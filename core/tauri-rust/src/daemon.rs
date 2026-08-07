@@ -49,10 +49,7 @@ pub fn spawn_daemon(app: &AppHandle, script_path: PathBuf) -> std::io::Result<Da
         use std::os::windows::io::AsRawHandle;
         use windows::Win32::Foundation::HANDLE;
 
-        crate::supervisor::windows::assign_process(
-            &job_handle,
-            HANDLE(child.as_raw_handle() as isize),
-        )?;
+        crate::supervisor::windows::assign_process(&job_handle, HANDLE(child.as_raw_handle()))?;
     }
 
     let stdin = child

@@ -68,6 +68,14 @@ pub(crate) mod windows {
     /// assigned to it, including the Python daemon.
     pub struct JobHandle(HANDLE);
 
+    // A Windows HANDLE is an opaque value safe to use from any thread — the
+    // only real constraint is not closing it concurrently from two threads,
+    // which `Drop` here only ever does once. Needed because `HANDLE` wraps
+    // a raw pointer, and `DaemonHandle` (which holds a `JobHandle`) must be
+    // `Send + Sync` to be Tauri-managed state.
+    unsafe impl Send for JobHandle {}
+    unsafe impl Sync for JobHandle {}
+
     impl Drop for JobHandle {
         fn drop(&mut self) {
             unsafe {
@@ -134,12 +142,33 @@ mod tests {
         if intermediate_pid == 0 {
             unsafe { libc::close(read_fd) };
 
+            // A second, private pipe so the intermediate process can't
+            // report the grandchild's pid (and then exit) until the
+            // grandchild confirms `set_kill_on_parent_death` has actually
+            // registered — otherwise this is a race: fork() returning
+            // doesn't mean the grandchild has run yet, and if the
+            // intermediate exits first, there's nothing for the kernel
+            // to have armed.
+            let mut ready_fds = [0i32; 2];
+            assert_eq!(unsafe { libc::pipe(ready_fds.as_mut_ptr()) }, 0);
+            let [ready_read, ready_write] = ready_fds;
+
             let grandchild_pid = unsafe { libc::fork() };
             if grandchild_pid == 0 {
+                unsafe { libc::close(ready_read) };
                 let _ = super::linux::set_kill_on_parent_death();
+                unsafe {
+                    libc::write(ready_write, [1u8].as_ptr() as *const _, 1);
+                    libc::close(ready_write);
+                }
                 unsafe { libc::pause() };
                 unsafe { libc::_exit(0) };
             }
+
+            unsafe { libc::close(ready_write) };
+            let mut ready_buf = [0u8; 1];
+            unsafe { libc::read(ready_read, ready_buf.as_mut_ptr() as *mut _, 1) };
+            unsafe { libc::close(ready_read) };
 
             let msg = format!("{grandchild_pid}\n");
             unsafe {
@@ -200,7 +229,7 @@ mod windows_tests {
             assign_new_job_object(&mut command).expect("job object creation should succeed");
 
         let mut child = command.spawn().expect("failed to spawn long-lived child");
-        assign_process(&job, HANDLE(child.as_raw_handle() as isize))
+        assign_process(&job, HANDLE(child.as_raw_handle()))
             .expect("assigning the child to the job should succeed");
 
         // Dropping the job handle closes it — because the job was created
