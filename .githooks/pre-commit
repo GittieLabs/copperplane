@@ -1,0 +1,21 @@
+#!/bin/bash
+# Pre-commit hook: Verify staged CTX files have valid formatting
+
+# Check if any CTX files are staged
+STAGED_CTX=$(git diff --cached --name-only | grep -E 'context/CTX-.*\.md$')
+
+if [ -n "$STAGED_CTX" ]; then
+    echo "🔍 Validating staged CONTEXT files..."
+    for file in $STAGED_CTX; do
+        if [ -f "$file" ]; then
+            # Check for frontmatter start
+            if ! head -n 1 "$file" | grep -q "^---"; then
+                echo "❌ Error: $file is missing YAML frontmatter header ('---')"
+                exit 1
+            fi
+        fi
+    done
+    echo "✅ Staged CONTEXT files format valid."
+fi
+
+exit 0
