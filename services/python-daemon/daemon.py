@@ -2,6 +2,8 @@ import sys
 import json
 import time
 
+from kicad_bridge import get_kicad_version
+
 def mock_generate_component(query):
     """
     Mock function to simulate generating a KiCad component.
@@ -17,7 +19,8 @@ def mock_generate_component(query):
 
 # Route Registry mapping string methods to Python functions
 ROUTES = {
-    "kicad.generate_component": mock_generate_component
+    "kicad.generate_component": mock_generate_component,
+    "kicad.get_version": get_kicad_version,
 }
 
 def handle_request(line: str) -> str:
