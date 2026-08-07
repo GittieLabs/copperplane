@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "hardware-agent-studio",
+  "version": "0.1.0",
+  "identifier": "com.gittielabs.hardware-agent-studio",
+  "build": {
+    "frontendDist": "../apps/tauri-ui/dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev --prefix ../apps/tauri-ui",
+    "beforeBuildCommand": "npm run build --prefix ../apps/tauri-ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Hardware Agent Studio",
+        "width": 800,
+        "height": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "android": {
+      "debugApplicationIdSuffix": ".debug"
+    }
+  }
+}
