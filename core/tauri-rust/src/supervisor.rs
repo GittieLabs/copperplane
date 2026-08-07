@@ -178,3 +178,50 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, target_os = "windows"))]
+mod windows_tests {
+    use super::windows::{assign_new_job_object, assign_process};
+    use std::os::windows::io::AsRawHandle;
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+    use windows::Win32::Foundation::HANDLE;
+
+    /// Proves the Windows crash shield end to end: assign a real child to
+    /// a job configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, drop
+    /// only the job handle, and confirm the child dies. Nothing here calls
+    /// `child.kill()` — the kill must come from the OS closing the job.
+    #[test]
+    fn child_is_killed_when_the_job_handle_is_dropped() {
+        let mut command = Command::new("powershell");
+        command.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 30"]);
+
+        let job =
+            assign_new_job_object(&mut command).expect("job object creation should succeed");
+
+        let mut child = command.spawn().expect("failed to spawn long-lived child");
+        assign_process(&job, HANDLE(child.as_raw_handle() as isize))
+            .expect("assigning the child to the job should succeed");
+
+        // Dropping the job handle closes it — because the job was created
+        // with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, that alone must kill
+        // every process still assigned to it.
+        drop(job);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut exited = false;
+        while Instant::now() < deadline {
+            if let Ok(Some(_status)) = child.try_wait() {
+                exited = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        assert!(
+            exited,
+            "child should have been killed when the job handle was dropped, \
+             without any explicit kill() call"
+        );
+    }
+}
