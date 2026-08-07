@@ -3,6 +3,7 @@ import json
 import time
 
 from kicad_bridge import get_kicad_version
+from freecad_bridge import generate_enclosure
 
 def mock_generate_component(query):
     """
@@ -21,6 +22,7 @@ def mock_generate_component(query):
 ROUTES = {
     "kicad.generate_component": mock_generate_component,
     "kicad.get_version": get_kicad_version,
+    "freecad.generate_enclosure": generate_enclosure,
 }
 
 def handle_request(line: str) -> str:
