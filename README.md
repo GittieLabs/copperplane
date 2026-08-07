@@ -15,6 +15,9 @@ Instead of writing separate, fragmented plugins for different CAD tools, this ap
 *   `core/tauri-rust/` - Rust process manager and OS-level lifecycle supervisor.
 *   `services/python-daemon/` - The CLI sidecar that communicates with Tauri over `stdin/stdout` and executes CAD tasks.
 
+## 🗺️ Roadmap
+See [ROADMAP.md](ROADMAP.md) for the spec backlog, milestone sequencing, and the spec-to-context workflow agents follow in this repo.
+
 ## 🤝 Contributing
 We need:
 1.  **React/Three.js Developers:** To build out the `.glb` 3D viewer for the FreeCAD exports.
