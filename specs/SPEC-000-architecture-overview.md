@@ -8,9 +8,11 @@ last_updated: 2026-08-07
 target_version: v0.1.0
 location: "specs/SPEC-000-architecture-overview.md"
 parent_spec: null
-child_specs: 
-  - "apps/tauri-ui/specs/SPEC-101-ui-ipc-bridge.md"
-  - "services/python-daemon/specs/SPEC-102-daemon-rpc-router.md"
+child_specs:
+  - "../apps/tauri-ui/specs/SPEC-101-ui-ipc-bridge.md"
+  - "../services/python-daemon/specs/SPEC-102-daemon-rpc-router.md"
+  - "../services/python-daemon/specs/SPEC-103-kicad-ipc.md"
+  - "../services/python-daemon/specs/SPEC-104-freecad-headless.md"
 ---
 
 # SPEC-000: Root Architecture: Hardware Agent Studio
@@ -48,11 +50,18 @@ Instead of running a local HTTP server (FastAPI) which risks leaving dangling TC
 
 ## 4. Module Map & Reference Links
 
-*Note: Child specs will be created as these modules are developed.*
+See [ROADMAP.md](../ROADMAP.md) for the full spec backlog, milestone sequencing, and the
+Claude Code spec-to-context workflow.
 
 ```text
 [SPEC-000] (Root - You are here)
-   ├── [SPEC-101] Tauri UI & Rust Process Supervisor (Pending)
-   ├── [SPEC-102] Python JSON-RPC Daemon (Pending)
-   ├── [SPEC-103] KiCad IPC Bridge (Pending)
-   └── [SPEC-104] FreeCAD Headless Bridge (Pending)
+   |-- [SPEC-101] Tauri UI & Rust Process Supervisor      (Implemented - CTX-101.1)
+   |-- [SPEC-102] Python JSON-RPC Daemon & Route Registry (Implemented - CTX-102.1)
+   |-- [SPEC-103] KiCad IPC Bridge                        (Bridge implemented - CTX-103.1)
+   `-- [SPEC-104] FreeCAD Headless Bridge                 (Pipeline implemented - CTX-104.1)
+```
+
+*   [SPEC-101: Tauri UI & Rust Process Supervisor](../apps/tauri-ui/specs/SPEC-101-ui-ipc-bridge.md)
+*   [SPEC-102: Python JSON-RPC Daemon & Route Registry](../services/python-daemon/specs/SPEC-102-daemon-rpc-router.md)
+*   [SPEC-103: KiCad IPC Bridge](../services/python-daemon/specs/SPEC-103-kicad-ipc.md)
+*   [SPEC-104: FreeCAD Headless Bridge](../services/python-daemon/specs/SPEC-104-freecad-headless.md)
