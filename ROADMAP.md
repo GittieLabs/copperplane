@@ -1,6 +1,6 @@
 # 🗺️ Hardware Agent Studio — Roadmap
 
-**Status:** Draft · **Last updated:** 2026-08-07 · **Current version:** `v0.1.0` (in progress)
+**Status:** Draft · **Last updated:** 2026-08-08 · **Current version:** `v0.1.0` (in progress)
 
 This document is the planning layer above the [Spec & Context framework](CONTRIBUTING.md). It
 answers three questions:
@@ -112,6 +112,14 @@ Two threads mid-write will interleave and corrupt the frame.
 *Likely slices:* `CTX-105.1` job protocol + daemon worker; `CTX-105.2` frontend job/progress client
 replacing the single-in-flight guard.
 
+*AgentFlow interaction (see §3.2's decision):* AgentFlow's `EventBus` already emits
+`NODE_STARTED`/`NODE_COMPLETED`/`LLM_CALL_STARTED`/`LLM_CALL_COMPLETED`/`TOOL_CALLED`/`TOOL_RESULT`/
+`ERROR` (plus custom events) for exactly the kind of progress reporting this spec needs once
+SPEC-201/202/204 land. That's the likely mechanism for the progress/streaming half of this spec —
+don't invent a second event system alongside it. Whether `EventBus` events get forwarded as JSON-RPC
+notifications directly or need a translation layer is this spec's own call, made once AgentFlow is
+actually wired in, not before.
+
 #### SPEC-106 — Configuration & Secrets Store
 *Module:* `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-102
 
@@ -160,49 +168,98 @@ fillets, and STEP export alongside `.glb` so the result is usable in real mechan
 
 ### 3.2 `2xx` — Intelligence layer
 
+**Decision (2026-08-08): the AI runtime for this layer is [AgentFlow](https://github.com/GittieLabs/agentflow)
+(`gittielabs-agentflow` on PyPI, MIT, our own library) — a context-engineering framework for
+multi-agent systems: `.prompt.md`/`.workflow.md`/`.context.md` definitions, a `ConfigLoader`,
+`RouterEngine`, `WorkflowExecutor` (DAG, sync/parallel/async nodes, handler nodes, `foreach`), a
+`ToolRegistry` with local and HTTP dispatchers, `SessionManager`/`MemoryManager`, pluggable
+providers (Anthropic / OpenAI-compatible / Google / Mock), an `EventBus`, and Langfuse telemetry.
+This replaces most of what SPEC-201/202/204 were originally scoped to build from scratch — see each
+entry below for what survives as this product's own work.**
+
+**This decision is scoped to the application only.** AgentFlow has no role in the development
+workflow this repo uses to build itself. Claude Code stays vanilla, and `SPEC-901` (§3.5) must not
+gain an AgentFlow dependency. The two `context/` concepts — AgentFlow's tree of agent/workflow
+definitions, and this repo's own `CTX-*.md` implementation-plan files — are unrelated and must not
+be blurred; see the open question below about where AgentFlow's tree actually lives on disk.
+
 #### SPEC-201 — LLM Provider Abstraction
 *Module:* `services/python-daemon` · *Depends on:* SPEC-102, SPEC-106, SPEC-105
 
-The "Local AI (Privacy First)" promise, made real. One interface over local Ollama and remote
-providers, with model selection, streaming, timeouts, retries, and a clear statement of what leaves
-the machine under each configuration.
+Collapses to adopting AgentFlow's provider layer: `AnthropicProvider`, `OpenAICompatProvider`
+(covers OpenAI, Azure, **and Ollama** — Ollama rides the OpenAI-compatible provider, not a bespoke
+client), `GoogleGenAIProvider`, and `MockLLMProvider` for tests. AgentFlow already solves streaming,
+the provider protocol, and per-agent model selection in `.prompt.md` front-matter; there is no
+reason to write a second one.
 
-*Constraint inherited from SPEC-000 §3:* heavy imports block `stdout` for 2–4 seconds at startup.
-Prefer lazy import of provider clients so the daemon's `ready` handshake isn't delayed by a
-provider the user never selected.
+What actually survives as this spec's own work: the model-selection UI/config surface, and a clear,
+written statement of what leaves the machine under each provider configuration. The "Local AI
+(Privacy First)" promise from the README is a data-egress claim, not a code interface — AgentFlow
+picks the provider you configure, it doesn't make privacy guarantees for you.
+
+*Constraint inherited from SPEC-000 §3:* heavy provider SDK imports block `stdout` for 2–4 seconds
+at startup. Prefer lazy import of provider clients so the daemon's `ready` handshake isn't delayed
+by a provider the user never selected.
 
 #### SPEC-202 — Component Intelligence Pipeline
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-203
 
-The heart of the product, and the thing that replaces the `time.sleep(1.5)` mock. Datasheet or part
-number in → validated structured component (pins, numbers, names, electrical types, package
-dimensions, courtyard) out. The structured schema is the contract SPEC-108 consumes.
+Still the heart of the product, and still the thing that replaces the `time.sleep(1.5)` mock — but
+the *orchestration* changes. Datasheet or part number in → validated structured component (pins,
+numbers, names, electrical types, package dimensions, courtyard) out, expressed as an AgentFlow
+`.workflow.md` DAG: an agent node does the LLM extraction, a handler node (deterministic Python, no
+LLM call — see AgentFlow's handler-node mechanism) does the schema/geometry validation, connected
+through `inputs` mappings instead of bespoke glue code. The structured schema is still the contract
+SPEC-108 consumes.
 
-*Design position worth taking early:* the LLM should produce **structured data validated against a
-schema**, never raw `.kicad_mod` s-expression text. Generated geometry must be checked (pin count
-matches the package, pitch is sane, courtyard encloses pads) before anything reaches a board. A
-hallucinated footprint that looks plausible costs a PCB spin — this is the highest-consequence
-failure mode in the product, and it deserves its own section in the spec.
+What AgentFlow does **not** supply, and what remains this spec's real substance: the validated
+component schema itself, and the specific checks that stop a hallucinated footprint from reaching a
+board (pin count matches the package, pitch is sane, courtyard encloses pads) — before anything
+reaches a board. That is domain logic particular to this product; no framework ships it. A
+hallucinated footprint that looks plausible costs a PCB spin — this is still the
+highest-consequence failure mode in the product, and it still deserves its own section in the spec.
 
 #### SPEC-203 — Supplier API Integration
 *Module:* `services/python-daemon` · *Depends on:* SPEC-106
 
 DigiKey / Octopart / Mouser: authentication, rate limits, a local cache (part data barely changes;
 re-querying on every request wastes quota and adds latency), and graceful degradation to
-LLM-only extraction when no key is configured or the user is offline.
+LLM-only extraction when no key is configured or the user is offline. Unaffected by the AgentFlow
+decision — this is a plain HTTP integration, not an LLM-orchestration concern.
 
 #### SPEC-204 — Agent Tool Registry
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-102
 
-What makes this an *agent* studio rather than a form with an LLM behind it: exposing the `ROUTES`
-registry to the model as callable tools, so "put a BME280 near the ESP32 and give me an enclosure
-that fits" decomposes into a plan across the KiCad and FreeCAD bridges. Needs a policy for which
-tools are auto-approved versus confirmation-gated — **anything that writes to a board should be
-confirmation-gated by default.**
+Becomes replacing the daemon's hand-rolled `ROUTES` dict with AgentFlow's `ToolRegistry`
+(`LocalToolDispatcher` for in-process routes; `HTTPToolDispatcher` only if a route ever needs to
+live out-of-process) exposed to the model as callable tools, so "put a BME280 near the ESP32 and
+give me an enclosure that fits" decomposes into a plan across the KiCad and FreeCAD bridges.
+
+What AgentFlow doesn't have an opinion on, and what this spec's own job actually is: the
+confirmation-gating policy for which tools are auto-approved versus confirmation-gated —
+**anything that writes to a board stays confirmation-gated by default, full stop.**
 
 *Note:* SPEC-000 §1 explicitly rules out MCP as the transport, for good reasons (binary `.glb`
-streaming, bespoke UI rendering). That decision is about the *wire protocol*; MCP's tool-description
-conventions are still worth borrowing as a schema shape.
+streaming, bespoke UI rendering). That decision is about the *wire protocol*; AgentFlow's own tool
+schema shape (`name`/`description`/`input_schema`) already resembles MCP's tool-description
+conventions closely enough that no separate borrowing decision is needed here.
+
+#### Open questions for this layer (raised here, not decided)
+
+*   **Where does AgentFlow's `context/` tree live inside `services/python-daemon`?** AgentFlow
+    expects a directory of `agents/`, `workflows/`, `domains/`, `shared/` — but
+    `services/python-daemon/context/` already means something else in this repo (`CTX-*.md`
+    implementation plans, per `CONTRIBUTING.md` §3). Same word, two unrelated meanings, one
+    module. Whichever spec adopts AgentFlow needs to pick a non-colliding location (e.g.
+    `services/python-daemon/agentflow/` or `.agentflow/`) and say so explicitly — don't let the
+    name collision get resolved by accident.
+*   **Does AgentFlow's session/memory layer (`SessionManager`, `Scratchpad`, `ArtifactStore`,
+    `MemoryManager`) replace the daemon's own state, or sit beside it?** The daemon today has no
+    persistent state at all beyond the held-open KiCad/FreeCAD connections (SPEC-103/104). Adopting
+    AgentFlow's session system could subsume whatever SPEC-105/106 end up needing for job/config
+    state, or could end up as a second, parallel state mechanism the daemon has to reconcile with
+    its own. Whichever spec adopts AgentFlow should decide this explicitly rather than defaulting
+    into "both."
 
 ### 3.3 `3xx` — Product surface
 
@@ -257,6 +314,11 @@ Scope: freeze the daemon (PyInstaller or equivalent) into a per-target binary, s
 the crash shield working across that change. Budget real time for `pynng`'s native extension and
 `trimesh`'s optional dependencies — frozen native wheels are where this kind of work goes wrong.
 
+Adopting AgentFlow (§3.2: SPEC-201/202/204) adds `pydantic`, `httpx`, and whichever provider SDK is
+selected (e.g. `anthropic`, `openai` — the latter also covers the Ollama path) to whatever gets
+frozen into the sidecar. One more native-adjacent dependency set this spike needs to budget time
+for, alongside `pynng` and `trimesh`.
+
 *Do this before showing the app to anyone who isn't sitting at Keith's desk.*
 
 #### SPEC-402 — Release, Signing & Auto-Update
@@ -283,6 +345,12 @@ the two most fragile integration points in the codebase.
 **Written 2026-08-08.** No `CTX-901.1` yet — the spec exists, `CLAUDE.md` and the four slash
 commands (`/spec-status`, `/new-spec`, `/new-context`, `/close-context`) don't. See §5 below for the
 workflow it formalizes.
+
+**AgentFlow-free, deliberately.** §3.2 adopts AgentFlow as the AI runtime for the *application*.
+This spec is not the application — it's the development process used to build it — and stays
+vanilla. Claude Code itself, `CLAUDE.md`, and the four slash commands must never gain an AgentFlow
+dependency. Keeping the two clearly separated is the point; don't blur them because both happen to
+involve "agents" and "context" files.
 
 #### SPEC-902 — Spec Graph Validator v2
 *Module:* `scripts/` · *Depends on:* SPEC-901
