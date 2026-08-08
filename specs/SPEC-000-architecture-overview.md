@@ -13,6 +13,7 @@ child_specs:
   - "../services/python-daemon/specs/SPEC-102-daemon-rpc-router.md"
   - "../services/python-daemon/specs/SPEC-103-kicad-ipc.md"
   - "../services/python-daemon/specs/SPEC-104-freecad-headless.md"
+  - "../specs/SPEC-105-daemon-async-job-progress-protocol.md"
 ---
 
 # SPEC-000: Root Architecture: Hardware Agent Studio
