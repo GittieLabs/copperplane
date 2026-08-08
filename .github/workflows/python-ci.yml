@@ -45,4 +45,4 @@ jobs:
       # CAD tools on this runner) rather than merely exiting 0 -- a test that
       # silently stopped running would also show zero failures.
       - name: Run daemon + scripts test suites, verify expected skips
-        run: "${{ env.VENV_PYTHON }}" scripts/ci/check_expected_skips.py
+        run: ${{ env.VENV_PYTHON }} scripts/ci/check_expected_skips.py
