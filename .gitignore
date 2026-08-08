@@ -29,3 +29,6 @@ src-tauri/target/
 # Node
 node_modules/
 dist/
+
+# Claude Code machine-local permission state — not shared config
+.claude/settings.local.json
