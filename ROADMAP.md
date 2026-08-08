@@ -84,16 +84,8 @@ code does not do that yet.) This is the single biggest blocker between "impressi
 
 ## 2. Spec numbering scheme
 
-The existing `1xx` block is the platform foundation. Extending outward:
-
-| Range | Layer | Lives in |
-| :--- | :--- | :--- |
-| `000` | Root architecture | `specs/` |
-| `1xx` | Platform & transport foundation | module `specs/` dirs |
-| `2xx` | Intelligence layer — LLMs, suppliers, datasheets | `services/python-daemon/specs/` |
-| `3xx` | Product surface — viewer, chat, settings, workspace | `apps/tauri-ui/specs/` |
-| `4xx` | Distribution & operations | `specs/` |
-| `9xx` | Meta — the development framework itself | `specs/` |
+Now a permanent convention, not a roadmap detail — see [CONTRIBUTING.md](CONTRIBUTING.md), §2 "Spec ID
+Numbering." The backlog below is organized by that same `1xx`/`2xx`/`3xx`/`4xx`/`9xx` layering.
 
 ---
 
@@ -285,14 +277,12 @@ the two most fragile integration points in the codebase.
 
 ### 3.5 `9xx` — The framework itself
 
-#### SPEC-901 — Agent Operating Manual & Context Generation Protocol
+#### [SPEC-901](specs/SPEC-901-agent-operating-manual.md) — Agent Operating Manual & Context Generation Protocol
 *Module:* repo-wide · *Depends on:* nothing — **start here**
 
-This is the spec that makes the rest of the roadmap executable by Claude Code. See §5 for the
-intended workflow in detail. Deliverables: a root `CLAUDE.md`, slash commands for the
-spec → context → execute → close loop, and a written statement of the repo's engineering norms —
-including the "verify for real, not just mocks" standard and the "record plan drift honestly"
-standard that CTX-101.1, CTX-103.1, and CTX-104.1 all model well.
+**Written 2026-08-08.** No `CTX-901.1` yet — the spec exists, `CLAUDE.md` and the four slash
+commands (`/spec-status`, `/new-spec`, `/new-context`, `/close-context`) don't. See §5 below for the
+workflow it formalizes.
 
 #### SPEC-902 — Spec Graph Validator v2
 *Module:* `scripts/` · *Depends on:* SPEC-901
