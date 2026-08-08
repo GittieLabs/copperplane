@@ -25,8 +25,11 @@ answers three questions:
 | :--- | :--- | :--- | :--- | :--- |
 | [SPEC-101](apps/tauri-ui/specs/SPEC-101-ui-ipc-bridge.md) | `apps/tauri-ui` + `core/tauri-rust` | [CTX-101.1](apps/tauri-ui/context/CTX-101.1-ui-ipc-bridge.md) | ✅ Completed | Tauri shell boots, React frontend, `dispatch_to_daemon` string transport, daemon `stdout` → frontend events, crash shield green on all three CI runners |
 | [SPEC-102](services/python-daemon/specs/SPEC-102-daemon-rpc-router.md) | `services/python-daemon` | [CTX-102.1](services/python-daemon/context/CTX-102.1-json-rpc-daemon.md) | ✅ Completed | `stdin` read loop, JSON-RPC 2.0 parse/error mapping, `ROUTES` registry |
-| [SPEC-103](services/python-daemon/specs/SPEC-103-kicad-ipc.md) | `services/python-daemon` | [CTX-103.1](services/python-daemon/context/CTX-103.1-kicad-ipc.md) | 🔍 Review | `kipy` connection manager, version gate, `kicad.get_version` verified live against KiCad 10.0.3 |
-| [SPEC-104](services/python-daemon/specs/SPEC-104-freecad-headless.md) | `services/python-daemon` | [CTX-104.1](services/python-daemon/context/CTX-104.1-freecad-headless-bridge.md) | 🔍 Review | `freecadcmd` path resolution, temp-script handoff, STL → GLB via `trimesh`, verified live against FreeCAD 1.1.1 |
+| [SPEC-103](services/python-daemon/specs/SPEC-103-kicad-ipc.md) | `services/python-daemon` | [CTX-103.1](services/python-daemon/context/CTX-103.1-kicad-ipc.md) | ✅ Completed | `kipy` connection manager, version gate, `kicad.get_version` verified live against KiCad 10.0.3 |
+| [SPEC-104](services/python-daemon/specs/SPEC-104-freecad-headless.md) | `services/python-daemon` | [CTX-104.1](services/python-daemon/context/CTX-104.1-freecad-headless-bridge.md) | ✅ Completed | `freecadcmd` path resolution, temp-script handoff, STL → GLB via `trimesh`, verified live against FreeCAD 1.1.1 |
+| [SPEC-901](specs/SPEC-901-agent-operating-manual.md) | repo-wide (`.claude/`) | [CTX-901.1](context/CTX-901.1-agent-operating-manual.md) | ✅ Completed | `CLAUDE.md`, four slash commands (`/spec-status`, `/new-spec`, `/new-context`, `/close-context`), bloat guard test |
+| [SPEC-903](specs/SPEC-903-python-frontend-ci.md) | `.github/workflows/` | [CTX-903.1](context/CTX-903.1-python-frontend-ci.md) | ✅ Completed | `python-ci.yml`, `frontend-ci.yml`, three-OS matrix, expected-skip verification |
+| [SPEC-902](specs/SPEC-902-spec-graph-validator-v2.md) | `scripts/` | [CTX-902.1](context/CTX-902.1-spec-graph-validator-v2.md) | ✅ Completed | `validate_spec_context.py` upgraded to a full graph validator (id/location/link integrity across every `SPEC-*.md`), path-exclusion matcher fixed, 22-test suite green on all three OSes |
 
 The foundation is in better shape than most projects at this stage, and two things in particular
 are worth preserving as norms rather than accidents:
@@ -339,11 +342,15 @@ the two most fragile integration points in the codebase.
 
 ### 3.5 `9xx` — The framework itself
 
+**All three done as of 2026-08-08.** SPEC-901/CTX-901.1, SPEC-903/CTX-903.1, and SPEC-902/CTX-902.1
+are all merged and `Completed` — see §1.1. Kept here for the design rationale each spec still
+records.
+
 #### [SPEC-901](specs/SPEC-901-agent-operating-manual.md) — Agent Operating Manual & Context Generation Protocol
 *Module:* repo-wide · *Depends on:* nothing — **start here**
 
-**Written 2026-08-08.** No `CTX-901.1` yet — the spec exists, `CLAUDE.md` and the four slash
-commands (`/spec-status`, `/new-spec`, `/new-context`, `/close-context`) don't. See §5 below for the
+[CTX-901.1](context/CTX-901.1-agent-operating-manual.md) landed `CLAUDE.md` and the four slash
+commands (`/spec-status`, `/new-spec`, `/new-context`, `/close-context`). See §5 below for the
 workflow it formalizes.
 
 **AgentFlow-free, deliberately.** §3.2 adopts AgentFlow as the AI runtime for the *application*.
@@ -355,35 +362,36 @@ involve "agents" and "context" files.
 #### SPEC-902 — Spec Graph Validator v2
 *Module:* `scripts/` · *Depends on:* SPEC-901
 
-Upgrade `validate_spec_context.py` from a context linter into a graph validator: parse `SPEC-*.md`
-frontmatter too, verify every `parent_spec` / `child_specs` / `spec_ref` path resolves on disk,
-check id uniqueness and that `id` matches the filename, flag orphan specs and specs with no
-context, and check that `location:` matches the file's actual path. Every one of the §1.3 breakages
-is mechanically detectable — the framework should catch them instead of a human reading carefully.
-Also fix the `.json`/`README.md` exclusion bugs noted there.
+[CTX-902.1](context/CTX-902.1-spec-graph-validator-v2.md) upgraded `validate_spec_context.py` from
+a context linter into a graph validator: parses `SPEC-*.md` frontmatter too, verifies every
+`parent_spec` / `child_specs` / `spec_ref` path resolves on disk, checks id uniqueness and that
+`id` matches the filename, flags orphan specs and specs with no context, and checks that
+`location:` matches the file's actual path. Every one of the §1.3 breakages is now mechanically
+detectable. Also fixed the `.json`-lockfile exclusion bug noted there (the `README.md` claim turned
+out not to reflect a live bug — see CTX-902.1's Plan Drift).
 
 #### SPEC-903 — Python & Frontend CI
 *Module:* `.github/workflows/` · *Depends on:* nothing
 
-`rust-core-ci.yml` is a good template; Python and the frontend need the equivalent. Python: `uv`
-matrix over the three OSes running `python -m unittest discover tests/` (live CAD tests skip
-themselves cleanly by design — verify the skips actually happen rather than silently passing zero
-assertions). Frontend: `vitest` plus `oxlint` plus `tsc -b`.
+[CTX-903.1](context/CTX-903.1-python-frontend-ci.md) added `python-ci.yml` (uv matrix over three
+OSes running `python -m unittest discover tests/`, with expected-skip verification for the live
+CAD tests) and `frontend-ci.yml` (`vitest` plus `oxlint` plus `tsc -b`), following the pattern
+`rust-core-ci.yml` already established.
 
 ---
 
 ## 4. Milestones
 
-### M0 — Framework repair *(days, do first)*
-Unblocks everything else and makes the repo safe for parallel agent work.
+### M0 — Framework repair *(days, do first)* — ✅ complete as of 2026-08-08
+Unblocked everything else and made the repo safe for parallel agent work.
 
 | # | Work | Spec |
 | :--- | :--- | :--- |
 | 1 | ~~Fix spec graph links, write SPEC-102~~ ✅ done 2026-08-07 | — |
-| 2 | Agent operating manual + context-generation commands | SPEC-901 |
-| 3 | Python & frontend CI | SPEC-903 |
-| 4 | Validator v2 | SPEC-902 |
-| 5 | Merge `feat/CTX-103.1-*` and `feat/CTX-104.1-*` into `develop`; move both CTX files Review → Completed | — |
+| 2 | ~~Agent operating manual + context-generation commands~~ ✅ done 2026-08-08 | SPEC-901 |
+| 3 | ~~Python & frontend CI~~ ✅ done 2026-08-08 | SPEC-903 |
+| 4 | ~~Validator v2~~ ✅ done 2026-08-08 | SPEC-902 |
+| 5 | ~~Merge `feat/CTX-103.1-*` and `feat/CTX-104.1-*` into `develop`; move both CTX files Review → Completed~~ ✅ done 2026-08-08 | — |
 
 ### M1 — `v0.1.0` "It's real" — the end-to-end vertical slice
 **Goal:** type a part number, watch an AI generate a real footprint, see it land in a live KiCad
@@ -496,10 +504,12 @@ These are drawn from what already worked in this repo, not invented:
 
 ## 7. Immediate next actions
 
-1.  Merge the two open CAD branches into `develop` and close out CTX-103.1 / CTX-104.1.
-2.  Write **SPEC-901** and land `CLAUDE.md` + the four slash commands. Everything downstream gets
-    cheaper once an agent can generate its own context files reliably.
-3.  Write **SPEC-903** and get Python + frontend tests running in CI on all three OSes.
-4.  Spike **SPEC-401** packaging far enough to know whether frozen `pynng`/`trimesh` is a day or a
+M0 is complete as of 2026-08-08 (see §4) — items 1-4 below are done.
+
+1.  ~~Merge the two open CAD branches into `develop` and close out CTX-103.1 / CTX-104.1.~~ ✅ done
+2.  ~~Write **SPEC-901** and land `CLAUDE.md` + the four slash commands.~~ ✅ done
+3.  ~~Write **SPEC-903** and get Python + frontend tests running in CI on all three OSes.~~ ✅ done
+4.  ~~Write **SPEC-902** and upgrade the validator into a full graph checker.~~ ✅ done
+5.  Spike **SPEC-401** packaging far enough to know whether frozen `pynng`/`trimesh` is a day or a
     fortnight. Find out now, not in M2.
-5.  Write **SPEC-105**, then start M1.
+6.  Write **SPEC-105**, then start M1.
