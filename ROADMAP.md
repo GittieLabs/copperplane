@@ -84,16 +84,8 @@ code does not do that yet.) This is the single biggest blocker between "impressi
 
 ## 2. Spec numbering scheme
 
-The existing `1xx` block is the platform foundation. Extending outward:
-
-| Range | Layer | Lives in |
-| :--- | :--- | :--- |
-| `000` | Root architecture | `specs/` |
-| `1xx` | Platform & transport foundation | module `specs/` dirs |
-| `2xx` | Intelligence layer — LLMs, suppliers, datasheets | `services/python-daemon/specs/` |
-| `3xx` | Product surface — viewer, chat, settings, workspace | `apps/tauri-ui/specs/` |
-| `4xx` | Distribution & operations | `specs/` |
-| `9xx` | Meta — the development framework itself | `specs/` |
+Now a permanent convention, not a roadmap detail — see [CONTRIBUTING.md](CONTRIBUTING.md), §2 "Spec ID
+Numbering." The backlog below is organized by that same `1xx`/`2xx`/`3xx`/`4xx`/`9xx` layering.
 
 ---
 

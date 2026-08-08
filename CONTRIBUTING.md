@@ -21,7 +21,27 @@ Every feature, architecture change, or significant bug fix is driven by two type
 
 ---
 
-## 📂 2. Directory Layout
+## 🔢 2. Spec ID Numbering
+
+Every spec gets a three-digit ID chosen from a fixed range, so the number alone tells you what
+layer of the system it belongs to and roughly where its file lives:
+
+| Range | Layer | Lives in |
+| :--- | :--- | :--- |
+| `000` | Root architecture | `specs/` |
+| `1xx` | Platform & transport foundation | module `specs/` dirs |
+| `2xx` | Intelligence layer — LLMs, suppliers, datasheets | `services/python-daemon/specs/` |
+| `3xx` | Product surface — viewer, chat, settings, workspace | `apps/tauri-ui/specs/` |
+| `4xx` | Distribution & operations | `specs/` |
+| `9xx` | Meta — the development framework itself | `specs/` |
+
+`SPEC-000` is reserved for the root architecture overview and is never reused. When you write a new
+spec, pick the next unused number in the range that matches its layer — don't reuse or skip ahead
+within a range.
+
+---
+
+## 📂 3. Directory Layout
 
 Specs and Context files live as close to the relevant module as possible:
 
@@ -41,12 +61,12 @@ hardware-agent-studio/
 
 ---
 
-## 🚀 3. The Development Workflow
+## 🚀 4. The Development Workflow
 
 When picking up a new feature, follow this exact workflow:
 
 ### Step 1: Read or Write the Spec
-* If a Spec doesn't exist for your architectural domain, create one using `SPEC-TEMPLATE.md`.
+* If a Spec doesn't exist for your architectural domain, create one using `SPEC-TEMPLATE.md`, choosing its ID per the numbering scheme in §2.
 * Ensure your Spec clearly defines the data contracts and architectural boundaries.
 
 ### Step 2: Create the Context File
@@ -68,7 +88,7 @@ When picking up a new feature, follow this exact workflow:
 
 ---
 
-## 🛑 4. CI/CD Gatekeeper Rules
+## 🛑 5. CI/CD Gatekeeper Rules
 
 We use a custom GitHub Action (`spec-context-gatekeeper.yml`) to automatically enforce this framework. **Your PR will fail if:**
 
