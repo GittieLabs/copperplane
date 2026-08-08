@@ -186,7 +186,7 @@ class TestEndToEndCLI(unittest.TestCase):
 
         result = subprocess.run(
             [sys.executable, self.script_path, '--base', 'develop'],
-            cwd=self.tmpdir, capture_output=True, text=True,
+            cwd=self.tmpdir, capture_output=True, text=True, encoding='utf-8',
         )
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn('DANGLING parent_spec', result.stdout)
@@ -212,7 +212,7 @@ class TestEndToEndCLI(unittest.TestCase):
 
         result = subprocess.run(
             [sys.executable, self.script_path, '--base', 'develop'],
-            cwd=self.tmpdir, capture_output=True, text=True,
+            cwd=self.tmpdir, capture_output=True, text=True, encoding='utf-8',
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
@@ -249,7 +249,7 @@ class TestEndToEndCLI(unittest.TestCase):
 
         result = subprocess.run(
             [sys.executable, self.script_path, '--base', 'develop'],
-            cwd=self.tmpdir, capture_output=True, text=True,
+            cwd=self.tmpdir, capture_output=True, text=True, encoding='utf-8',
         )
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn('DANGLING spec_ref', result.stdout)
