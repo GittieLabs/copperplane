@@ -1,0 +1,48 @@
+name: "Python Daemon CI"
+
+on:
+  pull_request:
+    branches: [ develop, main ]
+    paths:
+      - "services/python-daemon/**"
+      - "scripts/**"
+      - ".github/workflows/python-ci.yml"
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+
+      - name: Create venv and install daemon dependencies
+        working-directory: services/python-daemon
+        run: |
+          uv venv --python 3.12
+          uv pip install -r requirements.txt
+
+      # Each `run:` step is a fresh shell — `source .venv/bin/activate` does not
+      # persist across steps. Resolve the venv's own python path explicitly
+      # instead of relying on activation (this bit locally in this repo's own
+      # dev environment before it ever got to CI).
+      - name: Locate venv Python (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: echo "VENV_PYTHON=$GITHUB_WORKSPACE/services/python-daemon/.venv/bin/python" >> "$GITHUB_ENV"
+
+      - name: Locate venv Python (Windows)
+        if: runner.os == 'Windows'
+        run: echo "VENV_PYTHON=$env:GITHUB_WORKSPACE\services\python-daemon\.venv\Scripts\python.exe" >> $env:GITHUB_ENV
+
+      # Runs services/python-daemon/tests and scripts/tests, and asserts that
+      # the live KiCad/FreeCAD integration tests report as SKIPPED here (no
+      # CAD tools on this runner) rather than merely exiting 0 -- a test that
+      # silently stopped running would also show zero failures.
+      - name: Run daemon + scripts test suites, verify expected skips
+        run: ${{ env.VENV_PYTHON }} scripts/ci/check_expected_skips.py
