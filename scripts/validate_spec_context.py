@@ -6,6 +6,12 @@ import subprocess
 import sys
 import yaml
 
+# Windows' default console codepage (cp1252) can't encode this script's emoji
+# output; a subprocess (no attached console) falls back to it too, so this
+# must happen unconditionally, not just when a TTY is detected.
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
 # Extension patterns considered "code" that requires a context update
 CODE_EXTENSIONS = ('.rs', '.ts', '.tsx', '.js', '.jsx', '.py', '.toml', '.json')
 
