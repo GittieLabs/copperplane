@@ -32,6 +32,7 @@ answers three questions:
 | [SPEC-902](specs/SPEC-902-spec-graph-validator-v2.md) | `scripts/` | [CTX-902.1](context/CTX-902.1-spec-graph-validator-v2.md) | ✅ Completed | `validate_spec_context.py` upgraded to a full graph validator (id/location/link integrity across every `SPEC-*.md`), path-exclusion matcher fixed, 22-test suite green on all three OSes |
 | [SPEC-105](specs/SPEC-105-daemon-async-job-progress-protocol.md) | `services/python-daemon` + `core/tauri-rust` + `apps/tauri-ui` | [CTX-105.1](context/CTX-105.1-daemon-async-job-protocol.md), [CTX-105.2](apps/tauri-ui/context/CTX-105.2-frontend-job-progress-client.md) | ✅ Completed | Async job dispatch + atomic `stdout` notifications + real cancellation (daemon side); frontend `JobHandle` client replacing the CTX-101.1 single-in-flight guard |
 | [SPEC-106](specs/SPEC-106-configuration-secrets-store.md) | `core/tauri-rust` + `services/python-daemon` | [CTX-106.1](context/CTX-106.1-config-secrets-store.md) | ✅ Completed | Non-secret config injected as a spawn-time env var, secrets via the OS keychain handed over as the daemon's first `stdin` line; wired into `freecadcmd` path override and `kicad_bridge` connection settings |
+| [SPEC-107](specs/SPEC-107-structured-logging-diagnostics.md) | `services/python-daemon` + `core/tauri-rust` | [CTX-107.1](context/CTX-107.1-structured-logging-diagnostics.md) | ✅ Completed | `stderr`/rotating-file logging, capability-aware bridge imports, `daemon.ready` startup handshake, `daemon.heartbeat` closing `CTX-101.1`'s deferred macOS crash-shield heartbeat |
 
 The foundation is in better shape than most projects at this stage, and two things in particular
 are worth preserving as norms rather than accidents:
@@ -146,8 +147,11 @@ spawn, or does the daemon read the config file itself? **Decided: Rust owns it, 
 line on the daemon's `stdin`. Keeps secrets out of Python's memory longer; costs a daemon restart
 (already cheap) to pick up a changed setting.
 
-#### SPEC-107 — Structured Logging, Startup Handshake & Diagnostics
+#### [SPEC-107](specs/SPEC-107-structured-logging-diagnostics.md) — Structured Logging, Startup Handshake & Diagnostics — ✅ done 2026-08-09
 *Module:* all three · *Depends on:* SPEC-102
+
+[CTX-107.1](context/CTX-107.1-structured-logging-diagnostics.md) landed — see §1.1. Kept here for
+the design rationale.
 
 `stdout` is reserved for JSON-RPC frames, so **any** stray `print()` or library banner corrupts the
 stream and produces a request that hangs forever with no error. This spec defines `stderr` as the
@@ -508,7 +512,7 @@ These are drawn from what already worked in this repo, not invented:
 | An LLM hallucinates a plausible-but-wrong footprint that reaches a real board | A wasted PCB spin; the fastest way to lose a hardware engineer's trust permanently | SPEC-202 validation layer + SPEC-204 confirmation gate on all writes |
 | KiCad's IPC API changes across a major version | The KiCad bridge breaks wholesale; CTX-103.1's "patch bumps are safe" assumption is untested against a real break | SPEC-103 version gate, revisited in SPEC-108 |
 | Windows and Linux live paths stay unverified | "Cross-platform" is a claim, not a fact, at the two most fragile integration points | SPEC-403, SPEC-903 |
-| macOS crash shield never gets its heartbeat | Orphaned Python and FreeCAD processes accumulate on the platform being developed on | Unowned — needs a home in SPEC-107's handshake work |
+| macOS crash shield never gets its heartbeat | Orphaned Python and FreeCAD processes accumulate on the platform being developed on | ✅ Closed by CTX-107.1's `daemon.heartbeat` + macOS-only monitor thread — not yet verified end-to-end under a live running app (see CTX-107.1 Plan Drift) |
 | Solo-maintainer bandwidth vs. a 16-spec backlog | Half-built layers, none finished | Milestones are ordered so each one ends at a demonstrable state; M1 is deliberately narrow |
 
 ---
@@ -523,8 +527,8 @@ blocking it.
 2.  ~~Write **SPEC-901** and land `CLAUDE.md` + the four slash commands.~~ ✅ done
 3.  ~~Write **SPEC-903** and get Python + frontend tests running in CI on all three OSes.~~ ✅ done
 4.  ~~Write **SPEC-902** and upgrade the validator into a full graph checker.~~ ✅ done
-5.  ~~Write **SPEC-105** (async job/progress protocol) and **SPEC-106** (config & secrets store).~~
-    ✅ done
+5.  ~~Write **SPEC-105** (async job/progress protocol), **SPEC-106** (config & secrets store), and
+    **SPEC-107** (structured logging, startup handshake & diagnostics).~~ ✅ done
 6.  Spike **SPEC-401** packaging far enough to know whether frozen `pynng`/`trimesh` is a day or a
     fortnight. Find out now, not in M2.
-7.  Write **SPEC-107** (structured logging, startup handshake & diagnostics), then start M1.
+7.  Start M1.
