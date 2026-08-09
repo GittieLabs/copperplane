@@ -34,6 +34,7 @@ answers three questions:
 | [SPEC-106](specs/SPEC-106-configuration-secrets-store.md) | `core/tauri-rust` + `services/python-daemon` | [CTX-106.1](context/CTX-106.1-config-secrets-store.md) | ✅ Completed | Non-secret config injected as a spawn-time env var, secrets via the OS keychain handed over as the daemon's first `stdin` line; wired into `freecadcmd` path override and `kicad_bridge` connection settings |
 | [SPEC-107](specs/SPEC-107-structured-logging-diagnostics.md) | `services/python-daemon` + `core/tauri-rust` | [CTX-107.1](context/CTX-107.1-structured-logging-diagnostics.md) | ✅ Completed | `stderr`/rotating-file logging, capability-aware bridge imports, `daemon.ready` startup handshake, `daemon.heartbeat` closing `CTX-101.1`'s deferred macOS crash-shield heartbeat |
 | [SPEC-301](apps/tauri-ui/specs/SPEC-301-3d-viewer.md) | `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` | [CTX-301.1](apps/tauri-ui/context/CTX-301.1-3d-viewer.md) | ✅ Completed | R3F viewer with GPU-disposal-on-replace, `.glb` output relocated to an app-owned directory, `assetProtocol` scoped to exactly that directory. Completes the `.glb`-generation → render half of M1's vertical slice — the LLM/KiCad-injection half (`SPEC-201`/`202`/`108`) and `SPEC-302` are still open, M1 is not done. |
+| [SPEC-201](services/python-daemon/specs/SPEC-201-llm-provider-abstraction.md) | `services/python-daemon` | [CTX-201.1](services/python-daemon/context/CTX-201.1-llm-provider-abstraction.md) | ✅ Completed | `llm.chat` async route wrapping AgentFlow's provider classes; verified for real against Anthropic, Google, Perplexity, and a local Ollama server — OpenAI's code path exists but is unverified (no usable key). `SPEC-202`/`108` are the next links in M1's remaining critical path. |
 
 The foundation is in better shape than most projects at this stage, and two things in particular
 are worth preserving as norms rather than accidents:
@@ -202,8 +203,12 @@ gain an AgentFlow dependency. The two `context/` concepts — AgentFlow's tree o
 definitions, and this repo's own `CTX-*.md` implementation-plan files — are unrelated and must not
 be blurred; see the open question below about where AgentFlow's tree actually lives on disk.
 
-#### SPEC-201 — LLM Provider Abstraction
+#### [SPEC-201](services/python-daemon/specs/SPEC-201-llm-provider-abstraction.md) — LLM Provider Abstraction — ✅ done 2026-08-09
 *Module:* `services/python-daemon` · *Depends on:* SPEC-102, SPEC-106, SPEC-105
+
+[CTX-201.1](services/python-daemon/context/CTX-201.1-llm-provider-abstraction.md) landed — see
+§1.1. Kept here for the design rationale, including both open questions below, which this context
+resolved.
 
 Collapses to adopting AgentFlow's provider layer: `AnthropicProvider`, `OpenAICompatProvider`
 (covers OpenAI, Azure, **and Ollama** — Ollama rides the OpenAI-compatible provider, not a bespoke
@@ -263,22 +268,20 @@ streaming, bespoke UI rendering). That decision is about the *wire protocol*; Ag
 schema shape (`name`/`description`/`input_schema`) already resembles MCP's tool-description
 conventions closely enough that no separate borrowing decision is needed here.
 
-#### Open questions for this layer (raised here, not decided)
+#### Open questions for this layer — both resolved by `SPEC-201`/`CTX-201.1`
 
 *   **Where does AgentFlow's `context/` tree live inside `services/python-daemon`?** AgentFlow
     expects a directory of `agents/`, `workflows/`, `domains/`, `shared/` — but
     `services/python-daemon/context/` already means something else in this repo (`CTX-*.md`
-    implementation plans, per `CONTRIBUTING.md` §3). Same word, two unrelated meanings, one
-    module. Whichever spec adopts AgentFlow needs to pick a non-colliding location (e.g.
-    `services/python-daemon/agentflow/` or `.agentflow/`) and say so explicitly — don't let the
-    name collision get resolved by accident.
+    implementation plans, per `CONTRIBUTING.md` §3). **Decided:** `services/python-daemon/agentflow/`
+    — not created yet, since `CTX-201.1` calls AgentFlow's provider classes directly, not its
+    `ConfigLoader`/`RouterEngine`/`.prompt.md` system; the directory becomes real once `SPEC-202`
+    defines actual per-task prompts.
 *   **Does AgentFlow's session/memory layer (`SessionManager`, `Scratchpad`, `ArtifactStore`,
-    `MemoryManager`) replace the daemon's own state, or sit beside it?** The daemon today has no
-    persistent state at all beyond the held-open KiCad/FreeCAD connections (SPEC-103/104). Adopting
-    AgentFlow's session system could subsume whatever SPEC-105/106 end up needing for job/config
-    state, or could end up as a second, parallel state mechanism the daemon has to reconcile with
-    its own. Whichever spec adopts AgentFlow should decide this explicitly rather than defaulting
-    into "both."
+    `MemoryManager`) replace the daemon's own state, or sit beside it?** **Decided: neither, yet.**
+    `SPEC-201`/`CTX-201.1` adopt none of it — a single LLM call per request needs no session state,
+    matching M1's actual demo shape. Whether `SPEC-202`'s pipeline needs it is that spec's own call
+    once it actually needs multi-step orchestration.
 
 ### 3.3 `3xx` — Product surface
 
@@ -419,10 +422,10 @@ on a dev machine.
 Critical path, in dependency order:
 
 ```text
-SPEC-105 (async jobs & progress) ✅ ─┬─> SPEC-201 (LLM provider) ──> SPEC-202 (component pipeline) ──> SPEC-108 (KiCad injection)
-SPEC-106 (config & secrets) ✅       ─┘                                                                        │
-SPEC-107 (logging & handshake) ✅     ─────────────────────────────────────────────────────────────────────────┤
-SPEC-301 (3D viewer) ✅ ──────────────────────────────────────────────────────────> SPEC-302 (chat surface) ────┴──> demo
+SPEC-105 (async jobs & progress) ✅ ─┬─> SPEC-201 (LLM provider) ✅ ──> SPEC-202 (component pipeline) ──> SPEC-108 (KiCad injection)
+SPEC-106 (config & secrets) ✅       ─┘                                                                            │
+SPEC-107 (logging & handshake) ✅     ─────────────────────────────────────────────────────────────────────────────┤
+SPEC-301 (3D viewer) ✅ ──────────────────────────────────────────────────────────────> SPEC-302 (chat surface) ────┴──> demo
 ```
 
 SPEC-105 comes first because without it the UI locks up for the entire duration of every AI call,
@@ -430,9 +433,9 @@ which makes the demo unwatchable regardless of how good the generation is. SPEC-
 dependency on the AI work and can run fully in parallel — the `.glb` pipeline already produces
 valid output today.
 
-**Progress as of 2026-08-09:** the entire left/bottom branch (SPEC-105/106/107/301) is done. The
-remaining path to "demo" is unblocked but unwritten: SPEC-201 → SPEC-202 → SPEC-108, and SPEC-302.
-SPEC-201 itself has two open questions (§3.2) that need deciding before it can be written.
+**Progress as of 2026-08-09:** SPEC-105/106/107/301/201 are all done — five of six nodes. The one
+remaining unblocked-but-unwritten link is SPEC-202 → SPEC-108, plus SPEC-302. SPEC-201's own two
+open questions (§3.2) are resolved.
 
 **Explicitly out of M1:** packaging (SPEC-401), enclosure-from-board-geometry (SPEC-109), supplier
 APIs (SPEC-203), agent tool-calling (SPEC-204). M1 proves the product is possible; it does not
