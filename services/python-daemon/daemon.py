@@ -1,15 +1,73 @@
 import inspect
+import logging
+import logging.handlers
 import os
+import platform
 import sys
 import json
 import threading
 import time
 import uuid
 
-import freecad_bridge
-import kicad_bridge
-from kicad_bridge import get_kicad_version
-from freecad_bridge import generate_enclosure
+
+def _default_log_dir() -> str:
+    """A per-OS log directory, chosen without needing Rust to pass one in
+    -- SPEC-107 §2 keeps this spec's Rust-side changes scoped to the macOS
+    heartbeat signal, not a new config channel."""
+    system = platform.system()
+    if system == "Darwin":
+        base = os.path.expanduser("~/Library/Logs")
+    elif system == "Windows":
+        base = os.environ.get("APPDATA", os.path.expanduser("~"))
+    else:
+        base = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
+    return os.path.join(base, "hardware-agent-studio")
+
+
+def _configure_logging() -> None:
+    """stderr is the log channel, unconditionally -- stdout is the
+    JSON-RPC wire and must never carry a log line (CLAUDE.md's "stdout is
+    sacred" norm). This runs before any bridge-module import below, so an
+    import failure that would otherwise kill the daemon silently still
+    reaches the log (SPEC-107 §2)."""
+    handlers = [logging.StreamHandler(sys.stderr)]
+
+    try:
+        log_dir = _default_log_dir()
+        os.makedirs(log_dir, exist_ok=True)
+        handlers.append(
+            logging.handlers.RotatingFileHandler(
+                os.path.join(log_dir, "daemon.log"), maxBytes=1_000_000, backupCount=3,
+            )
+        )
+    except OSError:
+        pass  # stderr alone is still a real log path; a read-only log dir isn't fatal.
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=handlers,
+    )
+
+
+_configure_logging()
+logger = logging.getLogger("daemon")
+
+try:
+    import kicad_bridge
+    from kicad_bridge import get_kicad_version
+except Exception:
+    logger.exception("kicad_bridge failed to import -- kicad.* routes will be unavailable")
+    kicad_bridge = None
+    get_kicad_version = None
+
+try:
+    import freecad_bridge
+    from freecad_bridge import generate_enclosure
+except Exception:
+    logger.exception("freecad_bridge failed to import -- freecad.* routes will be unavailable")
+    freecad_bridge = None
+    generate_enclosure = None
 
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
@@ -33,11 +91,13 @@ def _apply_env_config() -> None:
     except json.JSONDecodeError:
         return
 
-    freecad_bridge.configure(path_override=env_config.get("freecadcmd_path_override"))
-    kicad_bridge.configure(
-        socket_path=env_config.get("kicad_socket_path"),
-        timeout_ms=env_config.get("kicad_timeout_ms"),
-    )
+    if freecad_bridge is not None:
+        freecad_bridge.configure(path_override=env_config.get("freecadcmd_path_override"))
+    if kicad_bridge is not None:
+        kicad_bridge.configure(
+            socket_path=env_config.get("kicad_socket_path"),
+            timeout_ms=env_config.get("kicad_timeout_ms"),
+        )
 
 
 _apply_env_config()
@@ -92,19 +152,31 @@ def cancel_job(job_id: str) -> dict:
     return {"job_id": job_id, "cancelling": True}
 
 
-# Route Registry mapping string methods to Python functions
-ROUTES = {
-    "kicad.generate_component": mock_generate_component,
-    "kicad.get_version": get_kicad_version,
-    "freecad.generate_enclosure": generate_enclosure,
-    "job.cancel": cancel_job,
-    "daemon.configure": configure_daemon,
-}
+def _build_routes() -> dict:
+    """kicad.*/freecad.* are only registered if their bridge module
+    actually imported (SPEC-107 §2) -- a broken kipy install shouldn't
+    take down the daemon's ability to serve FreeCAD requests, or vice
+    versa. A function (not a bare literal) so this registration logic is
+    directly testable without needing to simulate a real import failure."""
+    routes = {
+        "kicad.generate_component": mock_generate_component,
+        "job.cancel": cancel_job,
+        "daemon.configure": configure_daemon,
+    }
+    if get_kicad_version is not None:
+        routes["kicad.get_version"] = get_kicad_version
+    if generate_enclosure is not None:
+        routes["freecad.generate_enclosure"] = generate_enclosure
+    return routes
+
+
+# Route Registry mapping string methods to Python functions.
+ROUTES = _build_routes()
 
 # Methods that run off the read loop: a request for one of these returns
 # {"job_id": ...} immediately, and the real result/failure/cancellation
 # arrives later as a job.* notification (SPEC-105 §2).
-ASYNC_ROUTES = {"freecad.generate_enclosure"}
+ASYNC_ROUTES = {"freecad.generate_enclosure"} & ROUTES.keys()
 
 # job_id -> {"cancel_event": threading.Event()} for every job currently
 # in flight. Entries are removed once the job's worker thread finishes.
@@ -259,10 +331,57 @@ def handle_request(line: str) -> str:
             "id": req_id
         })
 
+# How often the heartbeat fires. Rust's macOS crash-signal path (CTX-107.1)
+# treats a gap of roughly 2x this as evidence the daemon hard-crashed, not
+# just that one heartbeat happened to be delayed.
+_HEARTBEAT_INTERVAL_S = 5.0
+
+
+def _detect_capabilities() -> dict:
+    """Cheap, non-blocking checks only (SPEC-107 §3) -- SPEC-103/104 both
+    connect to KiCad/FreeCAD lazily on first real use, and this probe must
+    not itself pay for a slow handshake on every single startup."""
+    kicad_available = False
+    if kicad_bridge is not None:
+        socket_path = kicad_bridge._socket_path_override or "/tmp/kicad/api.sock"
+        kicad_available = os.path.exists(socket_path)
+
+    freecad_available = False
+    if freecad_bridge is not None:
+        try:
+            freecad_bridge.find_freecadcmd()
+            freecad_available = True
+        except Exception:
+            freecad_available = False
+
+    return {
+        "kicad_available": kicad_available,
+        "freecad_available": freecad_available,
+        # SPEC-201 is the first spec with a real provider to report here.
+        "llm_providers": [],
+    }
+
+
+def _emit_heartbeat() -> None:
+    emit({"jsonrpc": "2.0", "method": "daemon.heartbeat", "params": {}})
+
+
+def _heartbeat_loop() -> None:
+    """Runs on its own thread, independent of request handling, so a
+    long-running freecadcmd call in flight can never starve it and produce
+    a false "crashed" signal on the Rust side (SPEC-107 §3)."""
+    while True:
+        time.sleep(_HEARTBEAT_INTERVAL_S)
+        _emit_heartbeat()
+
+
 def main():
     """
     The infinite event loop listening to standard input.
     """
+    emit({"jsonrpc": "2.0", "method": "daemon.ready", "params": _detect_capabilities()})
+    threading.Thread(target=_heartbeat_loop, daemon=True).start()
+
     for line in sys.stdin:
         if not line.strip():
             continue

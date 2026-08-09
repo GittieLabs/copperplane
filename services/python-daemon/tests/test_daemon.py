@@ -1,3 +1,4 @@
+import io
 import json
 import threading
 import time
@@ -156,6 +157,89 @@ class TestJSONRPCDaemon(unittest.TestCase):
             self.assertEqual(daemon.CONFIG["secrets"], {"llm_api_key": "sk-test-123"})
         finally:
             daemon.CONFIG["secrets"] = original_secrets
+
+
+class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
+    """CTX-107.1: daemon.ready capability detection and the daemon.heartbeat
+    signal Rust's macOS crash-detection path relies on."""
+
+    def test_001_detect_capabilities_reports_freecad_available_for_real(self):
+        """TEST-001: a real, non-mocked check on this machine, where
+        FreeCAD is actually installed (same 'verify for real' pattern as
+        CTX-104.1's own TEST-004)."""
+        caps = daemon._detect_capabilities()
+        self.assertTrue(caps["freecad_available"], "FreeCAD is actually installed on this machine")
+        self.assertIn("kicad_available", caps)
+        self.assertIn("llm_providers", caps)
+
+    @patch('daemon.freecad_bridge.find_freecadcmd')
+    def test_002_detect_capabilities_reports_freecad_unavailable_on_error(self, mock_find):
+        """TEST-001: freecad_available is False when find_freecadcmd raises."""
+        mock_find.side_effect = daemon.freecad_bridge.FreeCADUnavailableError("not found")
+        caps = daemon._detect_capabilities()
+        self.assertFalse(caps["freecad_available"])
+
+    @patch('daemon.os.path.exists', return_value=True)
+    def test_003_detect_capabilities_reports_kicad_available_when_socket_present(self, mock_exists):
+        """TEST-001: kicad_available reflects whether the IPC socket path exists."""
+        caps = daemon._detect_capabilities()
+        self.assertTrue(caps["kicad_available"])
+
+    def test_004_main_emits_daemon_ready_before_reading_any_input(self):
+        """TEST-002: main() emits daemon.ready -- reporting detected
+        capabilities -- before (and regardless of) anything arriving on
+        stdin. Feeding it an immediately-EOF stdin proves this: main()
+        only returns after emitting daemon.ready, not because a request
+        was ever read."""
+        captured = []
+        original_write_line = daemon._write_line
+        original_stdin = sys.stdin
+        daemon._write_line = lambda text: captured.append(json.loads(text))
+        sys.stdin = io.StringIO("")
+        try:
+            daemon.main()
+        finally:
+            daemon._write_line = original_write_line
+            sys.stdin = original_stdin
+
+        ready_notifications = [n for n in captured if n.get("method") == "daemon.ready"]
+        self.assertEqual(len(ready_notifications), 1)
+        self.assertIn("kicad_available", ready_notifications[0]["params"])
+        self.assertIn("freecad_available", ready_notifications[0]["params"])
+
+    def test_005_emit_heartbeat_writes_a_daemon_heartbeat_notification(self):
+        """TEST-003: _emit_heartbeat (the body of the background heartbeat
+        loop) writes exactly one daemon.heartbeat notification -- tested
+        directly rather than running the real infinite loop, which sleeps
+        forever between beats."""
+        captured = []
+        original_write_line = daemon._write_line
+        daemon._write_line = lambda text: captured.append(json.loads(text))
+        try:
+            daemon._emit_heartbeat()
+        finally:
+            daemon._write_line = original_write_line
+
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0]["method"], "daemon.heartbeat")
+        self.assertNotIn("id", captured[0])
+
+    def test_006_build_routes_omits_kicad_route_when_import_failed(self):
+        """TEST-004: if kicad_bridge's import had failed (get_kicad_version
+        would be None), _build_routes omits kicad.get_version but keeps
+        every other route -- a broken kipy install doesn't take down the
+        daemon's ability to serve FreeCAD/job/config requests."""
+        original = daemon.get_kicad_version
+        daemon.get_kicad_version = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.get_version", routes)
+            self.assertIn("kicad.generate_component", routes)
+            self.assertIn("job.cancel", routes)
+            self.assertIn("daemon.configure", routes)
+        finally:
+            daemon.get_kicad_version = original
+
 
 if __name__ == '__main__':
     unittest.main()
