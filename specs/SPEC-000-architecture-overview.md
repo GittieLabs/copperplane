@@ -16,6 +16,7 @@ child_specs:
   - "../specs/SPEC-105-daemon-async-job-progress-protocol.md"
   - "../specs/SPEC-106-configuration-secrets-store.md"
   - "../specs/SPEC-107-structured-logging-diagnostics.md"
+  - "../apps/tauri-ui/specs/SPEC-301-3d-viewer.md"
 ---
 
 # SPEC-000: Root Architecture: Hardware Agent Studio
