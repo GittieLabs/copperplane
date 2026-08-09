@@ -12,7 +12,7 @@ const listenMock = vi.fn(async (_eventName: string, listener: DaemonEventListene
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }))
 
-const { dispatch } = await import('./ipc')
+const { dispatch, submitJob } = await import('./ipc')
 
 beforeEach(() => {
   invokeMock.mockReset()
@@ -37,6 +37,14 @@ function respondOnNextTick(buildResult: (id: number) => unknown) {
       capturedListener?.({ payload: JSON.stringify(buildResult(id)) })
     })
   })
+}
+
+/** Submits an async job whose ack response carries the given job_id, and
+ * returns the handle once that ack has resolved -- notifications for it
+ * can then be delivered via `capturedListener` in the test body. */
+async function submitJobWithId(jobId: string) {
+  respondOnNextTick((id) => ({ jsonrpc: '2.0', id, result: { job_id: jobId } }))
+  return submitJob('freecad.generate_enclosure', { width: 1, depth: 1, height: 1 })
 }
 
 describe('dispatch', () => {
@@ -70,32 +78,98 @@ describe('dispatch', () => {
     expect(response.result).toBe('fine')
   })
 
-  it('rejects a second dispatch while one is already in flight, without calling invoke again', async () => {
-    // invoke() resolves immediately, same as the real command (it only
-    // writes to stdin) — what keeps this request "in flight" is that its
-    // response never arrives during this test, same as the real daemon
-    // taking a while to process a long-running command.
-    invokeMock.mockImplementationOnce(async () => {})
+  it('TEST-005: two concurrent dispatches both resolve correctly, matched by id', async () => {
+    // Neither invoke() call resolves the request itself (same as the real
+    // command, which only writes to stdin) -- both stay "in flight"
+    // simultaneously until their responses arrive out of submission order,
+    // proving id-matching (not a single-in-flight guard) is what keeps
+    // concurrent dispatches correct post-CTX-105.2.
+    invokeMock.mockImplementation(async () => {})
 
-    const first = dispatch('kicad.generate_component')
+    const first = dispatch('kicad.generate_component', { query: 'first' })
     await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledTimes(1))
+    const second = dispatch('kicad.generate_component', { query: 'second' })
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledTimes(2))
 
-    await expect(dispatch('kicad.generate_component')).rejects.toThrow(/in flight/)
-    expect(invokeMock).toHaveBeenCalledTimes(1)
+    const firstId = idFromInvokeCall(0)
+    const secondId = idFromInvokeCall(1)
 
-    // Unstick the first call so it doesn't leak into later tests.
-    const id = idFromInvokeCall()
-    capturedListener?.({ payload: JSON.stringify({ jsonrpc: '2.0', id, result: null }) })
-    await first
+    // Resolve out of order: second's response arrives before first's.
+    capturedListener?.({ payload: JSON.stringify({ jsonrpc: '2.0', id: secondId, result: 'second' }) })
+    capturedListener?.({ payload: JSON.stringify({ jsonrpc: '2.0', id: firstId, result: 'first' }) })
+
+    expect((await first).result).toBe('first')
+    expect((await second).result).toBe('second')
+  })
+})
+
+describe('submitJob', () => {
+  it('TEST-001: routes a job.* notification (no id field) to its job instead of dropping it', async () => {
+    const handle = await submitJobWithId('job-abc')
+    const updates: unknown[] = []
+    handle.onUpdate((update) => updates.push(update))
+
+    capturedListener?.({
+      payload: JSON.stringify({ jsonrpc: '2.0', method: 'job.progress', params: { job_id: 'job-abc', status: 'running' } }),
+    })
+
+    expect(updates).toEqual([{ status: 'running' }])
   })
 
-  it('allows a new dispatch once the in-flight one has settled', async () => {
-    respondOnNextTick((id) => ({ jsonrpc: '2.0', id, result: 'first' }))
-    await dispatch('kicad.generate_component')
+  it('TEST-002: result resolves with the job.completed payload after job.progress fires first', async () => {
+    const handle = await submitJobWithId('job-def')
+    const statuses: string[] = []
+    handle.onUpdate((update) => statuses.push(update.status))
 
-    respondOnNextTick((id) => ({ jsonrpc: '2.0', id, result: 'second' }))
-    const second = await dispatch('kicad.generate_component')
+    capturedListener?.({
+      payload: JSON.stringify({ jsonrpc: '2.0', method: 'job.progress', params: { job_id: 'job-def' } }),
+    })
+    capturedListener?.({
+      payload: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'job.completed',
+        params: { job_id: 'job-def', result: '/tmp/enclosure.glb' },
+      }),
+    })
 
-    expect(second.result).toBe('second')
+    await expect(handle.result).resolves.toBe('/tmp/enclosure.glb')
+    expect(statuses).toEqual(['running', 'completed'])
+  })
+
+  it('TEST-003: result rejects on job.failed', async () => {
+    const handle = await submitJobWithId('job-fail')
+
+    capturedListener?.({
+      payload: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'job.failed',
+        params: { job_id: 'job-fail', error: 'freecadcmd exited with code 1' },
+      }),
+    })
+
+    await expect(handle.result).rejects.toThrow('freecadcmd exited with code 1')
+  })
+
+  it('TEST-003: result rejects on job.cancelled', async () => {
+    const handle = await submitJobWithId('job-cancel')
+
+    capturedListener?.({
+      payload: JSON.stringify({ jsonrpc: '2.0', method: 'job.cancelled', params: { job_id: 'job-cancel' } }),
+    })
+
+    await expect(handle.result).rejects.toThrow(/cancelled/)
+  })
+
+  it('TEST-004: cancel() dispatches job.cancel with the job\'s own job_id', async () => {
+    const handle = await submitJobWithId('job-to-cancel')
+
+    respondOnNextTick((id) => ({ jsonrpc: '2.0', id, result: { job_id: 'job-to-cancel', cancelling: true } }))
+    await handle.cancel()
+
+    const cancelCallIndex = invokeMock.mock.calls.length - 1
+    const { request } = invokeMock.mock.calls[cancelCallIndex][1] as { request: string }
+    const parsed = JSON.parse(request)
+    expect(parsed.method).toBe('job.cancel')
+    expect(parsed.params).toEqual({ job_id: 'job-to-cancel' })
   })
 })
