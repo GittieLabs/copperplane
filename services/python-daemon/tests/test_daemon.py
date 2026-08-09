@@ -137,5 +137,25 @@ class TestJSONRPCDaemon(unittest.TestCase):
         finally:
             daemon.ROUTES.pop('test.strict', None)
 
+    def test_006_daemon_configure_merges_secrets_into_config(self):
+        """TEST-004 (CTX-106.1): daemon.configure, dispatched through
+        handle_request like any other route, merges its secrets param
+        into the in-memory CONFIG and returns {"configured": true}."""
+        original_secrets = daemon.CONFIG.get("secrets")
+        try:
+            request = json.dumps({
+                "jsonrpc": "2.0",
+                "method": "daemon.configure",
+                "params": {"secrets": {"llm_api_key": "sk-test-123"}},
+                "id": "req_configure",
+            })
+            response = json.loads(handle_request(request))
+
+            self.assertNotIn("error", response)
+            self.assertEqual(response["result"], {"configured": True})
+            self.assertEqual(daemon.CONFIG["secrets"], {"llm_api_key": "sk-test-123"})
+        finally:
+            daemon.CONFIG["secrets"] = original_secrets
+
 if __name__ == '__main__':
     unittest.main()

@@ -18,15 +18,36 @@ class KiCadUnavailableError(Exception):
 
 
 _client = None
+_socket_path_override = None
+_timeout_ms_override = None
+
+
+def configure(socket_path=None, timeout_ms=None):
+    """Applies CTX-106.1's daemon-injected config. Resets the held-open
+    client so the *next* `get_client()` call reconnects using these
+    settings -- without this, a config change wouldn't take effect until
+    a full daemon restart, since the client is normally held open for the
+    daemon's whole life (SPEC-103 §2)."""
+    global _socket_path_override, _timeout_ms_override, _client
+    _socket_path_override = socket_path
+    _timeout_ms_override = timeout_ms
+    _client = None
 
 
 def get_client() -> KiCad:
-    """Returns the held-open KiCad client, connecting on first use."""
+    """Returns the held-open KiCad client, connecting on first use with
+    any configured `socket_path`/`timeout_ms` override (SPEC-106)."""
     global _client
     if _client is not None:
         return _client
 
-    client = KiCad()
+    kwargs = {}
+    if _socket_path_override:
+        kwargs["socket_path"] = _socket_path_override
+    if _timeout_ms_override:
+        kwargs["timeout_ms"] = _timeout_ms_override
+
+    client = KiCad(**kwargs)
     try:
         client.check_version()
     except FutureVersionError:

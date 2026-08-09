@@ -1,6 +1,7 @@
 //! The IPC transport layer described in SPEC-101 §2: a raw string pipe
 //! between the frontend and the Python JSON-RPC daemon. This layer never
 //! parses the JSON-RPC payload itself — that is the daemon's job.
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -10,6 +11,31 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// Event name the frontend listens on for daemon `stdout` lines.
 pub const DAEMON_RESPONSE_EVENT: &str = "daemon://response";
+
+/// Secret keys this app currently stores in the OS keychain and hands to
+/// the daemon via the `daemon.configure` handshake (SPEC-106 §2). Empty
+/// today -- SPEC-201 (an LLM provider's API key) and SPEC-203 (a
+/// supplier's API key) are the first specs with a real key name to add
+/// here. Kept as an explicit allowlist rather than "fetch everything
+/// stored under our service name" so a stray keychain entry from some
+/// unrelated feature never leaks into the daemon's configure handshake.
+const KNOWN_SECRET_KEYS: &[&str] = &[];
+
+/// Builds the `daemon.configure` JSON-RPC request line (SPEC-106 §2) that
+/// `spawn_daemon` writes as the very first thing on the daemon's `stdin`.
+/// Secrets travel this way -- over the same private pipe `SPEC-101`
+/// already built -- rather than as an env var or, worse, a command-line
+/// argument visible to any user via `ps`. A pure function of the secrets
+/// map, so it's directly unit-testable without a real child process.
+pub fn build_configure_request(secrets: &BTreeMap<String, String>) -> String {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "daemon.configure",
+        "params": { "secrets": secrets },
+        "id": 0,
+    })
+    .to_string()
+}
 
 /// Owns the daemon child process and the `Arc<Mutex<ChildStdin>>` transport
 /// handle described in SPEC-101, so `dispatch_to_daemon` can write to it
@@ -36,6 +62,14 @@ pub fn spawn_daemon(app: &AppHandle, script_path: PathBuf) -> std::io::Result<Da
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
 
+    // SPEC-106 §2: Rust owns config and secrets, injecting them at spawn.
+    // Non-secret settings ride as an env var -- visible only to this OS
+    // user, a materially smaller exposure than `ps`'s world-readable argv.
+    let daemon_config = crate::config::load_config(app);
+    for (name, value) in crate::config::build_daemon_env(&daemon_config) {
+        command.env(name, value);
+    }
+
     #[cfg(target_os = "linux")]
     crate::supervisor::bind_child_lifetime(&mut command);
 
@@ -52,7 +86,7 @@ pub fn spawn_daemon(app: &AppHandle, script_path: PathBuf) -> std::io::Result<Da
         crate::supervisor::windows::assign_process(&job_handle, HANDLE(child.as_raw_handle()))?;
     }
 
-    let stdin = child
+    let mut stdin = child
         .stdin
         .take()
         .expect("daemon child was spawned with Stdio::piped() stdin");
@@ -60,6 +94,21 @@ pub fn spawn_daemon(app: &AppHandle, script_path: PathBuf) -> std::io::Result<Da
         .stdout
         .take()
         .expect("daemon child was spawned with Stdio::piped() stdout");
+
+    // SPEC-106 §2: secrets go over stdin, as the very first line the
+    // daemon ever reads -- before spawn_daemon returns and hands the
+    // stdin handle to anything that could write a second, ordinary
+    // request ahead of it.
+    let secrets: BTreeMap<String, String> = KNOWN_SECRET_KEYS
+        .iter()
+        .filter_map(|key| {
+            crate::secrets::get_secret(key)
+                .ok()
+                .flatten()
+                .map(|value| (key.to_string(), value))
+        })
+        .collect();
+    write_request(&mut stdin, &build_configure_request(&secrets))?;
 
     let app_handle = app.clone();
     std::thread::spawn(move || {
@@ -120,7 +169,36 @@ pub fn dispatch_to_daemon(
 
 #[cfg(test)]
 mod tests {
-    use super::write_request;
+    use super::{build_configure_request, write_request};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn build_configure_request_produces_a_valid_daemon_configure_line() {
+        let mut secrets = BTreeMap::new();
+        secrets.insert("llm_api_key".to_string(), "sk-test-123".to_string());
+
+        let line = build_configure_request(&secrets);
+        let parsed: serde_json::Value = serde_json::from_str(&line)
+            .expect("build_configure_request should produce valid JSON");
+
+        assert_eq!(parsed["jsonrpc"], "2.0");
+        assert_eq!(parsed["method"], "daemon.configure");
+        assert_eq!(parsed["params"]["secrets"]["llm_api_key"], "sk-test-123");
+        assert!(parsed.get("id").is_some(), "a JSON-RPC request must carry an id");
+    }
+
+    #[test]
+    fn build_configure_request_composes_with_write_request() {
+        let secrets = BTreeMap::new();
+        let mut buf: Vec<u8> = Vec::new();
+
+        write_request(&mut buf, &build_configure_request(&secrets)).unwrap();
+
+        let written = String::from_utf8(buf).unwrap();
+        assert!(written.ends_with('\n'), "the configure line must be newline-terminated like any other request");
+        let parsed: serde_json::Value = serde_json::from_str(written.trim_end()).unwrap();
+        assert_eq!(parsed["method"], "daemon.configure");
+    }
 
     #[test]
     fn writes_the_request_terminated_by_a_single_newline_and_flushes() {

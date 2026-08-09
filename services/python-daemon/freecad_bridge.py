@@ -56,10 +56,29 @@ _CANDIDATE_GLOBS = {
 }
 
 
+_path_override = None
+
+
+def configure(path_override=None):
+    """Applies CTX-106.1's daemon-injected config: an explicit
+    `freecadcmd` path override, when set, takes priority over the
+    PATH/glob search `find_freecadcmd` otherwise falls back to."""
+    global _path_override
+    _path_override = path_override
+
+
 def find_freecadcmd() -> str:
-    """Locates the `freecadcmd` executable: PATH first, then a handful of
-    standard per-OS install locations. Raises a clean error rather than
-    letting a caller hit a confusing `FileNotFoundError` from `subprocess`."""
+    """Locates the `freecadcmd` executable: a configured override first
+    (SPEC-106), then PATH, then a handful of standard per-OS install
+    locations. Raises a clean error rather than letting a caller hit a
+    confusing `FileNotFoundError` from `subprocess`."""
+    if _path_override:
+        if os.path.isfile(_path_override):
+            return _path_override
+        raise FreeCADUnavailableError(
+            f"Configured freecadcmd path override does not exist: {_path_override}"
+        )
+
     on_path = shutil.which("freecadcmd")
     if on_path:
         return on_path

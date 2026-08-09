@@ -14,11 +14,15 @@ class TestKiCadBridge(unittest.TestCase):
 
     def setUp(self):
         # The connection is module-level held-open state; make sure no
-        # test leaks a stale/mocked client into another test.
+        # test leaks a stale/mocked client or config override into another.
         kicad_bridge._client = None
+        kicad_bridge._socket_path_override = None
+        kicad_bridge._timeout_ms_override = None
 
     def tearDown(self):
         kicad_bridge._client = None
+        kicad_bridge._socket_path_override = None
+        kicad_bridge._timeout_ms_override = None
 
     @patch('kicad_bridge.KiCad')
     def test_001_connection_refused_raises_clean_error(self, mock_kicad_cls):
@@ -71,6 +75,27 @@ class TestKiCadBridge(unittest.TestCase):
             kicad_bridge._client,
             "the dead client must be dropped so the next call reconnects",
         )
+
+    @patch('kicad_bridge.KiCad')
+    def test_004_configure_resets_client_and_applies_overrides(self, mock_kicad_cls):
+        """TEST-004 (CTX-106.1): kicad_bridge.configure resets the held
+        client, and the next connection attempt constructs KiCad with the
+        configured socket_path/timeout_ms -- a live socket on a *custom*
+        path isn't available to test for real on this machine, only the
+        default path TEST-002 already verifies, so this is mocked at the
+        KiCad constructor call itself."""
+        mock_client = MagicMock()
+        mock_kicad_cls.return_value = mock_client
+
+        # Establish a held-open client under the default (no override) config.
+        kicad_bridge.get_client()
+        self.assertIsNotNone(kicad_bridge._client)
+
+        kicad_bridge.configure(socket_path='/custom/kicad.sock', timeout_ms=9000)
+        self.assertIsNone(kicad_bridge._client, "configure should drop the stale client immediately")
+
+        kicad_bridge.get_client()
+        mock_kicad_cls.assert_called_with(socket_path='/custom/kicad.sock', timeout_ms=9000)
 
 
 if __name__ == '__main__':

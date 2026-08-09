@@ -1,4 +1,6 @@
+mod config;
 mod daemon;
+mod secrets;
 mod supervisor;
 
 use std::path::PathBuf;
