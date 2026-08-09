@@ -33,6 +33,7 @@ answers three questions:
 | [SPEC-105](specs/SPEC-105-daemon-async-job-progress-protocol.md) | `services/python-daemon` + `core/tauri-rust` + `apps/tauri-ui` | [CTX-105.1](context/CTX-105.1-daemon-async-job-protocol.md), [CTX-105.2](apps/tauri-ui/context/CTX-105.2-frontend-job-progress-client.md) | ✅ Completed | Async job dispatch + atomic `stdout` notifications + real cancellation (daemon side); frontend `JobHandle` client replacing the CTX-101.1 single-in-flight guard |
 | [SPEC-106](specs/SPEC-106-configuration-secrets-store.md) | `core/tauri-rust` + `services/python-daemon` | [CTX-106.1](context/CTX-106.1-config-secrets-store.md) | ✅ Completed | Non-secret config injected as a spawn-time env var, secrets via the OS keychain handed over as the daemon's first `stdin` line; wired into `freecadcmd` path override and `kicad_bridge` connection settings |
 | [SPEC-107](specs/SPEC-107-structured-logging-diagnostics.md) | `services/python-daemon` + `core/tauri-rust` | [CTX-107.1](context/CTX-107.1-structured-logging-diagnostics.md) | ✅ Completed | `stderr`/rotating-file logging, capability-aware bridge imports, `daemon.ready` startup handshake, `daemon.heartbeat` closing `CTX-101.1`'s deferred macOS crash-shield heartbeat |
+| [SPEC-301](apps/tauri-ui/specs/SPEC-301-3d-viewer.md) | `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` | [CTX-301.1](apps/tauri-ui/context/CTX-301.1-3d-viewer.md) | ✅ Completed | R3F viewer with GPU-disposal-on-replace, `.glb` output relocated to an app-owned directory, `assetProtocol` scoped to exactly that directory. Completes the `.glb`-generation → render half of M1's vertical slice — the LLM/KiCad-injection half (`SPEC-201`/`202`/`108`) and `SPEC-302` are still open, M1 is not done. |
 
 The foundation is in better shape than most projects at this stage, and two things in particular
 are worth preserving as norms rather than accidents:
@@ -281,20 +282,22 @@ conventions closely enough that no separate borrowing decision is needed here.
 
 ### 3.3 `3xx` — Product surface
 
-#### SPEC-301 — 3D Viewer
+#### [SPEC-301](apps/tauri-ui/specs/SPEC-301-3d-viewer.md) — 3D Viewer — ✅ done 2026-08-09
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-104, SPEC-105
+
+[CTX-301.1](apps/tauri-ui/context/CTX-301.1-3d-viewer.md) landed — see §1.1. Kept here for the
+design rationale, including the asset-loading gotcha below, which this context resolved.
 
 SPEC-101 names React Three Fiber, but nothing renders today — `freecad.generate_enclosure` returns
 a `.glb` path that the UI simply never opens. Scope: R3F canvas, camera/lighting defaults that make
 a grey box legible, loading and error states, and disposal on unmount (leaking GPU buffers across
 repeated generations is the standard Three.js failure).
 
-*Known gotcha, and it will bite immediately:* the `.glb` is written to the system temp directory,
-and `tauri.conf.json` currently configures no `assetProtocol` scope at all (`csp` is `null`, no
-`fs`/asset permissions in `capabilities/default.json`). The WebView cannot load an arbitrary
-absolute path from disk. Either scope the asset protocol to the daemon's output directory, or have
-Rust read the bytes and hand them to the frontend as a blob. **Decide this in the spec, not
-mid-implementation.**
+*Known gotcha, resolved by `CTX-301.1`:* the `.glb` was written to the system temp directory, and
+`tauri.conf.json` configured no `assetProtocol` scope at all. **Decided: scope the asset protocol
+to the daemon's own output directory** (not a Rust-mediated blob read) — `.glb` output moved to
+`<app_data_dir>/generated`, `assetProtocol.scope` narrowed to exactly that directory, and the
+frontend loads it via `convertFileSrc()`.
 
 #### SPEC-302 — Chat & Command Surface
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-105, SPEC-201
@@ -416,16 +419,20 @@ on a dev machine.
 Critical path, in dependency order:
 
 ```text
-SPEC-105 (async jobs & progress)   ─┬─> SPEC-201 (LLM provider) ──> SPEC-202 (component pipeline) ──> SPEC-108 (KiCad injection)
-SPEC-106 (config & secrets)        ─┘                                                                        │
-SPEC-107 (logging & handshake)     ─────────────────────────────────────────────────────────────────────────┤
-SPEC-301 (3D viewer) ──────────────────────────────────────────────────────────> SPEC-302 (chat surface) ────┴──> demo
+SPEC-105 (async jobs & progress) ✅ ─┬─> SPEC-201 (LLM provider) ──> SPEC-202 (component pipeline) ──> SPEC-108 (KiCad injection)
+SPEC-106 (config & secrets) ✅       ─┘                                                                        │
+SPEC-107 (logging & handshake) ✅     ─────────────────────────────────────────────────────────────────────────┤
+SPEC-301 (3D viewer) ✅ ──────────────────────────────────────────────────────────> SPEC-302 (chat surface) ────┴──> demo
 ```
 
 SPEC-105 comes first because without it the UI locks up for the entire duration of every AI call,
 which makes the demo unwatchable regardless of how good the generation is. SPEC-301 has no
 dependency on the AI work and can run fully in parallel — the `.glb` pipeline already produces
 valid output today.
+
+**Progress as of 2026-08-09:** the entire left/bottom branch (SPEC-105/106/107/301) is done. The
+remaining path to "demo" is unblocked but unwritten: SPEC-201 → SPEC-202 → SPEC-108, and SPEC-302.
+SPEC-201 itself has two open questions (§3.2) that need deciding before it can be written.
 
 **Explicitly out of M1:** packaging (SPEC-401), enclosure-from-board-geometry (SPEC-109), supplier
 APIs (SPEC-203), agent tool-calling (SPEC-204). M1 proves the product is possible; it does not
