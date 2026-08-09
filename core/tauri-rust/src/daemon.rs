@@ -6,8 +6,20 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
+
+/// How often the macOS heartbeat monitor checks in (SPEC-107 §2/§3).
+#[cfg(target_os = "macos")]
+const HEARTBEAT_CHECK_INTERVAL_S: u64 = 5;
+
+/// How long without a heartbeat/ready line before the daemon is treated as
+/// hard-crashed. 3x the daemon's own 5s heartbeat interval (`daemon.py`'s
+/// `_HEARTBEAT_INTERVAL_S`) rather than 2x, to leave real margin for
+/// scheduling jitter under load before concluding a live daemon crashed.
+#[cfg(target_os = "macos")]
+const HEARTBEAT_TIMEOUT_S: u64 = 15;
 
 /// Event name the frontend listens on for daemon `stdout` lines.
 pub const DAEMON_RESPONSE_EVENT: &str = "daemon://response";
@@ -35,6 +47,54 @@ pub fn build_configure_request(secrets: &BTreeMap<String, String>) -> String {
         "id": 0,
     })
     .to_string()
+}
+
+/// True if `line` is a `daemon.ready` or `daemon.heartbeat` notification --
+/// the two signals the macOS crash-detection monitor (SPEC-107 §2) treats
+/// as proof the daemon is still alive. A narrow, deliberate exception to
+/// this module's own "never parse the payload" principle (this file's own
+/// header comment) -- detecting these two method names is structurally
+/// required for heartbeat-based crash detection to exist at all. Every
+/// other aspect of forwarding `stdout` to the frontend remains unparsed.
+#[cfg(target_os = "macos")]
+fn is_heartbeat_signal(line: &str) -> bool {
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(line) else {
+        return false;
+    };
+    matches!(
+        parsed.get("method").and_then(|m| m.as_str()),
+        Some("daemon.ready") | Some("daemon.heartbeat")
+    )
+}
+
+/// Watches `last_heartbeat`; if too long passes without a `daemon.ready`/
+/// `daemon.heartbeat` line, treats the daemon as hard-crashed and runs the
+/// same cleanup `RunEvent::Exit` would have (SPEC-107 §2) -- the missing
+/// half of `CTX-101.1`'s crash shield on macOS, where `RunEvent::Exit`
+/// only ever fires on a *graceful* quit. Windows/Linux already have
+/// working OS-level crash shields (Job Objects / `prctl`); this path is
+/// macOS-only by design, not an oversight (SPEC-107 §3).
+#[cfg(target_os = "macos")]
+fn spawn_heartbeat_monitor(app: &AppHandle, last_heartbeat: Arc<Mutex<Instant>>) {
+    let app_handle = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(HEARTBEAT_CHECK_INTERVAL_S));
+
+        let elapsed = last_heartbeat
+            .lock()
+            .map(|guard| guard.elapsed())
+            .unwrap_or(Duration::ZERO);
+
+        if elapsed > Duration::from_secs(HEARTBEAT_TIMEOUT_S) {
+            log::warn!(
+                "No daemon heartbeat for {elapsed:?} -- treating as a hard crash (SPEC-107) and cleaning up"
+            );
+            if let Some(handle) = app_handle.try_state::<DaemonHandle>() {
+                handle.shutdown();
+            }
+            break;
+        }
+    });
 }
 
 /// Owns the daemon child process and the `Arc<Mutex<ChildStdin>>` transport
@@ -110,11 +170,25 @@ pub fn spawn_daemon(app: &AppHandle, script_path: PathBuf) -> std::io::Result<Da
         .collect();
     write_request(&mut stdin, &build_configure_request(&secrets))?;
 
+    // SPEC-107 §2: the clock starts now, not on the first heartbeat --
+    // otherwise a daemon that's slow to reach its own daemon.ready would
+    // look identical to one that already crashed.
+    #[cfg(target_os = "macos")]
+    let last_heartbeat = Arc::new(Mutex::new(Instant::now()));
+    #[cfg(target_os = "macos")]
+    let stdout_last_heartbeat = last_heartbeat.clone();
+
     let app_handle = app.clone();
     std::thread::spawn(move || {
         for line in BufReader::new(stdout).lines() {
             match line {
                 Ok(line) if !line.trim().is_empty() => {
+                    #[cfg(target_os = "macos")]
+                    if is_heartbeat_signal(&line) {
+                        if let Ok(mut last) = stdout_last_heartbeat.lock() {
+                            *last = Instant::now();
+                        }
+                    }
                     let _ = app_handle.emit(DAEMON_RESPONSE_EVENT, line);
                 }
                 Ok(_) => {}
@@ -122,6 +196,9 @@ pub fn spawn_daemon(app: &AppHandle, script_path: PathBuf) -> std::io::Result<Da
             }
         }
     });
+
+    #[cfg(target_os = "macos")]
+    spawn_heartbeat_monitor(app, last_heartbeat);
 
     Ok(DaemonHandle {
         child: Mutex::new(child),
@@ -165,6 +242,40 @@ pub fn dispatch_to_daemon(
         .lock()
         .map_err(|_| "daemon stdin lock was poisoned".to_string())?;
     write_request(&mut *stdin, &request).map_err(|e| e.to_string())
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod heartbeat_tests {
+    use super::is_heartbeat_signal;
+
+    #[test]
+    fn recognizes_daemon_ready_as_a_heartbeat_signal() {
+        assert!(is_heartbeat_signal(
+            r#"{"jsonrpc": "2.0", "method": "daemon.ready", "params": {"kicad_available": true}}"#
+        ));
+    }
+
+    #[test]
+    fn recognizes_daemon_heartbeat_as_a_heartbeat_signal() {
+        assert!(is_heartbeat_signal(r#"{"jsonrpc": "2.0", "method": "daemon.heartbeat", "params": {}}"#));
+    }
+
+    #[test]
+    fn an_ordinary_response_is_not_a_heartbeat_signal() {
+        assert!(!is_heartbeat_signal(r#"{"jsonrpc": "2.0", "result": {"job_id": "abc"}, "id": 1}"#));
+    }
+
+    #[test]
+    fn a_different_notification_method_is_not_a_heartbeat_signal() {
+        assert!(!is_heartbeat_signal(
+            r#"{"jsonrpc": "2.0", "method": "job.progress", "params": {"job_id": "abc"}}"#
+        ));
+    }
+
+    #[test]
+    fn malformed_json_is_not_a_heartbeat_signal() {
+        assert!(!is_heartbeat_signal("not json at all"));
+    }
 }
 
 #[cfg(test)]
