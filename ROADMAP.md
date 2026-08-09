@@ -33,8 +33,9 @@ answers three questions:
 | [SPEC-105](specs/SPEC-105-daemon-async-job-progress-protocol.md) | `services/python-daemon` + `core/tauri-rust` + `apps/tauri-ui` | [CTX-105.1](context/CTX-105.1-daemon-async-job-protocol.md), [CTX-105.2](apps/tauri-ui/context/CTX-105.2-frontend-job-progress-client.md) | ✅ Completed | Async job dispatch + atomic `stdout` notifications + real cancellation (daemon side); frontend `JobHandle` client replacing the CTX-101.1 single-in-flight guard |
 | [SPEC-106](specs/SPEC-106-configuration-secrets-store.md) | `core/tauri-rust` + `services/python-daemon` | [CTX-106.1](context/CTX-106.1-config-secrets-store.md) | ✅ Completed | Non-secret config injected as a spawn-time env var, secrets via the OS keychain handed over as the daemon's first `stdin` line; wired into `freecadcmd` path override and `kicad_bridge` connection settings |
 | [SPEC-107](specs/SPEC-107-structured-logging-diagnostics.md) | `services/python-daemon` + `core/tauri-rust` | [CTX-107.1](context/CTX-107.1-structured-logging-diagnostics.md) | ✅ Completed | `stderr`/rotating-file logging, capability-aware bridge imports, `daemon.ready` startup handshake, `daemon.heartbeat` closing `CTX-101.1`'s deferred macOS crash-shield heartbeat |
-| [SPEC-301](apps/tauri-ui/specs/SPEC-301-3d-viewer.md) | `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` | [CTX-301.1](apps/tauri-ui/context/CTX-301.1-3d-viewer.md) | ✅ Completed | R3F viewer with GPU-disposal-on-replace, `.glb` output relocated to an app-owned directory, `assetProtocol` scoped to exactly that directory. Completes the `.glb`-generation → render half of M1's vertical slice — the LLM/KiCad-injection half (`SPEC-201`/`202`/`108`) and `SPEC-302` are still open, M1 is not done. |
+| [SPEC-301](apps/tauri-ui/specs/SPEC-301-3d-viewer.md) | `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` | [CTX-301.1](apps/tauri-ui/context/CTX-301.1-3d-viewer.md) | ✅ Completed | R3F viewer with GPU-disposal-on-replace, `.glb` output relocated to an app-owned directory, `assetProtocol` scoped to exactly that directory. Completes the `.glb`-generation → render half of M1's vertical slice — `SPEC-201`/`202` have since landed; `SPEC-108` (KiCad injection) and `SPEC-302` are still open, M1 is not done. |
 | [SPEC-201](services/python-daemon/specs/SPEC-201-llm-provider-abstraction.md) | `services/python-daemon` | [CTX-201.1](services/python-daemon/context/CTX-201.1-llm-provider-abstraction.md) | ✅ Completed | `llm.chat` async route wrapping AgentFlow's provider classes; verified for real against Anthropic, Google, Perplexity, and a local Ollama server — OpenAI's code path exists but is unverified (no usable key). `SPEC-202`/`108` are the next links in M1's remaining critical path. |
+| [SPEC-202](services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md) | `services/python-daemon` + `apps/tauri-ui` | [CTX-202.1](services/python-daemon/context/CTX-202.1-component-intelligence-pipeline.md) | ✅ Completed | `kicad.generate_component` real AgentFlow extract → validate DAG; three safety checks (pin count, pitch sanity, courtyard clearance) against a package reference table, fails closed on an unrecognized package; verified live against Anthropic for a real part (ATtiny85). `SPEC-108` is the next and last link in M1's critical path; `SPEC-302` is the other remaining open item. |
 
 The foundation is in better shape than most projects at this stage, and two things in particular
 are worth preserving as norms rather than accidents:
@@ -225,8 +226,11 @@ picks the provider you configure, it doesn't make privacy guarantees for you.
 at startup. Prefer lazy import of provider clients so the daemon's `ready` handshake isn't delayed
 by a provider the user never selected.
 
-#### [SPEC-202](services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md) — Component Intelligence Pipeline
+#### [SPEC-202](services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md) — Component Intelligence Pipeline — ✅ done 2026-08-09
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201
+
+[CTX-202.1](services/python-daemon/context/CTX-202.1-component-intelligence-pipeline.md) landed —
+see §1.1. Kept here for the design rationale.
 
 [Its own spec](services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md) drops the
 `SPEC-203` dependency listed here — a real contradiction with §4's explicit "SPEC-203 is out of
@@ -428,7 +432,7 @@ on a dev machine.
 Critical path, in dependency order:
 
 ```text
-SPEC-105 (async jobs & progress) ✅ ─┬─> SPEC-201 (LLM provider) ✅ ──> SPEC-202 (component pipeline) ──> SPEC-108 (KiCad injection)
+SPEC-105 (async jobs & progress) ✅ ─┬─> SPEC-201 (LLM provider) ✅ ──> SPEC-202 (component pipeline) ✅ ──> SPEC-108 (KiCad injection)
 SPEC-106 (config & secrets) ✅       ─┘                                                                            │
 SPEC-107 (logging & handshake) ✅     ─────────────────────────────────────────────────────────────────────────────┤
 SPEC-301 (3D viewer) ✅ ──────────────────────────────────────────────────────────────> SPEC-302 (chat surface) ────┴──> demo
@@ -439,9 +443,10 @@ which makes the demo unwatchable regardless of how good the generation is. SPEC-
 dependency on the AI work and can run fully in parallel — the `.glb` pipeline already produces
 valid output today.
 
-**Progress as of 2026-08-09:** SPEC-105/106/107/301/201 are all done — five of six nodes. The one
-remaining unblocked-but-unwritten link is SPEC-202 → SPEC-108, plus SPEC-302. SPEC-201's own two
-open questions (§3.2) are resolved.
+**Progress as of 2026-08-09:** SPEC-105/106/107/301/201/202 are all done — six of eight nodes.
+M1 is **not** complete: SPEC-108 (KiCad injection, the pipeline's actual write-into-a-live-board
+step) and SPEC-302 (chat surface) are both still unwritten, and the critical path's final `──>
+demo` join needs both. SPEC-201's own two open questions (§3.2) are resolved.
 
 **Explicitly out of M1:** packaging (SPEC-401), enclosure-from-board-geometry (SPEC-109), supplier
 APIs (SPEC-203), agent tool-calling (SPEC-204). M1 proves the product is possible; it does not
