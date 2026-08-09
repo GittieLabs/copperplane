@@ -14,30 +14,32 @@ from daemon import handle_request
 
 class TestJSONRPCDaemon(unittest.TestCase):
 
-    @patch('daemon.time.sleep', return_value=None)
-    def test_001_valid_routing(self, mock_sleep):
-        """TEST-001: Validates valid JSON-RPC parsing and routing"""
-        request = json.dumps({
-            "jsonrpc": "2.0",
-            "method": "kicad.generate_component",
-            "params": {"query": "esp32"},
-            "id": "req_100"
-        })
-        
-        response_str = handle_request(request)
-        response = json.loads(response_str)
-        
-        self.assertEqual(response.get("jsonrpc"), "2.0")
-        self.assertEqual(response.get("id"), "req_100")
-        self.assertIn("result", response)
-        self.assertNotIn("error", response)
-        
-        result = response["result"]
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["symbol_created"], "ESP32_symbol.kicad_sym")
-        
-        # Verify our mock sleep was actually called (to ensure route logic ran)
-        mock_sleep.assert_called_once_with(1.5)
+    def test_001_valid_routing(self):
+        """TEST-001: Validates valid JSON-RPC parsing and routing. Uses a
+        synthetic route (not a real business one) so this stays a pure
+        routing/parsing check -- kicad.generate_component is now a real,
+        async-dispatched pipeline (SPEC-202) with its own dedicated,
+        real/skip-clean tests in test_component_pipeline.py, and running
+        it here would trigger an uncontrolled real LLM call."""
+        daemon.ROUTES['test.echo_query'] = lambda query: {"received": query.upper()}
+        try:
+            request = json.dumps({
+                "jsonrpc": "2.0",
+                "method": "test.echo_query",
+                "params": {"query": "esp32"},
+                "id": "req_100"
+            })
+
+            response_str = handle_request(request)
+            response = json.loads(response_str)
+
+            self.assertEqual(response.get("jsonrpc"), "2.0")
+            self.assertEqual(response.get("id"), "req_100")
+            self.assertIn("result", response)
+            self.assertNotIn("error", response)
+            self.assertEqual(response["result"]["received"], "ESP32")
+        finally:
+            daemon.ROUTES.pop('test.echo_query', None)
 
     def test_002_malformed_json(self):
         """TEST-002: Handles malformed JSON input without crashing"""

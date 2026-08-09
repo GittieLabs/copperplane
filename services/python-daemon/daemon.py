@@ -75,6 +75,12 @@ except Exception:
     logger.exception("llm_providers failed to import -- llm.* routes will be unavailable")
     llm_providers = None
 
+try:
+    import component_pipeline
+except Exception:
+    logger.exception("component_pipeline failed to import -- kicad.generate_component will be unavailable")
+    component_pipeline = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -116,18 +122,13 @@ def _apply_env_config() -> None:
 
 _apply_env_config()
 
-def mock_generate_component(query):
-    """
-    Mock function to simulate generating a KiCad component.
-    Sleeps for 1.5 seconds to simulate API/Processing delay.
-    """
-    time.sleep(1.5)
-    return {
-        "status": "success",
-        "symbol_created": f"{query.upper()}_symbol.kicad_sym",
-        "footprint_created": f"{query.upper()}_footprint.kicad_mod",
-        "message": f"Successfully generated {query} and injected it into active KiCad schematic."
-    }
+def kicad_generate_component(part_number: str) -> dict:
+    """The real kicad.generate_component route (SPEC-202): runs the
+    component_intelligence.workflow.md DAG (LLM extraction + deterministic
+    validation) and returns the validated schema, or raises
+    ComponentValidationError -- replacing the old time.sleep(1.5) mock
+    that fabricated filenames and never validated anything."""
+    return component_pipeline.generate_component(part_number, secrets=CONFIG.get("secrets", {}))
 
 
 class InvalidParamsError(Exception):
@@ -192,7 +193,6 @@ def _build_routes() -> dict:
     versa. A function (not a bare literal) so this registration logic is
     directly testable without needing to simulate a real import failure."""
     routes = {
-        "kicad.generate_component": mock_generate_component,
         "job.cancel": cancel_job,
         "daemon.configure": configure_daemon,
     }
@@ -202,6 +202,8 @@ def _build_routes() -> dict:
         routes["freecad.generate_enclosure"] = generate_enclosure
     if llm_providers is not None:
         routes["llm.chat"] = llm_chat
+    if component_pipeline is not None:
+        routes["kicad.generate_component"] = kicad_generate_component
     return routes
 
 
@@ -211,7 +213,7 @@ ROUTES = _build_routes()
 # Methods that run off the read loop: a request for one of these returns
 # {"job_id": ...} immediately, and the real result/failure/cancellation
 # arrives later as a job.* notification (SPEC-105 §2).
-ASYNC_ROUTES = {"freecad.generate_enclosure", "llm.chat"} & ROUTES.keys()
+ASYNC_ROUTES = {"freecad.generate_enclosure", "llm.chat", "kicad.generate_component"} & ROUTES.keys()
 
 # job_id -> {"cancel_event": threading.Event()} for every job currently
 # in flight. Entries are removed once the job's worker thread finishes.
