@@ -21,12 +21,16 @@ from freecad_bridge import (
 class TestFreeCADBridge(unittest.TestCase):
 
     def setUp(self):
-        # The path override is module-level state; make sure no test
-        # leaks a configured override into another.
+        # The path/output-dir overrides and last-glb tracker are all
+        # module-level state; make sure no test leaks one into another.
         freecad_bridge._path_override = None
+        freecad_bridge._output_dir_override = None
+        freecad_bridge._last_glb_path = None
 
     def tearDown(self):
         freecad_bridge._path_override = None
+        freecad_bridge._output_dir_override = None
+        freecad_bridge._last_glb_path = None
 
     @patch('freecad_bridge.glob.glob', return_value=[])
     @patch('freecad_bridge.shutil.which', return_value=None)
@@ -139,6 +143,53 @@ class TestFreeCADBridge(unittest.TestCase):
             find_freecadcmd()
 
         self.assertIn("Configured freecadcmd path override does not exist", str(ctx.exception))
+
+    def test_008_output_dir_override_is_honored_for_real(self):
+        """TEST-006 (CTX-301.1): generate_enclosure writes its .glb under
+        a configured output_dir instead of the shared OS temp directory --
+        verified for real against the actually-installed FreeCAD, same
+        'verify for real' pattern as TEST-004. Skips itself cleanly when
+        no freecadcmd is found, e.g. in CI."""
+        try:
+            find_freecadcmd()
+        except FreeCADUnavailableError:
+            self.skipTest(
+                "No local freecadcmd found. Install FreeCAD 0.20+ to run this "
+                "test for real."
+            )
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            freecad_bridge.configure(output_dir=output_dir)
+            glb_path = generate_enclosure(width=50, depth=30, height=20)
+
+            self.assertEqual(os.path.dirname(glb_path), output_dir)
+            self.assertTrue(os.path.exists(glb_path))
+
+    def test_009_previous_glb_is_deleted_on_next_successful_generation(self):
+        """TEST-006 (CTX-301.1): SPEC-301's flagged known debt -- nothing
+        previously deleted a generated .glb, harmless in a self-cleaning
+        OS temp dir, a real leak in a persistent output_dir. Generating a
+        second enclosure deletes the first's .glb, bounding the leak to
+        at most one extra file rather than unbounded growth. Verified for
+        real; skips itself cleanly when no freecadcmd is found."""
+        try:
+            find_freecadcmd()
+        except FreeCADUnavailableError:
+            self.skipTest(
+                "No local freecadcmd found. Install FreeCAD 0.20+ to run this "
+                "test for real."
+            )
+
+        with tempfile.TemporaryDirectory() as output_dir:
+            freecad_bridge.configure(output_dir=output_dir)
+
+            first_glb = generate_enclosure(width=50, depth=30, height=20)
+            self.assertTrue(os.path.exists(first_glb))
+
+            second_glb = generate_enclosure(width=60, depth=40, height=25)
+
+            self.assertFalse(os.path.exists(first_glb), "the previous .glb should be cleaned up")
+            self.assertTrue(os.path.exists(second_glb))
 
 
 if __name__ == '__main__':

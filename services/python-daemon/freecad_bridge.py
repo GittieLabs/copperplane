@@ -57,14 +57,21 @@ _CANDIDATE_GLOBS = {
 
 
 _path_override = None
+_output_dir_override = None
+_last_glb_path = None
 
 
-def configure(path_override=None):
-    """Applies CTX-106.1's daemon-injected config: an explicit
+def configure(path_override=None, output_dir=None):
+    """Applies CTX-106.1/CTX-301.1's daemon-injected config: an explicit
     `freecadcmd` path override, when set, takes priority over the
-    PATH/glob search `find_freecadcmd` otherwise falls back to."""
-    global _path_override
+    PATH/glob search `find_freecadcmd` otherwise falls back to.
+    `output_dir` (SPEC-301 §2), when set, is where `generate_enclosure`
+    writes its `.glb` output instead of the shared OS temp directory --
+    Rust always sets this to the same directory `tauri.conf.json`'s
+    `assetProtocol.scope` is narrowed to."""
+    global _path_override, _output_dir_override
     _path_override = path_override
+    _output_dir_override = output_dir
 
 
 def find_freecadcmd() -> str:
@@ -149,14 +156,26 @@ def generate_enclosure(
     caller running this on a worker thread actually kill the underlying
     `freecadcmd` process early, rather than only stopping the caller's own
     reporting on it once it eventually finishes.
+
+    The returned `.glb` lands in the configured `output_dir` (SPEC-301
+    §2) if one was set, or the shared OS temp directory otherwise (e.g.
+    running this module standalone, outside the Tauri app). The
+    intermediate script and `.stl` always use the OS temp directory --
+    only the persistent `.glb` a frontend might load needs to live
+    somewhere `assetProtocol.scope` can be narrowed to.
     """
+    global _last_glb_path
+
     freecadcmd = find_freecadcmd()
 
     build_id = uuid.uuid4().hex
     tmp_dir = tempfile.gettempdir()
     script_path = os.path.join(tmp_dir, f"temp_build_{build_id}.py")
     stl_path = os.path.join(tmp_dir, f"enclosure_{build_id}.stl")
-    glb_path = os.path.join(tmp_dir, f"enclosure_{build_id}.glb")
+
+    output_dir = _output_dir_override or tmp_dir
+    os.makedirs(output_dir, exist_ok=True)
+    glb_path = os.path.join(output_dir, f"enclosure_{build_id}.glb")
 
     with open(script_path, "w") as f:
         f.write(_BUILD_SCRIPT_TEMPLATE.format(width=width, depth=depth, height=height, stl_path=stl_path))
@@ -186,6 +205,18 @@ def generate_enclosure(
 
         mesh = trimesh.load(stl_path)
         mesh.export(glb_path)
+
+        # SPEC-301 §3's flagged known debt: nothing previously deleted a
+        # generated .glb (harmless in a self-cleaning OS temp dir, a real
+        # leak in a persistent output_dir). Deleting the *previous*
+        # successful output on each new success bounds the leak to at
+        # most one extra file at a time, rather than unbounded growth.
+        # Deliberately not zero: a daemon killed/restarted mid-session
+        # never cleans up its very last output. See CTX-301.1 Plan Drift.
+        if _last_glb_path and _last_glb_path != glb_path and os.path.exists(_last_glb_path):
+            os.remove(_last_glb_path)
+        _last_glb_path = glb_path
+
         return glb_path
     finally:
         if os.path.exists(script_path):

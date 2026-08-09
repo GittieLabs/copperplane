@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { dispatch, submitJob, type JobHandle, type JsonRpcResponse } from './lib/ipc'
+import { EnclosureViewer } from './components/EnclosureViewer'
 
 function App() {
   const [query, setQuery] = useState('')
@@ -122,7 +123,12 @@ function EnclosurePanel() {
         )}
       </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
-      {glbPath && <p className="text-sm text-neutral-400">Generated: {glbPath}</p>}
+      {glbPath && (
+        <>
+          <p className="text-sm text-neutral-400">Generated: {glbPath}</p>
+          <EnclosureViewer glbPath={glbPath} />
+        </>
+      )}
     </div>
   )
 }

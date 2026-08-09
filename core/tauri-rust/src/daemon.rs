@@ -125,7 +125,11 @@ pub fn spawn_daemon(app: &AppHandle, script_path: PathBuf) -> std::io::Result<Da
     // SPEC-106 §2: Rust owns config and secrets, injecting them at spawn.
     // Non-secret settings ride as an env var -- visible only to this OS
     // user, a materially smaller exposure than `ps`'s world-readable argv.
-    let daemon_config = crate::config::load_config(app);
+    let mut daemon_config = crate::config::load_config(app);
+    // SPEC-301 §2: unlike every other DaemonConfig field, output_dir is
+    // never read from config.json -- always Rust-computed so it agrees
+    // exactly with tauri.conf.json's assetProtocol.scope.
+    daemon_config.output_dir = crate::config::resolve_output_dir(app);
     for (name, value) in crate::config::build_daemon_env(&daemon_config) {
         command.env(name, value);
     }
