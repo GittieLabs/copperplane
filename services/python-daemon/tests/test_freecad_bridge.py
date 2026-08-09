@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 from unittest.mock import MagicMock, patch
@@ -18,6 +19,14 @@ from freecad_bridge import (
 
 
 class TestFreeCADBridge(unittest.TestCase):
+
+    def setUp(self):
+        # The path override is module-level state; make sure no test
+        # leaks a configured override into another.
+        freecad_bridge._path_override = None
+
+    def tearDown(self):
+        freecad_bridge._path_override = None
 
     @patch('freecad_bridge.glob.glob', return_value=[])
     @patch('freecad_bridge.shutil.which', return_value=None)
@@ -110,6 +119,26 @@ class TestFreeCADBridge(unittest.TestCase):
             generate_enclosure(width=50, depth=30, height=20, cancel_event=cancel_event)
 
         mock_popen.return_value.kill.assert_called_once()
+
+    def test_006_configure_override_is_honored_when_path_exists(self):
+        """TEST-005 (CTX-106.1): freecad_bridge.configure's path override
+        is honored by find_freecadcmd when the path is a real file --
+        a genuine filesystem check, not mocked, since that's cheap and
+        real to do."""
+        with tempfile.NamedTemporaryFile() as fake_freecadcmd:
+            freecad_bridge.configure(path_override=fake_freecadcmd.name)
+            self.assertEqual(find_freecadcmd(), fake_freecadcmd.name)
+
+    def test_007_configure_override_raises_clean_error_when_path_missing(self):
+        """TEST-005 (CTX-106.1): a configured-but-missing override path
+        raises a clean, specific error instead of silently falling back
+        to the PATH/glob search."""
+        freecad_bridge.configure(path_override='/definitely/not/a/real/path/freecadcmd')
+
+        with self.assertRaises(FreeCADUnavailableError) as ctx:
+            find_freecadcmd()
+
+        self.assertIn("Configured freecadcmd path override does not exist", str(ctx.exception))
 
 
 if __name__ == '__main__':

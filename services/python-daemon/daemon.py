@@ -1,12 +1,46 @@
 import inspect
+import os
 import sys
 import json
 import threading
 import time
 import uuid
 
+import freecad_bridge
+import kicad_bridge
 from kicad_bridge import get_kicad_version
 from freecad_bridge import generate_enclosure
+
+# Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
+# must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
+# once, at import time, before the read loop starts, so every route sees
+# a fully-configured bridge module on its very first call.
+_DAEMON_CONFIG_ENV_VAR = "HAS_DAEMON_CONFIG"
+
+# In-memory config the daemon.configure route (below) fills in. Holds
+# secrets Rust injects over stdin as the daemon's first-ever request --
+# never written to disk, never logged (SPEC-106 §3).
+CONFIG = {"secrets": {}}
+
+
+def _apply_env_config() -> None:
+    raw = os.environ.get(_DAEMON_CONFIG_ENV_VAR)
+    if not raw:
+        return
+
+    try:
+        env_config = json.loads(raw)
+    except json.JSONDecodeError:
+        return
+
+    freecad_bridge.configure(path_override=env_config.get("freecadcmd_path_override"))
+    kicad_bridge.configure(
+        socket_path=env_config.get("kicad_socket_path"),
+        timeout_ms=env_config.get("kicad_timeout_ms"),
+    )
+
+
+_apply_env_config()
 
 def mock_generate_component(query):
     """
@@ -35,6 +69,16 @@ class JobNotFoundError(Exception):
 # supply directly over the wire.
 _INTERNAL_ONLY_PARAMS = {"cancel_event"}
 
+def configure_daemon(secrets: dict = None) -> dict:
+    """The daemon.configure route (SPEC-106 §2): merges secrets Rust hands
+    over on the daemon's very first request into CONFIG. Ordinary route,
+    dispatched through the normal ROUTES registry like anything else --
+    Rust's spawn_daemon (CTX-106.1) is what guarantees this line reaches
+    stdin before any other, not any special-casing here."""
+    CONFIG["secrets"] = dict(secrets) if secrets else {}
+    return {"configured": True}
+
+
 def cancel_job(job_id: str) -> dict:
     """Signals a running async job to cancel. Real cancellation (actually
     killing the underlying work, not just stopping its being reported on)
@@ -54,6 +98,7 @@ ROUTES = {
     "kicad.get_version": get_kicad_version,
     "freecad.generate_enclosure": generate_enclosure,
     "job.cancel": cancel_job,
+    "daemon.configure": configure_daemon,
 }
 
 # Methods that run off the read loop: a request for one of these returns
