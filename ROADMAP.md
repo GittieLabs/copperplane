@@ -30,6 +30,8 @@ answers three questions:
 | [SPEC-901](specs/SPEC-901-agent-operating-manual.md) | repo-wide (`.claude/`) | [CTX-901.1](context/CTX-901.1-agent-operating-manual.md) | ✅ Completed | `CLAUDE.md`, four slash commands (`/spec-status`, `/new-spec`, `/new-context`, `/close-context`), bloat guard test |
 | [SPEC-903](specs/SPEC-903-python-frontend-ci.md) | `.github/workflows/` | [CTX-903.1](context/CTX-903.1-python-frontend-ci.md) | ✅ Completed | `python-ci.yml`, `frontend-ci.yml`, three-OS matrix, expected-skip verification |
 | [SPEC-902](specs/SPEC-902-spec-graph-validator-v2.md) | `scripts/` | [CTX-902.1](context/CTX-902.1-spec-graph-validator-v2.md) | ✅ Completed | `validate_spec_context.py` upgraded to a full graph validator (id/location/link integrity across every `SPEC-*.md`), path-exclusion matcher fixed, 22-test suite green on all three OSes |
+| [SPEC-105](specs/SPEC-105-daemon-async-job-progress-protocol.md) | `services/python-daemon` + `core/tauri-rust` + `apps/tauri-ui` | [CTX-105.1](context/CTX-105.1-daemon-async-job-protocol.md), [CTX-105.2](apps/tauri-ui/context/CTX-105.2-frontend-job-progress-client.md) | ✅ Completed | Async job dispatch + atomic `stdout` notifications + real cancellation (daemon side); frontend `JobHandle` client replacing the CTX-101.1 single-in-flight guard |
+| [SPEC-106](specs/SPEC-106-configuration-secrets-store.md) | `core/tauri-rust` + `services/python-daemon` | [CTX-106.1](context/CTX-106.1-config-secrets-store.md) | ✅ Completed | Non-secret config injected as a spawn-time env var, secrets via the OS keychain handed over as the daemon's first `stdin` line; wired into `freecadcmd` path override and `kicad_bridge` connection settings |
 
 The foundation is in better shape than most projects at this stage, and two things in particular
 are worth preserving as norms rather than accidents:
@@ -99,8 +101,12 @@ Each entry is a spec that does not exist yet. `Depends on` means the named spec 
 
 ### 3.1 `1xx` — Platform foundation
 
-#### SPEC-105 — Daemon Async Job & Progress Protocol
+#### [SPEC-105](specs/SPEC-105-daemon-async-job-progress-protocol.md) — Daemon Async Job & Progress Protocol — ✅ done 2026-08-09
 *Module:* `services/python-daemon` + `core/tauri-rust` + `apps/tauri-ui` · *Depends on:* SPEC-102, SPEC-101
+
+[CTX-105.1](context/CTX-105.1-daemon-async-job-protocol.md) (daemon side) and
+[CTX-105.2](apps/tauri-ui/context/CTX-105.2-frontend-job-progress-client.md) (frontend side) both
+landed — see §1.1. Kept here for the design rationale.
 
 The daemon is strictly serial and the frontend enforces a hard single-in-flight guard, so a
 3-second `freecadcmd` cold boot or a 30-second LLM call freezes the entire UI with no feedback.
@@ -123,17 +129,22 @@ don't invent a second event system alongside it. Whether `EventBus` events get f
 notifications directly or need a translation layer is this spec's own call, made once AgentFlow is
 actually wired in, not before.
 
-#### SPEC-106 — Configuration & Secrets Store
+#### [SPEC-106](specs/SPEC-106-configuration-secrets-store.md) — Configuration & Secrets Store — ✅ done 2026-08-09
 *Module:* `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-102
+
+[CTX-106.1](context/CTX-106.1-config-secrets-store.md) landed — see §1.1. Kept here for the design
+rationale, including the open question below, which this context resolved.
 
 One place for: `freecadcmd` path override (SPEC-104 §3 explicitly asks for this), KiCad IPC
 settings, selected LLM provider and model, and supplier API keys. Keys must go to the OS keychain,
 not a plaintext JSON file — and must never be passed as command-line arguments to the daemon, where
 they'd be visible in `ps`.
 
-*Open question:* does Rust own config and inject it into the daemon at spawn, or does the daemon
-read the config file itself? The former keeps secrets out of Python's memory longer; the latter
-lets the daemon reload without an app restart.
+*Open question, resolved by `CTX-106.1`:* does Rust own config and inject it into the daemon at
+spawn, or does the daemon read the config file itself? **Decided: Rust owns it, injects at spawn**
+— non-secret settings as an env var, secrets as a `daemon.configure` request written as the first
+line on the daemon's `stdin`. Keeps secrets out of Python's memory longer; costs a daemon restart
+(already cheap) to pick up a changed setting.
 
 #### SPEC-107 — Structured Logging, Startup Handshake & Diagnostics
 *Module:* all three · *Depends on:* SPEC-102
@@ -504,12 +515,16 @@ These are drawn from what already worked in this repo, not invented:
 
 ## 7. Immediate next actions
 
-M0 is complete as of 2026-08-08 (see §4) — items 1-4 below are done.
+M0 is complete as of 2026-08-08 (see §4) — items 1-4 below are done. SPEC-105 and SPEC-106
+(items 6-7 as originally written here) are also done as of 2026-08-09, ahead of M1 rather than
+blocking it.
 
 1.  ~~Merge the two open CAD branches into `develop` and close out CTX-103.1 / CTX-104.1.~~ ✅ done
 2.  ~~Write **SPEC-901** and land `CLAUDE.md` + the four slash commands.~~ ✅ done
 3.  ~~Write **SPEC-903** and get Python + frontend tests running in CI on all three OSes.~~ ✅ done
 4.  ~~Write **SPEC-902** and upgrade the validator into a full graph checker.~~ ✅ done
-5.  Spike **SPEC-401** packaging far enough to know whether frozen `pynng`/`trimesh` is a day or a
+5.  ~~Write **SPEC-105** (async job/progress protocol) and **SPEC-106** (config & secrets store).~~
+    ✅ done
+6.  Spike **SPEC-401** packaging far enough to know whether frozen `pynng`/`trimesh` is a day or a
     fortnight. Find out now, not in M2.
-6.  Write **SPEC-105**, then start M1.
+7.  Write **SPEC-107** (structured logging, startup handshake & diagnostics), then start M1.
