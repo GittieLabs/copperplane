@@ -16,30 +16,110 @@ export interface JsonRpcResponse<T = unknown> {
   error?: JsonRpcError
 }
 
+/** A `job.*` event (CTX-105.1) -- unlike a response, it carries no `id`
+ * at all, which is exactly how the listener below tells the two apart. */
+interface JsonRpcNotification {
+  jsonrpc: '2.0'
+  method: string
+  params?: { job_id?: string; result?: unknown; error?: string }
+}
+
 interface PendingRequest {
   resolve: (response: JsonRpcResponse) => void
+}
+
+export type JobStatus = 'running' | 'completed' | 'failed' | 'cancelled'
+
+export interface JobUpdate {
+  status: JobStatus
+  result?: unknown
+  error?: string
+}
+
+interface JobEntry {
+  listeners: Set<(update: JobUpdate) => void>
+  resolve: (result: unknown) => void
+  reject: (error: Error) => void
+}
+
+export interface JobHandle<T = unknown> {
+  jobId: string
+  /** Resolves on `job.completed`; rejects on `job.failed` or `job.cancelled`. */
+  result: Promise<T>
+  /** Subscribes to every job.* update for this job, including `job.progress`.
+   * Returns an unsubscribe function. */
+  onUpdate(listener: (update: JobUpdate) => void): () => void
+  /** Requests cancellation via the `job.cancel` route. This does not itself
+   * settle `result` -- that still arrives as a `job.cancelled` update, same
+   * as it would for a cancellation the daemon decided on its own. */
+  cancel(): Promise<void>
 }
 
 let nextRequestId = 1
 let unlisten: UnlistenFn | null = null
 let listening: Promise<void> | null = null
 const pending = new Map<number, PendingRequest>()
-let inFlight = false
+const jobs = new Map<string, JobEntry>()
+
+function isNotification(payload: unknown): payload is JsonRpcNotification {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    typeof (payload as JsonRpcNotification).method === 'string' &&
+    !('id' in payload)
+  )
+}
+
+function handleJobNotification(notification: JsonRpcNotification): void {
+  const jobId = notification.params?.job_id
+  if (!jobId) return
+  const entry = jobs.get(jobId)
+  if (!entry) return
+
+  switch (notification.method) {
+    case 'job.progress':
+      entry.listeners.forEach((listener) => listener({ status: 'running' }))
+      return
+    case 'job.completed':
+      entry.listeners.forEach((listener) => listener({ status: 'completed', result: notification.params?.result }))
+      entry.resolve(notification.params?.result)
+      jobs.delete(jobId)
+      return
+    case 'job.failed': {
+      const message = notification.params?.error ?? 'Job failed'
+      entry.listeners.forEach((listener) => listener({ status: 'failed', error: message }))
+      entry.reject(new Error(message))
+      jobs.delete(jobId)
+      return
+    }
+    case 'job.cancelled':
+      entry.listeners.forEach((listener) => listener({ status: 'cancelled' }))
+      entry.reject(new Error('Job was cancelled'))
+      jobs.delete(jobId)
+      return
+  }
+}
 
 async function ensureListening(): Promise<void> {
   if (unlisten) return
   if (!listening) {
     listening = listen<string>(DAEMON_RESPONSE_EVENT, (event) => {
-      let response: JsonRpcResponse
+      let payload: unknown
       try {
         // Security: the daemon's stdout is untrusted input. Only ever
         // JSON.parse it — never eval() — per SPEC-101's security
         // constraints. A line that isn't valid JSON-RPC is dropped.
-        response = JSON.parse(event.payload)
+        payload = JSON.parse(event.payload)
       } catch {
         return
       }
 
+      if (isNotification(payload)) {
+        handleJobNotification(payload)
+        return
+      }
+
+      const response = payload as JsonRpcResponse
       if (response.id === null || response.id === undefined) return
       const waiter = pending.get(response.id)
       if (!waiter) return
@@ -52,43 +132,83 @@ async function ensureListening(): Promise<void> {
   await listening
 }
 
-/** True while a dispatch is awaiting its response. */
-export function isDispatchInFlight(): boolean {
-  return inFlight
-}
-
 /**
  * Sends one JSON-RPC request to the Python daemon via the Rust
  * `dispatch_to_daemon` command and resolves with its matching response.
  *
- * Rejects immediately, without touching the daemon's stdin, if another
- * dispatch is already in flight — the daemon processes one line at a
- * time, so queuing a second request here would just spam its stdin
- * buffer with conflicting commands (SPEC-101 §3).
+ * Concurrent calls are safe: each request gets its own `id`, and the
+ * daemon's response always echoes it back, so multiple in-flight
+ * dispatches resolve independently regardless of arrival order (CTX-105.2
+ * -- CTX-101.1's original hard single-in-flight guard was never protocol
+ * load-bearing, only a conservative stdin-spam precaution).
  */
 export async function dispatch(
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<JsonRpcResponse> {
-  if (inFlight) {
-    throw new Error('A daemon request is already in flight')
-  }
-  inFlight = true
-
   const id = nextRequestId++
+  await ensureListening()
+
+  const responsePromise = new Promise<JsonRpcResponse>((resolve) => {
+    pending.set(id, { resolve })
+  })
+
+  const request = { jsonrpc: '2.0' as const, method, params, id }
+  await invoke('dispatch_to_daemon', { request: JSON.stringify(request) })
+
   try {
-    await ensureListening()
-
-    const responsePromise = new Promise<JsonRpcResponse>((resolve) => {
-      pending.set(id, { resolve })
-    })
-
-    const request = { jsonrpc: '2.0' as const, method, params, id }
-    await invoke('dispatch_to_daemon', { request: JSON.stringify(request) })
-
     return await responsePromise
   } finally {
-    inFlight = false
     pending.delete(id)
+  }
+}
+
+/**
+ * Dispatches a request to an async-flagged route (CTX-105.1) and returns
+ * a handle for tracking that job's progress, completion, and cancellation
+ * -- rather than the immediate `{"job_id": ...}` acknowledgement response
+ * itself, which callers rarely want directly.
+ */
+export async function submitJob<T = unknown>(
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<JobHandle<T>> {
+  const response = await dispatch(method, params)
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+
+  const jobId = (response.result as { job_id?: string } | undefined)?.job_id
+  if (!jobId) {
+    throw new Error(`${method} did not return a job_id -- is it registered in ASYNC_ROUTES?`)
+  }
+
+  let resolveResult!: (result: T) => void
+  let rejectResult!: (error: Error) => void
+  const result = new Promise<T>((resolve, reject) => {
+    resolveResult = resolve
+    rejectResult = reject
+  })
+
+  const listeners = new Set<(update: JobUpdate) => void>()
+  jobs.set(jobId, {
+    listeners,
+    resolve: resolveResult as (result: unknown) => void,
+    reject: rejectResult,
+  })
+
+  return {
+    jobId,
+    result,
+    onUpdate(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    async cancel() {
+      const cancelResponse = await dispatch('job.cancel', { job_id: jobId })
+      if (cancelResponse.error) {
+        throw new Error(cancelResponse.error.message)
+      }
+    },
   }
 }
