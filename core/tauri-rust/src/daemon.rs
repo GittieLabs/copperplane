@@ -25,13 +25,21 @@ const HEARTBEAT_TIMEOUT_S: u64 = 15;
 pub const DAEMON_RESPONSE_EVENT: &str = "daemon://response";
 
 /// Secret keys this app currently stores in the OS keychain and hands to
-/// the daemon via the `daemon.configure` handshake (SPEC-106 §2). Empty
-/// today -- SPEC-201 (an LLM provider's API key) and SPEC-203 (a
-/// supplier's API key) are the first specs with a real key name to add
-/// here. Kept as an explicit allowlist rather than "fetch everything
-/// stored under our service name" so a stray keychain entry from some
-/// unrelated feature never leaks into the daemon's configure handshake.
-const KNOWN_SECRET_KEYS: &[&str] = &[];
+/// the daemon via the `daemon.configure` handshake (SPEC-106 §2). The
+/// four LLM provider keys are SPEC-201's; SPEC-203 (a supplier API key)
+/// is the next spec with a real key name to add here. Kept as an
+/// explicit allowlist rather than "fetch everything stored under our
+/// service name" so a stray keychain entry from some unrelated feature
+/// never leaks into the daemon's configure handshake. Naming convention:
+/// `<provider>_api_key`, matching `llm_providers.py`'s own lookup
+/// (`CONFIG["secrets"][f"{provider}_api_key"]`). Ollama needs no key --
+/// it isn't listed here.
+const KNOWN_SECRET_KEYS: &[&str] = &[
+    "anthropic_api_key",
+    "google_api_key",
+    "openai_api_key",
+    "perplexity_api_key",
+];
 
 /// Builds the `daemon.configure` JSON-RPC request line (SPEC-106 §2) that
 /// `spawn_daemon` writes as the very first thing on the daemon's `stdin`.
