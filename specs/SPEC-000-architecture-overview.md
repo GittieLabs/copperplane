@@ -18,6 +18,7 @@ child_specs:
   - "../specs/SPEC-107-structured-logging-diagnostics.md"
   - "../apps/tauri-ui/specs/SPEC-301-3d-viewer.md"
   - "../services/python-daemon/specs/SPEC-201-llm-provider-abstraction.md"
+  - "../services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md"
 ---
 
 # SPEC-000: Root Architecture: Hardware Agent Studio
