@@ -1,19 +1,27 @@
 import { useState } from 'react'
-import { dispatch, submitJob, type JobHandle, type JsonRpcResponse } from './lib/ipc'
+import { submitJob, type JobHandle } from './lib/ipc'
 import { EnclosureViewer } from './components/EnclosureViewer'
 
 function App() {
-  const [query, setQuery] = useState('')
+  const [partNumber, setPartNumber] = useState('')
   const [pending, setPending] = useState(false)
-  const [response, setResponse] = useState<JsonRpcResponse | null>(null)
+  const [schema, setSchema] = useState<unknown>(null)
   const [error, setError] = useState<string | null>(null)
 
   async function handleGenerate() {
     setPending(true)
     setError(null)
+    setSchema(null)
     try {
-      const result = await dispatch('kicad.generate_component', { query })
-      setResponse(result)
+      // SPEC-202: kicad.generate_component is a real, validated pipeline
+      // now -- an async job (a real LLM extraction call is multi-second,
+      // same reasoning as freecad.generate_enclosure/llm.chat) that
+      // raises a clean error naming the failed safety check, rather than
+      // ever returning a best-effort/fabricated result.
+      const handle = await submitJob<Record<string, unknown>>('kicad.generate_component', {
+        part_number: partNumber,
+      })
+      setSchema(await handle.result)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -27,24 +35,24 @@ function App() {
       <div className="flex w-full max-w-md gap-2">
         <input
           className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
-          placeholder="e.g. BME280"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          placeholder="e.g. ATtiny85"
+          value={partNumber}
+          onChange={(e) => setPartNumber(e.target.value)}
           disabled={pending}
         />
         <button
           type="button"
           className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
           onClick={handleGenerate}
-          disabled={pending || query.trim().length === 0}
+          disabled={pending || partNumber.trim().length === 0}
         >
           {pending ? 'Generating…' : 'Generate'}
         </button>
       </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
-      {response && (
+      {schema !== null && (
         <pre className="w-full max-w-md overflow-auto rounded bg-neutral-900 p-3 text-xs">
-          {JSON.stringify(response, null, 2)}
+          {JSON.stringify(schema, null, 2)}
         </pre>
       )}
       <EnclosurePanel />
