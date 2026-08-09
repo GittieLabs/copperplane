@@ -225,8 +225,14 @@ picks the provider you configure, it doesn't make privacy guarantees for you.
 at startup. Prefer lazy import of provider clients so the daemon's `ready` handshake isn't delayed
 by a provider the user never selected.
 
-#### SPEC-202 — Component Intelligence Pipeline
-*Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-203
+#### [SPEC-202](services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md) — Component Intelligence Pipeline
+*Module:* `services/python-daemon` · *Depends on:* SPEC-201
+
+[Its own spec](services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md) drops the
+`SPEC-203` dependency listed here — a real contradiction with §4's explicit "SPEC-203 is out of
+M1" and the M1 diagram, which never routes through it. This spec's M1-scoped pipeline is LLM-only
+extraction, permanently, not a degraded mode of a supplier-augmented pipeline that doesn't exist
+yet; `SPEC-203` becomes an optional future enhancement, never a hard prerequisite.
 
 Still the heart of the product, and still the thing that replaces the `time.sleep(1.5)` mock — but
 the *orchestration* changes. Datasheet or part number in → validated structured component (pins,
