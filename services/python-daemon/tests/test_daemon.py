@@ -163,12 +163,21 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
     """CTX-107.1: daemon.ready capability detection and the daemon.heartbeat
     signal Rust's macOS crash-detection path relies on."""
 
-    def test_001_detect_capabilities_reports_freecad_available_for_real(self):
-        """TEST-001: a real, non-mocked check on this machine, where
-        FreeCAD is actually installed (same 'verify for real' pattern as
-        CTX-104.1's own TEST-004)."""
+    def test_001_detect_capabilities_matches_find_freecadcmd_for_real(self):
+        """TEST-001: a real, non-mocked check -- freecad_available agrees
+        with whatever find_freecadcmd itself finds on this machine.
+        Deliberately not a hardcoded True/False, so this test is honest on
+        both a dev machine with FreeCAD installed and a CI runner without
+        one (same 'verify for real, without assuming an environment'
+        pattern as CTX-104.1's own TEST-004)."""
+        try:
+            daemon.freecad_bridge.find_freecadcmd()
+            expected = True
+        except daemon.freecad_bridge.FreeCADUnavailableError:
+            expected = False
+
         caps = daemon._detect_capabilities()
-        self.assertTrue(caps["freecad_available"], "FreeCAD is actually installed on this machine")
+        self.assertEqual(caps["freecad_available"], expected)
         self.assertIn("kicad_available", caps)
         self.assertIn("llm_providers", caps)
 
