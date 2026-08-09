@@ -92,7 +92,10 @@ def _apply_env_config() -> None:
         return
 
     if freecad_bridge is not None:
-        freecad_bridge.configure(path_override=env_config.get("freecadcmd_path_override"))
+        freecad_bridge.configure(
+            path_override=env_config.get("freecadcmd_path_override"),
+            output_dir=env_config.get("output_dir"),
+        )
     if kicad_bridge is not None:
         kicad_bridge.configure(
             socket_path=env_config.get("kicad_socket_path"),
