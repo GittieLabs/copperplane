@@ -172,5 +172,61 @@ class TestRealCancellation(unittest.TestCase):
         )
 
 
+class TestRealLLMChatJob(unittest.TestCase):
+
+    def test_001_llm_chat_dispatched_through_handle_request_reports_job_completed(self):
+        """TEST-006 (CTX-201.1): llm.chat, submitted through handle_request
+        exactly like a real client would, returns a job_id immediately and
+        reports job.completed with the real provider's response text --
+        proving the full route/param-resolution/async-dispatch wiring, not
+        just llm_providers.chat in isolation (test_llm_providers.py). Uses
+        Ollama since it needs no API key and is always available locally
+        on a machine with it installed; skips itself cleanly otherwise."""
+        import httpx
+
+        try:
+            httpx.get("http://localhost:11434/api/version", timeout=1.0).raise_for_status()
+        except Exception:
+            self.skipTest("No local Ollama server reachable at localhost:11434.")
+
+        captured = []
+        original_write_line = daemon._write_line
+        daemon._write_line = lambda text: captured.append(json.loads(text))
+        try:
+            request = json.dumps({
+                "jsonrpc": "2.0",
+                "method": "llm.chat",
+                "params": {
+                    "prompt": "Reply with exactly one word: pong",
+                    "provider": "ollama",
+                },
+                "id": "req_llm_chat",
+            })
+            response = json.loads(daemon.handle_request(request))
+            self.assertNotIn("error", response)
+            job_id = response["result"]["job_id"]
+
+            deadline = time.monotonic() + 30.0
+            terminal_notification = None
+            while time.monotonic() < deadline:
+                for n in captured:
+                    if (
+                        n.get("params", {}).get("job_id") == job_id
+                        and n["method"] in ("job.completed", "job.failed")
+                    ):
+                        terminal_notification = n
+                        break
+                if terminal_notification:
+                    break
+                time.sleep(0.1)
+        finally:
+            daemon._write_line = original_write_line
+
+        self.assertIsNotNone(terminal_notification, "llm.chat job never reached a terminal state within 30s")
+        self.assertEqual(terminal_notification["method"], "job.completed")
+        self.assertIsInstance(terminal_notification["params"]["result"], str)
+        self.assertGreater(len(terminal_notification["params"]["result"].strip()), 0)
+
+
 if __name__ == '__main__':
     unittest.main()

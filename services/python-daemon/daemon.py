@@ -69,6 +69,12 @@ except Exception:
     freecad_bridge = None
     generate_enclosure = None
 
+try:
+    import llm_providers
+except Exception:
+    logger.exception("llm_providers failed to import -- llm.* routes will be unavailable")
+    llm_providers = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -77,8 +83,10 @@ _DAEMON_CONFIG_ENV_VAR = "HAS_DAEMON_CONFIG"
 
 # In-memory config the daemon.configure route (below) fills in. Holds
 # secrets Rust injects over stdin as the daemon's first-ever request --
-# never written to disk, never logged (SPEC-106 §3).
-CONFIG = {"secrets": {}}
+# never written to disk, never logged (SPEC-106 §3). llm_provider/
+# llm_model existed on Rust's DaemonConfig since CTX-106.1 but were never
+# read on this side until SPEC-201 -- its first real consumer.
+CONFIG = {"secrets": {}, "llm_provider": None, "llm_model": None}
 
 
 def _apply_env_config() -> None:
@@ -101,6 +109,9 @@ def _apply_env_config() -> None:
             socket_path=env_config.get("kicad_socket_path"),
             timeout_ms=env_config.get("kicad_timeout_ms"),
         )
+
+    CONFIG["llm_provider"] = env_config.get("llm_provider")
+    CONFIG["llm_model"] = env_config.get("llm_model")
 
 
 _apply_env_config()
@@ -142,6 +153,25 @@ def configure_daemon(secrets: dict = None) -> dict:
     return {"configured": True}
 
 
+def llm_chat(prompt: str, provider: str = None, model: str = None, system: str = "") -> str:
+    """The llm.chat route (SPEC-201): resolves the configured provider/
+    model from CONFIG (SPEC-106's daemon.configure/env-config handshake)
+    and the matching secret, then delegates to llm_providers.chat.
+    Registered as an async route (SPEC-105) -- a real LLM call is almost
+    always multi-second, the same reasoning freecad.generate_enclosure
+    already established."""
+    provider_name = provider or CONFIG.get("llm_provider")
+    if not provider_name:
+        raise llm_providers.LLMProviderError(
+            "No LLM provider configured (set llm_provider via daemon config, or pass one explicitly)."
+        )
+
+    model_name = model or CONFIG.get("llm_model")
+    api_key = CONFIG.get("secrets", {}).get(f"{provider_name}_api_key", "")
+
+    return llm_providers.chat(prompt, provider=provider_name, api_key=api_key, model=model_name, system=system)
+
+
 def cancel_job(job_id: str) -> dict:
     """Signals a running async job to cancel. Real cancellation (actually
     killing the underlying work, not just stopping its being reported on)
@@ -170,6 +200,8 @@ def _build_routes() -> dict:
         routes["kicad.get_version"] = get_kicad_version
     if generate_enclosure is not None:
         routes["freecad.generate_enclosure"] = generate_enclosure
+    if llm_providers is not None:
+        routes["llm.chat"] = llm_chat
     return routes
 
 
@@ -179,7 +211,7 @@ ROUTES = _build_routes()
 # Methods that run off the read loop: a request for one of these returns
 # {"job_id": ...} immediately, and the real result/failure/cancellation
 # arrives later as a job.* notification (SPEC-105 §2).
-ASYNC_ROUTES = {"freecad.generate_enclosure"} & ROUTES.keys()
+ASYNC_ROUTES = {"freecad.generate_enclosure", "llm.chat"} & ROUTES.keys()
 
 # job_id -> {"cancel_event": threading.Event()} for every job currently
 # in flight. Entries are removed once the job's worker thread finishes.

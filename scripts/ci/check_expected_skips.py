@@ -20,6 +20,14 @@ import unittest
 EXPECTED_SKIPS = {
     "test_002_real_kicad_version_round_trip",
     "test_004_real_enclosure_round_trip",
+    # SPEC-201: no LLM provider credential or local Ollama server exists
+    # on a CI runner, so every real-provider test skips itself cleanly.
+    "test_001_real_anthropic_chat",
+    "test_002_real_google_chat",
+    "test_003_real_perplexity_chat",
+    "test_004_real_ollama_chat",
+    "test_005_real_openai_chat_not_verified_no_key_available",
+    "test_001_llm_chat_dispatched_through_handle_request_reports_job_completed",
 }
 
 
