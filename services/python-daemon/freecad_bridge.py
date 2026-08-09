@@ -11,6 +11,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
+import time
 import uuid
 
 import trimesh
@@ -23,6 +24,17 @@ class FreeCADUnavailableError(Exception):
 class FreeCADBuildError(Exception):
     """Raised when `freecadcmd` runs but the build script fails, times
     out, or doesn't produce the expected output file."""
+
+
+class FreeCADCancelledError(Exception):
+    """Raised when a `cancel_event` is set while `generate_enclosure` is
+    still waiting on `freecadcmd` (CTX-105.1) -- distinct from a timeout
+    or a build failure, both of which are the subprocess's own doing."""
+
+
+# How often the wait loop checks in on the subprocess. Short enough that a
+# cancel_event set mid-run is noticed promptly, long enough not to busy-spin.
+_POLL_INTERVAL_S = 0.1
 
 
 # Standard per-OS install locations to fall back to if `freecadcmd` isn't
@@ -77,7 +89,35 @@ box.Shape.exportStl({stl_path!r})
 """
 
 
-def generate_enclosure(width: float, depth: float, height: float, timeout_s: float = 30.0) -> str:
+def _wait_with_cancellation(proc: subprocess.Popen, timeout_s: float, cancel_event) -> tuple:
+    """Polls `proc` in short intervals instead of blocking uninterruptibly
+    on a single `communicate(timeout=timeout_s)` call, so a `cancel_event`
+    set from another thread (CTX-105.1's job-cancellation path) gets
+    noticed and acted on promptly rather than only after the full timeout
+    elapses."""
+    start = time.monotonic()
+    while True:
+        try:
+            stdout_data, stderr_data = proc.communicate(timeout=_POLL_INTERVAL_S)
+            return stdout_data, stderr_data, proc.returncode
+        except subprocess.TimeoutExpired:
+            if cancel_event is not None and cancel_event.is_set():
+                proc.kill()
+                proc.communicate()
+                raise FreeCADCancelledError("generate_enclosure cancelled before completion")
+            if time.monotonic() - start > timeout_s:
+                proc.kill()
+                proc.communicate()
+                raise FreeCADBuildError(f"freecadcmd did not finish within {timeout_s}s")
+
+
+def generate_enclosure(
+    width: float,
+    depth: float,
+    height: float,
+    timeout_s: float = 30.0,
+    cancel_event=None,
+) -> str:
     """Runs a headless FreeCAD subprocess that builds a parametric box
     enclosure and returns the path to a generated `.glb` mesh.
 
@@ -85,6 +125,11 @@ def generate_enclosure(width: float, depth: float, height: float, timeout_s: flo
     CTX-104.1 Plan Drift), so the subprocess exports `.stl` — which is
     well-supported — and this function converts that to `.glb` itself via
     `trimesh`, entirely outside the FreeCAD subprocess.
+
+    `cancel_event` (an optional `threading.Event`, CTX-105.1) lets a
+    caller running this on a worker thread actually kill the underlying
+    `freecadcmd` process early, rather than only stopping the caller's own
+    reporting on it once it eventually finishes.
     """
     freecadcmd = find_freecadcmd()
 
@@ -98,28 +143,26 @@ def generate_enclosure(width: float, depth: float, height: float, timeout_s: flo
         f.write(_BUILD_SCRIPT_TEMPLATE.format(width=width, depth=depth, height=height, stl_path=stl_path))
 
     try:
-        try:
-            result = subprocess.run(
-                [freecadcmd, script_path],
-                # freecadcmd drops into an interactive console prompt
-                # after running the script and hangs forever waiting on
-                # stdin unless it's redirected to hit EOF immediately.
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise FreeCADBuildError(f"freecadcmd did not finish within {timeout_s}s") from e
+        proc = subprocess.Popen(
+            [freecadcmd, script_path],
+            # freecadcmd drops into an interactive console prompt
+            # after running the script and hangs forever waiting on
+            # stdin unless it's redirected to hit EOF immediately.
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        _stdout_data, stderr_data, returncode = _wait_with_cancellation(proc, timeout_s, cancel_event)
 
-        if result.returncode != 0:
+        if returncode != 0:
             raise FreeCADBuildError(
-                f"freecadcmd exited with code {result.returncode}: {result.stderr.strip()}"
+                f"freecadcmd exited with code {returncode}: {stderr_data.strip()}"
             )
         if not os.path.exists(stl_path):
             raise FreeCADBuildError(
                 f"freecadcmd exited cleanly but did not produce the expected STL "
-                f"file: {result.stderr.strip()}"
+                f"file: {stderr_data.strip()}"
             )
 
         mesh = trimesh.load(stl_path)
