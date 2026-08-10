@@ -33,15 +33,21 @@ _PERPLEXITY_BASE_URL = "https://api.perplexity.ai"
 # even though a local Ollama server doesn't actually check it.
 _OLLAMA_PLACEHOLDER_API_KEY = "ollama"
 
-# Deliberately not AgentFlow's own per-provider defaults -- verified for
-# real (2026-08-09) that its GoogleGenAIProvider default,
-# `gemini-2.5-flash-preview`, 404s: it no longer exists on Google's real
-# model list. Every default here has been confirmed against each
-# provider's real, currently-available models, not assumed from a
-# library default (see CTX-201.1 Plan Drift).
+# Deliberately not AgentFlow's own per-provider defaults, even though
+# they're now the same values as of gittielabs-agentflow==0.8.2 --
+# every default here has been confirmed against each provider's real,
+# currently-available models via a live API call, not assumed from a
+# library default or from memory (see CTX-201.1 and CTX-202.1 Plan
+# Drift, and the 2026-08-10 upstream AgentFlow fix that made
+# claude-sonnet-5 usable at all: it rejects an explicit `temperature`
+# and needs a `-low`/`-medium`/`-high` model-name suffix to opt into
+# extended thinking -- see agentflow's AnthropicProvider). `google`
+# uses Google's own stable rolling alias rather than a dated snapshot
+# so it doesn't go stale the same way `gemini-2.5-flash-preview` (a
+# former default here) did -- confirmed 404 before being replaced.
 _DEFAULT_MODELS = {
-    "anthropic": "claude-sonnet-4-6",
-    "google": "gemini-2.5-flash",
+    "anthropic": "claude-sonnet-5",
+    "google": "gemini-flash-latest",
     "openai": "gpt-4o",
     "perplexity": "sonar",
     "ollama": "llama3.2:1b",
