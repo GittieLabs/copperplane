@@ -301,6 +301,13 @@ conventions closely enough that no separate borrowing decision is needed here.
 
 ### 3.3 `3xx` — Product surface
 
+**Superseded by [PRODUCT-PLAN.md](PRODUCT-PLAN.md), approved 2026-08-11, for everything from
+SPEC-300 onward.** Its own §5.2 re-scopes SPEC-301/302; its §5.1 adds SPEC-300/304-310. The four
+entries below are kept for historical record, not as the current backlog — read PRODUCT-PLAN.md
+§5 before picking up any 3xx work. Two real conflicts between this section and that plan are
+flagged inline below rather than silently resolved; both need a decision before their specs are
+written.
+
 #### [SPEC-301](apps/tauri-ui/specs/SPEC-301-3d-viewer.md) — 3D Viewer — ✅ done 2026-08-09
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-104, SPEC-105
 
@@ -329,6 +336,12 @@ source rather than assumed: no provider supports real token streaming today (exp
 and no agentic tool-calling exists either (`SPEC-204`'s job, out of M1) — a small, explicit
 `generate`/`inject` command recognizer wraps the same two already-real routes instead.
 
+**Re-scoped by `PRODUCT-PLAN.md` §5.2 → Project Conversation.** The command-parsing half
+(`parseCommand` in `apps/tauri-ui/src/lib/commands.ts`) is deleted, not improved — it's the
+mechanism that produced the reported bug. The chat half survives intact and moves into the
+Overview area. `CTX-302.x` should record this as Plan Drift when the re-scope is actually
+implemented.
+
 #### SPEC-303 — Settings UI
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-106, SPEC-107
 
@@ -337,12 +350,25 @@ is its IPC server enabled, where is `freecadcmd`, which model is selected, and a
 diagnostics" for bug reports. The single highest-leverage thing for reducing "it doesn't work"
 issues from contributors.
 
+**Not addressed by `PRODUCT-PLAN.md` — flagged, not resolved.** The plan's §5 spec list and §5.3
+"Unaffected" section don't mention SPEC-303 at all. Carried forward unchanged here; confirm whether
+it's still a standalone spec or whether some of its diagnostics surface belongs inside SPEC-305 (App
+Shell & Navigation) once that's written.
+
 #### SPEC-304 — Project & Workspace Model
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-108, SPEC-109
 
 Binding a session to a KiCad project on disk: which board is being edited, where generated
 artifacts are written (next to the project, not `/tmp`), and how enclosure revisions are tracked
 alongside board revisions. Deferrable until SPEC-108 and SPEC-109 make artifacts worth keeping.
+
+**ID conflict with `PRODUCT-PLAN.md` §5.1 — flagged, not resolved.** The plan proposes a *different*
+`SPEC-304 Project & Library Storage` (the §4 file layout: `library/`/`projects/`/`.index/`, the
+Component/Project/Artifact schemas) — related to this entry but not the same scope, and depending
+on `SPEC-300` rather than `SPEC-108`/`SPEC-109`. Neither has been written as a real `SPEC-304-*.md`
+file yet, so `/new-spec` won't catch this as a collision today — but only one of them can actually
+claim the ID. Needs a decision before either is written: rename this backlog entry to a free number,
+fold its scope into the plan's SPEC-304, or renumber the plan's proposal.
 
 ### 3.4 `4xx` — Distribution & operations
 
@@ -466,6 +492,22 @@ folded into `SPEC-302`, which explicitly doesn't need to solve either.
 APIs (SPEC-203), agent tool-calling (SPEC-204). M1 proves the product is possible; it does not
 produce something installable.
 
+### M2+ — see [PRODUCT-PLAN.md](PRODUCT-PLAN.md) §6
+
+**Superseded 2026-08-11.** `PRODUCT-PLAN.md`'s own frontmatter states it supersedes this section;
+its §6 M2 ("Shell, Projects, Components") through M5 ("Enclosure from geometry, then ambition")
+replace the M2/M3 originally described here, kept below for historical record.
+
+**Not carried forward, and not yet re-slotted anywhere — flagged, not resolved.** The original M2
+below was packaging/signing/cross-platform verification (SPEC-401/402/403). `PRODUCT-PLAN.md` §5.3
+("Unaffected") doesn't mention distribution at all, and its M2-M5 sequence has no room for it either.
+This is a real gap, not a decision to drop packaging — SPEC-401 is still the highest-risk unsolved
+problem in the project (§1.2) — it just has no milestone right now. Needs a home once the
+product-model milestones are far enough along to package, or its own milestone number.
+
+<details>
+<summary>Original M2/M3 (superseded, kept for record)</summary>
+
 ### M2 — `v0.2.0` "It ships"
 SPEC-401 packaging, SPEC-106/303 settings and diagnostics surfaced, SPEC-107 logging, SPEC-402
 signing and updates, SPEC-903/403 verification on Windows and Linux. This is the milestone where
@@ -474,6 +516,8 @@ the `.app` works on a machine that has never seen the repo.
 ### M3 — `v0.3.0` "It's an agent"
 SPEC-204 tool-calling, SPEC-203 supplier data, SPEC-109 enclosures derived from real board
 geometry, SPEC-304 workspace model. The point where "Hardware Agent Studio" earns the middle word.
+
+</details>
 
 ---
 
