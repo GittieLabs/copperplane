@@ -2,16 +2,27 @@ import { useState } from 'react'
 import { submitJob, type JobHandle } from './lib/ipc'
 import { EnclosureViewer } from './components/EnclosureViewer'
 
+// SPEC-108's own Cross-Module Impacts section names a fixed placement
+// position as enough for a first UI trigger ("even a hardcoded
+// board-origin default for M1's demo"). A real position-picker UI is
+// future work, not this button's job.
+const _INJECT_DEFAULT_POSITION_MM = { x: 50, y: 50 }
+
 function App() {
   const [partNumber, setPartNumber] = useState('')
   const [pending, setPending] = useState(false)
-  const [schema, setSchema] = useState<unknown>(null)
+  const [schema, setSchema] = useState<Record<string, unknown> | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [injectPending, setInjectPending] = useState(false)
+  const [injectError, setInjectError] = useState<string | null>(null)
+  const [injected, setInjected] = useState(false)
 
   async function handleGenerate() {
     setPending(true)
     setError(null)
     setSchema(null)
+    setInjectError(null)
+    setInjected(false)
     try {
       // SPEC-202: kicad.generate_component is a real, validated pipeline
       // now -- an async job (a real LLM extraction call is multi-second,
@@ -26,6 +37,29 @@ function App() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setPending(false)
+    }
+  }
+
+  async function handleInject() {
+    setInjectPending(true)
+    setInjectError(null)
+    setInjected(false)
+    try {
+      // SPEC-108: writes the just-generated, already-validated schema into
+      // whatever board KiCad already has open. Mutates the real board the
+      // instant it succeeds -- there is no confirmation step here yet
+      // (SPEC-204, not written).
+      const handle = await submitJob<Record<string, unknown>>('kicad.inject_component', {
+        schema,
+        x_mm: _INJECT_DEFAULT_POSITION_MM.x,
+        y_mm: _INJECT_DEFAULT_POSITION_MM.y,
+      })
+      await handle.result
+      setInjected(true)
+    } catch (err) {
+      setInjectError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setInjectPending(false)
     }
   }
 
@@ -51,9 +85,21 @@ function App() {
       </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
       {schema !== null && (
-        <pre className="w-full max-w-md overflow-auto rounded bg-neutral-900 p-3 text-xs">
-          {JSON.stringify(schema, null, 2)}
-        </pre>
+        <div className="flex w-full max-w-md flex-col gap-2">
+          <pre className="w-full overflow-auto rounded bg-neutral-900 p-3 text-xs">
+            {JSON.stringify(schema, null, 2)}
+          </pre>
+          <button
+            type="button"
+            className="rounded border border-neutral-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
+            onClick={handleInject}
+            disabled={injectPending}
+          >
+            {injectPending ? 'Injecting…' : 'Inject into Board'}
+          </button>
+          {injectError && <p className="text-sm text-red-400">{injectError}</p>}
+          {injected && <p className="text-sm text-emerald-400">Injected into the open board.</p>}
+        </div>
       )}
       <EnclosurePanel />
     </main>
