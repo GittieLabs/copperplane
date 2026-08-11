@@ -110,6 +110,7 @@ export function EnclosureViewer({ glbPath }: { glbPath: string }) {
   return (
     <div className="h-64 w-full overflow-hidden rounded border border-neutral-800">
       <Canvas camera={{ position: [80, 80, 80], fov: 50 }}>
+        <color attach="background" args={['#3f3f46']} />
         <ambientLight intensity={0.6} />
         <directionalLight position={[100, 100, 100]} intensity={0.8} />
         {scene && <primitive object={scene} />}
