@@ -1,10 +1,12 @@
 # Product Plan: from capability demo to product
 
-**Status:** Draft for review · **Date:** 2026-08-08 · **Supersedes:** ROADMAP.md §3.3 and §4 (M2–M3)
+**Status:** Approved 2026-08-11 · **Date:** 2026-08-08 · **Supersedes:** ROADMAP.md §3.3 and §4
+(M2–M3)
 
 This is a plan, not a spec. It proposes the product model, the navigation, the stage machine, and
-which specs need to exist in what order. Nothing here is committed to the repo until the shape is
-agreed.
+which specs need to exist in what order. Approved as of 2026-08-11 — `ROADMAP.md` §3.3 and §4 now
+point here. The child specs in §5.1 are not yet written; those, not this document, are the real
+commitment per spec, following the usual spec/context loop.
 
 ---
 
@@ -327,8 +329,8 @@ These amend SPEC-901's norms, SPEC-902's checks, and `SPEC-TEMPLATE.md`. They ap
 everything under it — meaning the very first spec written under this plan is also the first one
 subject to the gate.
 
-> **Status note (2026-08-11):** both amendments described in this section are implemented —
-> `SPEC-TEMPLATE.md`'s `user_facing` field and `## 5. User & Interaction` section, `ROADMAP.md` §5.3
-> norms 8/9, and the two new `scripts/validate_spec_context.py` hard failures — in `CTX-901.2`
-> ([PR #42](https://github.com/GittieLabs/hardware-agent-studio/pull/42), open against `develop` at
-> the time this plan was saved). SPEC-300, once written, is already subject to that gate.
+> **Status note (2026-08-11):** both amendments described in this section are implemented and
+> merged — `SPEC-TEMPLATE.md`'s `user_facing` field and `## 5. User & Interaction` section,
+> `ROADMAP.md` §5.3 norms 8/9, and the two new `scripts/validate_spec_context.py` hard failures —
+> in `CTX-901.2` ([PR #42](https://github.com/GittieLabs/hardware-agent-studio/pull/42)). SPEC-300,
+> once written, is already subject to that gate.
