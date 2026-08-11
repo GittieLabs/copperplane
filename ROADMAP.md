@@ -33,10 +33,10 @@ answers three questions:
 | [SPEC-105](specs/SPEC-105-daemon-async-job-progress-protocol.md) | `services/python-daemon` + `core/tauri-rust` + `apps/tauri-ui` | [CTX-105.1](context/CTX-105.1-daemon-async-job-protocol.md), [CTX-105.2](apps/tauri-ui/context/CTX-105.2-frontend-job-progress-client.md) | ✅ Completed | Async job dispatch + atomic `stdout` notifications + real cancellation (daemon side); frontend `JobHandle` client replacing the CTX-101.1 single-in-flight guard |
 | [SPEC-106](specs/SPEC-106-configuration-secrets-store.md) | `core/tauri-rust` + `services/python-daemon` | [CTX-106.1](context/CTX-106.1-config-secrets-store.md) | ✅ Completed | Non-secret config injected as a spawn-time env var, secrets via the OS keychain handed over as the daemon's first `stdin` line; wired into `freecadcmd` path override and `kicad_bridge` connection settings |
 | [SPEC-107](specs/SPEC-107-structured-logging-diagnostics.md) | `services/python-daemon` + `core/tauri-rust` | [CTX-107.1](context/CTX-107.1-structured-logging-diagnostics.md) | ✅ Completed | `stderr`/rotating-file logging, capability-aware bridge imports, `daemon.ready` startup handshake, `daemon.heartbeat` closing `CTX-101.1`'s deferred macOS crash-shield heartbeat |
-| [SPEC-301](apps/tauri-ui/specs/SPEC-301-3d-viewer.md) | `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` | [CTX-301.1](apps/tauri-ui/context/CTX-301.1-3d-viewer.md) | ✅ Completed | R3F viewer with GPU-disposal-on-replace, `.glb` output relocated to an app-owned directory, `assetProtocol` scoped to exactly that directory. Completes the `.glb`-generation → render half of M1's vertical slice — `SPEC-201`/`202`/`108` have since landed; `SPEC-302` is the one remaining open item, M1 is not done. |
+| [SPEC-301](apps/tauri-ui/specs/SPEC-301-3d-viewer.md) | `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` | [CTX-301.1](apps/tauri-ui/context/CTX-301.1-3d-viewer.md), [CTX-301.2](apps/tauri-ui/context/CTX-301.2-orbit-controls.md) | ✅ Completed | R3F viewer with GPU-disposal-on-replace, `.glb` output relocated to an app-owned directory, `assetProtocol` scoped to exactly that directory, real `OrbitControls` + a visible background (`CTX-301.2`, found by a real human click-through). Completes the `.glb`-generation → render half of M1's vertical slice — `SPEC-201`/`202`/`108` have since landed; `SPEC-302` is specced but not yet implemented, the one remaining open item, M1 is not done. |
 | [SPEC-201](services/python-daemon/specs/SPEC-201-llm-provider-abstraction.md) | `services/python-daemon` | [CTX-201.1](services/python-daemon/context/CTX-201.1-llm-provider-abstraction.md) | ✅ Completed | `llm.chat` async route wrapping AgentFlow's provider classes; verified for real against Anthropic, Google, Perplexity, and a local Ollama server — OpenAI's code path exists but is unverified (no usable key). `SPEC-202`/`108` are the next links in M1's remaining critical path. |
 | [SPEC-202](services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md) | `services/python-daemon` + `apps/tauri-ui` | [CTX-202.1](services/python-daemon/context/CTX-202.1-component-intelligence-pipeline.md) | ✅ Completed | `kicad.generate_component` real AgentFlow extract → validate DAG; three safety checks (pin count, pitch sanity, courtyard clearance) against a package reference table, fails closed on an unrecognized package; verified live against Anthropic for a real part (ATtiny85), and since verified again in the real native window (`ATtiny85` → `DIP-8`). `SPEC-108` has since landed; `SPEC-302` is the one remaining open item in M1's critical path. |
-| [SPEC-108](services/python-daemon/specs/SPEC-108-kicad-write-path-footprint-symbol-injection.md) | `services/python-daemon` | [CTX-108.1](services/python-daemon/context/CTX-108.1-kicad-write-path-footprint-injection.md) | ✅ Completed | `kicad.inject_component` — a real `kipy` `FootprintInstance`/`Pad`/courtyard build plus a real KiCad transaction (`begin_commit`/`create_items`/`push_commit` or `drop_commit`, then `save`); live-verified against an actually-running KiCad 10.0.3 PCB Editor session (both a real SMD and a real through-hole footprint). Schematic symbol injection (this spec's other half) is deliberately deferred to `CTX-108.2` — `kipy`'s `Schematic` support needs KiCad 11, this machine has 10.0.3. No UI trigger exists yet for this route. |
+| [SPEC-108](services/python-daemon/specs/SPEC-108-kicad-write-path-footprint-symbol-injection.md) | `services/python-daemon` + `apps/tauri-ui` | [CTX-108.1](services/python-daemon/context/CTX-108.1-kicad-write-path-footprint-injection.md), [CTX-108.3](apps/tauri-ui/context/CTX-108.3-inject-component-ui.md) | ✅ Completed | `kicad.inject_component` — a real `kipy` `FootprintInstance`/`Pad`/courtyard build plus a real KiCad transaction (`begin_commit`/`create_items`/`push_commit` or `drop_commit`, then `save`); live-verified against an actually-running KiCad 10.0.3 PCB Editor session (both a real SMD and a real through-hole footprint). Schematic symbol injection (this spec's other half) is deliberately deferred to `CTX-108.2` — `kipy`'s `Schematic` support needs KiCad 11, this machine has 10.0.3. `CTX-108.3` adds a plain "Inject into Board" button — a fixed default position, no confirmation gate (`SPEC-204`, not written), matching `SPEC-108`'s own stated scope. |
 
 The foundation is in better shape than most projects at this stage, and two things in particular
 are worth preserving as norms rather than accidents:
@@ -318,12 +318,16 @@ to the daemon's own output directory** (not a Rust-mediated blob read) — `.glb
 `<app_data_dir>/generated`, `assetProtocol.scope` narrowed to exactly that directory, and the
 frontend loads it via `convertFileSrc()`.
 
-#### SPEC-302 — Chat & Command Surface
+#### [SPEC-302](apps/tauri-ui/specs/SPEC-302-chat-command-surface.md) — Chat & Command Surface — specced 2026-08-11, not yet implemented
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-105, SPEC-201
 
 `App.tsx` is one input, one button, and a `<pre>` dump of raw JSON. The README's framing — "type
-'Generate a footprint for BME280'" — implies a conversation: message history, streaming tokens,
-tool-call rendering, per-message error states, and inline `.glb` previews.
+'Generate a footprint for BME280'" — implies a conversation: message history, per-message error
+states, and inline `.glb` previews. Its own spec resolves two things this blurb used to promise
+that turned out not to be real, checked directly against the installed `gittielabs-agentflow==0.8.2`
+source rather than assumed: no provider supports real token streaming today (explicit non-goal),
+and no agentic tool-calling exists either (`SPEC-204`'s job, out of M1) — a small, explicit
+`generate`/`inject` command recognizer wraps the same two already-real routes instead.
 
 #### SPEC-303 — Settings UI
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-106, SPEC-107
@@ -450,12 +454,13 @@ dependency on the AI work and can run fully in parallel — the `.glb` pipeline 
 valid output today.
 
 **Progress as of 2026-08-11:** SPEC-105/106/107/301/201/202/108 are all done — seven of eight
-nodes. M1 is **not** complete: SPEC-302 (chat surface) is the one remaining unwritten node, and the
-critical path's final `──> demo` join needs it. SPEC-201's own two open questions (§3.2) are
-resolved. Two real gaps found while device-testing the shipped pieces, tracked but not yet fixed:
-`EnclosureViewer` has no camera controls despite `SPEC-301` naming that as the reason
-`@react-three/drei` was added, and `kicad.inject_component` (`SPEC-108`) has no UI trigger at all —
-`SPEC-302` itself doesn't yet say whether closing that gap is its job or a separate small addition.
+nodes. M1 is **not** complete: SPEC-302 (chat surface) is specced (`SPEC-302-chat-command-surface.md`)
+but not yet implemented — its own critical-path node is still open, and the critical path's final
+`──> demo` join needs it. SPEC-201's own two open questions (§3.2) are resolved. Two real gaps found
+while device-testing the shipped pieces are now closed: `EnclosureViewer` gained real
+`OrbitControls` plus a visible background (`CTX-301.2`), and `kicad.inject_component` (`SPEC-108`)
+gained a plain "Inject into Board" button (`CTX-108.3`) — both small, targeted fixes rather than
+folded into `SPEC-302`, which explicitly doesn't need to solve either.
 
 **Explicitly out of M1:** packaging (SPEC-401), enclosure-from-board-geometry (SPEC-109), supplier
 APIs (SPEC-203), agent tool-calling (SPEC-204). M1 proves the product is possible; it does not
