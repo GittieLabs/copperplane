@@ -131,6 +131,15 @@ def kicad_generate_component(part_number: str) -> dict:
     return component_pipeline.generate_component(part_number, secrets=CONFIG.get("secrets", {}))
 
 
+def kicad_inject_component(schema: dict, x_mm: float, y_mm: float) -> dict:
+    """The kicad.inject_component route (SPEC-108, CTX-108.1): writes a
+    SPEC-202-validated component schema into the board KiCad already
+    has open, at (x_mm, y_mm). Mutates the board the instant it's
+    called -- the caller (eventually SPEC-204's confirmation gate) is
+    solely responsible for only invoking this after approval."""
+    return kicad_bridge.inject_component(schema, (x_mm, y_mm))
+
+
 class InvalidParamsError(Exception):
     """Raised when a request's params don't match the route's real signature."""
 
@@ -198,6 +207,8 @@ def _build_routes() -> dict:
     }
     if get_kicad_version is not None:
         routes["kicad.get_version"] = get_kicad_version
+    if kicad_bridge is not None:
+        routes["kicad.inject_component"] = kicad_inject_component
     if generate_enclosure is not None:
         routes["freecad.generate_enclosure"] = generate_enclosure
     if llm_providers is not None:
@@ -213,7 +224,9 @@ ROUTES = _build_routes()
 # Methods that run off the read loop: a request for one of these returns
 # {"job_id": ...} immediately, and the real result/failure/cancellation
 # arrives later as a job.* notification (SPEC-105 §2).
-ASYNC_ROUTES = {"freecad.generate_enclosure", "llm.chat", "kicad.generate_component"} & ROUTES.keys()
+ASYNC_ROUTES = {
+    "freecad.generate_enclosure", "llm.chat", "kicad.generate_component", "kicad.inject_component",
+} & ROUTES.keys()
 
 # job_id -> {"cancel_event": threading.Event()} for every job currently
 # in flight. Entries are removed once the job's worker thread finishes.

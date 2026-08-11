@@ -98,5 +98,109 @@ class TestKiCadBridge(unittest.TestCase):
         mock_kicad_cls.assert_called_with(socket_path='/custom/kicad.sock', timeout_ms=9000)
 
 
+_SOIC8_SCHEMA = {
+    "part_number": "ATTINY85",
+    "package": "SOIC-8",
+    "pins": [{"number": str(i), "name": f"P{i}", "electrical_type": "passive"} for i in range(1, 9)],
+    "package_dimensions": {"length_mm": 4.9, "width_mm": 3.9, "height_mm": 1.75, "pitch_mm": 1.27},
+    "courtyard": {"length_mm": 5.2, "width_mm": 4.2},
+}
+
+
+class TestInjectComponent(unittest.TestCase):
+    """Mocked orchestration coverage for kicad_bridge.inject_component
+    (TEST-005 (CTX-108.1)): does the real, live-verified write path
+    (see test_kicad_write.py's TestRealKicadWrite) call push_commit +
+    save on success, and drop_commit -- never push_commit or save --
+    on any failure. board.save() must never run in an automated test
+    against a real board a developer might have open, so this is the
+    only place inject_component's own control flow is exercised
+    end-to-end."""
+
+    def setUp(self):
+        kicad_bridge._client = None
+
+    def tearDown(self):
+        kicad_bridge._client = None
+
+    @patch('kicad_bridge.KiCad')
+    def test_001_success_commits_and_saves(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_client.check_version.return_value = True
+        mock_board = MagicMock()
+        mock_client.get_board.return_value = mock_board
+        mock_kicad_cls.return_value = mock_client
+
+        commit_sentinel = object()
+        mock_board.begin_commit.return_value = commit_sentinel
+
+        result = kicad_bridge.inject_component(_SOIC8_SCHEMA, (50, 50))
+
+        mock_board.create_items.assert_called_once()
+        mock_board.push_commit.assert_called_once_with(commit_sentinel, "Add ATTINY85")
+        mock_board.drop_commit.assert_not_called()
+        mock_board.save.assert_called_once()
+        self.assertEqual(result, {"part_number": "ATTINY85", "package": "SOIC-8", "pins": 8})
+
+    @patch('kicad_bridge.KiCad')
+    def test_002_create_items_failure_drops_the_commit_and_never_saves(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_client.check_version.return_value = True
+        mock_board = MagicMock()
+        mock_client.get_board.return_value = mock_board
+        mock_kicad_cls.return_value = mock_client
+
+        commit_sentinel = object()
+        mock_board.begin_commit.return_value = commit_sentinel
+        mock_board.create_items.side_effect = RuntimeError("KiCad rejected the item")
+
+        with self.assertRaises(kicad_bridge.KiCadWriteError) as ctx:
+            kicad_bridge.inject_component(_SOIC8_SCHEMA, (50, 50))
+
+        self.assertIn("ATTINY85", str(ctx.exception))
+        mock_board.drop_commit.assert_called_once_with(commit_sentinel)
+        mock_board.push_commit.assert_not_called()
+        mock_board.save.assert_not_called()
+
+    @patch('kicad_bridge.KiCad')
+    def test_003_unrecognized_package_never_touches_the_board(self, mock_kicad_cls):
+        """An unsupported package must fail before begin_commit is ever
+        called -- kicad_write.UnsupportedPackageError, not a half-open
+        transaction against the board."""
+        mock_client = MagicMock()
+        mock_client.check_version.return_value = True
+        mock_board = MagicMock()
+        mock_client.get_board.return_value = mock_board
+        mock_kicad_cls.return_value = mock_client
+
+        schema = dict(_SOIC8_SCHEMA, package="TQFP-32")
+
+        with self.assertRaises(kicad_bridge.KiCadWriteError):
+            kicad_bridge.inject_component(schema, (50, 50))
+
+        mock_board.begin_commit.assert_not_called()
+
+    @patch('kicad_bridge.KiCad')
+    def test_004_save_failure_is_reported_distinctly(self, mock_kicad_cls):
+        """A save failure happens *after* the commit already succeeded --
+        the component exists in the live KiCad session even though the
+        file wasn't persisted. Must not attempt drop_commit against an
+        already-pushed commit."""
+        mock_client = MagicMock()
+        mock_client.check_version.return_value = True
+        mock_board = MagicMock()
+        mock_client.get_board.return_value = mock_board
+        mock_kicad_cls.return_value = mock_client
+
+        mock_board.save.side_effect = RuntimeError("disk full")
+
+        with self.assertRaises(kicad_bridge.KiCadWriteError) as ctx:
+            kicad_bridge.inject_component(_SOIC8_SCHEMA, (50, 50))
+
+        self.assertIn("could not be saved", str(ctx.exception))
+        mock_board.push_commit.assert_called_once()
+        mock_board.drop_commit.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()
