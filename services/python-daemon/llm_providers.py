@@ -125,8 +125,22 @@ async def _chat_and_close(provider_client, messages, system: str):
         await _close_provider_client(provider_client)
 
 
-def chat(prompt: str, provider: str, api_key: str = "", model: str | None = None, system: str = "") -> str:
+def chat(
+    prompt: str,
+    provider: str,
+    api_key: str = "",
+    model: str | None = None,
+    system: str = "",
+    history: list[dict] | None = None,
+) -> str:
     """Sends one prompt to `provider` and returns its text response.
+
+    `history` (SPEC-302), each entry `{"role": "user"|"assistant", "content": str}`, is prepended
+    to `prompt` as prior turns in the same conversation -- the raw provider's own `chat(messages:
+    list[Message], ...)` already accepts a full conversation natively (verified against the
+    installed package before adding this); this does not go through AgentFlow's `AgentExecutor`
+    (which has its own, different `history` mechanism this function never touches). Omitting
+    `history` behaves exactly as before: a single-message conversation.
 
     Synchronous on purpose: `daemon.py`'s `ROUTES` dispatch (SPEC-102) is
     synchronous, so this function -- not every caller -- is the one place
@@ -143,7 +157,11 @@ def chat(prompt: str, provider: str, api_key: str = "", model: str | None = None
     except Exception as e:
         raise LLMProviderError(f"Could not construct the '{provider}' provider: {e}") from e
 
-    messages = [Message(role=Role.USER, content=prompt)]
+    messages = [
+        Message(role=Role(turn["role"]), content=turn["content"]) for turn in (history or [])
+    ]
+    messages.append(Message(role=Role.USER, content=prompt))
+
     try:
         response = asyncio.run(_chat_and_close(provider_client, messages, system))
     except Exception as e:
