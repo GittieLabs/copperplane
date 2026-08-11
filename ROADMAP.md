@@ -304,9 +304,10 @@ conventions closely enough that no separate borrowing decision is needed here.
 **Superseded by [PRODUCT-PLAN.md](PRODUCT-PLAN.md), approved 2026-08-11, for everything from
 SPEC-300 onward.** Its own §5.2 re-scopes SPEC-301/302; its §5.1 adds SPEC-300/304-310. The four
 entries below are kept for historical record, not as the current backlog — read PRODUCT-PLAN.md
-§5 before picking up any 3xx work. Two real conflicts between this section and that plan are
-flagged inline below rather than silently resolved; both need a decision before their specs are
-written.
+§5 before picking up any 3xx work. One real conflict between this section and that plan remains
+flagged inline below rather than silently resolved (the SPEC-304 ID conflict this section
+originally flagged was resolved 2026-08-11 — see that entry); SPEC-303 still needs a decision
+before its own spec is written.
 
 #### [SPEC-301](apps/tauri-ui/specs/SPEC-301-3d-viewer.md) — 3D Viewer — ✅ done 2026-08-09
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-104, SPEC-105
@@ -355,20 +356,31 @@ issues from contributors.
 it's still a standalone spec or whether some of its diagnostics surface belongs inside SPEC-305 (App
 Shell & Navigation) once that's written.
 
-#### SPEC-304 — Project & Workspace Model
-*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-108, SPEC-109
+#### SPEC-304 — Project & Library Storage
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-300
 
-Binding a session to a KiCad project on disk: which board is being edited, where generated
-artifacts are written (next to the project, not `/tmp`), and how enclosure revisions are tracked
-alongside board revisions. Deferrable until SPEC-108 and SPEC-109 make artifacts worth keeping.
+**ID conflict from the original `PRODUCT-PLAN.md` sync (PR #44) resolved 2026-08-11: absorbed, not
+renumbered.** This entry used to read "Project & Workspace Model" (binding a session to a KiCad
+project on disk, artifact placement, enclosure-revision tracking), a different scope than
+`PRODUCT-PLAN.md` §5.1's `SPEC-304 Project & Library Storage` under the same ID. On inspection the
+two turned out to be ~90% the same concern: the plan's `project.json` (KiCad project link,
+component refs) and `projects/*/artifacts/` layout already cover "which board" and "artifacts next
+to the project, not `/tmp`." The one real gap — **enclosure revisions tracked alongside board
+revisions** — didn't exist in the plan's storage section and is carried forward here as a named
+requirement for this spec's Artifact schema, not dropped. No renumbering was needed; this replaces
+the old entry rather than sitting beside it.
 
-**ID conflict with `PRODUCT-PLAN.md` §5.1 — flagged, not resolved.** The plan proposes a *different*
-`SPEC-304 Project & Library Storage` (the §4 file layout: `library/`/`projects/`/`.index/`, the
-Component/Project/Artifact schemas) — related to this entry but not the same scope, and depending
-on `SPEC-300` rather than `SPEC-108`/`SPEC-109`. Neither has been written as a real `SPEC-304-*.md`
-file yet, so `/new-spec` won't catch this as a collision today — but only one of them can actually
-claim the ID. Needs a decision before either is written: rename this backlog entry to a free number,
-fold its scope into the plan's SPEC-304, or renumber the plan's proposal.
+Scope, per `PRODUCT-PLAN.md` §4/§5.1: the file-based storage layout (`library/parts|symbols|
+footprints|datasheets/`, `projects/<name>/{project.json, conversation.jsonl, artifacts/}`,
+a rebuildable `.index/` SQLite cache — never authoritative), the Project/Part/Symbol/Footprint/
+Artifact schemas from `SPEC-300` §2.1 (provenance required per §2.2), index rebuild-on-stale-check,
+and import/export to KiCad's own `.kicad_sym`/`.pretty` library formats.
+
+**Dependency change worth naming explicitly, not just cosmetic:** the old entry depended on
+`SPEC-108`/`SPEC-109` ("deferrable until there's something worth persisting"); this one depends on
+`SPEC-300` only. That means the schema and index can be written before `SPEC-109`
+(enclosure-from-geometry) exists — the schema doesn't need `SPEC-109` done, only to eventually
+produce `Artifact`s it stores.
 
 ### 3.4 `4xx` — Distribution & operations
 

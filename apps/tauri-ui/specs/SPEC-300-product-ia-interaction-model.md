@@ -152,11 +152,14 @@ user_facing: true
         every concrete `3xx` child this spec actually governs (`SPEC-304`-`SPEC-310`) is not yet
         written, and listing an unwritten spec's path would be a dangling link the validator
         (`SPEC-902`) would correctly reject.
-    *   **`SPEC-304`'s ID is claimed by two different scopes.** `ROADMAP.md` §3.3 already has an
-        unwritten backlog entry `SPEC-304 Project & Workspace Model`; `PRODUCT-PLAN.md` §5.1 proposes
-        a different `SPEC-304 Project & Library Storage` as this spec's direct child. Flagged in
-        `ROADMAP.md` (`docs/roadmap-product-plan-sync`, merged) and not resolved there or here —
-        whoever writes the storage spec must resolve it first.
+    *   **`SPEC-304`'s ID conflict is resolved, not renumbered.** `ROADMAP.md` §3.3 used to carry an
+        unwritten backlog entry `SPEC-304 Project & Workspace Model`, a different scope than
+        `PRODUCT-PLAN.md` §5.1's `SPEC-304 Project & Library Storage` under the same ID. Resolved
+        2026-08-11 by absorbing the old entry into the new one (~90% overlap; the plan's
+        `project.json`/`artifacts/` layout already covers the old entry's "which KiCad project" and
+        "artifacts next to the project" concerns) rather than renumbering either — see `ROADMAP.md`
+        §3.3's `SPEC-304` entry for the one real gap (enclosure-revision tracking) carried forward as
+        a named requirement for this spec's Artifact schema.
 *   **Gotchas & Hazards:**
     *   **This spec can become a design document nobody implements against** if it grows
         screen-by-screen detail that belongs in child specs (`PRODUCT-PLAN.md` §9's stated risk).
@@ -186,7 +189,8 @@ user_facing: true
     spec's §2 design rationale; §3 is this spec's navigation/AI-boundary rationale; §8/§9 are this
     spec's inherited open questions and risks.
 *   [ROADMAP.md](../../../ROADMAP.md) §3.3 — the backlog entries this spec's children (`SPEC-304`
-    onward) fill in, including the flagged `SPEC-304` ID collision and the unaddressed `SPEC-303`.
+    onward) fill in. The `SPEC-304` ID conflict noted there is resolved (absorbed, see §3 above);
+    `SPEC-303` is still unaddressed by the plan and needs a decision before it's written.
 *   [SPEC-301](SPEC-301-3d-viewer.md) — survives as-is per `PRODUCT-PLAN.md` §5.2; not yet
     re-parented under this spec (see §3 above).
 *   [SPEC-302](SPEC-302-chat-command-surface.md) — re-scoped to Project Conversation per
