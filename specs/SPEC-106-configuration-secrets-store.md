@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "specs/SPEC-106-configuration-secrets-store.md"
 parent_spec: "SPEC-000-architecture-overview.md"
 child_specs: []
+user_facing: false
 ---
 
 # SPEC-106: Configuration & Secrets Store

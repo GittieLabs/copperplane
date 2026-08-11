@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "specs/SPEC-107-structured-logging-diagnostics.md"
 parent_spec: "SPEC-000-architecture-overview.md"
 child_specs: []
+user_facing: false
 ---
 
 # SPEC-107: Structured Logging, Startup Handshake & Diagnostics

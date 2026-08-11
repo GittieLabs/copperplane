@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "apps/tauri-ui/specs/SPEC-302-chat-command-surface.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
 child_specs: []
+user_facing: true
 ---
 
 # SPEC-302: Chat & Command Surface
@@ -158,3 +159,13 @@ child_specs: []
    └── [SPEC-302] Chat & Command Surface
           └── [Context 302.1] (not yet written)
 ```
+
+## 5. User & Interaction
+
+*TODO (pre-existing debt, flagged by `CTX-901.2`): `user_facing: true` was backfilled onto this
+spec's frontmatter when the field became required, after this spec had already shipped
+(`CTX-302.1`). This is the exact spec `CTX-901.2` names as the motivating example: a capability spec
+— `generate`/`inject`/plain-chat routed through one text box by string-matching prose — that passed
+every capability test while nobody asked what the user was actually doing with the box. Writing the
+three bullets below now, after the fact, would launder that gap rather than record it. Fill this in
+for real the next time this surface changes.*

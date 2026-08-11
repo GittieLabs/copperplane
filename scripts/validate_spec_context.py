@@ -31,7 +31,9 @@ EXCLUDE_EXACT_PATHS = {'LICENSE'}
 LOCKFILE_BASENAMES = {'package-lock.json', 'Cargo.lock', 'uv.lock'}
 
 REQUIRED_CTX_FRONTMATTER = ['id', 'spec_ref', 'status', 'branch', 'commit_hashes']
-REQUIRED_SPEC_FRONTMATTER = ['id', 'title', 'status', 'location']
+# 'user_facing' is required repo-wide (CTX-901.2) -- checked for every SPEC-*.md
+# on every run via validate_spec_graph(), not just files changed in this diff.
+REQUIRED_SPEC_FRONTMATTER = ['id', 'title', 'status', 'location', 'user_facing']
 
 # Specs deliberately not children of SPEC-000 (framework/meta specs, not
 # product architecture) -- excluded from the "orphan root spec" info note.
@@ -128,6 +130,31 @@ def validate_testing_matrix(file_path):
         errors.append(f"MISSING SECTION: {file_path} does not contain a '## 2. Testing Requirements Matrix' section.")
 
     return errors
+
+
+def validate_user_facing_section(file_path):
+    """CTX-901.2: a SPEC-*.md declaring user_facing: true must have a
+    '## 5. User & Interaction' section. Structural presence only, not
+    content depth -- a TODO-marked stub (a pre-existing spec honestly
+    backfilled rather than invented, see CTX-901.2's Plan Drift) still
+    passes. Callers scope this to changed files only; unlike
+    validate_spec_graph()'s repo-wide checks, a spec that already has the
+    section isn't broken by an unrelated PR that doesn't touch it."""
+    fm = parse_frontmatter(file_path)
+    if not fm or not fm.get('user_facing'):
+        return []
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    for line in lines:
+        if re.match(r'^##\s+.*User\s*&\s*Interaction', line, re.IGNORECASE):
+            return []
+
+    return [
+        f"MISSING USER & INTERACTION SECTION: {file_path} declares user_facing: true but has no "
+        f"'## 5. User & Interaction' section."
+    ]
 
 
 def resolve_relative(from_file, rel_path):
@@ -316,6 +343,16 @@ def validate_pr(base_branch):
         # Check Testing Requirements Matrix for valid file paths
         matrix_errors = validate_testing_matrix(ctx_file)
         errors.extend(matrix_errors)
+
+    # RULE 5 (CTX-901.2): a *changed* SPEC-*.md with user_facing: true must
+    # declare its "## 5. User & Interaction" section. Deliberately scoped to
+    # files changed in this diff, not repo-wide like Rule 4 below -- a spec
+    # that already has the section shouldn't fail because an unrelated PR
+    # touched it, and a pre-existing spec backfilled with an honest TODO
+    # stub in the same PR that introduces this field still passes (the check
+    # is structural presence, not content depth).
+    for spec_file in spec_files_changed:
+        errors.extend(validate_user_facing_section(spec_file))
 
     # RULE 4 (SPEC-902): validate the whole SPEC-*.md graph every run, not
     # only when this diff touches a spec -- a change to one spec's

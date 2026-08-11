@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "specs/SPEC-901-agent-operating-manual.md"
 parent_spec: null
 child_specs: []
+user_facing: false
 ---
 
 # SPEC-901: Agent Operating Manual & Context Generation Protocol
@@ -113,14 +114,23 @@ child_specs: []
 ## 3. Known Constraints & Risks
 
 *   **Known Issues / Technical Debt:**
-    *   `scripts/validate_spec_context.py` only validates `CTX-*.md` frontmatter and test paths — it
-        never opens a `SPEC-*.md` (`ROADMAP.md` §1.3). `/new-spec` and `/new-context` are the two
-        places a bad `SPEC-*.md` link gets created, so until `SPEC-902` lands, correctness there
-        depends on these commands' own logic, not CI.
+    *   **Stale as of `CTX-901.2`, corrected here:** this bullet used to say
+        `scripts/validate_spec_context.py` never opens a `SPEC-*.md`. `SPEC-902`/`CTX-902.1` closed
+        that gap — the validator now parses every `SPEC-*.md`'s frontmatter, checks id/location/link
+        integrity repo-wide, and (`CTX-901.2`) hard-fails a spec missing the `user_facing` field, plus
+        a *changed* `user_facing: true` spec missing its `## 5. User & Interaction` section. Left the
+        old claim visible here, struck through by correction rather than silently deleted, because
+        this exact kind of staleness is what norm 8/9 exist to catch in spec content generally.
+    *   **A spec can pass every check above and still be the wrong thing to build.** `SPEC-902`'s
+        checks are structural — links resolve, ids are unique, required fields are present. None of
+        them ask whether a user-facing surface makes sense. `CTX-901.2` added exactly one structural
+        proxy for that question (`## 5. User & Interaction` must exist when `user_facing: true`) —
+        it forces the question to be asked, in writing, before the section can be skipped; it cannot
+        mechanically check that the answer is good. `ROADMAP.md` §5.3 norms 8/9 name the human
+        judgment this doesn't replace.
     *   `CODE_EXTENSIONS`/`EXCLUDE_PATHS` in the same script have known gaps (`.json` too broad,
-        `EXCLUDE_PATHS` only exempts the root `README.md`). Slash commands that touch `.json`/`.md`
-        files near those edges may trip the gatekeeper's Rule 1 in ways that look like a false
-        positive but aren't fixable here — that's `SPEC-902` territory too.
+        `EXCLUDE_PATHS` only exempts the root `README.md`) — `SPEC-902`'s own Known Issues records
+        that the second claim turned out not to reflect a live bug; the first is real and still open.
 *   **Gotchas & Hazards:**
     *   **Bidirectional linking is the norm most likely to be dropped again.** It was missed twice
         already (SPEC-102's parent pointing at SPEC-000 before SPEC-102 existed; SPEC-000's
@@ -150,10 +160,13 @@ It sits at the root of its own `9xx` branch of the graph, same as `SPEC-000` sit
 *   [ROADMAP.md](../ROADMAP.md) §3.5, §5 — the backlog entry and workflow this spec formalizes.
 *   [CONTRIBUTING.md](../CONTRIBUTING.md) — the human-facing framework this spec's tooling
     generates artifacts for; `CLAUDE.md` defers to it rather than duplicating it.
-*   `SPEC-902` *(not yet written — no file to link to)* — depends on this spec per `ROADMAP.md`
-    §3.5; mechanizes the graph checks this spec's commands perform by hand.
+*   [SPEC-902](SPEC-902-spec-graph-validator-v2.md) — depends on this spec per `ROADMAP.md` §3.5;
+    mechanizes the graph checks this spec's commands perform by hand. Landed and `Completed`
+    (`CTX-902.1`); `CTX-901.2` extends its validator further with the `user_facing` checks.
 
 ```text
 [SPEC-901] (root of the 9xx / framework branch — no parent)
-   └── [Context 901.1] (not yet written) — CLAUDE.md + four slash commands
+   ├── [Context 901.1] CLAUDE.md + four slash commands
+   └── [Context 901.2] user_facing frontmatter + "## 5. User & Interaction" template section,
+                          backfilled onto SPEC-108/301/302, two new validator hard failures
 ```
