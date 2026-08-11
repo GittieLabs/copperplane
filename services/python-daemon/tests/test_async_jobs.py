@@ -300,5 +300,97 @@ class TestRealComponentGenerationJob(unittest.TestCase):
         self.assertIn("pins", schema)
 
 
+class TestRealInjectComponentJob(unittest.TestCase):
+
+    def test_001_kicad_inject_component_dispatched_through_handle_request_reports_job_completed(self):
+        """TEST-005 (CTX-108.1): kicad.inject_component, submitted through
+        handle_request exactly as a real client would, returns a job_id
+        immediately and reports job.completed with the real write result
+        -- proving the full route/param-resolution/async-dispatch chain
+        against the actually-running KiCad, not just
+        kicad_bridge.inject_component in isolation (test_kicad_bridge.py).
+
+        board.save() is patched to a no-op for the whole test: this
+        suite must never be able to persist a change to whatever real
+        .kicad_pcb file a developer happens to have open, no matter what
+        route triggered the write. The created footprint is removed
+        from the live in-memory board afterward so it never accumulates
+        across repeated runs of this suite within the same KiCad
+        session. Skips itself cleanly when no live KiCad IPC socket is
+        reachable, matching CTX-103.1/104.1 precedent."""
+        from unittest.mock import patch
+
+        socket_path = "/tmp/kicad/api.sock"
+        if not os.path.exists(socket_path):
+            self.skipTest(
+                f"No live KiCad IPC socket at {socket_path}. Enable the IPC API "
+                "(Preferences > Plugins), launch KiCad, and open a board in the "
+                "PCB Editor to run this test for real."
+            )
+
+        import kicad_bridge
+        try:
+            kicad_bridge.get_client().get_board()
+        except Exception as e:
+            self.skipTest(f"KiCad is running but no board is open in the PCB Editor: {e}")
+
+        schema = {
+            "part_number": "TEST-CTX-108-1",
+            "package": "SOIC-8",
+            "pins": [{"number": str(i), "name": f"P{i}", "electrical_type": "passive"} for i in range(1, 9)],
+            "package_dimensions": {"length_mm": 4.9, "width_mm": 3.9, "height_mm": 1.75, "pitch_mm": 1.27},
+            "courtyard": {"length_mm": 5.2, "width_mm": 4.2},
+        }
+
+        captured = []
+        original_write_line = daemon._write_line
+        daemon._write_line = lambda text: captured.append(json.loads(text))
+        try:
+            with patch('kipy.board.Board.save', return_value=None):
+                request = json.dumps({
+                    "jsonrpc": "2.0",
+                    "method": "kicad.inject_component",
+                    "params": {"schema": schema, "x_mm": 110, "y_mm": 110},
+                    "id": "req_inject_component",
+                })
+                response = json.loads(daemon.handle_request(request))
+                self.assertNotIn("error", response)
+                job_id = response["result"]["job_id"]
+
+                deadline = time.monotonic() + 15.0
+                terminal_notification = None
+                while time.monotonic() < deadline:
+                    for n in captured:
+                        if (
+                            n.get("params", {}).get("job_id") == job_id
+                            and n["method"] in ("job.completed", "job.failed")
+                        ):
+                            terminal_notification = n
+                            break
+                    if terminal_notification:
+                        break
+                    time.sleep(0.1)
+        finally:
+            daemon._write_line = original_write_line
+            # Remove the footprint this test just created from the live,
+            # in-memory board -- board.save() was patched out above, so
+            # this never touched disk, but the in-memory session would
+            # otherwise carry the test footprint into the next run.
+            board = kicad_bridge.get_client().get_board()
+            leftover = [f for f in board.get_footprints() if f.value_field.text.value == "TEST-CTX-108-1"]
+            if leftover:
+                cleanup_commit = board.begin_commit()
+                board.remove_items_by_id([f.id for f in leftover])
+                board.push_commit(cleanup_commit, "test cleanup")
+
+        self.assertIsNotNone(
+            terminal_notification, "kicad.inject_component job never reached a terminal state within 15s"
+        )
+        self.assertEqual(terminal_notification["method"], "job.completed")
+        result = terminal_notification["params"]["result"]
+        self.assertEqual(result["part_number"], "TEST-CTX-108-1")
+        self.assertEqual(result["pins"], 8)
+
+
 if __name__ == '__main__':
     unittest.main()

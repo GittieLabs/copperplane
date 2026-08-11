@@ -8,6 +8,9 @@ import logging
 
 from kipy import KiCad
 from kipy.errors import ApiError, ConnectionError as KiCadConnectionError, FutureVersionError
+from kipy.geometry import Vector2
+
+import kicad_write
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +18,14 @@ logger = logging.getLogger(__name__)
 class KiCadUnavailableError(Exception):
     """Raised whenever KiCad can't be reached, with a clean, user-facing
     message instead of a raw kipy traceback."""
+
+
+class KiCadWriteError(Exception):
+    """Raised when injecting a component into the open board fails --
+    an unsupported package (kicad_write.UnsupportedPackageError) or a
+    real KiCad API failure during the write itself. The board is left
+    unchanged either way: drop_commit runs on any failure before the
+    commit is pushed."""
 
 
 _client = None
@@ -99,3 +110,52 @@ def get_kicad_version() -> dict:
         "minor": version.minor,
         "patch": version.patch,
     }
+
+
+def inject_component(schema: dict, position_mm: tuple) -> dict:
+    """The kicad.inject_component route (SPEC-108): builds a real
+    FootprintInstance from a SPEC-202-validated schema and writes it
+    into the board KiCad already has open, at `position_mm`. Mutates
+    the board the instant it's called -- no confirmation check of its
+    own; the caller (eventually SPEC-204's gate) is solely responsible
+    for only invoking this after approval.
+
+    Reuses get_client() unchanged -- no additional version-check
+    strictness for writes beyond CTX-103.1's existing
+    FutureVersionError warning (see CTX-108.1 Plan Drift)."""
+    client = get_client()
+
+    try:
+        board = client.get_board()
+    except (KiCadConnectionError, ApiError) as e:
+        reset_connection()
+        raise KiCadUnavailableError(
+            "Lost connection to KiCad mid-request. It may have been closed."
+        ) from e
+
+    try:
+        pin_numbers = [pin["number"] for pin in schema["pins"]]
+        pads = kicad_write.generate_pad_layout(schema["package"], pin_numbers, schema["package_dimensions"])
+        footprint = kicad_write.build_footprint_instance(schema, pads, schema["courtyard"])
+    except kicad_write.UnsupportedPackageError as e:
+        raise KiCadWriteError(str(e)) from e
+
+    footprint.position = Vector2.from_xy_mm(*position_mm)
+
+    commit = board.begin_commit()
+    try:
+        board.create_items([footprint])
+    except Exception as e:
+        board.drop_commit(commit)
+        raise KiCadWriteError(f"Failed to write '{schema['part_number']}' to the board: {e}") from e
+
+    board.push_commit(commit, f"Add {schema['part_number']}")
+
+    try:
+        board.save()
+    except Exception as e:
+        raise KiCadWriteError(
+            f"'{schema['part_number']}' was added in KiCad but the board file could not be saved: {e}"
+        ) from e
+
+    return {"part_number": schema["part_number"], "package": schema["package"], "pins": len(pads)}
