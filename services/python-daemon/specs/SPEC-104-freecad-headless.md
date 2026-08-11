@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "services/python-daemon/specs/SPEC-104-freecad-headless.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
 child_specs: []
+user_facing: false
 ---
 
 # SPEC-104: FreeCAD Headless Bridge

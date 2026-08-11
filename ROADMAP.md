@@ -536,6 +536,16 @@ These are drawn from what already worked in this repo, not invented:
 6.  **One CTX per PR, one feature branch per CTX**, branch named after the context id.
 7.  **State what was *not* verified.** Both CAD contexts explicitly note that their live paths ran
     on exactly one machine. That sentence is worth more than a green checkmark.
+8.  **A spec that adds a user-facing surface states what the user is doing, not just what the
+    machine does.** A capability spec can be perfect — every route it calls real, every test green —
+    and still be the wrong thing to build. `SPEC-302` was: twelve PRs of correct spec/context
+    process produced three unrelated functions (`generate`/`inject`/plain-chat) sharing one text box,
+    routed by string-matching prose, because no section of `SPEC-TEMPLATE.md` ever asked the
+    question. `SPEC-TEMPLATE.md`'s `## 5. User & Interaction` section exists to force it.
+9.  **Verify as the user, not just as the capability.** Norm 3 is satisfied by proving a route
+    returns the right value. This one is only satisfied by a human using the actual surface the way
+    a user would, and recording what happened. Every capability test for `SPEC-302` passed; nobody
+    tried to look up a part.
 
 ---
 

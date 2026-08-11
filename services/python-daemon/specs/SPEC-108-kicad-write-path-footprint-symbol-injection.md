@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "services/python-daemon/specs/SPEC-108-kicad-write-path-footprint-symbol-injection.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
 child_specs: []
+user_facing: true
 ---
 
 # SPEC-108: KiCad Write Path: Footprint & Symbol Injection
@@ -140,3 +141,11 @@ child_specs: []
    └── [SPEC-108] KiCad Write Path: Footprint & Symbol Injection
           └── [Context 108.1] (not yet written)
 ```
+
+## 5. User & Interaction
+
+*TODO (pre-existing debt, flagged by `CTX-901.2`): `user_facing: true` was backfilled onto this
+spec's frontmatter when the field became required, after this spec had already shipped
+(`CTX-108.1`, `CTX-108.3`). Writing the three bullets below now, without a product conversation
+that predates the shipped UI, would be inventing an answer rather than recording one — see
+`CTX-108.3`'s own note on this gap. Fill this in for real the next time this surface changes.*

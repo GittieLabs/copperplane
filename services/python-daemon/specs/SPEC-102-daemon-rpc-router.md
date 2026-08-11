@@ -11,6 +11,7 @@ parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
 child_specs:
   - "SPEC-103-kicad-ipc.md"
   - "SPEC-104-freecad-headless.md"
+user_facing: false
 ---
 
 # SPEC-102: Python JSON-RPC Daemon & Route Registry

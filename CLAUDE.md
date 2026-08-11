@@ -35,6 +35,16 @@ Full sequence diagram, including why each command is scoped the way it is:
 - **`stdout` in the Python daemon is sacred.** No `print()`, ever, anywhere in
   `services/python-daemon`. It is the JSON-RPC wire; a stray line corrupts the frame. Use `stderr`
   or `logging` for anything diagnostic.
+- **A spec for a user-facing surface states what the user is doing, not just what the machine
+  does.** A spec can be mechanically perfect — every route real, every test green — and still be
+  the wrong thing to build. `SPEC-TEMPLATE.md`'s `## 5. User & Interaction` section exists because
+  `SPEC-302` shipped without one: three unrelated functions ended up sharing a single text box,
+  routed by string-matching prose, and every process step along the way was still followed
+  correctly. If `user_facing: true`, that section is required, not decorative.
+- **Verify as the user, not just as the capability.** The norm above (verify against the real
+  thing) is satisfied by proving a route returns the right value. This one is only satisfied by a
+  human actually using the surface the way a user would, with the outcome recorded. `SPEC-302`'s
+  capability tests all passed; nobody tried to look up a part before it shipped.
 
 ## Three traps that will bite you
 

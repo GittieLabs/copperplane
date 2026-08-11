@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "specs/SPEC-903-python-frontend-ci.md"
 parent_spec: null
 child_specs: []
+user_facing: false
 ---
 
 # SPEC-903: Python & Frontend CI

@@ -21,6 +21,7 @@ child_specs:
   - "../services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md"
   - "../services/python-daemon/specs/SPEC-108-kicad-write-path-footprint-symbol-injection.md"
   - "../apps/tauri-ui/specs/SPEC-302-chat-command-surface.md"
+user_facing: false
 ---
 
 # SPEC-000: Root Architecture: Hardware Agent Studio

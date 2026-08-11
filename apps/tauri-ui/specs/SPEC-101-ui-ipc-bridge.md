@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "apps/tauri-ui/specs/SPEC-101-ui-ipc-bridge.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
 child_specs: []
+user_facing: false
 ---
 
 # SPEC-101: Tauri UI & Rust Process Supervisor

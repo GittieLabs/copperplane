@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "apps/tauri-ui/specs/SPEC-301-3d-viewer.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
 child_specs: []
+user_facing: true
 ---
 
 # SPEC-301: 3D Viewer
@@ -132,3 +133,13 @@ child_specs: []
    └── [SPEC-301] 3D Viewer
           └── [Context 301.1] (not yet written)
 ```
+
+## 5. User & Interaction
+
+*TODO (pre-existing debt, flagged by `CTX-901.2`): `user_facing: true` was backfilled onto this
+spec's frontmatter when the field became required, after this spec had already shipped
+(`CTX-301.1`, `CTX-301.2`). `CTX-301.2` itself only exists because a real human clicked through the
+shipped viewer and found it unusable (all-black background, no orbit control) — exactly the gap
+norm 9 now names. Writing the three bullets below without redoing that product conversation would
+be inventing an answer, not recording one. Fill this in for real the next time this surface
+changes.*

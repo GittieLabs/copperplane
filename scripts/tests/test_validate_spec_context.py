@@ -50,7 +50,8 @@ class SpecGraphFixtureTestCase(unittest.TestCase):
         os.chdir(self.orig_cwd)
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def write_spec(self, relpath, spec_id, location=None, parent_spec=None, child_specs=None):
+    def write_spec(self, relpath, spec_id, location=None, parent_spec=None, child_specs=None,
+                    user_facing=False):
         full = os.path.join(self.tmpdir, relpath)
         os.makedirs(os.path.dirname(full), exist_ok=True)
         lines = [
@@ -59,6 +60,7 @@ class SpecGraphFixtureTestCase(unittest.TestCase):
             'title: "Test Spec"',
             'status: Draft',
             f'location: "{location if location is not None else relpath}"',
+            f'user_facing: {"true" if user_facing else "false"}',
         ]
         lines.append(f'parent_spec: "{parent_spec}"' if parent_spec else 'parent_spec: null')
         lines.append('child_specs:')
@@ -137,6 +139,84 @@ class TestSpecGraphInformationalFindings(SpecGraphFixtureTestCase):
         self.assertTrue(any('ORPHAN ROOT SPEC' in n for n in info), info)
 
 
+class TestUserFacingFieldRequired(SpecGraphFixtureTestCase):
+    """CTX-901.2 TEST-007: user_facing missing entirely is a repo-wide hard
+    error, checked the same way as id/title/status/location already are."""
+
+    def test_001_missing_user_facing_field_is_a_hard_error(self):
+        full = os.path.join(self.tmpdir, 'specs/SPEC-100-x.md')
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, 'w') as f:
+            f.write(
+                '---\nid: SPEC-100\ntitle: "X"\nstatus: Draft\n'
+                'location: "specs/SPEC-100-x.md"\nparent_spec: null\nchild_specs: []\n'
+                '---\n# SPEC-100\n'
+            )
+        errors, _info = vsc.validate_spec_graph()
+        self.assertTrue(
+            any('MISSING SPEC FRONTMATTER FIELD' in e and 'user_facing' in e for e in errors),
+            errors,
+        )
+
+    def test_002_explicit_false_is_not_flagged(self):
+        self.write_spec('specs/SPEC-100-x.md', 'SPEC-100', user_facing=False)
+        errors, _info = vsc.validate_spec_graph()
+        self.assertFalse(any('user_facing' in e for e in errors), errors)
+
+
+class TestUserFacingSectionCheck(SpecGraphFixtureTestCase):
+    """CTX-901.2 TEST-007: a SPEC-*.md declaring user_facing: true must have
+    a '## 5. User & Interaction' section -- structural presence only, so a
+    TODO-marked stub (the backfill pattern used for SPEC-301/302/108) still
+    passes without inventing real content."""
+
+    def _write_raw(self, relpath, content):
+        full = os.path.join(self.tmpdir, relpath)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, 'w') as f:
+            f.write(content)
+
+    def test_001_user_facing_true_without_section_is_flagged(self):
+        self._write_raw(
+            'specs/SPEC-100-x.md',
+            '---\nid: SPEC-100\ntitle: "X"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-x.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: true\n---\n# SPEC-100\n\n## 1. Executive Summary & Goals\n',
+        )
+        errors = vsc.validate_user_facing_section('specs/SPEC-100-x.md')
+        self.assertTrue(any('MISSING USER & INTERACTION SECTION' in e for e in errors), errors)
+
+    def test_002_user_facing_true_with_real_section_passes(self):
+        self._write_raw(
+            'specs/SPEC-100-x.md',
+            '---\nid: SPEC-100\ntitle: "X"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-x.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: true\n---\n# SPEC-100\n\n## 5. User & Interaction\n* real content\n',
+        )
+        errors = vsc.validate_user_facing_section('specs/SPEC-100-x.md')
+        self.assertEqual([], errors)
+
+    def test_003_todo_stub_section_still_passes_structural_check(self):
+        self._write_raw(
+            'specs/SPEC-100-x.md',
+            '---\nid: SPEC-100\ntitle: "X"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-x.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: true\n---\n# SPEC-100\n\n## 5. User & Interaction\n*TODO*\n',
+        )
+        errors = vsc.validate_user_facing_section('specs/SPEC-100-x.md')
+        self.assertEqual([], errors)
+
+    def test_004_user_facing_false_without_section_is_not_flagged(self):
+        self._write_raw(
+            'specs/SPEC-100-x.md',
+            '---\nid: SPEC-100\ntitle: "X"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-x.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: false\n---\n# SPEC-100\n',
+        )
+        errors = vsc.validate_user_facing_section('specs/SPEC-100-x.md')
+        self.assertEqual([], errors)
+
+
 class TestEndToEndCLI(unittest.TestCase):
     """TEST-005: the real CLI, invoked via subprocess against a real
     temporary git repo with a real commit history -- not a helper
@@ -168,7 +248,8 @@ class TestEndToEndCLI(unittest.TestCase):
         self._write(
             'specs/SPEC-100-base.md',
             '---\nid: SPEC-100\ntitle: "Base"\nstatus: Draft\n'
-            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n---\n# base\n',
+            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: false\n---\n# base\n',
         )
         self._git('add', '.')
         self._git('commit', '-q', '-m', 'base')
@@ -179,7 +260,8 @@ class TestEndToEndCLI(unittest.TestCase):
             'specs/SPEC-101-child.md',
             '---\nid: SPEC-101\ntitle: "Child"\nstatus: Draft\n'
             'location: "specs/SPEC-101-child.md"\n'
-            'parent_spec: "SPEC-999-nonexistent.md"\nchild_specs: []\n---\n# child\n',
+            'parent_spec: "SPEC-999-nonexistent.md"\nchild_specs: []\n'
+            'user_facing: false\n---\n# child\n',
         )
         self._git('add', '.')
         self._git('commit', '-q', '-m', 'add child with dangling parent')
@@ -199,7 +281,8 @@ class TestEndToEndCLI(unittest.TestCase):
         self._write(
             'specs/SPEC-100-base.md',
             '---\nid: SPEC-100\ntitle: "Base"\nstatus: Draft\n'
-            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n---\n# base\n',
+            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: false\n---\n# base\n',
         )
         self._git('add', '.')
         self._git('commit', '-q', '-m', 'base')
@@ -228,7 +311,8 @@ class TestEndToEndCLI(unittest.TestCase):
         self._write(
             'specs/SPEC-100-base.md',
             '---\nid: SPEC-100\ntitle: "Base"\nstatus: Draft\n'
-            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n---\n# base\n',
+            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: false\n---\n# base\n',
         )
         self._git('add', '.')
         self._git('commit', '-q', '-m', 'base')
@@ -253,6 +337,69 @@ class TestEndToEndCLI(unittest.TestCase):
         )
         self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn('DANGLING spec_ref', result.stdout)
+
+
+    def test_004_real_cli_flags_a_changed_user_facing_spec_missing_section(self):
+        self._git('init', '-q')
+        self._git('config', 'user.email', 'test@example.com')
+        self._git('config', 'user.name', 'Test')
+
+        self._write(
+            'specs/SPEC-100-base.md',
+            '---\nid: SPEC-100\ntitle: "Base"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: false\n---\n# base\n',
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'base')
+        self._git('branch', '-q', '-m', 'develop')
+
+        self._git('checkout', '-q', '-b', 'feature')
+        self._write(
+            'specs/SPEC-100-base.md',
+            '---\nid: SPEC-100\ntitle: "Base"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: true\n---\n# base\n',
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'flip to user-facing without adding the section')
+
+        result = subprocess.run(
+            [sys.executable, self.script_path, '--base', 'develop'],
+            cwd=self.tmpdir, capture_output=True, text=True, encoding='utf-8',
+        )
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn('MISSING USER & INTERACTION SECTION', result.stdout)
+
+    def test_005_real_cli_does_not_flag_an_untouched_user_facing_spec(self):
+        # RULE 5 is changed-files-only, unlike RULE 4's repo-wide graph
+        # checks -- a pre-existing user_facing:true spec missing the
+        # section must not fail a PR that never touches it (CTX-901.2's
+        # backfill pattern for SPEC-301/302/108 relies on this).
+        self._git('init', '-q')
+        self._git('config', 'user.email', 'test@example.com')
+        self._git('config', 'user.name', 'Test')
+
+        self._write(
+            'specs/SPEC-100-base.md',
+            '---\nid: SPEC-100\ntitle: "Base"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: true\n---\n# base\n',
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'base, already user_facing, no section (pre-existing debt)')
+        self._git('branch', '-q', '-m', 'develop')
+
+        self._git('checkout', '-q', '-b', 'feature')
+        self._write('README.md', '# unrelated\n')
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'unrelated docs change')
+
+        result = subprocess.run(
+            [sys.executable, self.script_path, '--base', 'develop'],
+            cwd=self.tmpdir, capture_output=True, text=True, encoding='utf-8',
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
 
 class TestAgainstRealRepo(unittest.TestCase):

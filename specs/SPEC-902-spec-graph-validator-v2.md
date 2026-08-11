@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "specs/SPEC-902-spec-graph-validator-v2.md"
 parent_spec: null
 child_specs: []
+user_facing: false
 ---
 
 # SPEC-902: Spec Graph Validator v2
@@ -61,6 +62,17 @@ child_specs: []
         with. The actual fix here is making the path-exclusion matching correct in general (real
         path-prefix/basename matching, not bare `str.startswith`), not special-casing the one
         symptom that happens to be inert today.
+    *   **`CTX-901.2` added a second graph-shaped field, `user_facing`, and split its two checks
+        across the existing repo-wide/changed-files-only line this spec already drew.** Whether the
+        field exists at all follows the `id`/`title`/`status`/`location` pattern above: checked for
+        every `SPEC-*.md` in the repo on every run, via the same `REQUIRED_SPEC_FRONTMATTER` list.
+        Whether the spec's body actually has a `## 5. User & Interaction` section is checked only for
+        files changed in the current diff — the opposite scoping from this spec's own link checks,
+        and deliberately so: a spec's own body content doesn't become invalid because an unrelated PR
+        touched a different file, the way a dangling link does. See §3 for how this let three
+        pre-existing user-facing specs (`SPEC-108`, `SPEC-301`, `SPEC-302`) get backfilled with an
+        honest TODO stub in the same PR that introduced the field, without contradicting either
+        check.
 *   **Data Flow / Interactions:**
 
     ```text
@@ -81,6 +93,10 @@ child_specs: []
                                          - id unique across the whole repo?
                                          - id matches this file's own name?
                                          - location: matches this file's own real path?
+                                         - user_facing field present? (CTX-901.2, repo-wide)
+          │
+          ├─> SPEC-*.md changed AND user_facing: true? ──> NEW (CTX-901.2, changed-files-only):
+          │                                                  '## 5. User & Interaction' present?
           │
           ▼
     hard failures -> exit 1, PR blocked
@@ -113,6 +129,16 @@ child_specs: []
         `specs/`/`context/` directories, e.g. `services/python-daemon/specs/`) is still wrong in
         principle and worth fixing correctly — just not because of the specific symptom named in
         the roadmap. Fix the mechanism; don't just patch around one currently-harmless case.
+    *   **Resolved, not left as a live conflict: the `user_facing` repo-wide field check and the
+        changed-files-only section check (`CTX-901.2`) could have collided on the very PR that
+        introduced them.** That PR backfills `user_facing: true` onto `SPEC-108`/`SPEC-301`/`SPEC-302`
+        (already shipped, already user-facing, never asked the question) in the same diff that adds
+        the repo-wide field requirement — so those three files are also "changed" in that PR, which
+        would trigger the section check too. The resolution: the section check is structural
+        (does a `## 5. User & Interaction` header exist), not a content-quality check, so a
+        TODO-marked stub section — honest about not inventing the answer — satisfies it. Backfilling
+        the field without also adding a stub section for those three specific files would have been
+        the actual conflict; adding both in the same PR is not.
 *   **Gotchas & Hazards:**
     *   **This script gates every PR in the repo, including its own.** A false-positive hard failure
         blocks all future work; a false-negative silently defeats the point of this spec. Any change
@@ -144,5 +170,7 @@ development framework itself, not a component of the product architecture `SPEC-
 
 ```text
 [SPEC-902] (root of its own framework-quality concern — no parent)
-   └── [Context 902.1] (not yet written) — extended validate_spec_context.py
+   ├── [Context 902.1] extended validate_spec_context.py into a full graph validator
+   └── [Context 901.2] added the user_facing field + section checks (lives under SPEC-901,
+                          implements here — see CTX-901.2's spec_ref)
 ```

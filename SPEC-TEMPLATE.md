@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "apps/tauri-ui/specs/SPEC-000.md"
 parent_spec: "../../specs/SPEC-100-root-epic.md" # Optional: link if sub-spec
 child_specs: [] # Optional: links to child specs
+user_facing: true | false # Does this spec add or change a surface a person directly interacts with?
 ---
 
 # SPEC-000: Feature / Architecture Title
@@ -35,3 +36,12 @@ child_specs: [] # Optional: links to child specs
    └── [This Spec](SPEC-000.md)
           ├── [Context 000.1](../context/CTX-000.1-subfeature.md)
           └── [Context 000.2](../context/CTX-000.2-subfeature.md)
+```
+
+## 5. User & Interaction
+*Required when `user_facing: true`. Delete this section entirely when `user_facing: false` — don't
+leave a placeholder for a surface that doesn't exist. Three bullets, kept short on purpose: the
+point is to force the question during design, not to produce documentation.*
+*   **Product Stage:** Which stage of the user's workflow this surface belongs to.
+*   **What the user is trying to accomplish:** The task-level goal, not the mechanism being built.
+*   **What the user sees and does:** The concrete surface — screen, input, output — in 1-2 sentences.
