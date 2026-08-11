@@ -53,6 +53,14 @@ _DEFAULT_MODELS = {
     "ollama": "llama3.2:1b",
 }
 
+# daemon.py's llm_chat route falls back to this when no provider is
+# configured (CONFIG["llm_provider"] unset) and none was passed
+# explicitly -- SPEC-303 (the settings UI that would let a human choose)
+# doesn't exist yet, and component_extraction.prompt.md already defaults
+# to this same provider for kicad.generate_component, so this isn't a
+# new app-wide convention, just applying the existing one consistently.
+_DEFAULT_PROVIDER = "anthropic"
+
 
 def _build_provider(provider: str, api_key: str, model: str | None):
     """Constructs the AgentFlow provider class for `provider`. Raises

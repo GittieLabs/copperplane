@@ -174,12 +174,14 @@ def llm_chat(
     already established.
 
     `history` (SPEC-302) is a real, existing provider capability
-    llm_providers.chat now exposes -- see its own docstring."""
-    provider_name = provider or CONFIG.get("llm_provider")
-    if not provider_name:
-        raise llm_providers.LLMProviderError(
-            "No LLM provider configured (set llm_provider via daemon config, or pass one explicitly)."
-        )
+    llm_providers.chat now exposes -- see its own docstring.
+
+    Falls back to llm_providers._DEFAULT_PROVIDER when neither an
+    explicit `provider` nor CONFIG["llm_provider"] is set (SPEC-303's
+    settings UI, which would let a human choose, doesn't exist yet --
+    found by actually running the real chat surface against a real,
+    never-configured install, CTX-302.1 Plan Drift)."""
+    provider_name = provider or CONFIG.get("llm_provider") or llm_providers._DEFAULT_PROVIDER
 
     model_name = model or CONFIG.get("llm_model")
     api_key = CONFIG.get("secrets", {}).get(f"{provider_name}_api_key", "")

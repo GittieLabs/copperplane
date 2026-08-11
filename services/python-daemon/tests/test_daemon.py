@@ -252,5 +252,54 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
             daemon.get_kicad_version = original
 
 
+class TestLlmChatProviderFallback(unittest.TestCase):
+    """CTX-302.1: llm_chat's provider resolution -- found by actually
+    running the real chat surface against a real, never-configured
+    install (no config.json exists anywhere on this machine, and
+    SPEC-303's settings UI doesn't exist yet to create one): the old
+    behavior raised LLMProviderError outright, which meant the chat
+    surface's plain-chat fallback could never work at all on a fresh
+    install. Mocked -- llm_providers.chat is a real, already-verified
+    function (test_llm_providers.py); this only checks what daemon.py
+    resolves before calling it."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    @patch('daemon.llm_providers.chat')
+    def test_001_falls_back_to_the_default_provider_when_nothing_is_configured(self, mock_chat):
+        daemon.CONFIG['llm_provider'] = None
+        mock_chat.return_value = "ok"
+
+        daemon.llm_chat("hello")
+
+        _, kwargs = mock_chat.call_args
+        self.assertEqual(kwargs['provider'], daemon.llm_providers._DEFAULT_PROVIDER)
+
+    @patch('daemon.llm_providers.chat')
+    def test_002_an_explicit_provider_still_wins_over_the_default(self, mock_chat):
+        daemon.CONFIG['llm_provider'] = None
+        mock_chat.return_value = "ok"
+
+        daemon.llm_chat("hello", provider="google")
+
+        _, kwargs = mock_chat.call_args
+        self.assertEqual(kwargs['provider'], "google")
+
+    @patch('daemon.llm_providers.chat')
+    def test_003_a_configured_provider_still_wins_over_the_default(self, mock_chat):
+        daemon.CONFIG['llm_provider'] = "perplexity"
+        mock_chat.return_value = "ok"
+
+        daemon.llm_chat("hello")
+
+        _, kwargs = mock_chat.call_args
+        self.assertEqual(kwargs['provider'], "perplexity")
+
+
 if __name__ == '__main__':
     unittest.main()
