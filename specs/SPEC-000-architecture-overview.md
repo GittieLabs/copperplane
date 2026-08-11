@@ -22,6 +22,7 @@ child_specs:
   - "../services/python-daemon/specs/SPEC-108-kicad-write-path-footprint-symbol-injection.md"
   - "../apps/tauri-ui/specs/SPEC-302-chat-command-surface.md"
   - "../apps/tauri-ui/specs/SPEC-300-product-ia-interaction-model.md"
+  - "../apps/tauri-ui/specs/SPEC-303-settings-ui.md"
 user_facing: false
 ---
 

@@ -304,10 +304,9 @@ conventions closely enough that no separate borrowing decision is needed here.
 **Superseded by [PRODUCT-PLAN.md](PRODUCT-PLAN.md), approved 2026-08-11, for everything from
 SPEC-300 onward.** Its own §5.2 re-scopes SPEC-301/302; its §5.1 adds SPEC-300/304-310. The four
 entries below are kept for historical record, not as the current backlog — read PRODUCT-PLAN.md
-§5 before picking up any 3xx work. One real conflict between this section and that plan remains
-flagged inline below rather than silently resolved (the SPEC-304 ID conflict this section
-originally flagged was resolved 2026-08-11 — see that entry); SPEC-303 still needs a decision
-before its own spec is written.
+§5 before picking up any 3xx work. The SPEC-304 ID conflict this section originally flagged was
+resolved 2026-08-11 (see that entry). SPEC-303 is now written but still isn't addressed by the plan
+— its own spec names the open shell-entry-point question rather than resolving it here.
 
 #### [SPEC-301](apps/tauri-ui/specs/SPEC-301-3d-viewer.md) — 3D Viewer — ✅ done 2026-08-09
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-104, SPEC-105
@@ -343,18 +342,21 @@ mechanism that produced the reported bug. The chat half survives intact and move
 Overview area. `CTX-302.x` should record this as Plan Drift when the re-scope is actually
 implemented.
 
-#### SPEC-303 — Settings UI
-*Module:* `apps/tauri-ui` · *Depends on:* SPEC-106, SPEC-107
+#### [SPEC-303](apps/tauri-ui/specs/SPEC-303-settings-ui.md) — Settings UI — specced 2026-08-11, not yet implemented
+*Module:* `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-106,
+SPEC-107, SPEC-201
 
 The surface for SPEC-106, plus the diagnostics panel SPEC-107 makes possible: is KiCad reachable,
 is its IPC server enabled, where is `freecadcmd`, which model is selected, and a one-click "copy
 diagnostics" for bug reports. The single highest-leverage thing for reducing "it doesn't work"
-issues from contributors.
+issues from contributors. Its own spec found this isn't purely a frontend surface — `set_secret`/
+`delete_secret` exist in Rust but were never registered as Tauri commands, there is no `config.json`
+*writer* at all, and `daemon.ready`'s `llm_providers` field is hardcoded to `[]`.
 
-**Not addressed by `PRODUCT-PLAN.md` — flagged, not resolved.** The plan's §5 spec list and §5.3
-"Unaffected" section don't mention SPEC-303 at all. Carried forward unchanged here; confirm whether
-it's still a standalone spec or whether some of its diagnostics surface belongs inside SPEC-305 (App
-Shell & Navigation) once that's written.
+**Still not addressed by `PRODUCT-PLAN.md`, even now that the spec exists — flagged, not resolved.**
+The plan's §5 spec list and §5.3 "Unaffected" section still don't mention SPEC-303, and SPEC-300's
+own shell model has no slot for an app-level settings screen. SPEC-303 §1/§3 name this explicitly as
+an open question for SPEC-300/SPEC-305 rather than deciding it unilaterally.
 
 #### SPEC-304 — Project & Library Storage
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-300
