@@ -227,6 +227,78 @@ class TestRealLLMChatJob(unittest.TestCase):
         self.assertIsInstance(terminal_notification["params"]["result"], str)
         self.assertGreater(len(terminal_notification["params"]["result"].strip()), 0)
 
+    def test_002_llm_chat_history_dispatched_through_handle_request_actually_uses_prior_context(self):
+        """TEST-006 (CTX-302.1): llm.chat's new `history` parameter,
+        submitted through handle_request exactly as the real chat UI
+        does, proving the full route/param-resolution/async-dispatch
+        chain -- not just llm_providers.chat's own history handling in
+        isolation (test_llm_providers.py). Uses Anthropic, not Ollama:
+        a real run found `llama3.2:1b` answers this exact prompt
+        inconsistently (42/43/86 across repeated identical calls, even
+        bypassing the daemon entirely) -- genuine model unreliability,
+        not a wiring bug, the same class of finding CTX-202.1 already
+        documented for this model. Skips cleanly without a real key."""
+        import os
+
+        dotenv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env.local'))
+        if os.path.exists(dotenv_path):
+            with open(dotenv_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#') or '=' not in line:
+                        continue
+                    key, _, value = line.partition('=')
+                    os.environ.setdefault(key.strip(), value.strip())
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            self.skipTest("ANTHROPIC_API_KEY not set. Add it to .env.local to run this test for real.")
+
+        original_secrets = daemon.CONFIG.get("secrets")
+        daemon.CONFIG["secrets"] = {"anthropic_api_key": api_key}
+
+        captured = []
+        original_write_line = daemon._write_line
+        daemon._write_line = lambda text: captured.append(json.loads(text))
+        try:
+            request = json.dumps({
+                "jsonrpc": "2.0",
+                "method": "llm.chat",
+                "params": {
+                    "prompt": "What is my favorite number? Reply with only the number.",
+                    "provider": "anthropic",
+                    "history": [
+                        {"role": "user", "content": "My favorite number is 42."},
+                        {"role": "assistant", "content": "Got it, I'll remember that."},
+                    ],
+                },
+                "id": "req_llm_chat_history",
+            })
+            response = json.loads(daemon.handle_request(request))
+            self.assertNotIn("error", response)
+            job_id = response["result"]["job_id"]
+
+            deadline = time.monotonic() + 30.0
+            terminal_notification = None
+            while time.monotonic() < deadline:
+                for n in captured:
+                    if (
+                        n.get("params", {}).get("job_id") == job_id
+                        and n["method"] in ("job.completed", "job.failed")
+                    ):
+                        terminal_notification = n
+                        break
+                if terminal_notification:
+                    break
+                time.sleep(0.1)
+        finally:
+            daemon._write_line = original_write_line
+            daemon.CONFIG["secrets"] = original_secrets
+
+        self.assertIsNotNone(terminal_notification, "llm.chat job never reached a terminal state within 30s")
+        self.assertEqual(terminal_notification["method"], "job.completed")
+        self.assertIn("42", terminal_notification["params"]["result"])
+
 
 class TestRealComponentGenerationJob(unittest.TestCase):
 

@@ -28,6 +28,8 @@ EXPECTED_SKIPS = {
     "test_004_real_ollama_chat",
     "test_005_real_openai_chat_not_verified_no_key_available",
     "test_001_llm_chat_dispatched_through_handle_request_reports_job_completed",
+    # SPEC-302: same reason -- no real ANTHROPIC_API_KEY on a CI runner.
+    "test_002_llm_chat_history_dispatched_through_handle_request_actually_uses_prior_context",
     # SPEC-202: no real ANTHROPIC_API_KEY exists on a CI runner, so the
     # component pipeline's real-extraction tests skip themselves cleanly.
     "test_001_real_extraction_and_validation_succeeds_for_a_real_part",

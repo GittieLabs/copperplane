@@ -150,5 +150,91 @@ class TestRealProviderCalls(unittest.TestCase):
         self.assertGreater(len(text.strip()), 0)
 
 
+class TestHistory(unittest.TestCase):
+    """SPEC-302: `chat()`'s `history` parameter -- a real capability the
+    raw provider's own `chat(messages: list[Message], ...)` already
+    supports natively; this is this module exposing it, not a new
+    AgentFlow capability (see CTX-302.1 Plan Drift Deviation 1)."""
+
+    def _mock_provider_and_capture(self):
+        """Mocks _build_provider to return a fake provider client whose
+        .chat() records the exact `messages` list it was called with,
+        and returns a minimal real-shaped response."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        captured = {}
+
+        async def fake_chat(messages, system=""):
+            captured["messages"] = messages
+            response = MagicMock()
+            response.text = "ok"
+            return response
+
+        mock_client = MagicMock()
+        mock_client.chat = fake_chat
+        mock_client._client = None  # short-circuits _close_provider_client's cleanup
+
+        patcher = patch("llm_providers._build_provider", return_value=mock_client)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return captured
+
+    def test_001_omitting_history_matches_the_pre_existing_single_message_behavior(self):
+        """TEST-003: a regression check -- every existing caller omits
+        history and must see exactly the same message list as before
+        this parameter existed."""
+        from agentflow.types import Message, Role
+
+        captured = self._mock_provider_and_capture()
+        chat("hello", provider="anthropic", api_key="test-key")
+
+        self.assertEqual(captured["messages"], [Message(role=Role.USER, content="hello")])
+
+    def test_002_history_is_prepended_before_the_new_prompt(self):
+        """TEST-003: history entries become real Message objects, in
+        order, before the new prompt's own message."""
+        from agentflow.types import Message, Role
+
+        captured = self._mock_provider_and_capture()
+        chat(
+            "what's my favorite number?",
+            provider="anthropic",
+            api_key="test-key",
+            history=[
+                {"role": "user", "content": "my favorite number is 42"},
+                {"role": "assistant", "content": "got it, 42"},
+            ],
+        )
+
+        self.assertEqual(
+            captured["messages"],
+            [
+                Message(role=Role.USER, content="my favorite number is 42"),
+                Message(role=Role.ASSISTANT, content="got it, 42"),
+                Message(role=Role.USER, content="what's my favorite number?"),
+            ],
+        )
+
+    def test_003_a_real_multi_turn_call_actually_uses_prior_context(self):
+        """TEST-003: real, live proof -- not just that the right objects
+        get constructed, but that a real model call with `history` set
+        answers using information *only* the history turn established.
+        Skips cleanly without a real ANTHROPIC_API_KEY."""
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            self.skipTest("ANTHROPIC_API_KEY not set. Add it to .env.local to run this test for real.")
+
+        text = chat(
+            "What is my favorite number? Reply with only the number.",
+            provider="anthropic",
+            api_key=api_key,
+            history=[
+                {"role": "user", "content": "My favorite number is 42."},
+                {"role": "assistant", "content": "Got it, I'll remember that."},
+            ],
+        )
+        self.assertIn("42", text)
+
+
 if __name__ == '__main__':
     unittest.main()

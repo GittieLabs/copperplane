@@ -163,23 +163,32 @@ def configure_daemon(secrets: dict = None) -> dict:
     return {"configured": True}
 
 
-def llm_chat(prompt: str, provider: str = None, model: str = None, system: str = "") -> str:
+def llm_chat(
+    prompt: str, provider: str = None, model: str = None, system: str = "", history: list = None
+) -> str:
     """The llm.chat route (SPEC-201): resolves the configured provider/
     model from CONFIG (SPEC-106's daemon.configure/env-config handshake)
     and the matching secret, then delegates to llm_providers.chat.
     Registered as an async route (SPEC-105) -- a real LLM call is almost
     always multi-second, the same reasoning freecad.generate_enclosure
-    already established."""
-    provider_name = provider or CONFIG.get("llm_provider")
-    if not provider_name:
-        raise llm_providers.LLMProviderError(
-            "No LLM provider configured (set llm_provider via daemon config, or pass one explicitly)."
-        )
+    already established.
+
+    `history` (SPEC-302) is a real, existing provider capability
+    llm_providers.chat now exposes -- see its own docstring.
+
+    Falls back to llm_providers._DEFAULT_PROVIDER when neither an
+    explicit `provider` nor CONFIG["llm_provider"] is set (SPEC-303's
+    settings UI, which would let a human choose, doesn't exist yet --
+    found by actually running the real chat surface against a real,
+    never-configured install, CTX-302.1 Plan Drift)."""
+    provider_name = provider or CONFIG.get("llm_provider") or llm_providers._DEFAULT_PROVIDER
 
     model_name = model or CONFIG.get("llm_model")
     api_key = CONFIG.get("secrets", {}).get(f"{provider_name}_api_key", "")
 
-    return llm_providers.chat(prompt, provider=provider_name, api_key=api_key, model=model_name, system=system)
+    return llm_providers.chat(
+        prompt, provider=provider_name, api_key=api_key, model=model_name, system=system, history=history
+    )
 
 
 def cancel_job(job_id: str) -> dict:
