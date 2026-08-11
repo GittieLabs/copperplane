@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Canvas } from '@react-three/fiber'
+import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -112,6 +113,7 @@ export function EnclosureViewer({ glbPath }: { glbPath: string }) {
         <ambientLight intensity={0.6} />
         <directionalLight position={[100, 100, 100]} intensity={0.8} />
         {scene && <primitive object={scene} />}
+        <OrbitControls makeDefault enableDamping />
       </Canvas>
     </div>
   )
