@@ -23,17 +23,13 @@ pub fn get_secret(key: &str) -> Result<Option<String>, String> {
     }
 }
 
-/// Writes a secret to the OS keychain. Not yet called by any UI -- SPEC-303
-/// is where a human actually sets these -- but needs to exist now so the
-/// round trip below can be proven for real.
-#[allow(dead_code)]
+/// Writes a secret to the OS keychain.
 pub fn set_secret(key: &str, value: &str) -> Result<(), String> {
     let entry = Entry::new(SERVICE, key).map_err(|e| e.to_string())?;
     entry.set_password(value).map_err(|e| e.to_string())
 }
 
 /// Deletes a secret from the OS keychain.
-#[allow(dead_code)]
 pub fn delete_secret(key: &str) -> Result<(), String> {
     let entry = Entry::new(SERVICE, key).map_err(|e| e.to_string())?;
     match entry.delete_credential() {
@@ -42,9 +38,54 @@ pub fn delete_secret(key: &str) -> Result<(), String> {
     }
 }
 
+/// Rejects any key not in `KNOWN_SECRET_KEYS`, so a typo'd or unrelated
+/// keychain entry can never be written under this app's service name via
+/// `save_secret`/`clear_secret`. Split out as its own `AppHandle`-free
+/// function so the validation itself is directly unit-testable, the same
+/// split `config.rs` already uses for `ensure_output_dir`/`resolve_output_dir`.
+fn validate_known_key(key: &str) -> Result<(), String> {
+    if crate::daemon::KNOWN_SECRET_KEYS.contains(&key) {
+        Ok(())
+    } else {
+        Err(format!("Unknown secret key: {key}"))
+    }
+}
+
+/// Saves a provider API key and immediately pushes the complete current
+/// secret set to the already-running daemon (SPEC-303) -- a human-facing
+/// counterpart to `set_secret`, reachable from the frontend.
+#[tauri::command]
+pub fn save_secret(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
+    validate_known_key(&key)?;
+    set_secret(&key, &value)?;
+    crate::daemon::sync_secrets_to_daemon(&app)
+}
+
+/// Clears a provider API key and re-syncs the daemon so it stops seeing a
+/// now-deleted key as configured, without a restart.
+#[tauri::command]
+pub fn clear_secret(app: tauri::AppHandle, key: String) -> Result<(), String> {
+    validate_known_key(&key)?;
+    delete_secret(&key)?;
+    crate::daemon::sync_secrets_to_daemon(&app)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_known_key_accepts_every_real_provider_key() {
+        for key in crate::daemon::KNOWN_SECRET_KEYS {
+            assert!(validate_known_key(key).is_ok(), "{key} should be a known key");
+        }
+    }
+
+    #[test]
+    fn validate_known_key_rejects_anything_not_in_the_allowlist() {
+        assert!(validate_known_key("not_a_real_provider_api_key").is_err());
+        assert!(validate_known_key("").is_err());
+    }
 
     #[test]
     fn real_round_trip_through_the_os_keychain() {

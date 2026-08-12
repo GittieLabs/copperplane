@@ -34,12 +34,40 @@ pub const DAEMON_RESPONSE_EVENT: &str = "daemon://response";
 /// `<provider>_api_key`, matching `llm_providers.py`'s own lookup
 /// (`CONFIG["secrets"][f"{provider}_api_key"]`). Ollama needs no key --
 /// it isn't listed here.
-const KNOWN_SECRET_KEYS: &[&str] = &[
+pub const KNOWN_SECRET_KEYS: &[&str] = &[
     "anthropic_api_key",
     "google_api_key",
     "openai_api_key",
     "perplexity_api_key",
 ];
+
+/// Rebuilds the known-secrets map fresh from the OS keychain (SPEC-106 §2)
+/// -- the same lookup `spawn_daemon` performs once at startup. Reused by
+/// `SPEC-303`'s `save_secret`/`clear_secret` commands so a live update
+/// always sends `daemon.configure` the *complete* current secret set,
+/// never a partial delta -- this is what lets `configure_daemon`'s
+/// replace-not-merge semantics on the Python side stay untouched.
+pub fn collect_known_secrets() -> BTreeMap<String, String> {
+    KNOWN_SECRET_KEYS
+        .iter()
+        .filter_map(|key| {
+            crate::secrets::get_secret(key)
+                .ok()
+                .flatten()
+                .map(|value| (key.to_string(), value))
+        })
+        .collect()
+}
+
+/// Pushes the complete current secrets set to the already-running daemon
+/// via `daemon.configure` (SPEC-303) -- called after any keychain write so
+/// a live daemon picks up the change without a restart. A plain Rust call
+/// into `dispatch_to_daemon`, not a second IPC round trip.
+pub fn sync_secrets_to_daemon(app: &AppHandle) -> Result<(), String> {
+    let secrets = collect_known_secrets();
+    let request = build_configure_request(&secrets);
+    dispatch_to_daemon(app.clone(), request)
+}
 
 /// Builds the `daemon.configure` JSON-RPC request line (SPEC-106 §2) that
 /// `spawn_daemon` writes as the very first thing on the daemon's `stdin`.
@@ -171,15 +199,7 @@ pub fn spawn_daemon(app: &AppHandle, script_path: PathBuf) -> std::io::Result<Da
     // daemon ever reads -- before spawn_daemon returns and hands the
     // stdin handle to anything that could write a second, ordinary
     // request ahead of it.
-    let secrets: BTreeMap<String, String> = KNOWN_SECRET_KEYS
-        .iter()
-        .filter_map(|key| {
-            crate::secrets::get_secret(key)
-                .ok()
-                .flatten()
-                .map(|value| (key.to_string(), value))
-        })
-        .collect();
+    let secrets = collect_known_secrets();
     write_request(&mut stdin, &build_configure_request(&secrets))?;
 
     // SPEC-107 §2: the clock starts now, not on the first heartbeat --
@@ -292,8 +312,35 @@ mod heartbeat_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_configure_request, write_request};
+    use super::{build_configure_request, collect_known_secrets, write_request, KNOWN_SECRET_KEYS};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn collect_known_secrets_reads_every_configured_key_fresh_from_the_real_keychain() {
+        // Real, non-mocked keychain round trip (CLAUDE.md's "verify for
+        // real" norm) -- skips cleanly if no OS keychain store is
+        // reachable, e.g. a headless CI runner, same pattern as
+        // secrets.rs's own real_round_trip_through_the_os_keychain test.
+        use keyring::Entry;
+        if Entry::store_status().is_err() {
+            eprintln!("Skipping collect_known_secrets_reads_every_configured_key_fresh_from_the_real_keychain: no OS keychain store available");
+            return;
+        }
+
+        let test_key = KNOWN_SECRET_KEYS[0];
+        crate::secrets::set_secret(test_key, "ctx-303.1-test-value")
+            .expect("set_secret should succeed against a real, reachable keychain");
+
+        let secrets = collect_known_secrets();
+        assert_eq!(secrets.get(test_key), Some(&"ctx-303.1-test-value".to_string()));
+
+        crate::secrets::delete_secret(test_key).expect("cleanup delete_secret should succeed");
+        let after_delete = collect_known_secrets();
+        assert!(
+            !after_delete.contains_key(test_key),
+            "a deleted key should not still appear in the collected map"
+        );
+    }
 
     #[test]
     fn build_configure_request_produces_a_valid_daemon_configure_line() {
