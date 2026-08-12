@@ -12,7 +12,7 @@ Layout, exactly matching PRODUCT-PLAN.md §4:
         parts/<part_id>.part.json
         symbols/<symbol_id>.json
         footprints/<footprint_id>.json
-        datasheets/<part_id>.pdf          (not managed by this module yet)
+        datasheets/<part_id>.pdf          (cache_datasheet, SPEC-306)
       projects/
         <project_name>/
           project.json
@@ -26,12 +26,23 @@ module never reaches into a daemon-owned global itself.
 """
 import json
 import os
+import ssl
+import urllib.error
+import urllib.request
+
+import certifi
 
 
 class SchemaValidationError(Exception):
     """Raised when a record fails a required-field or provenance check --
     SPEC-300 §2.2's "must reject," never merely document, requirement.
     A record that fails this is never written to disk."""
+
+
+class DatasheetFetchError(Exception):
+    """Raised when a datasheet can't be fetched or cached -- SPEC-306 §3:
+    fails closed with a specific reason, matching kicad_bridge/
+    freecad_bridge's own convention, never a silently-skipped cache."""
 
 
 class StorageRootUnconfiguredError(Exception):
@@ -222,6 +233,67 @@ def list_artifacts(project_name: str) -> list:
     suffix = ".json"
     directory = _artifacts_dir(project_name)
     return sorted(f[: -len(suffix)] for f in os.listdir(directory) if f.endswith(suffix))
+
+
+# --- Datasheet cache ------------------------------------------------------
+# SPEC-306 §2: the one piece of PRODUCT-PLAN.md §4's own layout this
+# module previously named as "not managed by this module yet" -- the
+# first real consumer (Component Discovery's disambiguation card) needs
+# a real fetch, not a URL string carried around unchecked.
+_DATASHEET_FETCH_TIMEOUT_S = 15
+
+# Real end-to-end verification found this: `services/python-daemon`'s
+# python3 build's own baked-in default OpenSSL cert path points at a
+# path from *that build's own CI runner* (a GitHub Actions
+# /Users/runner/... path), which doesn't exist on a real machine --
+# urlopen's default SSL context fails closed with
+# CERTIFICATE_VERIFY_FAILED on every real HTTPS host. certifi (already
+# an installed transitive dependency via gittielabs-agentflow's httpx/
+# google-genai deps) ships a real, working CA bundle -- used explicitly
+# here rather than trusting this interpreter's own broken default.
+_SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+
+
+def _datasheets_dir() -> str:
+    return _ensure_dir("library", "datasheets")
+
+
+def cache_datasheet(part_number: str, datasheet_url: str) -> str:
+    """Fetches `datasheet_url` and writes it to
+    library/datasheets/<part_number>.pdf, returning that real local path.
+    Never writes a partial file -- the full response is read into memory
+    before anything touches disk, so a fetch that fails partway through
+    raises DatasheetFetchError with nothing written. Does not touch
+    save_part/_validate_part_provenance: a cached datasheet is a new,
+    additional fact about a part number, not a replacement for the
+    datasheet_url provenance entry that check already enforces."""
+    if not part_number or "/" in part_number or "\\" in part_number or ".." in part_number:
+        raise DatasheetFetchError(f"'{part_number}' is not a safe part_number for a cache filename.")
+
+    request = urllib.request.Request(
+        datasheet_url, headers={"User-Agent": "hardware-agent-studio/0.1"}
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=_DATASHEET_FETCH_TIMEOUT_S, context=_SSL_CONTEXT
+        ) as response:
+            if response.status != 200:
+                raise DatasheetFetchError(
+                    f"Datasheet fetch for '{part_number}' returned HTTP {response.status}."
+                )
+            content = response.read()
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        # A real, slow/stalling host proved this necessary: `urlopen`
+        # only wraps a connection-phase failure in URLError. A timeout
+        # during `response.read()` itself (the connection opened fine,
+        # the body never finished arriving) raises a bare TimeoutError/
+        # OSError instead, which URLError alone does not catch.
+        raise DatasheetFetchError(f"Datasheet fetch for '{part_number}' failed: {e}") from e
+
+    path = os.path.join(_datasheets_dir(), f"{part_number}.pdf")
+    with open(path, "wb") as f:
+        f.write(content)
+    return path
 
 
 # --- Conversation -------------------------------------------------------

@@ -1,6 +1,8 @@
+import http.server
 import os
 import sys
 import tempfile
+import threading
 import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -234,6 +236,139 @@ class TestConversation(LibraryStoreTestCase):
             after_second = f.read()
 
         self.assertTrue(after_second.startswith(after_first))
+
+
+class _OneShotServer:
+    """A real, local HTTP server for cache_datasheet's tests -- a genuine
+    socket round trip and a genuine urllib fetch, per CLAUDE.md's 'verify
+    against the real thing' norm, without depending on outside internet
+    access for a repo test."""
+
+    def __init__(self, status: int, body: bytes, content_type: str = "application/pdf"):
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        self._server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self._server.server_port}/datasheet.pdf"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._server.shutdown()
+        self._server.server_close()
+
+
+class _StallingServer:
+    """Accepts the connection and sends headers, then blocks forever
+    before writing any body -- reproduces the real bug found by real
+    network testing: a timeout that happens during `response.read()`
+    (the connection succeeded; the body never arrives) raises a bare
+    TimeoutError, not urllib.error.URLError, so a handler that only
+    catches URLError lets it escape uncaught."""
+
+    def __init__(self):
+        release = threading.Event()
+        self._release = release
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/pdf")
+                self.end_headers()
+                self.wfile.flush()
+                release.wait(timeout=10)
+
+            def log_message(self, *args):
+                pass
+
+        self._server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self._server.server_port}/datasheet.pdf"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._release.set()
+        self._server.shutdown()
+        self._server.server_close()
+
+
+class TestCacheDatasheet(LibraryStoreTestCase):
+
+    def test_001_a_successful_fetch_writes_the_real_bytes_and_returns_the_real_path(self):
+        server = _OneShotServer(200, b"%PDF-1.4 fake datasheet bytes")
+        try:
+            path = store.cache_datasheet("ATtiny85", server.url)
+        finally:
+            server.stop()
+
+        self.assertTrue(path.endswith(os.path.join("library", "datasheets", "ATtiny85.pdf")))
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"%PDF-1.4 fake datasheet bytes")
+
+    def test_002_a_non_200_response_raises_and_writes_nothing(self):
+        server = _OneShotServer(404, b"not found")
+        try:
+            with self.assertRaises(store.DatasheetFetchError):
+                store.cache_datasheet("ATtiny85", server.url)
+        finally:
+            server.stop()
+
+        self.assertFalse(os.path.exists(os.path.join(store._datasheets_dir(), "ATtiny85.pdf")))
+
+    def test_003_an_unreachable_host_raises_a_clean_error(self):
+        with self.assertRaises(store.DatasheetFetchError):
+            store.cache_datasheet("ATtiny85", "http://127.0.0.1:1/nope.pdf")
+
+    def test_004_a_part_number_with_a_path_separator_is_rejected_before_any_fetch(self):
+        with self.assertRaises(store.DatasheetFetchError):
+            store.cache_datasheet("../../etc/passwd", "http://127.0.0.1:1/nope.pdf")
+
+    def test_005_a_real_https_fetch_passes_real_tls_certificate_verification(self):
+        """Real end-to-end verification of the Components tab found this:
+        this Python build's own default SSL context fails closed with
+        CERTIFICATE_VERIFY_FAILED on every real HTTPS host, because its
+        baked-in default cert path is a path from the build's own CI
+        runner, not a real path on any actual machine. The _OneShotServer
+        tests above are plain HTTP and can never catch this -- only a
+        real HTTPS fetch exercises certificate verification at all. Skips
+        cleanly on a genuine network-level failure (no internet access),
+        but a certificate error is a real regression, not something to
+        skip past."""
+        try:
+            path = store.cache_datasheet("test-tls-part", "https://www.python.org/robots.txt")
+        except store.DatasheetFetchError as e:
+            if "CERTIFICATE_VERIFY_FAILED" in str(e):
+                raise
+            self.skipTest(f"No real network access for this test: {e}")
+
+        with open(path, "rb") as f:
+            self.assertTrue(f.read())
+
+    def test_006_a_stalled_read_after_a_successful_connection_raises_a_clean_error(self):
+        """The real bug this test exists to catch: found running a real
+        search+cache loop against real search-agent output where one
+        candidate's URL connected fine but stalled reading the body.
+        Before this fix, that raised a bare TimeoutError that escaped
+        cache_datasheet entirely -- crashing the route instead of
+        surfacing a clean DatasheetFetchError."""
+        original_timeout = store._DATASHEET_FETCH_TIMEOUT_S
+        store._DATASHEET_FETCH_TIMEOUT_S = 0.3
+        server = _StallingServer()
+        try:
+            with self.assertRaises(store.DatasheetFetchError):
+                store.cache_datasheet("ATtiny85", server.url)
+        finally:
+            store._DATASHEET_FETCH_TIMEOUT_S = original_timeout
+            server.stop()
 
 
 if __name__ == '__main__':

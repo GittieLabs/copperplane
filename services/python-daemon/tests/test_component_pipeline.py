@@ -189,6 +189,87 @@ class TestBuildAgentExecutorProviderOverride(unittest.TestCase):
         self.assertEqual(executor.config.model, cp.llm_providers._DEFAULT_MODELS["google"])
 
 
+class TestValidateCandidates(unittest.TestCase):
+    """SPEC-306: search_components' own safety check -- a malformed
+    response must fail closed here, before it ever reaches the UI as a
+    half-populated disambiguation card."""
+
+    def _candidate(self, **overrides):
+        base = {
+            "part_number": "ATtiny85",
+            "manufacturer": "Microchip",
+            "package": "DIP-8",
+            "datasheet_url": "https://example.com/attiny85.pdf",
+            "confidence": "high",
+            "rationale": "Exact part number match.",
+        }
+        base.update(overrides)
+        return base
+
+    def test_001_a_well_formed_candidate_list_passes_through_unchanged(self):
+        candidates = [self._candidate()]
+        self.assertEqual(cp._validate_candidates(candidates), candidates)
+
+    def test_002_a_non_list_response_is_rejected(self):
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_candidates(self._candidate())
+
+    def test_003_an_empty_list_is_rejected(self):
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_candidates([])
+
+    def test_004_a_candidate_missing_a_required_field_is_rejected(self):
+        candidate = self._candidate()
+        del candidate["datasheet_url"]
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_candidates([candidate])
+
+    def test_005_a_candidate_with_an_invalid_confidence_level_is_rejected(self):
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_candidates([self._candidate(confidence="very high")])
+
+
+class TestRealSearchComponents(unittest.TestCase):
+    """Real, non-mocked search calls -- CLAUDE.md's 'verify for real'
+    norm. Skips itself cleanly when no real credential is available."""
+
+    def test_001_a_real_search_returns_well_formed_ranked_candidates(self):
+        """TEST-002: every candidate the real model returns has all
+        required fields and a valid confidence level -- proven against
+        the actual prompt file, not a hand-written fixture."""
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            self.skipTest("ANTHROPIC_API_KEY not set. Add it to .env.local to run this test for real.")
+
+        candidates = cp.search_components("atiny85", secrets={"anthropic_api_key": api_key})
+
+        self.assertGreaterEqual(len(candidates), 1)
+        for candidate in candidates:
+            for field in cp._SEARCH_REQUIRED_FIELDS:
+                self.assertTrue(candidate.get(field))
+            self.assertIn(candidate["confidence"], cp._SEARCH_CONFIDENCE_LEVELS)
+
+    def test_002_a_real_search_via_google_does_not_truncate(self):
+        """TEST-002: the actual bug this test exists to catch -- found by
+        real end-to-end verification of the Components tab (not by this
+        test suite first). With CONFIG["llm_provider"] == "google" (the
+        real Settings-configured value at the time), component_search's
+        response was truncated mid-JSON ('Unterminated string...') because
+        component_search.prompt.md's max_tokens (1024) was too tight for
+        Gemini's more verbose candidate rationales -- 3 of 5 real calls
+        failed. Run several times here since the failure was probabilistic,
+        not deterministic on a single call."""
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            self.skipTest("GOOGLE_API_KEY not set. Add it to .env.local to run this test for real.")
+
+        for _ in range(5):
+            candidates = cp.search_components(
+                "Atiny85", secrets={"google_api_key": api_key}, provider="google",
+            )
+            self.assertGreaterEqual(len(candidates), 1)
+
+
 class TestRealGenerateComponent(unittest.TestCase):
     """Real, non-mocked runs of the full extract -> validate DAG --
     CLAUDE.md's 'verify for real' norm. Skips itself cleanly when no real

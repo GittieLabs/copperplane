@@ -165,6 +165,30 @@ def kicad_generate_component(part_number: str) -> dict:
     )
 
 
+def component_search(query: str) -> list:
+    """The component.search route (SPEC-306): a free-text query in,
+    ranked candidates out. Threads CONFIG["llm_provider"]/["llm_model"]
+    through exactly like kicad_generate_component does, for the same
+    reason -- a fresh install with nothing configured in Settings yet
+    must still use whichever provider IS configured, not a hardcoded
+    default baked into the prompt file."""
+    return component_pipeline.search_components(
+        query,
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+    )
+
+
+def component_cache_datasheet(part_number: str, datasheet_url: str) -> dict:
+    """The component.cache_datasheet route (SPEC-306): fetches and caches
+    a confirmed candidate's datasheet -- a real network call, registered
+    as an async route below for the same reason freecad.generate_enclosure
+    is."""
+    path = library_store.cache_datasheet(part_number, datasheet_url)
+    return {"path": path}
+
+
 def kicad_inject_component(schema: dict, x_mm: float, y_mm: float) -> dict:
     """The kicad.inject_component route (SPEC-108, CTX-108.1): writes a
     SPEC-202-validated component schema into the board KiCad already
@@ -346,7 +370,9 @@ def _build_routes() -> dict:
         routes["llm.chat"] = llm_chat
     if component_pipeline is not None:
         routes["kicad.generate_component"] = kicad_generate_component
+        routes["component.search"] = component_search
     if library_store is not None:
+        routes["component.cache_datasheet"] = component_cache_datasheet
         routes["library.save_part"] = library_save_part
         routes["library.load_part"] = library_load_part
         routes["library.list_parts"] = library_list_parts
@@ -373,6 +399,7 @@ ROUTES = _build_routes()
 # arrives later as a job.* notification (SPEC-105 §2).
 ASYNC_ROUTES = {
     "freecad.generate_enclosure", "llm.chat", "kicad.generate_component", "kicad.inject_component",
+    "component.search", "component.cache_datasheet",
 } & ROUTES.keys()
 
 # job_id -> {"cancel_event": threading.Event()} for every job currently

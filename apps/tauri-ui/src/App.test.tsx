@@ -166,6 +166,15 @@ describe('App: chat & command surface', () => {
     expect(screen.queryByPlaceholderText(/generate ATtiny85/)).toBeNull()
   })
 
+  it('TEST-008b: the Components area tab renders the real ComponentDiscovery search box, not a placeholder', async () => {
+    await renderAppOnOverview()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Components' }))
+
+    await waitFor(() => screen.getByPlaceholderText(/search for a part/))
+    expect(screen.queryByText(/not built yet/)).toBeNull()
+  })
+
   it('TEST-008: loads an existing project\'s persisted conversation into view on first render', async () => {
     loadConversationMock.mockResolvedValueOnce([
       { role: 'user', content: 'hello from before' },
