@@ -23,6 +23,7 @@ child_specs:
   - "../apps/tauri-ui/specs/SPEC-302-chat-command-surface.md"
   - "../apps/tauri-ui/specs/SPEC-300-product-ia-interaction-model.md"
   - "../apps/tauri-ui/specs/SPEC-303-settings-ui.md"
+  - "../specs/SPEC-110-configurable-storage-root.md"
 user_facing: false
 ---
 
