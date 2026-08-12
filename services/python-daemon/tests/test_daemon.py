@@ -261,9 +261,33 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
             routes = daemon._build_routes()
             self.assertNotIn("library.save_part", routes)
             self.assertNotIn("project.save", routes)
+            self.assertNotIn("component.cache_datasheet", routes)
             self.assertIn("job.cancel", routes)
         finally:
             daemon.library_store = original
+
+    def test_008_build_routes_omits_component_search_when_import_failed(self):
+        """TEST-004 (CTX-306.1): mirrors test_006/007 for component.search
+        -- a broken component_pipeline import shouldn't take down
+        anything else, and kicad.generate_component/component.search
+        share the same gate since both depend on that module."""
+        original = daemon.component_pipeline
+        daemon.component_pipeline = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.generate_component", routes)
+            self.assertNotIn("component.search", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.component_pipeline = original
+
+    def test_009_component_search_and_cache_datasheet_are_registered_as_async(self):
+        """TEST-004 (CTX-306.1): both are real, multi-second calls (an
+        LLM search, a network fetch) -- the read loop must never block on
+        either, same reasoning kicad.generate_component/
+        freecad.generate_enclosure already established."""
+        self.assertIn("component.search", daemon.ASYNC_ROUTES)
+        self.assertIn("component.cache_datasheet", daemon.ASYNC_ROUTES)
 
 
 class TestLibraryRoutes(unittest.TestCase):
@@ -524,6 +548,57 @@ class TestKicadGenerateComponentProviderOverride(unittest.TestCase):
         _, kwargs = mock_generate.call_args
         self.assertIsNone(kwargs['provider'])
         self.assertIsNone(kwargs['model'])
+
+
+class TestComponentSearchAndCacheDatasheetRoutes(unittest.TestCase):
+    """CTX-306.1: component.search threads CONFIG's provider/model
+    through exactly like kicad_generate_component does (mirrors
+    TestKicadGenerateComponentProviderOverride); component.cache_datasheet
+    is a thin, one-line delegation to library_store, matching every
+    other library.*/project.* wrapper's own shape."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    @patch('daemon.component_pipeline.search_components')
+    def test_001_component_search_passes_the_configured_provider_and_model_through(self, mock_search):
+        daemon.CONFIG['llm_provider'] = "google"
+        daemon.CONFIG['llm_model'] = "gemini-flash"
+        daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
+        mock_search.return_value = [{"part_number": "ATtiny85"}]
+
+        daemon.component_search("atiny85")
+
+        args, kwargs = mock_search.call_args
+        self.assertEqual(args[0], "atiny85")
+        self.assertEqual(kwargs['provider'], "google")
+        self.assertEqual(kwargs['model'], "gemini-flash")
+        self.assertEqual(kwargs['secrets'], {"google_api_key": "fake"})
+
+    @patch('daemon.component_pipeline.search_components')
+    def test_002_nothing_configured_passes_none_through_not_a_forced_default(self, mock_search):
+        daemon.CONFIG['llm_provider'] = None
+        daemon.CONFIG['llm_model'] = None
+        mock_search.return_value = [{"part_number": "ATtiny85"}]
+
+        daemon.component_search("atiny85")
+
+        _, kwargs = mock_search.call_args
+        self.assertIsNone(kwargs['provider'])
+        self.assertIsNone(kwargs['model'])
+
+    @patch('daemon.library_store.cache_datasheet')
+    def test_003_cache_datasheet_delegates_and_wraps_the_path_in_a_result_dict(self, mock_cache):
+        mock_cache.return_value = "/fake/library/datasheets/ATtiny85.pdf"
+
+        result = daemon.component_cache_datasheet("ATtiny85", "https://example.com/x.pdf")
+
+        mock_cache.assert_called_once_with("ATtiny85", "https://example.com/x.pdf")
+        self.assertEqual(result, {"path": "/fake/library/datasheets/ATtiny85.pdf"})
 
 
 if __name__ == '__main__':
