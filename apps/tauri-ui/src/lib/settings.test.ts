@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { DaemonCapabilities } from './settings'
 
 const invokeMock = vi.fn()
 const dispatchMock = vi.fn()
+const writeTextMock = vi.fn()
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({ writeText: writeTextMock }))
 vi.mock('./ipc', () => ({ dispatch: dispatchMock }))
 
 const {
@@ -14,10 +17,13 @@ const {
   getCapabilities,
   setLlmProviderAndModel,
   secretKeyFor,
+  getAppVersion,
+  copyDiagnostics,
 } = await import('./settings')
 
 beforeEach(() => {
   invokeMock.mockReset()
+  writeTextMock.mockReset()
   dispatchMock.mockReset()
 })
 
@@ -62,13 +68,25 @@ describe('getCapabilities', () => {
     dispatchMock.mockResolvedValueOnce({
       jsonrpc: '2.0',
       id: 1,
-      result: { kicad_available: true, freecad_available: false, llm_providers: ['anthropic'] },
+      result: {
+        kicad_available: true,
+        freecad_available: false,
+        llm_providers: ['anthropic'],
+        log_path: '/var/log/daemon.log',
+        python_version: '3.12.0',
+      },
     })
 
     const caps = await getCapabilities()
 
     expect(dispatchMock).toHaveBeenCalledWith('daemon.get_capabilities', {})
-    expect(caps).toEqual({ kicad_available: true, freecad_available: false, llm_providers: ['anthropic'] })
+    expect(caps).toEqual({
+      kicad_available: true,
+      freecad_available: false,
+      llm_providers: ['anthropic'],
+      log_path: '/var/log/daemon.log',
+      python_version: '3.12.0',
+    })
   })
 
   it('throws when the daemon returns an error response', async () => {
@@ -109,5 +127,108 @@ describe('setLlmProviderAndModel', () => {
     await expect(
       setLlmProviderAndModel('anthropic', null, { llm_provider: null, llm_model: null }),
     ).rejects.toThrow('Invalid params')
+  })
+})
+
+describe('getAppVersion', () => {
+  it('invokes get_app_version and returns its result', async () => {
+    invokeMock.mockResolvedValueOnce('0.1.0')
+    await expect(getAppVersion()).resolves.toBe('0.1.0')
+    expect(invokeMock).toHaveBeenCalledWith('get_app_version')
+  })
+})
+
+describe('copyDiagnostics', () => {
+  const BASE_CAPABILITIES: DaemonCapabilities = {
+    kicad_available: false,
+    freecad_available: false,
+    llm_providers: [] as string[],
+    log_path: '/var/log/daemon.log',
+    python_version: '3.12.0',
+  }
+
+  function mockCapabilitiesAndVersion(capabilities: typeof BASE_CAPABILITIES) {
+    // getAppVersion -> invoke; getCapabilities -> dispatch. Order doesn't
+    // matter since copyDiagnostics runs them concurrently.
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_app_version') return '0.1.0'
+      throw new Error(`unexpected invoke: ${cmd}`)
+    })
+    dispatchMock.mockImplementation(async (method: string) => {
+      if (method === 'daemon.get_capabilities') {
+        return { jsonrpc: '2.0', id: 1, result: capabilities }
+      }
+      throw new Error(`unexpected dispatch: ${method}`)
+    })
+  }
+
+  it('TEST: bundles version, python version, log path, and connectivity into clipboard text', async () => {
+    mockCapabilitiesAndVersion(BASE_CAPABILITIES)
+
+    await copyDiagnostics()
+
+    expect(writeTextMock).toHaveBeenCalledTimes(1)
+    const text = writeTextMock.mock.calls[0][0] as string
+    expect(text).toContain('Hardware Agent Studio v0.1.0')
+    expect(text).toContain('Python: 3.12.0')
+    expect(text).toContain('Log file: /var/log/daemon.log')
+    expect(text).toContain('KiCad: not reachable')
+    expect(text).toContain('FreeCAD: not reachable')
+    expect(text).toContain('LLM providers configured: (none)')
+  })
+
+  it('reports "(not available)" when the daemon has no log file active', async () => {
+    mockCapabilitiesAndVersion({ ...BASE_CAPABILITIES, log_path: null })
+
+    await copyDiagnostics()
+
+    const text = writeTextMock.mock.calls[0][0] as string
+    expect(text).toContain('Log file: (not available)')
+  })
+
+  it('looks up the real KiCad version only when kicad_available is true', async () => {
+    mockCapabilitiesAndVersion({ ...BASE_CAPABILITIES, kicad_available: true })
+    dispatchMock.mockImplementation(async (method: string) => {
+      if (method === 'daemon.get_capabilities') {
+        return { jsonrpc: '2.0', id: 1, result: { ...BASE_CAPABILITIES, kicad_available: true } }
+      }
+      if (method === 'kicad.get_version') {
+        return { jsonrpc: '2.0', id: 2, result: { full_version: '10.0.3' } }
+      }
+      throw new Error(`unexpected dispatch: ${method}`)
+    })
+
+    await copyDiagnostics()
+
+    expect(dispatchMock).toHaveBeenCalledWith('kicad.get_version', {})
+    const text = writeTextMock.mock.calls[0][0] as string
+    expect(text).toContain('KiCad: 10.0.3')
+  })
+
+  it('degrades to "unreachable" rather than failing the whole bundle when the KiCad lookup errors', async () => {
+    dispatchMock.mockImplementation(async (method: string) => {
+      if (method === 'daemon.get_capabilities') {
+        return { jsonrpc: '2.0', id: 1, result: { ...BASE_CAPABILITIES, kicad_available: true } }
+      }
+      if (method === 'kicad.get_version') {
+        return { jsonrpc: '2.0', id: 2, error: { code: -32000, message: 'not connected' } }
+      }
+      throw new Error(`unexpected dispatch: ${method}`)
+    })
+    invokeMock.mockResolvedValue('0.1.0')
+
+    await copyDiagnostics()
+
+    const text = writeTextMock.mock.calls[0][0] as string
+    expect(text).toContain('KiCad: unreachable')
+  })
+
+  it('lists configured providers by name', async () => {
+    mockCapabilitiesAndVersion({ ...BASE_CAPABILITIES, llm_providers: ['anthropic', 'google'] })
+
+    await copyDiagnostics()
+
+    const text = writeTextMock.mock.calls[0][0] as string
+    expect(text).toContain('LLM providers configured: anthropic, google')
   })
 })

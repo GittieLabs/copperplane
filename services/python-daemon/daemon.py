@@ -24,22 +24,30 @@ def _default_log_dir() -> str:
     return os.path.join(base, "hardware-agent-studio")
 
 
+# The real, resolved log file path, if the file handler below was set up
+# successfully -- None if only stderr is active (e.g. a read-only log
+# dir). Exposed via _detect_capabilities() (SPEC-303 Tier 3) so Settings'
+# "Copy Diagnostics" can name it without duplicating this resolution logic.
+_LOG_FILE_PATH = None
+
+
 def _configure_logging() -> None:
     """stderr is the log channel, unconditionally -- stdout is the
     JSON-RPC wire and must never carry a log line (CLAUDE.md's "stdout is
     sacred" norm). This runs before any bridge-module import below, so an
     import failure that would otherwise kill the daemon silently still
     reaches the log (SPEC-107 §2)."""
+    global _LOG_FILE_PATH
     handlers = [logging.StreamHandler(sys.stderr)]
 
     try:
         log_dir = _default_log_dir()
         os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, "daemon.log")
         handlers.append(
-            logging.handlers.RotatingFileHandler(
-                os.path.join(log_dir, "daemon.log"), maxBytes=1_000_000, backupCount=3,
-            )
+            logging.handlers.RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=3)
         )
+        _LOG_FILE_PATH = log_path
     except OSError:
         pass  # stderr alone is still a real log path; a read-only log dir isn't fatal.
 
@@ -463,6 +471,11 @@ def _detect_capabilities() -> dict:
         # right now, fixed from a hardcoded [] that predated any real
         # settings surface to populate it.
         "llm_providers": [p for p in _KEY_BASED_PROVIDERS if configured_secrets.get(f"{p}_api_key")],
+        # SPEC-303 Tier 3: for the Settings screen's "Copy Diagnostics"
+        # bundle. log_path is None if only stderr is active (e.g. a
+        # read-only log dir) -- reported honestly, not papered over.
+        "log_path": _LOG_FILE_PATH,
+        "python_version": platform.python_version(),
     }
 
 

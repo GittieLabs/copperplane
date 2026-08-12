@@ -7,6 +7,7 @@ const saveConfigMock = vi.fn()
 const saveSecretMock = vi.fn()
 const clearSecretMock = vi.fn()
 const setLlmProviderAndModelMock = vi.fn()
+const copyDiagnosticsMock = vi.fn()
 
 vi.mock('../lib/settings', async () => {
   const actual = await vi.importActual<typeof import('../lib/settings')>('../lib/settings')
@@ -18,16 +19,24 @@ vi.mock('../lib/settings', async () => {
     saveSecret: (...args: unknown[]) => saveSecretMock(...args),
     clearSecret: (...args: unknown[]) => clearSecretMock(...args),
     setLlmProviderAndModel: (...args: unknown[]) => setLlmProviderAndModelMock(...args),
+    copyDiagnostics: (...args: unknown[]) => copyDiagnosticsMock(...args),
   }
 })
 
 const { Settings } = await import('./Settings')
 
-const EMPTY_CAPABILITIES = { kicad_available: false, freecad_available: false, llm_providers: [] }
+const EMPTY_CAPABILITIES = {
+  kicad_available: false,
+  freecad_available: false,
+  llm_providers: [],
+  log_path: '/var/log/daemon.log',
+  python_version: '3.12.0',
+}
 const EMPTY_CONFIG = { llm_provider: null, llm_model: null }
 
 beforeEach(() => {
   getCapabilitiesMock.mockReset().mockResolvedValue(EMPTY_CAPABILITIES)
+  copyDiagnosticsMock.mockReset().mockResolvedValue(undefined)
   getConfigMock.mockReset().mockResolvedValue(EMPTY_CONFIG)
   saveConfigMock.mockReset().mockResolvedValue(undefined)
   saveSecretMock.mockReset().mockResolvedValue(undefined)
@@ -157,5 +166,29 @@ describe('Settings: Tier 2 (KiCad/FreeCAD status + paths)', () => {
       }),
     )
     await waitFor(() => expect(screen.getByText('Saved — restart to apply.')).toBeTruthy())
+  })
+})
+
+describe('Settings: Tier 3 (Copy Diagnostics)', () => {
+  it('clicking Copy Diagnostics calls copyDiagnostics and confirms success', async () => {
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Diagnostics' }))
+
+    await waitFor(() => expect(copyDiagnosticsMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByText('Copied to clipboard.')).toBeTruthy())
+  })
+
+  it('surfaces an error instead of a false success message when copyDiagnostics fails', async () => {
+    copyDiagnosticsMock.mockRejectedValueOnce(new Error('clipboard unavailable'))
+
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Diagnostics' }))
+
+    await waitFor(() => expect(screen.getByText('clipboard unavailable')).toBeTruthy())
+    expect(screen.queryByText('Copied to clipboard.')).toBeNull()
   })
 })
