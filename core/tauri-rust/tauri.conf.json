@@ -27,6 +27,11 @@
       }
     }
   },
+  "plugins": {
+    "shell": {
+      "open": "^(https?://.+|/.+|[A-Za-z]:[\\\\/].+)$"
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

@@ -9,6 +9,7 @@ import {
   saveProject,
   type ConversationTurn,
 } from './lib/projects'
+import { ComponentDiscovery } from './components/ComponentDiscovery'
 import { EnclosureViewer } from './components/EnclosureViewer'
 import { NotBuiltPlaceholder } from './components/NotBuiltPlaceholder'
 import { Rail } from './components/Rail'
@@ -136,13 +137,7 @@ function App() {
 
             {view.area === 'overview' && <Overview projectName={view.name} />}
             {view.area === 'enclosure' && <EnclosurePanel />}
-            {view.area === 'components' && (
-              <NotBuiltPlaceholder
-                specId="SPEC-306"
-                title="Components"
-                description="Search and disambiguate a part number."
-              />
-            )}
+            {view.area === 'components' && <ComponentDiscovery />}
             {view.area === 'schematic' && (
               <NotBuiltPlaceholder
                 specId="SPEC-308"
