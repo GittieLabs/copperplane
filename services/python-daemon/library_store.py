@@ -154,6 +154,149 @@ def load_symbol(symbol_id: str) -> dict:
     return _read_json(os.path.join(_symbols_dir(), f"{symbol_id}.json"))
 
 
+# --- Symbol -> real .kicad_sym export (SPEC-307) --------------------------
+# The exact real format, confirmed by reading actual KiCad 10 library files
+# on this machine (both user-authored and KiCad's own bundled system
+# libraries) -- not guessed from documentation. Pin electrical-type
+# keywords and the left-angle-0/right-angle-180 convention were confirmed
+# the same way, via `grep` across real .kicad_sym files, not assumed.
+_KICAD_SYM_VERSION = 20251024
+_KICAD_PIN_LENGTH_MM = 2.54
+_KICAD_PIN_PITCH_MM = 2.54
+_KICAD_SYM_HALF_WIDTH_MM = 5.08
+
+# SPEC-202's electrical_type enum -> KiCad's own real pin-type vocabulary
+# (confirmed present across KiCad's bundled symbol libraries). "power" and
+# "ground" both map to power_in -- real KiCad libraries mark GND pins as
+# power_in too, not a separate "ground" keyword; there isn't one.
+_KICAD_PIN_TYPE = {
+    "input": "input",
+    "output": "output",
+    "bidirectional": "bidirectional",
+    "power": "power_in",
+    "ground": "power_in",
+    "passive": "passive",
+    "no_connect": "no_connect",
+}
+
+
+def _layout_pins(pins: list) -> dict:
+    """A pure, testable auto-layout: pins split evenly left/right, stacked
+    on KiCad's own real 2.54mm grid. Not an attempt at a real pinout
+    diagram (no visual symbol editor exists) -- just a real, valid
+    geometry every pin can hang off of. Returns each pin's real (x, y,
+    angle) plus the body rectangle's half-width/half-height."""
+    left_count = (len(pins) + 1) // 2
+    right_count = len(pins) - left_count
+
+    def _side_positions(count: int) -> list:
+        top = (count - 1) / 2 * _KICAD_PIN_PITCH_MM
+        return [top - i * _KICAD_PIN_PITCH_MM for i in range(count)]
+
+    left_ys = _side_positions(left_count)
+    right_ys = _side_positions(right_count)
+
+    placed = []
+    for pin, y in zip(pins[:left_count], left_ys):
+        x = -(_KICAD_SYM_HALF_WIDTH_MM + _KICAD_PIN_LENGTH_MM)
+        placed.append({**pin, "x": x, "y": y, "angle": 0})
+    for pin, y in zip(pins[left_count:], right_ys):
+        x = _KICAD_SYM_HALF_WIDTH_MM + _KICAD_PIN_LENGTH_MM
+        placed.append({**pin, "x": x, "y": y, "angle": 180})
+
+    max_count = max(left_count, right_count, 1)
+    half_height = (max_count - 1) / 2 * _KICAD_PIN_PITCH_MM + _KICAD_PIN_PITCH_MM
+
+    return {"pins": placed, "half_width": _KICAD_SYM_HALF_WIDTH_MM, "half_height": half_height}
+
+
+def _sexpr_str(value: str) -> str:
+    """Escapes a string for a KiCad S-expression quoted token."""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _sexpr_num(value: float) -> str:
+    """Formats a coordinate for a KiCad S-expression -- rounded to avoid
+    float noise like 7.619999999999999 from plain mm arithmetic, and
+    without a trailing '.0' for whole numbers, matching real .kicad_sym
+    files' own formatting."""
+    rounded = round(value, 4)
+    if rounded == int(rounded):
+        return str(int(rounded))
+    return f"{rounded:g}"
+
+
+def _build_kicad_sym_text(symbol: dict) -> str:
+    """Hand-builds a real, valid .kicad_sym file for one symbol -- the
+    same "write the real format directly" approach kicad_write.py already
+    established for .kicad_mod-shaped geometry (CTX-108.1), applied here
+    to a standalone library file instead of a live board transaction."""
+    symbol_id = symbol["symbol_id"]
+    reference_prefix = symbol.get("reference_prefix", "U")
+    layout = _layout_pins(symbol.get("pins", []))
+    half_width = layout["half_width"]
+    half_height = layout["half_height"]
+
+    pin_lines = []
+    for pin in layout["pins"]:
+        kicad_type = _KICAD_PIN_TYPE.get(pin.get("electrical_type"), "unspecified")
+        pin_lines.append(
+            f'\t\t\t(pin {kicad_type} line\n'
+            f'\t\t\t\t(at {_sexpr_num(pin["x"])} {_sexpr_num(pin["y"])} {pin["angle"]})\n'
+            f'\t\t\t\t(length {_sexpr_num(_KICAD_PIN_LENGTH_MM)})\n'
+            f'\t\t\t\t(name "{_sexpr_str(pin.get("name", ""))}" (effects (font (size 1.27 1.27))))\n'
+            f'\t\t\t\t(number "{_sexpr_str(pin.get("number", ""))}" (effects (font (size 1.27 1.27))))\n'
+            f'\t\t\t)'
+        )
+    pins_block = "\n".join(pin_lines)
+
+    return (
+        f'(kicad_symbol_lib\n'
+        f'\t(version {_KICAD_SYM_VERSION})\n'
+        f'\t(generator "hardware-agent-studio")\n'
+        f'\t(generator_version "0.1")\n'
+        f'\t(symbol "{_sexpr_str(symbol_id)}"\n'
+        f'\t\t(exclude_from_sim no)\n'
+        f'\t\t(in_bom yes)\n'
+        f'\t\t(on_board yes)\n'
+        f'\t\t(property "Reference" "{_sexpr_str(reference_prefix)}"\n'
+        f'\t\t\t(at 0 {_sexpr_num(half_height + 1.27)} 0)\n'
+        f'\t\t\t(effects (font (size 1.27 1.27)))\n'
+        f'\t\t)\n'
+        f'\t\t(property "Value" "{_sexpr_str(symbol_id)}"\n'
+        f'\t\t\t(at 0 {_sexpr_num(-(half_height + 1.27))} 0)\n'
+        f'\t\t\t(effects (font (size 1.27 1.27)))\n'
+        f'\t\t)\n'
+        f'\t\t(symbol "{_sexpr_str(symbol_id)}_0_1"\n'
+        f'\t\t\t(rectangle\n'
+        f'\t\t\t\t(start {_sexpr_num(-half_width)} {_sexpr_num(half_height)})\n'
+        f'\t\t\t\t(end {_sexpr_num(half_width)} {_sexpr_num(-half_height)})\n'
+        f'\t\t\t\t(stroke (width 0) (type default))\n'
+        f'\t\t\t\t(fill (type none))\n'
+        f'\t\t\t)\n'
+        f'\t\t)\n'
+        f'\t\t(symbol "{_sexpr_str(symbol_id)}_1_1"\n'
+        f'{pins_block}\n'
+        f'\t\t)\n'
+        f'\t)\n'
+        f')\n'
+    )
+
+
+def export_symbol_kicad_sym(symbol_id: str) -> str:
+    """Writes a real .kicad_sym file for an already-saved Symbol to
+    library/symbols/<symbol_id>.kicad_sym, returning that path. Real
+    verification (this module's own test suite) is KiCad's own
+    `kicad-cli sym export svg` successfully parsing and rendering the
+    result -- not just plausible-looking text."""
+    symbol = load_symbol(symbol_id)
+    text = _build_kicad_sym_text(symbol)
+    path = os.path.join(_symbols_dir(), f"{symbol_id}.kicad_sym")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
 # --- Footprint ------------------------------------------------------------
 def _footprints_dir() -> str:
     return _ensure_dir("library", "footprints")

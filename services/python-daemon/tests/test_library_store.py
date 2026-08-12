@@ -1,5 +1,7 @@
 import http.server
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -369,6 +371,110 @@ class TestCacheDatasheet(LibraryStoreTestCase):
         finally:
             store._DATASHEET_FETCH_TIMEOUT_S = original_timeout
             server.stop()
+
+
+def _find_kicad_cli():
+    """Same shutil.which-first, real-known-path-fallback convention
+    freecad_bridge.py already uses for freecadcmd. Test-only -- locating
+    kicad-cli robustly for *production* use is SPEC-309's own named open
+    question, not this context's job to solve."""
+    on_path = shutil.which("kicad-cli")
+    if on_path:
+        return on_path
+    macos_path = "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"
+    if os.path.exists(macos_path):
+        return macos_path
+    return None
+
+
+_ATTINY85_PINS = [
+    {"number": "1", "name": "RESET", "electrical_type": "bidirectional"},
+    {"number": "2", "name": "PB3", "electrical_type": "input"},
+    {"number": "3", "name": "PB4", "electrical_type": "output"},
+    {"number": "4", "name": "GND", "electrical_type": "ground"},
+    {"number": "5", "name": "PB0", "electrical_type": "bidirectional"},
+    {"number": "6", "name": "PB1", "electrical_type": "bidirectional"},
+    {"number": "7", "name": "PB2", "electrical_type": "bidirectional"},
+    {"number": "8", "name": "VCC", "electrical_type": "power"},
+]
+
+
+class TestLayoutPins(unittest.TestCase):
+
+    def test_001_splits_pins_evenly_left_and_right(self):
+        layout = store._layout_pins(_ATTINY85_PINS)
+        left = [p for p in layout["pins"] if p["angle"] == 0]
+        right = [p for p in layout["pins"] if p["angle"] == 180]
+        self.assertEqual(len(left), 4)
+        self.assertEqual(len(right), 4)
+
+    def test_002_left_pins_are_negative_x_right_pins_are_positive_x(self):
+        """Matches real KiCad convention confirmed by reading actual
+        .kicad_sym files: angle 0 on the left (negative x), angle 180 on
+        the right (positive x)."""
+        layout = store._layout_pins(_ATTINY85_PINS)
+        for pin in layout["pins"]:
+            if pin["angle"] == 0:
+                self.assertLess(pin["x"], 0)
+            else:
+                self.assertGreater(pin["x"], 0)
+
+    def test_003_pins_on_one_side_are_stacked_on_the_real_2_54mm_grid(self):
+        layout = store._layout_pins(_ATTINY85_PINS)
+        left_ys = sorted(p["y"] for p in layout["pins"] if p["angle"] == 0)
+        gaps = [round(b - a, 4) for a, b in zip(left_ys, left_ys[1:])]
+        self.assertTrue(all(gap == store._KICAD_PIN_PITCH_MM for gap in gaps))
+
+    def test_004_an_odd_pin_count_puts_the_extra_pin_on_the_left(self):
+        layout = store._layout_pins(_ATTINY85_PINS[:5])
+        left = [p for p in layout["pins"] if p["angle"] == 0]
+        right = [p for p in layout["pins"] if p["angle"] == 180]
+        self.assertEqual(len(left), 3)
+        self.assertEqual(len(right), 2)
+
+
+class TestExportSymbolKicadSym(LibraryStoreTestCase):
+
+    def test_001_writes_a_real_file_to_the_symbols_directory(self):
+        store.save_symbol({"symbol_id": "SOIC-8_8pin", "reference_prefix": "U", "pins": _ATTINY85_PINS})
+        path = store.export_symbol_kicad_sym("SOIC-8_8pin")
+        self.assertTrue(path.endswith(os.path.join("library", "symbols", "SOIC-8_8pin.kicad_sym")))
+        with open(path) as f:
+            text = f.read()
+        self.assertIn('(kicad_symbol_lib', text)
+        self.assertIn('"SOIC-8_8pin"', text)
+
+    def test_002_a_real_kicad_cli_parses_and_renders_the_exported_file(self):
+        """The real bar SPEC-307 §2 itself names: a file KiCad's own
+        parser accepts and can render, not just plausible-looking text.
+        Skips cleanly if kicad-cli isn't found on this machine, same
+        convention every other real-tool test in this repo uses."""
+        kicad_cli = _find_kicad_cli()
+        if not kicad_cli:
+            self.skipTest("kicad-cli not found on this machine.")
+
+        store.save_symbol({"symbol_id": "SOIC-8_8pin", "reference_prefix": "U", "pins": _ATTINY85_PINS})
+        path = store.export_symbol_kicad_sym("SOIC-8_8pin")
+
+        with tempfile.TemporaryDirectory() as svg_dir:
+            result = subprocess.run(
+                [kicad_cli, "sym", "export", "svg", "-o", svg_dir, path],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            svgs = [f for f in os.listdir(svg_dir) if f.endswith(".svg")]
+            self.assertEqual(len(svgs), 1)
+
+    def test_003_escapes_a_pin_name_containing_a_double_quote(self):
+        """A malformed .kicad_sym from an unescaped quote is a real,
+        not hypothetical, risk -- pin names come from an LLM extraction
+        (SPEC-202), which never guarantees clean input."""
+        pins = [{"number": "1", "name": 'weird"name', "electrical_type": "passive"}]
+        store.save_symbol({"symbol_id": "weird_1pin", "reference_prefix": "U", "pins": pins})
+        path = store.export_symbol_kicad_sym("weird_1pin")
+        with open(path) as f:
+            text = f.read()
+        self.assertIn('weird\\"name', text)
 
 
 if __name__ == '__main__':
