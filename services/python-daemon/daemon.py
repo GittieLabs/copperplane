@@ -133,8 +133,20 @@ def kicad_generate_component(part_number: str) -> dict:
     component_intelligence.workflow.md DAG (LLM extraction + deterministic
     validation) and returns the validated schema, or raises
     ComponentValidationError -- replacing the old time.sleep(1.5) mock
-    that fabricated filenames and never validated anything."""
-    return component_pipeline.generate_component(part_number, secrets=CONFIG.get("secrets", {}))
+    that fabricated filenames and never validated anything.
+
+    Passes CONFIG["llm_provider"]/["llm_model"] (SPEC-303's Settings UI)
+    through to override the extraction agent's own hardcoded
+    `component_extraction.prompt.md` default when set (CTX-303.1 Plan
+    Drift Deviation 2 -- this route used to always run that hardcoded
+    provider regardless of what was selected in Settings; only llm_chat
+    ever respected it)."""
+    return component_pipeline.generate_component(
+        part_number,
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+    )
 
 
 def kicad_inject_component(schema: dict, x_mm: float, y_mm: float) -> dict:

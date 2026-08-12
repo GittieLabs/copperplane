@@ -398,5 +398,50 @@ class TestDaemonCapabilities(unittest.TestCase):
         self.assertEqual(response["result"]["llm_providers"], ["google"])
 
 
+class TestKicadGenerateComponentProviderOverride(unittest.TestCase):
+    """CTX-303.2: kicad_generate_component used to always run
+    component_extraction.prompt.md's hardcoded provider, completely
+    ignoring CONFIG["llm_provider"]/["llm_model"] -- found only by real
+    end-to-end verification of SPEC-303's Settings UI (CTX-303.1 Plan
+    Drift Deviation 2). Fixed to resolve the same way llm_chat already
+    does."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    @patch('daemon.component_pipeline.generate_component')
+    def test_001_passes_the_configured_provider_and_model_through(self, mock_generate):
+        daemon.CONFIG['llm_provider'] = "google"
+        daemon.CONFIG['llm_model'] = "gemini-flash"
+        daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
+        mock_generate.return_value = {"part_number": "ATtiny85"}
+
+        daemon.kicad_generate_component("ATtiny85")
+
+        _, kwargs = mock_generate.call_args
+        self.assertEqual(kwargs['provider'], "google")
+        self.assertEqual(kwargs['model'], "gemini-flash")
+        self.assertEqual(kwargs['secrets'], {"google_api_key": "fake"})
+
+    @patch('daemon.component_pipeline.generate_component')
+    def test_002_nothing_configured_passes_none_through_not_a_forced_default(self, mock_generate):
+        """Leaves the extraction agent's own prompt-file default intact
+        on a fresh install -- must not regress that by forcing some other
+        default here."""
+        daemon.CONFIG['llm_provider'] = None
+        daemon.CONFIG['llm_model'] = None
+        mock_generate.return_value = {"part_number": "ATtiny85"}
+
+        daemon.kicad_generate_component("ATtiny85")
+
+        _, kwargs = mock_generate.call_args
+        self.assertIsNone(kwargs['provider'])
+        self.assertIsNone(kwargs['model'])
+
+
 if __name__ == '__main__':
     unittest.main()

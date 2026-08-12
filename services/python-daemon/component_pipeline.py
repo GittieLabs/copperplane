@@ -144,15 +144,48 @@ async def validate_component_schema(message: str, prior_outputs: dict) -> NodeOu
     )
 
 
-def _build_agent_executor(agent_name: str, loader: ConfigLoader, secrets: dict) -> tuple:
+def _build_agent_executor(
+    agent_name: str, loader: ConfigLoader, secrets: dict, provider: str = None, model: str = None,
+) -> tuple:
     """Returns (AgentExecutor, provider_client) -- the raw provider client
     is returned alongside so the caller can close it explicitly, since
     AgentExecutor calls the provider's own .chat() directly (not
     llm_providers.chat(), which already carries CTX-201.1's close-in-
     same-loop fix). Without this, each real workflow run leaks an
     unclosed async client the same way llm_providers.chat() itself did
-    before that fix -- caught here the same way, by running it for real."""
+    before that fix -- caught here the same way, by running it for real.
+
+    `provider`/`model` (SPEC-303, CTX-303.2) override the agent's own
+    `.prompt.md` frontmatter default when given -- daemon.py resolves
+    these from CONFIG["llm_provider"]/["llm_model"] (the Settings-
+    configured value), the same precedence llm_chat already uses. Neither
+    given leaves the prompt file's own hardcoded default untouched, so a
+    fresh install with nothing configured in Settings yet behaves exactly
+    as before (CTX-303.1 Plan Drift Deviation 2 -- this used to always run
+    the extraction agent's own hardcoded provider, ignoring Settings
+    entirely).
+
+    Switching `provider` without an explicit `model` does NOT keep the
+    prompt file's own model default -- that default is provider-specific
+    (e.g. an Anthropic model name) and is invalid for a different
+    provider's API, which a real call against Google proved directly:
+    an empty response, surfaced as a confusing JSON-parse error rather
+    than an obviously-wrong-model error. Falls back to that new
+    provider's own default model instead, the same fallback
+    `llm_providers._build_provider` already applies when `model` is
+    falsy -- applied explicitly here since `config.model` would
+    otherwise never be falsy."""
     config, prompt_body = loader.get_agent(agent_name)
+    overrides = {}
+    if provider:
+        overrides["provider"] = provider
+    if model:
+        overrides["model"] = model
+    elif provider:
+        overrides["model"] = llm_providers._DEFAULT_MODELS.get(provider, config.model)
+    if overrides:
+        config = config.model_copy(update=overrides)
+
     api_key = secrets.get(f"{config.provider}_api_key", "")
     provider_client = llm_providers._build_provider(config.provider, api_key, config.model)
     executor = AgentExecutor(config=config, prompt_body=prompt_body, llm=provider_client)
@@ -170,13 +203,17 @@ async def _run_workflow_and_close(executor: WorkflowExecutor, part_number: str, 
             await llm_providers._close_provider_client(provider_client)
 
 
-def generate_component(part_number: str, secrets: dict = None) -> dict:
+def generate_component(part_number: str, secrets: dict = None, provider: str = None, model: str = None) -> dict:
     """The kicad.generate_component route (SPEC-202): runs the real
     extract -> validate DAG and returns the validated schema, or raises
     ComponentValidationError for any check failure. Synchronous, matching
     daemon.py's ROUTES dispatch (SPEC-102) -- the async/sync boundary is
     resolved here, the same pattern llm_providers.chat already
-    established for SPEC-201."""
+    established for SPEC-201.
+
+    `provider`/`model` (SPEC-303, CTX-303.2) let the caller (daemon.py,
+    from CONFIG["llm_provider"]/["llm_model"]) override the extraction
+    agent's own hardcoded default -- see _build_agent_executor."""
     secrets = secrets or {}
 
     loader = ConfigLoader(_AGENTFLOW_DIR)
@@ -187,7 +224,7 @@ def generate_component(part_number: str, secrets: dict = None) -> dict:
 
     def runner_factory(node_id: str) -> NodeRunner:
         node = next(n for n in config.nodes if n.id == node_id)
-        executor, provider_client = _build_agent_executor(node.agent, loader, secrets)
+        executor, provider_client = _build_agent_executor(node.agent, loader, secrets, provider, model)
         provider_clients.append(provider_client)
         return NodeRunner(node, executor)
 
