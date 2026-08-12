@@ -192,6 +192,64 @@ def _build_agent_executor(
     return executor, provider_client
 
 
+_SEARCH_REQUIRED_FIELDS = ("part_number", "manufacturer", "package", "datasheet_url", "confidence")
+_SEARCH_CONFIDENCE_LEVELS = ("high", "medium", "low")
+
+
+def _validate_candidates(candidates) -> list:
+    """SPEC-306 §2: the disambiguation card is the only place a bad
+    identity guess gets caught, so a malformed response fails closed here
+    rather than reaching the UI as a half-populated card. `confidence` is
+    a closed enum (matching component_extraction.prompt.md's own
+    electrical_type enum pattern) so the UI can render a predictable
+    label, never a raw, possibly-inconsistent float."""
+    if not isinstance(candidates, list) or not candidates:
+        raise ComponentValidationError("Search did not return a non-empty list of candidates.")
+    for candidate in candidates:
+        missing = [f for f in _SEARCH_REQUIRED_FIELDS if not candidate.get(f)]
+        if missing:
+            raise ComponentValidationError(
+                f"Search candidate is missing required field(s): {', '.join(missing)}."
+            )
+        if candidate["confidence"] not in _SEARCH_CONFIDENCE_LEVELS:
+            raise ComponentValidationError(
+                f"Search candidate confidence '{candidate['confidence']}' is not one of "
+                f"{_SEARCH_CONFIDENCE_LEVELS}."
+            )
+    return candidates
+
+
+async def _run_agent_and_close(executor: AgentExecutor, message: str, provider_client) -> str:
+    """Runs a single standalone agent call (no WorkflowExecutor/DAG --
+    search has no deterministic validate step the way generate_component
+    does) and closes its provider client in the same event loop, same
+    reason _run_workflow_and_close does."""
+    try:
+        output = await executor.run(message=message)
+        return output.text
+    finally:
+        await llm_providers._close_provider_client(provider_client)
+
+
+def search_components(query: str, secrets: dict = None, provider: str = None, model: str = None) -> list:
+    """The component.search route (SPEC-306): a free-text query in,
+    ranked candidates out -- a sibling to generate_component, not a
+    branch inside it, since it's a distinct extraction shape (multiple
+    ranked candidates with a confidence signal, not one committed
+    schema). Never auto-selects a single result, even a high-confidence
+    one -- that's the UI's job to enforce by always rendering a
+    disambiguation card (SPEC-306 §2)."""
+    secrets = secrets or {}
+
+    loader = ConfigLoader(_AGENTFLOW_DIR)
+    loader.load()
+    executor, provider_client = _build_agent_executor("component_search", loader, secrets, provider, model)
+
+    text = asyncio.run(_run_agent_and_close(executor, query, provider_client))
+    candidates = _extract_json(text)
+    return _validate_candidates(candidates)
+
+
 async def _run_workflow_and_close(executor: WorkflowExecutor, part_number: str, provider_clients: list) -> dict:
     """Runs the workflow and closes every provider client built along the
     way, all inside the same event loop -- see _build_agent_executor's
