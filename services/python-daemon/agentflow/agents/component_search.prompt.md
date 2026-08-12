@@ -4,7 +4,7 @@ description: Ranks candidate parts matching a free-text search query, with a con
 provider: anthropic
 model: claude-sonnet-4-6
 temperature: 0.2
-max_tokens: 2048
+max_tokens: 3072
 ---
 You are a hardware component search assistant. Given a free-text query -- a part number the user
 may have misspelled or misremembered, a rough description, or a partial name -- respond with ONLY a
