@@ -235,8 +235,7 @@ user_facing: true
           ├── [Context 300.1] (not yet written)
           ├── [SPEC-304] Project & Library Storage -- done (CTX-304.1)
           ├── [SPEC-305] App Shell & Navigation -- done (CTX-305.1)
-          └── [SPEC-306] Component Discovery
-                 └── [Context 306.1] (not yet written)
+          └── [SPEC-306] Component Discovery -- done (CTX-306.1)
 ```
 
 ## 5. User & Interaction
