@@ -89,6 +89,12 @@ except Exception:
     logger.exception("component_pipeline failed to import -- kicad.generate_component will be unavailable")
     component_pipeline = None
 
+try:
+    import library_store
+except Exception:
+    logger.exception("library_store failed to import -- library.*/project.* routes will be unavailable")
+    library_store = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -129,6 +135,8 @@ def _apply_env_config() -> None:
             socket_path=env_config.get("kicad_socket_path"),
             timeout_ms=env_config.get("kicad_timeout_ms"),
         )
+    if library_store is not None:
+        library_store.configure(storage_root=env_config.get("storage_root"))
 
     CONFIG["llm_provider"] = env_config.get("llm_provider")
     CONFIG["llm_model"] = env_config.get("llm_model")
@@ -164,6 +172,71 @@ def kicad_inject_component(schema: dict, x_mm: float, y_mm: float) -> dict:
     called -- the caller (eventually SPEC-204's confirmation gate) is
     solely responsible for only invoking this after approval."""
     return kicad_bridge.inject_component(schema, (x_mm, y_mm))
+
+
+# --- library.*/project.* routes (SPEC-304, CTX-304.1) -----------------
+# Thin wrappers over library_store, matching kicad_generate_component's
+# own pattern of naming daemon-level routes distinctly from the bridge
+# module functions they delegate to.
+def library_save_part(part: dict) -> dict:
+    return library_store.save_part(part)
+
+
+def library_load_part(part_id: str) -> dict:
+    return library_store.load_part(part_id)
+
+
+def library_list_parts() -> list:
+    return library_store.list_parts()
+
+
+def library_save_symbol(symbol: dict) -> dict:
+    return library_store.save_symbol(symbol)
+
+
+def library_load_symbol(symbol_id: str) -> dict:
+    return library_store.load_symbol(symbol_id)
+
+
+def library_save_footprint(footprint: dict) -> dict:
+    return library_store.save_footprint(footprint)
+
+
+def library_load_footprint(footprint_id: str) -> dict:
+    return library_store.load_footprint(footprint_id)
+
+
+def project_save(project: dict) -> dict:
+    return library_store.save_project(project)
+
+
+def project_load(name: str) -> dict:
+    return library_store.load_project(name)
+
+
+def project_list() -> list:
+    return library_store.list_projects()
+
+
+def project_save_artifact(project_name: str, artifact: dict) -> dict:
+    return library_store.save_artifact(project_name, artifact)
+
+
+def project_load_artifact(project_name: str, artifact_id: str) -> dict:
+    return library_store.load_artifact(project_name, artifact_id)
+
+
+def project_list_artifacts(project_name: str) -> list:
+    return library_store.list_artifacts(project_name)
+
+
+def project_append_conversation_turn(project_name: str, turn: dict) -> dict:
+    library_store.append_conversation_turn(project_name, turn)
+    return {"appended": True}
+
+
+def project_load_conversation(project_name: str) -> list:
+    return library_store.load_conversation(project_name)
 
 
 class InvalidParamsError(Exception):
@@ -273,6 +346,22 @@ def _build_routes() -> dict:
         routes["llm.chat"] = llm_chat
     if component_pipeline is not None:
         routes["kicad.generate_component"] = kicad_generate_component
+    if library_store is not None:
+        routes["library.save_part"] = library_save_part
+        routes["library.load_part"] = library_load_part
+        routes["library.list_parts"] = library_list_parts
+        routes["library.save_symbol"] = library_save_symbol
+        routes["library.load_symbol"] = library_load_symbol
+        routes["library.save_footprint"] = library_save_footprint
+        routes["library.load_footprint"] = library_load_footprint
+        routes["project.save"] = project_save
+        routes["project.load"] = project_load
+        routes["project.list"] = project_list
+        routes["project.save_artifact"] = project_save_artifact
+        routes["project.load_artifact"] = project_load_artifact
+        routes["project.list_artifacts"] = project_list_artifacts
+        routes["project.append_conversation_turn"] = project_append_conversation_turn
+        routes["project.load_conversation"] = project_load_conversation
     return routes
 
 
