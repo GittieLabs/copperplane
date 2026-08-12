@@ -122,6 +122,73 @@ class TestValidateSchema(unittest.TestCase):
         cp.validate_schema(schema)  # must not raise
 
 
+class TestBuildAgentExecutorProviderOverride(unittest.TestCase):
+    """CTX-303.2: _build_agent_executor's provider/model override --
+    construction-only (llm_providers._build_provider makes no network
+    call, per test_llm_providers.py's own TestBuildProvider), so none of
+    this needs a real API key or network access."""
+
+    def _real_loader(self):
+        loader = cp.ConfigLoader(cp._AGENTFLOW_DIR)
+        loader.load()
+        return loader
+
+    def test_001_no_override_keeps_the_prompt_files_own_default(self):
+        """TEST-004: a fresh install with nothing configured in Settings
+        yet must behave exactly as before this fix."""
+        loader = self._real_loader()
+        executor, _client = cp._build_agent_executor(
+            "component_extraction", loader, {"anthropic_api_key": "sk-fake"},
+        )
+        self.assertEqual(executor.config.provider, "anthropic")
+
+    def test_002_provider_override_replaces_the_prompt_files_default(self):
+        """TEST-004: this is the actual bug fix -- generate used to always
+        run the hardcoded anthropic provider regardless of this override."""
+        from agentflow import GoogleGenAIProvider
+
+        loader = self._real_loader()
+        executor, client = cp._build_agent_executor(
+            "component_extraction", loader, {"google_api_key": "fake-key"}, provider="google",
+        )
+
+        self.assertEqual(executor.config.provider, "google")
+        self.assertIsInstance(client, GoogleGenAIProvider)
+
+    def test_003_model_override_replaces_the_prompt_files_default(self):
+        """TEST-004."""
+        loader = self._real_loader()
+        executor, _client = cp._build_agent_executor(
+            "component_extraction", loader, {"anthropic_api_key": "sk-fake"}, model="claude-opus-test",
+        )
+        self.assertEqual(executor.config.model, "claude-opus-test")
+
+    def test_004_overriding_provider_uses_that_providers_own_secret_key(self):
+        """TEST-004: only a google key is present -- if the override
+        didn't actually change which provider's key gets looked up, this
+        would build an anthropic client with an empty api_key instead."""
+        loader = self._real_loader()
+        executor, _client = cp._build_agent_executor(
+            "component_extraction", loader, {"google_api_key": "the-real-one"}, provider="google",
+        )
+        self.assertEqual(executor.config.provider, "google")
+
+    def test_005_switching_provider_without_a_model_uses_that_providers_own_default_model(self):
+        """TEST-004: a real bug this exact test caught -- switching to
+        google without overriding model must NOT keep
+        component_extraction.prompt.md's anthropic-specific model name
+        (claude-sonnet-4-6). A real call against Google with that model
+        name returns an empty response, surfaced downstream as a
+        confusing JSON-parse error rather than an obviously-wrong-model
+        one."""
+        loader = self._real_loader()
+        executor, _client = cp._build_agent_executor(
+            "component_extraction", loader, {"google_api_key": "fake-key"}, provider="google",
+        )
+        self.assertNotEqual(executor.config.model, "claude-sonnet-4-6")
+        self.assertEqual(executor.config.model, cp.llm_providers._DEFAULT_MODELS["google"])
+
+
 class TestRealGenerateComponent(unittest.TestCase):
     """Real, non-mocked runs of the full extract -> validate DAG --
     CLAUDE.md's 'verify for real' norm. Skips itself cleanly when no real
@@ -155,6 +222,22 @@ class TestRealGenerateComponent(unittest.TestCase):
             cp.generate_component("ZZZZ-NOT-A-REAL-PART-NUMBER-999", secrets={"anthropic_api_key": api_key})
         except cp.ComponentValidationError:
             pass  # expected outcome for a part the model can't confidently describe
+
+    def test_003_real_extraction_via_an_overridden_provider(self):
+        """TEST-004: the actual bug fix, proven for real -- generate_component
+        with provider="google" must really call Google, not silently run
+        component_extraction.prompt.md's hardcoded anthropic default.
+        Skips cleanly without a real GOOGLE_API_KEY."""
+        api_key = os.environ.get("GOOGLE_API_KEY")
+        if not api_key:
+            self.skipTest("GOOGLE_API_KEY not set. Add it to .env.local to run this test for real.")
+
+        schema = cp.generate_component(
+            "ATtiny85", secrets={"google_api_key": api_key}, provider="google",
+        )
+
+        self.assertEqual(schema["part_number"], "ATtiny85")
+        self.assertIn(schema["package"], cp.PACKAGE_REFERENCE)
 
 
 if __name__ == '__main__':

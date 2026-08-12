@@ -34,6 +34,9 @@ EXPECTED_SKIPS = {
     # component pipeline's real-extraction tests skip themselves cleanly.
     "test_001_real_extraction_and_validation_succeeds_for_a_real_part",
     "test_002_a_nonexistent_part_number_is_handled_as_a_clean_error_or_a_valid_guess",
+    # CTX-303.2: proves the provider-override fix for real against Google
+    # -- no real GOOGLE_API_KEY exists on a CI runner either.
+    "test_003_real_extraction_via_an_overridden_provider",
     "test_001_kicad_generate_component_dispatched_through_handle_request_reports_job_completed",
 }
 
