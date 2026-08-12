@@ -2,6 +2,7 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-shell'
 import { useState } from 'react'
 import { cacheDatasheet, searchComponents, type ComponentCandidate } from '../lib/components'
+import { PartDetail } from './PartDetail'
 
 type Status = 'idle' | 'searching' | 'error'
 
@@ -121,7 +122,6 @@ export function ComponentDiscovery() {
             </button>
           </div>
         )}
-        <p className="text-xs text-neutral-600">Part Detail (SPEC-307) isn't built yet.</p>
         <button
           type="button"
           className="mt-2 self-start rounded border border-neutral-700 px-3 py-1 text-xs"
@@ -129,6 +129,10 @@ export function ComponentDiscovery() {
         >
           Back to results
         </button>
+
+        <div className="mt-2 border-t border-neutral-800 pt-3">
+          <PartDetail candidate={confirmed.candidate} />
+        </div>
       </div>
     )
   }
