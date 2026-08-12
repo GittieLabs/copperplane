@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { submitJob, type JobHandle } from './lib/ipc'
 import { parseCommand } from './lib/commands'
 import { EnclosureViewer } from './components/EnclosureViewer'
+import { Settings } from './components/Settings'
 
 // SPEC-108's own Cross-Module Impacts section names a fixed placement
 // position as enough for a first UI trigger ("even a hardcoded
@@ -35,6 +36,12 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [latestSchema, setLatestSchema] = useState<Record<string, unknown> | null>(null)
   const [chatHistory, setChatHistory] = useState<HistoryTurn[]>([])
+  // SPEC-303: a plain, temporary trigger -- SPEC-300's real rail shell
+  // (SPEC-305) doesn't exist in code yet, same stopgap pattern CTX-108.3
+  // used for kicad.inject_component. Not the permanent placement PR #48
+  // describes (a fixed rail item beside Library); this just makes the
+  // screen reachable at all.
+  const [showSettings, setShowSettings] = useState(false)
 
   async function handleSend() {
     const text = input.trim()
@@ -133,34 +140,50 @@ function App() {
 
   return (
     <main className="flex min-h-screen flex-col items-center gap-8 bg-neutral-950 p-8 text-neutral-100">
-      <h1 className="text-2xl font-medium">Hardware Agent Studio</h1>
-      <div className="flex w-full max-w-md flex-col gap-3">
-        <div className="flex flex-col gap-2">
-          {messages.map((message) => (
-            <ChatMessageView key={message.id} message={message} />
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <input
-            className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
-            placeholder="generate ATtiny85, inject, or just ask a question"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleSend()
-            }}
-          />
-          <button
-            type="button"
-            className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
-            onClick={handleSend}
-            disabled={input.trim().length === 0}
-          >
-            Send
-          </button>
-        </div>
+      <div className="flex w-full max-w-md items-center justify-between">
+        <h1 className="text-2xl font-medium">Hardware Agent Studio</h1>
+        <button
+          type="button"
+          className="rounded border border-neutral-700 px-3 py-1 text-sm"
+          onClick={() => setShowSettings((prev) => !prev)}
+        >
+          {showSettings ? 'Back' : 'Settings'}
+        </button>
       </div>
-      <EnclosurePanel />
+
+      {showSettings ? (
+        <Settings />
+      ) : (
+        <>
+          <div className="flex w-full max-w-md flex-col gap-3">
+            <div className="flex flex-col gap-2">
+              {messages.map((message) => (
+                <ChatMessageView key={message.id} message={message} />
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                placeholder="generate ATtiny85, inject, or just ask a question"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSend()
+                }}
+              />
+              <button
+                type="button"
+                className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
+                onClick={handleSend}
+                disabled={input.trim().length === 0}
+              >
+                Send
+              </button>
+            </div>
+          </div>
+          <EnclosurePanel />
+        </>
+      )}
     </main>
   )
 }

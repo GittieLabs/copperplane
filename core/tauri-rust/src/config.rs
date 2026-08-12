@@ -35,20 +35,58 @@ pub struct DaemonConfig {
     pub output_dir: Option<String>,
 }
 
+/// `AppHandle`-free core of `load_config`, directly unit-testable against
+/// a real (temporary) filesystem directory rather than a live Tauri app --
+/// the same split this file already uses for `ensure_output_dir`.
+fn load_config_from_dir(dir: &std::path::Path) -> DaemonConfig {
+    match std::fs::read_to_string(dir.join("config.json")) {
+        Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+        Err(_) => DaemonConfig::default(),
+    }
+}
+
 /// Loads `config.json` from the app's own config directory, defaulting to
 /// an all-`None` config if the file doesn't exist yet (first run) -- not
 /// an error, since there's nothing wrong with never having configured
 /// anything.
 pub fn load_config(app: &AppHandle) -> DaemonConfig {
-    let path = match app.path().app_config_dir() {
-        Ok(dir) => dir.join("config.json"),
-        Err(_) => return DaemonConfig::default(),
-    };
-
-    match std::fs::read_to_string(&path) {
-        Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
+    match app.path().app_config_dir() {
+        Ok(dir) => load_config_from_dir(&dir),
         Err(_) => DaemonConfig::default(),
     }
+}
+
+/// `AppHandle`-free core of `save_config`; see `load_config_from_dir`.
+fn save_config_to_dir(dir: &std::path::Path, config: &DaemonConfig) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let json = serde_json::to_string_pretty(config).map_err(std::io::Error::other)?;
+    std::fs::write(dir.join("config.json"), json)
+}
+
+/// Writes `config` to `config.json` in the app's own config directory
+/// (SPEC-303) -- `load_config` above only ever read this file; nothing
+/// wrote it until now. `output_dir` is included if set, but harmless
+/// either way -- `spawn_daemon` always overwrites it with the real,
+/// Rust-computed value before it's ever serialized for the daemon.
+pub fn save_config(app: &AppHandle, config: &DaemonConfig) -> std::io::Result<()> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    save_config_to_dir(&dir, config)
+}
+
+/// Tauri command wrapper so the Settings UI (SPEC-303) can read the
+/// current non-secret configuration to prefill its form.
+#[tauri::command]
+pub fn get_config(app: AppHandle) -> DaemonConfig {
+    load_config(&app)
+}
+
+/// Tauri command wrapper around `save_config`.
+#[tauri::command]
+pub fn save_config_cmd(app: AppHandle, config: DaemonConfig) -> Result<(), String> {
+    save_config(&app, &config).map_err(|e| e.to_string())
 }
 
 /// Serializes `config` into the single env var the daemon reads at
@@ -87,6 +125,36 @@ pub fn resolve_output_dir(app: &AppHandle) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_config_to_dir_and_load_config_from_dir_round_trip_a_real_file() {
+        let base = std::env::temp_dir().join(format!("ctx-303.1-config-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        let config = DaemonConfig {
+            freecadcmd_path_override: Some("/opt/freecad/bin/freecadcmd".to_string()),
+            kicad_socket_path: Some("/tmp/kicad/api.sock".to_string()),
+            kicad_timeout_ms: Some(5000),
+            llm_provider: Some("anthropic".to_string()),
+            llm_model: Some("claude-sonnet".to_string()),
+            output_dir: None,
+        };
+
+        save_config_to_dir(&base, &config).expect("save_config_to_dir should succeed");
+        let loaded = load_config_from_dir(&base);
+
+        assert_eq!(loaded, config);
+        std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
+    }
+
+    #[test]
+    fn load_config_from_dir_defaults_cleanly_when_no_file_exists_yet() {
+        let base = std::env::temp_dir().join(format!("ctx-303.1-config-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        let loaded = load_config_from_dir(&base);
+        assert_eq!(loaded, DaemonConfig::default());
+    }
 
     #[test]
     fn build_daemon_env_serializes_set_fields_and_omits_unset_ones() {

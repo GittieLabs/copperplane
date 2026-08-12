@@ -33,7 +33,13 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![daemon::dispatch_to_daemon])
+        .invoke_handler(tauri::generate_handler![
+            daemon::dispatch_to_daemon,
+            secrets::save_secret,
+            secrets::clear_secret,
+            config::get_config,
+            config::save_config_cmd,
+        ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {

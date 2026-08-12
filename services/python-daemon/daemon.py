@@ -94,6 +94,12 @@ _DAEMON_CONFIG_ENV_VAR = "HAS_DAEMON_CONFIG"
 # read on this side until SPEC-201 -- its first real consumer.
 CONFIG = {"secrets": {}, "llm_provider": None, "llm_model": None}
 
+# Providers that need a stored API key to be usable (SPEC-303) -- matches
+# core/tauri-rust/src/daemon.rs's KNOWN_SECRET_KEYS allowlist and
+# llm_chat's own f"{provider}_api_key" lookup convention. Ollama needs no
+# key (a local server), so it's never reported here.
+_KEY_BASED_PROVIDERS = ("anthropic", "google", "openai", "perplexity")
+
 
 def _apply_env_config() -> None:
     raw = os.environ.get(_DAEMON_CONFIG_ENV_VAR)
@@ -153,14 +159,36 @@ class JobNotFoundError(Exception):
 # supply directly over the wire.
 _INTERNAL_ONLY_PARAMS = {"cancel_event"}
 
-def configure_daemon(secrets: dict = None) -> dict:
-    """The daemon.configure route (SPEC-106 §2): merges secrets Rust hands
-    over on the daemon's very first request into CONFIG. Ordinary route,
-    dispatched through the normal ROUTES registry like anything else --
-    Rust's spawn_daemon (CTX-106.1) is what guarantees this line reaches
-    stdin before any other, not any special-casing here."""
-    CONFIG["secrets"] = dict(secrets) if secrets else {}
+def configure_daemon(secrets: dict = None, llm_provider: str = None, llm_model: str = None) -> dict:
+    """The daemon.configure route (SPEC-106 §2, extended by SPEC-303):
+    merges secrets Rust hands over on the daemon's very first request into
+    CONFIG. Ordinary route, dispatched through the normal ROUTES registry
+    like anything else -- Rust's spawn_daemon (CTX-106.1) is what
+    guarantees this line reaches stdin before any other, not any
+    special-casing here.
+
+    Also callable again later, live, from the Settings UI (SPEC-303) --
+    `secrets` is always the *complete* current set when sent that way
+    (core/tauri-rust's collect_known_secrets/sync_secrets_to_daemon), so
+    replacing CONFIG["secrets"] wholesale is correct either way, not a
+    partial-update bug. `llm_provider`/`llm_model` default to None meaning
+    "leave unchanged" -- Rust's spawn-time call never passes them, so this
+    extension can't regress that call."""
+    if secrets is not None:
+        CONFIG["secrets"] = dict(secrets)
+    if llm_provider is not None:
+        CONFIG["llm_provider"] = llm_provider
+    if llm_model is not None:
+        CONFIG["llm_model"] = llm_model
     return {"configured": True}
+
+
+def get_daemon_capabilities() -> dict:
+    """The daemon.get_capabilities route (SPEC-303): re-runs the same
+    cheap, non-blocking checks daemon.ready reports once at boot, on
+    demand -- so the Settings UI can refresh what's actually configured
+    right after a save/clear, without waiting for the next restart."""
+    return _detect_capabilities()
 
 
 def llm_chat(
@@ -213,6 +241,7 @@ def _build_routes() -> dict:
     routes = {
         "job.cancel": cancel_job,
         "daemon.configure": configure_daemon,
+        "daemon.get_capabilities": get_daemon_capabilities,
     }
     if get_kicad_version is not None:
         routes["kicad.get_version"] = get_kicad_version
@@ -413,11 +442,15 @@ def _detect_capabilities() -> dict:
         except Exception:
             freecad_available = False
 
+    configured_secrets = CONFIG.get("secrets", {})
+
     return {
         "kicad_available": kicad_available,
         "freecad_available": freecad_available,
-        # SPEC-201 is the first spec with a real provider to report here.
-        "llm_providers": [],
+        # SPEC-303: reflects which providers actually have a key configured
+        # right now, fixed from a hardcoded [] that predated any real
+        # settings surface to populate it.
+        "llm_providers": [p for p in _KEY_BASED_PROVIDERS if configured_secrets.get(f"{p}_api_key")],
     }
 
 
