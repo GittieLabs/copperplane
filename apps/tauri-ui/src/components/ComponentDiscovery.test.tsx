@@ -19,6 +19,15 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
   open: (...args: unknown[]) => openMock(...args),
 }))
 
+// PartDetail (SPEC-307) has its own dedicated test file; stubbed here so
+// ComponentDiscovery's tests stay focused on search/confirm/cache and
+// don't need to mock PartDetail's own real extraction call.
+vi.mock('./PartDetail', () => ({
+  PartDetail: ({ candidate }: { candidate: { part_number: string } }) => (
+    <p>PartDetail stub for {candidate.part_number}</p>
+  ),
+}))
+
 const { ComponentDiscovery } = await import('./ComponentDiscovery')
 
 function search(query: string) {
@@ -109,7 +118,7 @@ describe('ComponentDiscovery', () => {
 
     await waitFor(() => screen.getByText(/Confirmed: ATtiny85/))
     screen.getByText(/Datasheet cached: \/storage\/library\/datasheets\/ATtiny85\.pdf/)
-    screen.getByText("Part Detail (SPEC-307) isn't built yet.")
+    screen.getByText('PartDetail stub for ATtiny85')
     expect(cacheDatasheetMock).toHaveBeenCalledWith('ATtiny85', 'https://example.com/attiny85.pdf')
 
     fireEvent.click(screen.getByRole('button', { name: 'Open datasheet' }))

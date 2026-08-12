@@ -3,6 +3,7 @@ import logging
 import logging.handlers
 import os
 import platform
+import re
 import sys
 import json
 import threading
@@ -222,6 +223,70 @@ def library_load_symbol(symbol_id: str) -> dict:
     return library_store.load_symbol(symbol_id)
 
 
+def _derive_symbol_id(package: str, pin_count: int) -> str:
+    """SPEC-307 §3's own named gotcha: Symbols are meant to be shared
+    across Parts (SPEC-300 §2.1), so symbol_id is derived from a
+    package + pin-count signature rather than a random id -- two Parts
+    with an identical pinout converge on one Symbol record instead of
+    silently duplicating. Sanitized for filesystem safety since it
+    becomes part of a real file path (export_symbol_kicad_sym)."""
+    safe_package = re.sub(r"[^A-Za-z0-9_-]", "_", package or "unknown")
+    return f"{safe_package}_{pin_count}pin"
+
+
+def library_save_confirmed_part(candidate: dict, extraction: dict) -> dict:
+    """The library.save_confirmed_part route (SPEC-307): assembles Part
+    provenance from two calls this route already has rather than
+    reopening component_pipeline.py's own output shape --
+    manufacturer/datasheet_url from SPEC-306's search candidate
+    (source: "search", the candidate's own confidence), package/pins
+    from this route's own extraction call (source: "llm_extraction").
+    Saves the Symbol first (Parts reference it by id), then the Part.
+
+    The extraction's real provider/model come from CONFIG, resolved the
+    same way kicad_generate_component itself resolves them -- the
+    frontend only ever calls kicad.generate_component, it never learns
+    which provider/model CONFIG actually picked, so this route must
+    look it up itself rather than trust a caller-supplied value."""
+    pins = extraction.get("pins", [])
+    symbol_id = _derive_symbol_id(extraction.get("package"), len(pins))
+
+    symbol = library_store.save_symbol({
+        "symbol_id": symbol_id,
+        "reference_prefix": "U",
+        "pins": pins,
+    })
+
+    search_provenance = {"source": "search", "confidence": candidate.get("confidence")}
+    extraction_provenance = {
+        "source": "llm_extraction",
+        "provider": CONFIG.get("llm_provider"),
+        "model": CONFIG.get("llm_model"),
+    }
+
+    part = library_store.save_part({
+        "part_id": extraction.get("part_number") or candidate.get("part_number"),
+        "manufacturer": candidate.get("manufacturer"),
+        "package": extraction.get("package"),
+        "pins": pins,
+        "datasheet_url": candidate.get("datasheet_url"),
+        "footprint_id": None,
+        "symbol_id": symbol_id,
+        "provenance": {
+            "manufacturer": search_provenance,
+            "datasheet_url": search_provenance,
+            "package": extraction_provenance,
+            "pins": extraction_provenance,
+        },
+    })
+
+    return {"part": part, "symbol": symbol}
+
+
+def library_export_symbol(symbol_id: str) -> dict:
+    return {"path": library_store.export_symbol_kicad_sym(symbol_id)}
+
+
 def library_save_footprint(footprint: dict) -> dict:
     return library_store.save_footprint(footprint)
 
@@ -378,6 +443,8 @@ def _build_routes() -> dict:
         routes["library.list_parts"] = library_list_parts
         routes["library.save_symbol"] = library_save_symbol
         routes["library.load_symbol"] = library_load_symbol
+        routes["library.save_confirmed_part"] = library_save_confirmed_part
+        routes["library.export_symbol"] = library_export_symbol
         routes["library.save_footprint"] = library_save_footprint
         routes["library.load_footprint"] = library_load_footprint
         routes["project.save"] = project_save

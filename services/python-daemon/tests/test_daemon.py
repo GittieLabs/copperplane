@@ -342,6 +342,90 @@ class TestLibraryRoutes(unittest.TestCase):
         response = self._dispatch("library.save_part", {"part": {"part_id": "X"}})
         self.assertIn("error", response)
 
+    def test_004_save_confirmed_part_builds_provenance_from_the_candidate_and_extraction(self):
+        """CTX-307.1 (SPEC-307): manufacturer/datasheet_url provenance
+        comes from the SPEC-306 search candidate; package/pins
+        provenance comes from this route's own extraction call. The
+        result must pass CTX-304.1's own _validate_part_provenance
+        check for real, not just look right."""
+        candidate = {
+            "part_number": "ATtiny85",
+            "manufacturer": "Microchip",
+            "package": "DIP-8",
+            "datasheet_url": "https://example.com/attiny85.pdf",
+            "confidence": "high",
+            "rationale": "Exact match.",
+        }
+        extraction = {
+            "part_number": "ATtiny85",
+            "package": "SOIC-8",
+            "pins": [
+                {"number": "1", "name": "RESET", "electrical_type": "bidirectional"},
+                {"number": "2", "name": "GND", "electrical_type": "ground"},
+            ],
+        }
+
+        original_config = dict(daemon.CONFIG)
+        daemon.CONFIG["llm_provider"] = "google"
+        daemon.CONFIG["llm_model"] = "gemini-flash"
+        try:
+            response = self._dispatch(
+                "library.save_confirmed_part", {"candidate": candidate, "extraction": extraction},
+            )
+        finally:
+            daemon.CONFIG.clear()
+            daemon.CONFIG.update(original_config)
+        self.assertNotIn("error", response)
+
+        part = daemon.library_store.load_part("ATtiny85")
+        self.assertEqual(part["manufacturer"], "Microchip")
+        self.assertEqual(part["package"], "SOIC-8")
+        self.assertEqual(part["provenance"]["manufacturer"]["source"], "search")
+        self.assertEqual(part["provenance"]["manufacturer"]["confidence"], "high")
+        self.assertEqual(part["provenance"]["package"]["source"], "llm_extraction")
+        self.assertEqual(part["provenance"]["package"]["model"], "gemini-flash")
+
+        symbol = daemon.library_store.load_symbol(part["symbol_id"])
+        self.assertEqual(len(symbol["pins"]), 2)
+
+    def test_005_save_confirmed_part_reuses_the_same_symbol_for_an_identical_pinout(self):
+        """SPEC-307 §3's own named gotcha: symbol_id is a package+pin-count
+        signature, not a random id, so a second Part with the same
+        package/pin-count converges on one Symbol record."""
+        candidate_1 = {"part_number": "ATtiny85", "manufacturer": "Microchip", "confidence": "high"}
+        candidate_2 = {"part_number": "ATtiny45", "manufacturer": "Microchip", "confidence": "high"}
+        extraction = {
+            "part_number": "X",
+            "package": "SOIC-8",
+            "pins": [{"number": str(i), "name": f"P{i}", "electrical_type": "passive"} for i in range(1, 9)],
+        }
+
+        r1 = self._dispatch(
+            "library.save_confirmed_part", {"candidate": candidate_1, "extraction": {**extraction, "part_number": "ATtiny85"}},
+        )
+        r2 = self._dispatch(
+            "library.save_confirmed_part", {"candidate": candidate_2, "extraction": {**extraction, "part_number": "ATtiny45"}},
+        )
+
+        self.assertEqual(r1["result"]["symbol"]["symbol_id"], r2["result"]["symbol"]["symbol_id"])
+
+    def test_006_export_symbol_dispatches_and_returns_a_real_path(self):
+        candidate = {
+            "part_number": "ATtiny85", "manufacturer": "Microchip",
+            "datasheet_url": "https://example.com/x.pdf", "confidence": "high",
+        }
+        extraction = {
+            "part_number": "ATtiny85", "package": "SOIC-8",
+            "pins": [{"number": "1", "name": "P1", "electrical_type": "passive"}],
+        }
+        saved = self._dispatch("library.save_confirmed_part", {"candidate": candidate, "extraction": extraction})
+        symbol_id = saved["result"]["symbol"]["symbol_id"]
+
+        response = self._dispatch("library.export_symbol", {"symbol_id": symbol_id})
+        self.assertNotIn("error", response)
+        self.assertTrue(response["result"]["path"].endswith(".kicad_sym"))
+        self.assertTrue(os.path.exists(response["result"]["path"]))
+
 
 class TestLlmChatProviderFallback(unittest.TestCase):
     """CTX-302.1: llm_chat's provider resolution -- found by actually

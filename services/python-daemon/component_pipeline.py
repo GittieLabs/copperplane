@@ -60,6 +60,18 @@ PACKAGE_REFERENCE = {
     "0805": {"pin_count": 2, "pitch_range_mm": None},
 }
 
+# Real-world package naming has common synonyms an extraction agent may
+# reasonably use ("PDIP-8" for "DIP-8") -- found by real end-to-end
+# testing of SPEC-307's Part Detail re-extraction, where a real search
+# result's own naming ("PDIP-8") failed this table's exact-string match
+# even though the geometry is identical to an entry already present.
+# Generated from PACKAGE_REFERENCE itself rather than hand-duplicated, so
+# every current and future DIP-N entry gets its PDIP-N alias for free.
+for _dip_key in list(PACKAGE_REFERENCE):
+    if _dip_key.startswith("DIP-"):
+        PACKAGE_REFERENCE[f"P{_dip_key}"] = PACKAGE_REFERENCE[_dip_key]
+del _dip_key
+
 # How much larger than the package body the courtyard must be, per side,
 # to count as "encloses the pads" -- a standard, conservative clearance,
 # not zero (a courtyard exactly equal to the package body leaves no room

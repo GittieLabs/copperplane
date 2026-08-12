@@ -121,6 +121,19 @@ class TestValidateSchema(unittest.TestCase):
         }
         cp.validate_schema(schema)  # must not raise
 
+    def test_007_a_pdip_synonym_validates_against_the_same_geometry_as_dip(self):
+        """Real end-to-end verification of SPEC-307's Part Detail found
+        this: a real extraction call returned "PDIP-8", a common
+        real-world synonym for "DIP-8" the extraction prompt's own
+        instruction to "use the package's real, standard name" doesn't
+        reliably prevent. Widening recognition (not just failing closed)
+        is the right fix here since the geometry is identical, not
+        unknown."""
+        schema = copy.deepcopy(_VALID_SOIC8_SCHEMA)
+        schema["package"] = "PDIP-8"
+        schema["package_dimensions"]["pitch_mm"] = 2.54
+        cp.validate_schema(schema)  # must not raise
+
 
 class TestBuildAgentExecutorProviderOverride(unittest.TestCase):
     """CTX-303.2: _build_agent_executor's provider/model override --
