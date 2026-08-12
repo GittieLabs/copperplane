@@ -1,7 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { submitJob, type JobHandle } from './lib/ipc'
 import { parseCommand } from './lib/commands'
+import {
+  appendConversationTurn,
+  listLibraryParts,
+  listProjects,
+  loadConversation,
+  saveProject,
+  type ConversationTurn,
+} from './lib/projects'
 import { EnclosureViewer } from './components/EnclosureViewer'
+import { NotBuiltPlaceholder } from './components/NotBuiltPlaceholder'
+import { Rail } from './components/Rail'
 import { Settings } from './components/Settings'
 
 // SPEC-108's own Cross-Module Impacts section names a fixed placement
@@ -11,14 +21,6 @@ import { Settings } from './components/Settings'
 const _INJECT_DEFAULT_POSITION_MM = { x: 50, y: 50 }
 
 type Status = 'pending' | 'done' | 'error'
-
-/** Only plain chat turns feed `history` (SPEC-302 §2's own named
- * limitation) -- a `generate`/`inject` command's own message isn't
- * folded back into the LLM's context in this pass. */
-interface HistoryTurn {
-  role: 'user' | 'assistant'
-  content: string
-}
 
 type ChatMessage =
   | { id: string; kind: 'user'; text: string }
@@ -31,17 +33,185 @@ function newMessageId(): string {
   return `msg_${nextMessageId++}`
 }
 
+/** SPEC-305 §2: the five per-project area tabs, in the shell's own
+ * order. Overview and Enclosure carry real, already-shipped content
+ * forward; Components/Schematic/PCB are visible-but-empty until
+ * SPEC-306/308/309 build them. */
+type Area = 'overview' | 'components' | 'schematic' | 'pcb' | 'enclosure'
+
+const AREAS: { key: Area; label: string }[] = [
+  { key: 'overview', label: 'Overview' },
+  { key: 'components', label: 'Components' },
+  { key: 'schematic', label: 'Schematic' },
+  { key: 'pcb', label: 'PCB' },
+  { key: 'enclosure', label: 'Enclosure' },
+]
+
+type View = { kind: 'settings' } | { kind: 'project'; name: string; area: Area } | null
+
 function App() {
+  const [projects, setProjects] = useState<string[]>([])
+  const [libraryCount, setLibraryCount] = useState(0)
+  const [view, setView] = useState<View>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const [names, parts] = await Promise.all([listProjects(), listLibraryParts()])
+        if (cancelled) return
+        setProjects(names)
+        setLibraryCount(parts.length)
+        setView((prev) => {
+          if (prev !== null) return prev
+          return names.length > 0 ? { kind: 'project', name: names[0], area: 'overview' } : prev
+        })
+      } catch (err) {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err))
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function handleCreateProject(name: string) {
+    try {
+      await saveProject({ name })
+      setProjects((prev) => (prev.includes(name) ? prev : [...prev, name]))
+      setView({ kind: 'project', name, area: 'overview' })
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  function handleSelectProject(name: string) {
+    setView({ kind: 'project', name, area: 'overview' })
+  }
+
+  function handleSelectArea(area: Area) {
+    setView((prev) => (prev?.kind === 'project' ? { ...prev, area } : prev))
+  }
+
+  return (
+    <div className="flex min-h-screen bg-neutral-950 text-neutral-100">
+      <Rail
+        projects={projects}
+        selectedProject={view?.kind === 'project' ? view.name : null}
+        onSelectProject={handleSelectProject}
+        onCreateProject={handleCreateProject}
+        libraryCount={libraryCount}
+        settingsSelected={view?.kind === 'settings'}
+        onSelectSettings={() => setView({ kind: 'settings' })}
+      />
+      <main className="flex flex-1 flex-col items-center gap-6 overflow-auto p-8">
+        {loadError && <p className="w-full max-w-md text-sm text-red-400">{loadError}</p>}
+
+        {view === null && (
+          <p className="text-sm text-neutral-500">Create a project on the left to get started.</p>
+        )}
+
+        {view?.kind === 'settings' && <Settings />}
+
+        {view?.kind === 'project' && (
+          <>
+            <div className="flex w-full max-w-md gap-1 border-b border-neutral-800 pb-2">
+              {AREAS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`rounded px-3 py-1 text-sm ${
+                    view.area === key
+                      ? 'bg-neutral-800 text-neutral-100'
+                      : 'text-neutral-400 hover:bg-neutral-900'
+                  }`}
+                  onClick={() => handleSelectArea(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {view.area === 'overview' && <Overview projectName={view.name} />}
+            {view.area === 'enclosure' && <EnclosurePanel />}
+            {view.area === 'components' && (
+              <NotBuiltPlaceholder
+                specId="SPEC-306"
+                title="Components"
+                description="Search and disambiguate a part number."
+              />
+            )}
+            {view.area === 'schematic' && (
+              <NotBuiltPlaceholder
+                specId="SPEC-308"
+                title="Schematic"
+                description="Schematic-level advice for the parts in this project."
+              />
+            )}
+            {view.area === 'pcb' && (
+              <NotBuiltPlaceholder
+                specId="SPEC-309"
+                title="PCB"
+                description="Layout and routing advice for this project's board."
+              />
+            )}
+          </>
+        )}
+      </main>
+    </div>
+  )
+}
+
+/** SPEC-305 §2: Overview re-houses the existing chat surface unchanged
+ * in substance, scoped to the selected project instead of one global
+ * `chatHistory`. Only plain chat turns persist to `SPEC-304`'s
+ * conversation log (SPEC-302 §2's own named limitation) -- a
+ * `generate`/`inject` command's own message isn't folded back into the
+ * LLM's context or persisted in this pass. Switching projects resets
+ * all of this state so no conversation leaks across the boundary
+ * (SPEC-305 §3's own named hazard). */
+function Overview({ projectName }: { projectName: string }) {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [latestSchema, setLatestSchema] = useState<Record<string, unknown> | null>(null)
-  const [chatHistory, setChatHistory] = useState<HistoryTurn[]>([])
-  // SPEC-303: a plain, temporary trigger -- SPEC-300's real rail shell
-  // (SPEC-305) doesn't exist in code yet, same stopgap pattern CTX-108.3
-  // used for kicad.inject_component. Not the permanent placement PR #48
-  // describes (a fixed rail item beside Library); this just makes the
-  // screen reachable at all.
-  const [showSettings, setShowSettings] = useState(false)
+  const [chatHistory, setChatHistory] = useState<ConversationTurn[]>([])
+  const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setInput('')
+    setMessages([])
+    setLatestSchema(null)
+    setChatHistory([])
+    setLoaded(false)
+    setLoadError(null)
+
+    loadConversation(projectName)
+      .then((turns) => {
+        if (cancelled) return
+        setChatHistory(turns)
+        setMessages(
+          turns.map((turn) =>
+            turn.role === 'user'
+              ? { id: newMessageId(), kind: 'user', text: turn.content }
+              : { id: newMessageId(), kind: 'chat', status: 'done', text: turn.content },
+          ),
+        )
+        setLoaded(true)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setLoadError(err instanceof Error ? err.message : String(err))
+        setLoaded(true)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [projectName])
 
   async function handleSend() {
     const text = input.trim()
@@ -115,9 +285,11 @@ function App() {
       return
     }
 
-    // Plain chat turn -- SPEC-201's llm.chat, with this conversation's
-    // prior plain-chat turns as real multi-turn context (SPEC-302's own
-    // backend addition to llm_providers.chat/daemon.llm_chat).
+    // Plain chat turn -- SPEC-201's llm.chat, with this project's prior
+    // plain-chat turns as real multi-turn context (SPEC-302's own
+    // backend addition to llm_providers.chat/daemon.llm_chat), now
+    // persisted to SPEC-304's conversation log instead of living only
+    // in React state.
     const id = newMessageId()
     setMessages((prev) => [...prev, { id, kind: 'chat', status: 'pending' }])
     try {
@@ -132,59 +304,46 @@ function App() {
         { role: 'user', content: command.message },
         { role: 'assistant', content: reply },
       ])
+      await appendConversationTurn(projectName, { role: 'user', content: command.message })
+      await appendConversationTurn(projectName, { role: 'assistant', content: reply })
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
       setMessages((prev) => prev.map((m) => (m.id === id && m.kind === 'chat' ? { ...m, status: 'error', error } : m)))
     }
   }
 
+  if (!loaded) {
+    return <p className="text-sm text-neutral-500">Loading conversation…</p>
+  }
+
   return (
-    <main className="flex min-h-screen flex-col items-center gap-8 bg-neutral-950 p-8 text-neutral-100">
-      <div className="flex w-full max-w-md items-center justify-between">
-        <h1 className="text-2xl font-medium">Hardware Agent Studio</h1>
+    <div className="flex w-full max-w-md flex-col gap-3">
+      {loadError && <p className="text-sm text-red-400">{loadError}</p>}
+      <div className="flex flex-col gap-2">
+        {messages.map((message) => (
+          <ChatMessageView key={message.id} message={message} />
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input
+          className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+          placeholder="generate ATtiny85, inject, or just ask a question"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSend()
+          }}
+        />
         <button
           type="button"
-          className="rounded border border-neutral-700 px-3 py-1 text-sm"
-          onClick={() => setShowSettings((prev) => !prev)}
+          className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
+          onClick={handleSend}
+          disabled={input.trim().length === 0}
         >
-          {showSettings ? 'Back' : 'Settings'}
+          Send
         </button>
       </div>
-
-      {showSettings ? (
-        <Settings />
-      ) : (
-        <>
-          <div className="flex w-full max-w-md flex-col gap-3">
-            <div className="flex flex-col gap-2">
-              {messages.map((message) => (
-                <ChatMessageView key={message.id} message={message} />
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
-                placeholder="generate ATtiny85, inject, or just ask a question"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSend()
-                }}
-              />
-              <button
-                type="button"
-                className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
-                onClick={handleSend}
-                disabled={input.trim().length === 0}
-              >
-                Send
-              </button>
-            </div>
-          </div>
-          <EnclosurePanel />
-        </>
-      )}
-    </main>
+    </div>
   )
 }
 
@@ -230,9 +389,9 @@ function ChatMessageView({ message }: { message: ChatMessage }) {
 
 /** Proves out CTX-105.2's job client against the one real async route
  * CTX-105.1 wired up (freecad.generate_enclosure): submit, watch progress,
- * cancel mid-flight, or land on a completed/failed result. Kept as its
- * own panel per SPEC-302's own design rationale -- enclosure generation
- * isn't part of this spec's "type to generate a footprint" promise. */
+ * cancel mid-flight, or land on a completed/failed result. Re-housed into
+ * the Enclosure area tab unchanged (SPEC-305 §2) -- enclosure generation
+ * isn't part of Overview's "type to generate a footprint" promise. */
 function EnclosurePanel() {
   const [dims, setDims] = useState({ width: 50, depth: 30, height: 20 })
   const [job, setJob] = useState<JobHandle<string> | null>(null)
@@ -266,8 +425,7 @@ function EnclosurePanel() {
   }
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-2 border-t border-neutral-800 pt-6">
-      <h2 className="text-sm font-medium text-neutral-400">Enclosure Generator</h2>
+    <div className="flex w-full max-w-md flex-col gap-2">
       <div className="flex gap-2">
         {(['width', 'depth', 'height'] as const).map((dim) => (
           <input
