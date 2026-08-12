@@ -301,5 +301,102 @@ class TestLlmChatProviderFallback(unittest.TestCase):
         self.assertEqual(kwargs['provider'], "perplexity")
 
 
+class TestConfigureDaemonLiveUpdates(unittest.TestCase):
+    """CTX-303.1: daemon.configure's SPEC-303 extension -- llm_provider/
+    llm_model can now be updated live, the same way secrets already were,
+    without regressing the secrets-only call Rust's spawn_daemon makes."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    def test_001_secrets_only_call_leaves_provider_and_model_untouched(self):
+        """TEST-005: Rust's spawn-time call passes only secrets -- must not
+        regress into clearing llm_provider/llm_model as a side effect."""
+        daemon.CONFIG['llm_provider'] = "anthropic"
+        daemon.CONFIG['llm_model'] = "claude-sonnet"
+
+        daemon.configure_daemon(secrets={"anthropic_api_key": "sk-test"})
+
+        self.assertEqual(daemon.CONFIG['llm_provider'], "anthropic")
+        self.assertEqual(daemon.CONFIG['llm_model'], "claude-sonnet")
+        self.assertEqual(daemon.CONFIG['secrets'], {"anthropic_api_key": "sk-test"})
+
+    def test_002_passing_llm_provider_and_model_updates_them_live(self):
+        """TEST-005: a Settings-UI-style call updates CONFIG immediately,
+        with no daemon restart, the same live-update guarantee secrets
+        already had."""
+        daemon.CONFIG['llm_provider'] = None
+        daemon.CONFIG['llm_model'] = None
+
+        result = daemon.configure_daemon(llm_provider="google", llm_model="gemini-pro")
+
+        self.assertEqual(result, {"configured": True})
+        self.assertEqual(daemon.CONFIG['llm_provider'], "google")
+        self.assertEqual(daemon.CONFIG['llm_model'], "gemini-pro")
+
+    def test_003_omitting_secrets_leaves_the_existing_secrets_untouched(self):
+        """TEST-005: a provider/model-only call must not wipe secrets that
+        were configured by an earlier call."""
+        daemon.CONFIG['secrets'] = {"anthropic_api_key": "sk-existing"}
+
+        daemon.configure_daemon(llm_provider="anthropic")
+
+        self.assertEqual(daemon.CONFIG['secrets'], {"anthropic_api_key": "sk-existing"})
+
+
+class TestDaemonCapabilities(unittest.TestCase):
+    """CTX-303.1: daemon.get_capabilities (on-demand) and _detect_capabilities's
+    llm_providers field (fixed from a hardcoded [])."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    def test_001_llm_providers_reflects_configured_secrets(self):
+        """TEST-004: only providers with a real configured key are
+        reported, not the old hardcoded empty list."""
+        daemon.CONFIG['secrets'] = {
+            "anthropic_api_key": "sk-1",
+            "perplexity_api_key": "sk-2",
+        }
+
+        caps = daemon._detect_capabilities()
+
+        self.assertEqual(sorted(caps['llm_providers']), ["anthropic", "perplexity"])
+
+    def test_002_llm_providers_is_empty_when_nothing_is_configured(self):
+        """TEST-004: the honest, un-configured state -- distinct from the
+        old behavior, which reported [] unconditionally regardless of
+        CONFIG, for the wrong reason."""
+        daemon.CONFIG['secrets'] = {}
+
+        caps = daemon._detect_capabilities()
+
+        self.assertEqual(caps['llm_providers'], [])
+
+    def test_003_get_daemon_capabilities_route_returns_the_same_shape_on_demand(self):
+        """TEST-004: dispatched through handle_request like any other
+        route -- proves it's really wired into ROUTES, not just callable
+        as a bare function."""
+        daemon.CONFIG['secrets'] = {"google_api_key": "sk-1"}
+
+        request = json.dumps({
+            "jsonrpc": "2.0", "method": "daemon.get_capabilities", "params": {}, "id": "req_caps",
+        })
+        response = json.loads(handle_request(request))
+
+        self.assertNotIn("error", response)
+        self.assertIn("kicad_available", response["result"])
+        self.assertIn("freecad_available", response["result"])
+        self.assertEqual(response["result"]["llm_providers"], ["google"])
+
+
 if __name__ == '__main__':
     unittest.main()
