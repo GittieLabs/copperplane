@@ -8,7 +8,8 @@ last_updated: 2026-08-11
 target_version: v0.1.0
 location: "apps/tauri-ui/specs/SPEC-300-product-ia-interaction-model.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
-child_specs: []
+child_specs:
+  - "SPEC-304-project-library-storage.md"
 user_facing: true
 ---
 
@@ -161,10 +162,10 @@ user_facing: true
         directly, predating this spec. Whether they should be re-parented to `SPEC-300` is a real
         structural decision (it changes `SPEC-000`'s own `child_specs`, not just this spec's) —
         deliberately **not** made here, to keep this spec's own scaffolding from silently rewriting
-        two already-shipped specs' link graph. `child_specs` below is left empty for the same reason:
-        every concrete `3xx` child this spec actually governs (`SPEC-304`-`SPEC-310`) is not yet
-        written, and listing an unwritten spec's path would be a dangling link the validator
-        (`SPEC-902`) would correctly reject.
+        two already-shipped specs' link graph. `SPEC-304` (written 2026-08-12) is the first concrete
+        child actually wired into `child_specs` below, since it's new rather than pre-existing —
+        `SPEC-305`-`SPEC-310` remain unwritten, and listing any of them would be a dangling link the
+        validator (`SPEC-902`) would correctly reject.
     *   **`SPEC-304`'s ID conflict is resolved, not renumbered.** `ROADMAP.md` §3.3 used to carry an
         unwritten backlog entry `SPEC-304 Project & Workspace Model`, a different scope than
         `PRODUCT-PLAN.md` §5.1's `SPEC-304 Project & Library Storage` under the same ID. Resolved
@@ -180,9 +181,10 @@ user_facing: true
         parameter, AI-boundary), and provenance-as-required. Pin diagrams, footprint search UX,
         ERC/DRC explanation copy, and file-format details all belong to `SPEC-306`-`SPEC-310`.
     *   **Provenance is specified here as a requirement, not enforced by this spec.** Enforcement is
-        a schema-validation concern for `SPEC-304`. If `SPEC-304` ships a schema where provenance is
-        optional, this spec's §2.2 rationale is defeated silently — worth checking explicitly when
-        `SPEC-304` is written, not assumed.
+        a schema-validation concern for `SPEC-304`, which names the same requirement explicitly
+        (§2, §3) but hasn't implemented a schema yet either. If that implementation ships with
+        provenance optional, this spec's §2.2 rationale is defeated silently — worth checking
+        explicitly once real code exists, not assumed from either spec's prose.
     *   **Five open questions from `PRODUCT-PLAN.md` §8 are inherited, not answered, by this spec:**
         `kicad-cli` binary presence (`SPEC-309`), live IPC vs. reading `.kicad_sch` from disk for the
         Schematic Advisor (`SPEC-309`, reopens a decision `SPEC-103` deliberately closed), footprint
@@ -202,23 +204,30 @@ user_facing: true
     spec's §2 design rationale; §3 is this spec's navigation/AI-boundary rationale; §8/§9 are this
     spec's inherited open questions and risks.
 *   [ROADMAP.md](../../../ROADMAP.md) §3.3 — the backlog entries this spec's children (`SPEC-304`
-    onward) fill in. The `SPEC-304` ID conflict noted there is resolved (absorbed, see §3 above);
-    `SPEC-303` is still unaddressed by the plan and needs a decision before it's written.
+    onward) fill in. The `SPEC-304` ID conflict noted there is resolved (absorbed, see §3 above).
+    `SPEC-303` is now written too, with its own real `## 5. User & Interaction` section — it's still
+    unaddressed by `PRODUCT-PLAN.md` itself, which is a plan-document gap, not a blocking one.
 *   [SPEC-301](SPEC-301-3d-viewer.md) — survives as-is per `PRODUCT-PLAN.md` §5.2; not yet
     re-parented under this spec (see §3 above).
 *   [SPEC-302](SPEC-302-chat-command-surface.md) — re-scoped to Project Conversation per
     `PRODUCT-PLAN.md` §5.2; not yet re-parented under this spec (see §3 above).
+*   [SPEC-303](SPEC-303-settings-ui.md) — the one existing `3xx` spec that predates `SPEC-300` and
+    is *also* not re-parented under it, same caution as `SPEC-301`/`SPEC-302` above.
+*   [SPEC-304](SPEC-304-project-library-storage.md) — the storage schema for this spec's six
+    objects; the first concrete child actually wired into `child_specs` (see §3 above).
 *   [SPEC-202](../../../services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md) —
     its output becomes this spec's Part object once provenance/confidence are added (its own
     re-scope, not this spec's).
-*   `SPEC-304`-`SPEC-310` *(not yet written — no files to link to)* — the concrete children this
-    spec exists to parent: storage, shell, discovery, part detail, footprints/schematic advisor,
+*   `SPEC-305`-`SPEC-310` *(not yet written — no files to link to)* — the remaining concrete
+    children: shell, discovery, part detail, footprints/schematic advisor,
     board advisor, enclosure-from-geometry, per `PRODUCT-PLAN.md` §5.1.
 
 ```text
 [SPEC-000] (Root Architecture)
    └── [SPEC-300] Product IA & Interaction Model
-          └── [Context 300.1] (not yet written)
+          ├── [Context 300.1] (not yet written)
+          └── [SPEC-304] Project & Library Storage
+                 └── [Context 304.1] (not yet written)
 ```
 
 ## 5. User & Interaction
