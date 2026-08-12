@@ -1,5 +1,6 @@
 import io
 import json
+import tempfile
 import threading
 import time
 import unittest
@@ -250,6 +251,72 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
             self.assertIn("daemon.configure", routes)
         finally:
             daemon.get_kicad_version = original
+
+    def test_007_build_routes_omits_library_routes_when_import_failed(self):
+        """TEST-004 (CTX-304.1): mirrors test_006 for library_store --
+        a broken import there shouldn't take down anything else."""
+        original = daemon.library_store
+        daemon.library_store = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("library.save_part", routes)
+            self.assertNotIn("project.save", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.library_store = original
+
+
+class TestLibraryRoutes(unittest.TestCase):
+    """CTX-304.1: library.*/project.* routes, dispatched through
+    handle_request like any other route -- real file I/O against a real
+    temp directory, not mocked, per CLAUDE.md's 'verify for real' norm."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def _dispatch(self, method, params):
+        request = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": "req"})
+        return json.loads(handle_request(request))
+
+    def test_001_library_save_part_and_load_part_round_trip(self):
+        provenance = {
+            field: {"source": "datasheet_pdf"}
+            for field in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS
+        }
+        part = {
+            "part_id": "ATtiny85",
+            "manufacturer": "Microchip",
+            "package": "SOIC-8",
+            "pins": [],
+            "datasheet_url": "https://example.com/x.pdf",
+            "provenance": provenance,
+        }
+
+        save_response = self._dispatch("library.save_part", {"part": part})
+        self.assertNotIn("error", save_response)
+
+        load_response = self._dispatch("library.load_part", {"part_id": "ATtiny85"})
+        self.assertNotIn("error", load_response)
+        self.assertEqual(load_response["result"]["manufacturer"], "Microchip")
+
+    def test_002_project_save_and_project_list_round_trip(self):
+        save_response = self._dispatch("project.save", {"project": {"name": "weather-pcb"}})
+        self.assertNotIn("error", save_response)
+
+        list_response = self._dispatch("project.list", {})
+        self.assertEqual(list_response["result"], ["weather-pcb"])
+
+    def test_003_a_schema_validation_error_surfaces_as_a_clean_route_error(self):
+        """A missing-provenance Part must not crash the daemon or leak a
+        raw traceback -- same handle_request error-mapping every other
+        route already gets."""
+        response = self._dispatch("library.save_part", {"part": {"part_id": "X"}})
+        self.assertIn("error", response)
 
 
 class TestLlmChatProviderFallback(unittest.TestCase):

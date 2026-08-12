@@ -166,6 +166,10 @@ pub fn spawn_daemon(app: &AppHandle, script_path: PathBuf) -> std::io::Result<Da
     // never read from config.json -- always Rust-computed so it agrees
     // exactly with tauri.conf.json's assetProtocol.scope.
     daemon_config.output_dir = crate::config::resolve_output_dir(app);
+    // SPEC-304 §3: same treatment, same reason -- storage_root must always
+    // agree with the app's real data directory, never a stale config.json
+    // value from before the app was reinstalled/moved.
+    daemon_config.storage_root = crate::config::resolve_storage_root(app);
     for (name, value) in crate::config::build_daemon_env(&daemon_config) {
         command.env(name, value);
     }
