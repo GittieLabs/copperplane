@@ -33,6 +33,17 @@ pub struct DaemonConfig {
     /// path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_dir: Option<String>,
+    /// Root directory for SPEC-304's `library/`/`projects/`/`.index/`
+    /// tree -- like `output_dir` above, always Rust-computed and never
+    /// read from `config.json`, so this field and the app's real data
+    /// directory can never disagree. Resolves the open question
+    /// `PRODUCT-PLAN.md` §8 and `SPEC-304` §3 both name (project root
+    /// location) by reusing the exact mechanism `SPEC-301`/`CTX-301.1`
+    /// already established for `output_dir`, rather than inventing a
+    /// second one: a fixed location under the app's own data directory,
+    /// not a user-chosen picker (deferred, not decided against).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_root: Option<String>,
 }
 
 /// `AppHandle`-free core of `load_config`, directly unit-testable against
@@ -122,6 +133,27 @@ pub fn resolve_output_dir(app: &AppHandle) -> Option<String> {
     Some(dir.to_string_lossy().to_string())
 }
 
+/// Creates (if missing) and returns `<app_data_dir>/storage` -- the root
+/// `services/python-daemon/library_store.py` (SPEC-304) creates its
+/// `library/`/`projects/`/`.index/` subdirectories under, lazily, on
+/// first write. A sibling of `generated` above, not nested under it --
+/// generated `.glb`s are ephemeral job output; this is persistent user
+/// data.
+pub fn ensure_storage_root(app_data_dir: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
+    let dir = app_data_dir.join("storage");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// The `AppHandle`-dependent half of `ensure_storage_root`; see
+/// `resolve_output_dir`'s own docstring for why this needs to agree with
+/// Tauri's own app-data-dir resolution rather than being computed twice.
+pub fn resolve_storage_root(app: &AppHandle) -> Option<String> {
+    let app_data_dir = app.path().app_data_dir().ok()?;
+    let dir = ensure_storage_root(&app_data_dir).ok()?;
+    Some(dir.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +170,7 @@ mod tests {
             llm_provider: Some("anthropic".to_string()),
             llm_model: Some("claude-sonnet".to_string()),
             output_dir: None,
+            storage_root: None,
         };
 
         save_config_to_dir(&base, &config).expect("save_config_to_dir should succeed");
@@ -165,6 +198,7 @@ mod tests {
             llm_provider: None,
             llm_model: None,
             output_dir: Some("/app/data/generated".to_string()),
+            storage_root: None,
         };
 
         let env = build_daemon_env(&config);
@@ -211,6 +245,44 @@ mod tests {
         let second = ensure_output_dir(&base).expect("calling it again should not error");
 
         assert!(second.is_dir());
+        std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
+    }
+
+    #[test]
+    fn ensure_storage_root_creates_the_storage_subdirectory_for_real() {
+        let base = std::env::temp_dir().join(format!("ctx-304.1-storage-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        let created = ensure_storage_root(&base).expect("ensure_storage_root should succeed");
+
+        assert_eq!(created, base.join("storage"));
+        assert!(created.is_dir(), "the directory should really exist on disk");
+
+        std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
+    }
+
+    #[test]
+    fn ensure_storage_root_is_idempotent() {
+        let base = std::env::temp_dir().join(format!("ctx-304.1-storage-idempotent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        ensure_storage_root(&base).expect("first call should succeed");
+        let second = ensure_storage_root(&base).expect("calling it again should not error");
+
+        assert!(second.is_dir());
+        std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
+    }
+
+    #[test]
+    fn storage_root_and_output_dir_are_siblings_not_nested() {
+        let base = std::env::temp_dir().join(format!("ctx-304.1-siblings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        let storage = ensure_storage_root(&base).expect("ensure_storage_root should succeed");
+        let generated = ensure_output_dir(&base).expect("ensure_output_dir should succeed");
+
+        assert_eq!(storage.parent(), generated.parent());
+        assert_ne!(storage, generated);
         std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
     }
 }
