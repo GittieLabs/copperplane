@@ -11,6 +11,7 @@ parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
 child_specs:
   - "SPEC-304-project-library-storage.md"
   - "SPEC-305-app-shell-navigation.md"
+  - "SPEC-306-component-discovery.md"
 user_facing: true
 ---
 
@@ -165,8 +166,9 @@ user_facing: true
         deliberately **not** made here, to keep this spec's own scaffolding from silently rewriting
         two already-shipped specs' link graph. `SPEC-304` and `SPEC-305` (both written 2026-08-12)
         are the first concrete children actually wired into `child_specs` below, since they're new
-        rather than pre-existing — `SPEC-306`-`SPEC-310` remain unwritten, and listing any of them
-        would be a dangling link the validator (`SPEC-902`) would correctly reject.
+        rather than pre-existing. `SPEC-306` (written 2026-08-12) is the third; `SPEC-307`-`SPEC-310`
+        remain unwritten, and listing any of them would be a dangling link the validator (`SPEC-902`)
+        would correctly reject.
     *   **`SPEC-304`'s ID conflict is resolved, not renumbered.** `ROADMAP.md` §3.3 used to carry an
         unwritten backlog entry `SPEC-304 Project & Workspace Model`, a different scope than
         `PRODUCT-PLAN.md` §5.1's `SPEC-304 Project & Library Storage` under the same ID. Resolved
@@ -218,20 +220,23 @@ user_facing: true
     objects; done (`CTX-304.1`) as of 2026-08-12.
 *   [SPEC-305](SPEC-305-app-shell-navigation.md) — the shell that renders this spec's model for
     real; the second concrete child wired into `child_specs`.
+*   [SPEC-306](SPEC-306-component-discovery.md) — the discovery/disambiguation stage; the third
+    concrete child wired into `child_specs`.
 *   [SPEC-202](../../../services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md) —
     its output becomes this spec's Part object once provenance/confidence are added (its own
-    re-scope, not this spec's).
-*   `SPEC-306`-`SPEC-310` *(not yet written — no files to link to)* — the remaining concrete
-    children: discovery, part detail, footprints/schematic advisor, board advisor,
-    enclosure-from-geometry, per `PRODUCT-PLAN.md` §5.1.
+    re-scope, not this spec's); `SPEC-306` adds a sibling search capability alongside it.
+*   `SPEC-307`-`SPEC-310` *(not yet written — no files to link to)* — the remaining concrete
+    children: part detail, footprints/schematic advisor, board advisor, enclosure-from-geometry, per
+    `PRODUCT-PLAN.md` §5.1.
 
 ```text
 [SPEC-000] (Root Architecture)
    └── [SPEC-300] Product IA & Interaction Model
           ├── [Context 300.1] (not yet written)
           ├── [SPEC-304] Project & Library Storage -- done (CTX-304.1)
-          └── [SPEC-305] App Shell & Navigation
-                 └── [Context 305.1] (not yet written)
+          ├── [SPEC-305] App Shell & Navigation -- done (CTX-305.1)
+          └── [SPEC-306] Component Discovery
+                 └── [Context 306.1] (not yet written)
 ```
 
 ## 5. User & Interaction
