@@ -8,9 +8,7 @@ last_updated: 2026-08-07
 target_version: v0.1.0
 location: "services/python-daemon/specs/SPEC-102-daemon-rpc-router.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
-child_specs:
-  - "SPEC-103-kicad-ipc.md"
-  - "SPEC-104-freecad-headless.md"
+child_specs: []
 user_facing: false
 ---
 
