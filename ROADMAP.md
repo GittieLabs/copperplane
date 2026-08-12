@@ -331,7 +331,7 @@ to the daemon's own output directory** (not a Rust-mediated blob read) — `.glb
 `<app_data_dir>/generated`, `assetProtocol.scope` narrowed to exactly that directory, and the
 frontend loads it via `convertFileSrc()`.
 
-#### [SPEC-302](apps/tauri-ui/specs/SPEC-302-chat-command-surface.md) — Chat & Command Surface — specced 2026-08-11, not yet implemented
+#### [SPEC-302](apps/tauri-ui/specs/SPEC-302-chat-command-surface.md) — Chat & Command Surface — ✅ done 2026-08-11
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-105, SPEC-201
 
 `App.tsx` is one input, one button, and a `<pre>` dump of raw JSON. The README's framing — "type
@@ -348,7 +348,12 @@ mechanism that produced the reported bug. The chat half survives intact and move
 Overview area. `CTX-302.x` should record this as Plan Drift when the re-scope is actually
 implemented.
 
-#### [SPEC-303](apps/tauri-ui/specs/SPEC-303-settings-ui.md) — Settings UI — specced 2026-08-11, not yet implemented
+**Re-scope partially shipped.** `CTX-305.1` moved the chat half into a per-project Overview area
+(see §1.1's `SPEC-305` row) exactly as described above. `parseCommand` itself is still not deleted —
+`CTX-305.1`'s own Plan Drift names this explicitly as inherited, unresolved debt, matching
+`SPEC-305` §3's own named issue.
+
+#### [SPEC-303](apps/tauri-ui/specs/SPEC-303-settings-ui.md) — Settings UI — ✅ done 2026-08-12
 *Module:* `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-106,
 SPEC-107, SPEC-201
 
@@ -359,10 +364,10 @@ issues from contributors. Its own spec found this isn't purely a frontend surfac
 `delete_secret` exist in Rust but were never registered as Tauri commands, there is no `config.json`
 *writer* at all, and `daemon.ready`'s `llm_providers` field is hardcoded to `[]`.
 
-**Still not addressed by `PRODUCT-PLAN.md`, even now that the spec exists — flagged, not resolved.**
-The plan's §5 spec list and §5.3 "Unaffected" section still don't mention SPEC-303, and SPEC-300's
-own shell model has no slot for an app-level settings screen. SPEC-303 §1/§3 name this explicitly as
-an open question for SPEC-300/SPEC-305 rather than deciding it unilaterally.
+**Resolved by `SPEC-305`.** The plan's §5 spec list and §5.3 "Unaffected" section still don't
+mention SPEC-303 by name, but the open question SPEC-303 §1/§3 named — where Settings anchors in
+SPEC-300's shell model — is answered now: `SPEC-305`/`CTX-305.1` anchor it at the bottom of the
+rail, exactly where `SPEC-300` §2 said it would go.
 
 #### [SPEC-304](apps/tauri-ui/specs/SPEC-304-project-library-storage.md) — Project & Library Storage — ✅ done (schemas + file I/O) 2026-08-12
 *Module:* `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-300
