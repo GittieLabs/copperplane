@@ -96,6 +96,12 @@ user_facing: true
         datasheet link and a confidence note that the user confirms) rather than a silent
         substitution — the exact failure mode from `PRODUCT-PLAN.md` §1 ("generate atiny85" silently
         producing a correct ATtiny85 by luck, with nothing surfacing that a correction occurred).
+    *   **Settings gets a fixed home in the rail, resolved 2026-08-11.** `SPEC-303` named this as an
+        open question rather than deciding it unilaterally: the rail already has exactly one other
+        thing that isn't project-scoped (the Library), so Settings anchors beside it — a persistent
+        item at the bottom of the rail, not inside any project's area tabs. Selecting it swaps the
+        main content area the same way selecting a project's own tab does, but renders no area-tab
+        row, since Settings has no stages under it. See the shell diagram below.
 *   **Data Flow / Interactions:**
 
     ```text
@@ -121,12 +127,19 @@ user_facing: true
     |  LIBRARY       |                                          |
     |   Components   |                                          |
     |   Footprints   |                                          |
-    +----------------+------------------------------------------+
+    |                |                                          |
+    |  [gear] Settings|  ( full main-area swap, no area tabs -- |
+    +----------------+     it's app-level, not project-scoped ) +
     ```
 
     Overview is the project summary plus the freeform Conversation with history — chat as a
     *place*, not a router. The Library sits outside any project, because Parts/Symbols/Footprints
-    are reusable across projects by design.
+    are reusable across projects by design. **Settings (`SPEC-303`) anchors at the bottom of the
+    rail, always visible regardless of which project is selected** — resolves the open question
+    `SPEC-303` itself named: it's app-level, so it belongs beside Projects/Library, not inside any
+    project's own area tabs. Selecting it swaps the main content area the same way a project's tabs
+    do, but with no area-tab row, since Settings has no stages under it. Selecting a project again
+    restores that project's previously-selected area.
 *   **Cross-Module Impacts:**
     *   `apps/tauri-ui`: this is the spec the whole shell/navigation/stage rendering (`SPEC-305`) and
         every per-stage surface (`SPEC-306`-`SPEC-310`) implement against. `App.tsx`'s current

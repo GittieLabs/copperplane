@@ -38,11 +38,10 @@ user_facing: true
     *   **Not Ollama's endpoint, FreeCAD's build timeout, or the heartbeat/crash-detection
         intervals.** All three are currently hardcoded constants with no live pain point driving
         exposing them — deferred, not forgotten (see §3).
-    *   **Not deciding where this screen's entry point lives in `SPEC-300`'s shell.** `SPEC-300`'s
-        navigation model (Projects rail, Library rail, per-project area tabs) has no slot for
-        app-level settings — this is neither project-scoped nor library-scoped. That's a small
-        addition to `SPEC-300`/`SPEC-305`'s own navigation, not something this spec should invent
-        unilaterally by bolting a settings icon on ad hoc (see §3).
+    *   **Not the shell chrome itself.** `SPEC-300` §2 (updated 2026-08-11) anchors a Settings item
+        at the bottom of the rail, beside Library — a persistent, non-project-scoped destination
+        that swaps the main content area with no area-tab row. This spec builds the screen that
+        lives behind that entry point; it does not re-decide where the entry point is.
 
 ## 2. System Architecture & Design Choices
 
@@ -135,11 +134,10 @@ user_facing: true
         renderer after save.** `SPEC-106`'s existing security posture (`CLAUDE.md`: "`stdout` is
         sacred"; keys never as CLI args, never in `ps`) extends to this spec's own new write path —
         regressing it here would undo the reason `SPEC-106` put keys in the keychain at all.
-    *   **This screen's entry point in the shell has no defined home.** `PRODUCT-PLAN.md` doesn't
-        mention `SPEC-303` at all (flagged in `ROADMAP.md` §3.3, still open), and `SPEC-300`'s own
-        shell model has no app-level-settings slot. Implementing this spec's UI before that's decided
-        risks a settings icon bolted on wherever seemed convenient, not where the IA actually wants
-        it.
+    *   **Resolved 2026-08-11: the shell entry point.** `SPEC-300` §2 now anchors Settings at the
+        bottom of the rail, beside Library — see §1. `PRODUCT-PLAN.md` itself still doesn't mention
+        `SPEC-303` (flagged in `ROADMAP.md` §3.3, still open), but that's a plan-document gap, not a
+        blocking one now that the IA spec itself has a real answer.
 *   **Not building yet, and why:** Ollama's endpoint (hardcoded, nobody has hit a need to change it),
     FreeCAD's build timeout (not even in the config schema today), and the heartbeat/crash-detection
     intervals (internal tuning, not a user-facing setting) — Tier 4, no current pain point.
@@ -155,10 +153,10 @@ user_facing: true
 *   [SPEC-201](../../../services/python-daemon/specs/SPEC-201-llm-provider-abstraction.md) — the
     provider list (`llm_providers.py`) this spec's Tier 1 picker enumerates.
 *   [ROADMAP.md](../../../ROADMAP.md) §3.3 — this spec's backlog entry; also records that
-    `PRODUCT-PLAN.md` doesn't address `SPEC-303` at all, an open question this spec inherits rather
-    than resolves (see §3).
-*   [SPEC-300](SPEC-300-product-ia-interaction-model.md) — the shell/navigation model this spec's
-    entry point needs a slot in; not yet decided (see §1 Non-Goals, §3).
+    `PRODUCT-PLAN.md` doesn't address `SPEC-303` at all — a plan-document gap, not a blocking one
+    (see §3).
+*   [SPEC-300](SPEC-300-product-ia-interaction-model.md) — §2, updated 2026-08-11, anchors this
+    spec's entry point at the bottom of the rail, beside Library.
 *   [CTX-302.1](../context/CTX-302.1-chat-command-surface.md) Plan Drift Deviation 3 — the real,
     live failure ("No LLM provider configured") this spec exists to make unreachable.
 
@@ -171,8 +169,8 @@ user_facing: true
 ## 5. User & Interaction
 
 *   **Product Stage:** App-level, outside any project — alongside the Library, this is one of the
-    few surfaces that isn't scoped to a single project. Its exact entry point in the shell chrome is
-    still open (§3).
+    few surfaces that isn't scoped to a single project. Anchored at the bottom of the rail per
+    `SPEC-300` §2.
 *   **What the user is trying to accomplish:** Get the app talking to an LLM provider and to their
     installed KiCad/FreeCAD without hand-editing a config file or running a keychain command from a
     terminal; confirm the app can actually reach its dependencies before trying a feature that needs
