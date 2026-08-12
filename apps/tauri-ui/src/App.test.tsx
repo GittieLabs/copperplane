@@ -2,9 +2,22 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const submitJobMock = vi.fn()
+const listProjectsMock = vi.fn()
+const listLibraryPartsMock = vi.fn()
+const saveProjectMock = vi.fn()
+const loadConversationMock = vi.fn()
+const appendConversationTurnMock = vi.fn()
 
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
+}))
+
+vi.mock('./lib/projects', () => ({
+  listProjects: (...args: unknown[]) => listProjectsMock(...args),
+  listLibraryParts: (...args: unknown[]) => listLibraryPartsMock(...args),
+  saveProject: (...args: unknown[]) => saveProjectMock(...args),
+  loadConversation: (...args: unknown[]) => loadConversationMock(...args),
+  appendConversationTurn: (...args: unknown[]) => appendConversationTurnMock(...args),
 }))
 
 vi.mock('./components/EnclosureViewer', () => ({
@@ -25,6 +38,15 @@ function fakeJobHandle<T>(result: Promise<T>) {
   return { jobId: 'job_1', result, onUpdate: () => () => {}, cancel: vi.fn() }
 }
 
+/** These tests exercise the Overview area of a single, already-existing
+ * project -- SPEC-305's shell selects a project's Overview by default
+ * once `project.list` resolves, so waiting for the chat input is the
+ * real signal that the shell finished loading, not an arbitrary delay. */
+async function renderAppOnOverview() {
+  render(<App />)
+  await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+}
+
 function sendMessage(text: string) {
   fireEvent.change(screen.getByPlaceholderText(/generate ATtiny85/), { target: { value: text } })
   fireEvent.click(screen.getByRole('button', { name: 'Send' }))
@@ -33,13 +55,18 @@ function sendMessage(text: string) {
 describe('App: chat & command surface', () => {
   beforeEach(() => {
     submitJobMock.mockReset()
+    listProjectsMock.mockReset().mockResolvedValue(['test-project'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    saveProjectMock.mockReset()
+    loadConversationMock.mockReset().mockResolvedValue([])
+    appendConversationTurnMock.mockReset().mockResolvedValue(undefined)
   })
 
   it('TEST-001: "generate <part>" calls kicad.generate_component and renders the schema', async () => {
     const schema = { part_number: 'ATtiny85', package: 'SOIC-8', pins: [] }
     submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(schema)))
 
-    render(<App />)
+    await renderAppOnOverview()
     sendMessage('generate ATtiny85')
 
     await waitFor(() => screen.getByText(/"part_number": "ATtiny85"/))
@@ -56,7 +83,7 @@ describe('App: chat & command surface', () => {
       fakeJobHandle(Promise.resolve({ part_number: 'ATtiny85', package: 'SOIC-8', pins: 8 })),
     )
 
-    render(<App />)
+    await renderAppOnOverview()
     sendMessage('generate ATtiny85')
     await waitFor(() => screen.getByText(/"part_number": "ATtiny85"/))
 
@@ -71,17 +98,17 @@ describe('App: chat & command surface', () => {
   })
 
   it('TEST-003: "inject" with nothing generated yet shows a clean message, never calls the route', async () => {
-    render(<App />)
+    await renderAppOnOverview()
     sendMessage('inject')
 
     await waitFor(() => screen.getByText('Nothing to inject yet — generate a component first.'))
     expect(submitJobMock).not.toHaveBeenCalled()
   })
 
-  it('TEST-004: an unrecognized message is a plain chat turn against llm.chat, rendering the real reply', async () => {
+  it('TEST-004: an unrecognized message is a plain chat turn against llm.chat, rendering the real reply, and persists both turns', async () => {
     submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve('Pin 3 is a GPIO pin.')))
 
-    render(<App />)
+    await renderAppOnOverview()
     sendMessage('what does pin 3 do?')
 
     await waitFor(() => screen.getByText('Pin 3 is a GPIO pin.'))
@@ -89,13 +116,21 @@ describe('App: chat & command surface', () => {
       prompt: 'what does pin 3 do?',
       history: [],
     })
+    expect(appendConversationTurnMock).toHaveBeenCalledWith('test-project', {
+      role: 'user',
+      content: 'what does pin 3 do?',
+    })
+    expect(appendConversationTurnMock).toHaveBeenCalledWith('test-project', {
+      role: 'assistant',
+      content: 'Pin 3 is a GPIO pin.',
+    })
   })
 
   it('TEST-005: a second plain chat turn sends the first turn back as history', async () => {
     submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve('Got it, 42.')))
     submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve('42.')))
 
-    render(<App />)
+    await renderAppOnOverview()
     sendMessage('my favorite number is 42')
     await waitFor(() => screen.getByText('Got it, 42.'))
 
@@ -116,9 +151,31 @@ describe('App: chat & command surface', () => {
       fakeJobHandle(Promise.reject(new Error("Package 'FOO-1' is not in the known reference table."))),
     )
 
-    render(<App />)
+    await renderAppOnOverview()
     sendMessage('generate FOO-1')
 
     await waitFor(() => screen.getByText("Package 'FOO-1' is not in the known reference table."))
+  })
+
+  it('TEST-007: a fresh install with no projects shows the empty state, not a broken chat surface', async () => {
+    listProjectsMock.mockResolvedValueOnce([])
+
+    render(<App />)
+
+    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+    expect(screen.queryByPlaceholderText(/generate ATtiny85/)).toBeNull()
+  })
+
+  it('TEST-008: loads an existing project\'s persisted conversation into view on first render', async () => {
+    loadConversationMock.mockResolvedValueOnce([
+      { role: 'user', content: 'hello from before' },
+      { role: 'assistant', content: 'hi again' },
+    ])
+
+    render(<App />)
+
+    await waitFor(() => screen.getByText('> hello from before'))
+    screen.getByText('hi again')
+    expect(loadConversationMock).toHaveBeenCalledWith('test-project')
   })
 })
