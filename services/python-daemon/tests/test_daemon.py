@@ -381,6 +381,20 @@ class TestDaemonCapabilities(unittest.TestCase):
 
         self.assertEqual(caps['llm_providers'], [])
 
+    def test_004_reports_the_real_resolved_log_path(self):
+        """CTX-303.3: log_path matches whatever _configure_logging actually
+        resolved for this real process -- not asserting a specific path
+        (that's per-OS), just that the two agree."""
+        caps = daemon._detect_capabilities()
+        self.assertEqual(caps['log_path'], daemon._LOG_FILE_PATH)
+
+    def test_005_reports_the_real_python_version(self):
+        """CTX-303.3."""
+        import platform as _platform
+
+        caps = daemon._detect_capabilities()
+        self.assertEqual(caps['python_version'], _platform.python_version())
+
     def test_003_get_daemon_capabilities_route_returns_the_same_shape_on_demand(self):
         """TEST-004: dispatched through handle_request like any other
         route -- proves it's really wired into ROUTES, not just callable
@@ -396,6 +410,8 @@ class TestDaemonCapabilities(unittest.TestCase):
         self.assertIn("kicad_available", response["result"])
         self.assertIn("freecad_available", response["result"])
         self.assertEqual(response["result"]["llm_providers"], ["google"])
+        self.assertIn("log_path", response["result"])
+        self.assertIn("python_version", response["result"])
 
 
 class TestKicadGenerateComponentProviderOverride(unittest.TestCase):

@@ -3,6 +3,7 @@ import {
   ALL_PROVIDERS,
   KEY_BASED_PROVIDERS,
   clearSecret,
+  copyDiagnostics,
   getCapabilities,
   getConfig,
   saveConfig,
@@ -37,6 +38,7 @@ export function Settings() {
     freecadcmd_path_override: '',
   })
   const [pathsSaved, setPathsSaved] = useState(false)
+  const [diagnosticsCopied, setDiagnosticsCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -120,6 +122,17 @@ export function Settings() {
         freecadcmd_path_override: pathFields.freecadcmd_path_override.trim() || null,
       })
       setPathsSaved(true)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleCopyDiagnostics() {
+    setError(null)
+    setDiagnosticsCopied(false)
+    try {
+      await copyDiagnostics()
+      setDiagnosticsCopied(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -265,6 +278,20 @@ export function Settings() {
             Save
           </button>
           {pathsSaved && <span className="text-sm text-emerald-400">Saved — restart to apply.</span>}
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium text-neutral-400">Diagnostics</h3>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="self-start rounded border border-neutral-700 px-3 py-1 text-sm"
+            onClick={() => void handleCopyDiagnostics()}
+          >
+            Copy Diagnostics
+          </button>
+          {diagnosticsCopied && <span className="text-sm text-emerald-400">Copied to clipboard.</span>}
         </div>
       </section>
     </div>

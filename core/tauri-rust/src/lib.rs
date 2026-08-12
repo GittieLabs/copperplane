@@ -16,9 +16,18 @@ fn daemon_script_path() -> PathBuf {
         .join("../../services/python-daemon/daemon.py")
 }
 
+/// The app version the Settings screen's "Copy Diagnostics" (SPEC-303
+/// Tier 3) includes -- a compile-time constant from this crate's own
+/// Cargo.toml, not a value read from disk at runtime.
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -39,6 +48,7 @@ pub fn run() {
             secrets::clear_secret,
             config::get_config,
             config::save_config_cmd,
+            get_app_version,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -55,4 +65,19 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::get_app_version;
+
+    #[test]
+    fn get_app_version_matches_this_crates_own_cargo_toml() {
+        assert_eq!(get_app_version(), env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn get_app_version_is_not_empty() {
+        assert!(!get_app_version().is_empty());
+    }
 }

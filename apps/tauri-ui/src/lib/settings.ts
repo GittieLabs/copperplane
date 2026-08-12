@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { dispatch } from './ipc'
 
 /** Must match `daemon.py`'s `_KEY_BASED_PROVIDERS` and
@@ -28,11 +29,15 @@ export interface DaemonConfig {
   llm_model?: string | null
 }
 
-/** Mirrors `daemon.py`'s `_detect_capabilities()` shape. */
+/** Mirrors `daemon.py`'s `_detect_capabilities()` shape. `log_path` is
+ * `null` if only `stderr` logging is active (e.g. a read-only log dir) --
+ * reported honestly by the daemon, not papered over here. */
 export interface DaemonCapabilities {
   kicad_available: boolean
   freecad_available: boolean
   llm_providers: string[]
+  log_path: string | null
+  python_version: string
 }
 
 /** Saves a provider API key to the OS keychain and pushes the complete
@@ -87,4 +92,42 @@ export async function setLlmProviderAndModel(
   if (response.error) {
     throw new Error(response.error.message)
   }
+}
+
+/** The app's own version -- a compile-time Rust constant
+ * (`core/tauri-rust`'s `get_app_version`), not read from disk at runtime. */
+export async function getAppVersion(): Promise<string> {
+  return invoke('get_app_version')
+}
+
+/** SPEC-303 Tier 3: bundles capability flags, the daemon's real log file
+ * location, and relevant versions into plain text and copies it to the
+ * clipboard -- the exact surface `SPEC-107` was built anticipating and
+ * that nothing has consumed until now. KiCad's version is looked up only
+ * when `kicad_available` is true, and failure there degrades to
+ * "unreachable" rather than failing the whole bundle. */
+export async function copyDiagnostics(): Promise<void> {
+  const [capabilities, appVersion] = await Promise.all([getCapabilities(), getAppVersion()])
+
+  let kicadVersion = 'not reachable'
+  if (capabilities.kicad_available) {
+    try {
+      const response = await dispatch('kicad.get_version', {})
+      const result = response.result as { full_version?: string } | undefined
+      kicadVersion = response.error ? 'unreachable' : result?.full_version ?? 'unknown'
+    } catch {
+      kicadVersion = 'unreachable'
+    }
+  }
+
+  const lines = [
+    `Hardware Agent Studio v${appVersion}`,
+    `Python: ${capabilities.python_version}`,
+    `Log file: ${capabilities.log_path ?? '(not available)'}`,
+    `KiCad: ${kicadVersion}`,
+    `FreeCAD: ${capabilities.freecad_available ? 'reachable' : 'not reachable'}`,
+    `LLM providers configured: ${capabilities.llm_providers.join(', ') || '(none)'}`,
+  ]
+
+  await writeText(lines.join('\n'))
 }
