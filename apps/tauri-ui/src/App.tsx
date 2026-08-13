@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
+import { open } from '@tauri-apps/plugin-shell'
 import { submitJob, type JobHandle } from './lib/ipc'
 import { parseCommand } from './lib/commands'
+import { generateEnclosure, type EnclosureParams, type EnclosureResult } from './lib/enclosure'
 import {
   appendConversationTurn,
   listLibraryParts,
@@ -9,6 +11,7 @@ import {
   saveProject,
   type ConversationTurn,
 } from './lib/projects'
+import { getCapabilities } from './lib/settings'
 import { ComponentDiscovery } from './components/ComponentDiscovery'
 import { EnclosureViewer } from './components/EnclosureViewer'
 import { NotBuiltPlaceholder } from './components/NotBuiltPlaceholder'
@@ -136,7 +139,7 @@ function App() {
             </div>
 
             {view.area === 'overview' && <Overview projectName={view.name} />}
-            {view.area === 'enclosure' && <EnclosurePanel />}
+            {view.area === 'enclosure' && <EnclosurePanel projectName={view.name} />}
             {view.area === 'components' && <ComponentDiscovery />}
             {view.area === 'schematic' && (
               <NotBuiltPlaceholder
@@ -383,31 +386,68 @@ function ChatMessageView({ message }: { message: ChatMessage }) {
 }
 
 /** Proves out CTX-105.2's job client against the one real async route
- * CTX-105.1 wired up (freecad.generate_enclosure): submit, watch progress,
- * cancel mid-flight, or land on a completed/failed result. Re-housed into
- * the Enclosure area tab unchanged (SPEC-305 §2) -- enclosure generation
- * isn't part of Overview's "type to generate a footprint" promise. */
-function EnclosurePanel() {
+ * CTX-105.1 wired up (freecad.generate_enclosure). Re-housed into the
+ * Enclosure area tab unchanged (SPEC-305 §2) -- enclosure generation
+ * isn't part of Overview's "type to generate a footprint" promise.
+ *
+ * CTX-109.2 adds the real board-driven mode CTX-109.1 built on the
+ * daemon side: "From board" only appears once `daemon.get_capabilities`
+ * reports `kicad_available`, and manual dimensions stay the always-
+ * available fallback, unchanged from the original three fields.
+ * `projectName` (the real, already-selected project -- SPEC-305's
+ * shell) is threaded through as `project_name`, so a generated
+ * enclosure is actually saved as a real Artifact instead of the daemon
+ * route silently skipping persistence the way it does with no
+ * project_name at all. */
+function EnclosurePanel({ projectName }: { projectName: string }) {
+  const [kicadAvailable, setKicadAvailable] = useState(false)
+  const [mode, setMode] = useState<'manual' | 'board'>('manual')
   const [dims, setDims] = useState({ width: 50, depth: 30, height: 20 })
-  const [job, setJob] = useState<JobHandle<string> | null>(null)
+  const [boardParams, setBoardParams] = useState({
+    height: 20,
+    wall_thickness_mm: 2.0,
+    clearance_mm: 0.5,
+    fillet_radius_mm: 1.0,
+    standoff_height_mm: 5.0,
+  })
+  const [job, setJob] = useState<JobHandle<EnclosureResult> | null>(null)
   const [status, setStatus] = useState<string | null>(null)
-  const [glbPath, setGlbPath] = useState<string | null>(null)
+  const [result, setResult] = useState<EnclosureResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const running = status === 'running'
 
+  useEffect(() => {
+    let cancelled = false
+    getCapabilities()
+      .then((caps) => {
+        if (!cancelled) setKicadAvailable(caps.kicad_available)
+      })
+      .catch(() => {
+        // A capabilities failure just leaves "From board" unoffered --
+        // manual dimensions remain fully usable either way.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   async function handleGenerate() {
     setError(null)
-    setGlbPath(null)
+    setResult(null)
     setStatus('running')
 
+    const params: EnclosureParams =
+      mode === 'manual'
+        ? { height: dims.height, width: dims.width, depth: dims.depth, project_name: projectName }
+        : { ...boardParams, project_name: projectName }
+
     try {
-      const handle = await submitJob<string>('freecad.generate_enclosure', dims)
+      const handle = await generateEnclosure(params)
       setJob(handle)
       handle.onUpdate((update) => setStatus(update.status))
 
-      const path = await handle.result
-      setGlbPath(path)
+      setResult(await handle.result)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -422,18 +462,68 @@ function EnclosurePanel() {
   return (
     <div className="flex w-full max-w-md flex-col gap-2">
       <div className="flex gap-2">
-        {(['width', 'depth', 'height'] as const).map((dim) => (
-          <input
-            key={dim}
-            type="number"
-            className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
-            placeholder={dim}
-            value={dims[dim]}
-            onChange={(e) => setDims((prev) => ({ ...prev, [dim]: Number(e.target.value) }))}
+        <button
+          type="button"
+          className={`rounded px-3 py-1 text-sm ${
+            mode === 'manual' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
+          }`}
+          onClick={() => setMode('manual')}
+          disabled={running}
+        >
+          Manual dimensions
+        </button>
+        {kicadAvailable && (
+          <button
+            type="button"
+            className={`rounded px-3 py-1 text-sm ${
+              mode === 'board' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
+            }`}
+            onClick={() => setMode('board')}
             disabled={running}
-          />
-        ))}
+          >
+            From board
+          </button>
+        )}
       </div>
+
+      {mode === 'manual' ? (
+        <div className="flex gap-2">
+          {(['width', 'depth', 'height'] as const).map((dim) => (
+            <input
+              key={dim}
+              type="number"
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+              placeholder={dim}
+              value={dims[dim]}
+              onChange={(e) => setDims((prev) => ({ ...prev, [dim]: Number(e.target.value) }))}
+              disabled={running}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {(
+            [
+              ['height', 'height (mm)'],
+              ['wall_thickness_mm', 'wall thickness (mm)'],
+              ['clearance_mm', 'clearance (mm)'],
+              ['fillet_radius_mm', 'fillet radius (mm)'],
+              ['standoff_height_mm', 'standoff height (mm)'],
+            ] as const
+          ).map(([field, placeholder]) => (
+            <input
+              key={field}
+              type="number"
+              className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+              placeholder={placeholder}
+              value={boardParams[field]}
+              onChange={(e) => setBoardParams((prev) => ({ ...prev, [field]: Number(e.target.value) }))}
+              disabled={running}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="flex gap-2">
         <button
           type="button"
@@ -454,10 +544,23 @@ function EnclosurePanel() {
         )}
       </div>
       {error && <p className="text-sm text-red-400">{error}</p>}
-      {glbPath && (
+      {result && result.unrecognized_holes.length > 0 && (
+        <p className="text-sm text-amber-400">
+          {result.unrecognized_holes.length} hole(s) on this board weren't recognized as mounting
+          holes and were skipped -- no standoff was drilled for them.
+        </p>
+      )}
+      {result && (
         <>
-          <p className="text-sm text-neutral-400">Generated: {glbPath}</p>
-          <EnclosureViewer glbPath={glbPath} />
+          <p className="text-sm text-neutral-400">Generated: {result.glb_path}</p>
+          <EnclosureViewer glbPath={result.glb_path} />
+          <button
+            type="button"
+            className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
+            onClick={() => open(result.step_path)}
+          >
+            Open .step
+          </button>
         </>
       )}
     </div>
