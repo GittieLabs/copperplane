@@ -709,5 +709,135 @@ class TestComponentSearchAndCacheDatasheetRoutes(unittest.TestCase):
         self.assertEqual(result, {"path": "/fake/library/datasheets/ATtiny85.pdf"})
 
 
+_FAKE_OUTLINE = {"x_mm": 0.0, "y_mm": 0.0, "width_mm": 20.0, "height_mm": 15.0}
+_FAKE_HOLES = [
+    {"x_mm": 2.0, "y_mm": 2.0, "diameter_mm": 3.2, "recognized": True},
+    {"x_mm": 18.0, "y_mm": 13.0, "diameter_mm": 1.0, "recognized": False},
+]
+
+
+class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
+    """CTX-109.1: freecad_generate_enclosure composes kicad_bridge's
+    board-read functions with freecad_bridge.generate_enclosure's real
+    geometry -- these tests cover the composition/routing logic itself
+    (mode selection, recognized-holes filtering, artifact persistence);
+    the real geometry those calls produce is already verified against a
+    real freecadcmd in TestBoardDrivenEnclosure (test_freecad_bridge.py)."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_board_outline')
+    def test_001_manual_dims_never_touch_kicad_bridge_even_with_a_live_connection(
+        self, mock_get_outline, mock_generate,
+    ):
+        """TEST-010: a caller who explicitly supplied width/depth is
+        never silently overridden with board data -- mode selection is
+        explicit, not connection-sniffed."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+
+        daemon.freecad_generate_enclosure(height=20, width=50, depth=30)
+
+        mock_get_outline.assert_not_called()
+        _, kwargs = mock_generate.call_args
+        self.assertIsNone(kwargs["board_outline"])
+        self.assertEqual(kwargs["width"], 50)
+        self.assertEqual(kwargs["depth"], 30)
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_002_omitting_width_and_depth_reads_real_board_data(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        """TEST-008: omitting width/depth is the real, explicit signal to
+        read a live board -- SPEC-109 §2's board-driven mode."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+
+        daemon.freecad_generate_enclosure(height=20)
+
+        mock_get_outline.assert_called_once()
+        mock_get_holes.assert_called_once()
+        _, kwargs = mock_generate.call_args
+        self.assertEqual(kwargs["board_outline"], _FAKE_OUTLINE)
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_003_only_recognized_holes_become_real_standoffs_but_unrecognized_ones_are_still_reported(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        """TEST-009: the unrecognized hole in _FAKE_HOLES must not become
+        a standoff (the real physical risk SPEC-109 §3 names), but must
+        not be silently dropped either -- the whole build must not fail
+        over it."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+
+        result = daemon.freecad_generate_enclosure(height=20)
+
+        _, kwargs = mock_generate.call_args
+        self.assertEqual(len(kwargs["standoffs"]), 1)
+        self.assertEqual(kwargs["standoffs"][0]["x_mm"], 2.0)
+        self.assertEqual(result["unrecognized_holes"], [_FAKE_HOLES[1]])
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_004_project_name_saves_a_real_enclosure_artifact_with_a_real_board_revision(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        """TEST-008: for the first time, an enclosure Artifact is
+        actually saved -- closing the board_revision requirement
+        library_store.py has enforced since CTX-304.1 but nothing has
+        ever called save_artifact against, for real (a real tmpdir
+        storage root, not mocked)."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+        daemon.library_store.save_project({"name": "weather-pcb"})
+
+        result = daemon.freecad_generate_enclosure(height=20, project_name="weather-pcb")
+
+        self.assertIn("artifact_id", result)
+        artifacts = daemon.library_store.list_artifacts("weather-pcb")
+        self.assertEqual(artifacts, [result["artifact_id"]])
+        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
+        self.assertEqual(loaded["kind"], "enclosure")
+        self.assertTrue(loaded["board_revision"])
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_005_no_project_name_never_saves_an_artifact_matching_todays_frontend(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        """Today's App.tsx dims object never sends project_name -- this
+        must keep working exactly as before, with no artifact saved."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+
+        result = daemon.freecad_generate_enclosure(height=20)
+
+        self.assertNotIn("artifact_id", result)
+
+    @patch('daemon.generate_enclosure')
+    def test_006_manual_mode_board_revision_is_a_real_honest_sentinel(self, mock_generate):
+        """The no-board-data fallback has no real board to hash -- the
+        sentinel must say so honestly, not fabricate a hash implying real
+        board data was read."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+        daemon.library_store.save_project({"name": "weather-pcb"})
+
+        result = daemon.freecad_generate_enclosure(
+            height=20, width=50, depth=30, project_name="weather-pcb",
+        )
+
+        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
+        self.assertEqual(loaded["board_revision"], "manual:50x30x20")
+
+
 if __name__ == '__main__':
     unittest.main()

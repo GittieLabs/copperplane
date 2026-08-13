@@ -1,3 +1,4 @@
+import hashlib
 import inspect
 import logging
 import logging.handlers
@@ -197,6 +198,113 @@ def kicad_inject_component(schema: dict, x_mm: float, y_mm: float) -> dict:
     called -- the caller (eventually SPEC-204's confirmation gate) is
     solely responsible for only invoking this after approval."""
     return kicad_bridge.inject_component(schema, (x_mm, y_mm))
+
+
+def _board_revision_for(outline: dict, recognized_holes: list) -> str:
+    """SPEC-109: a real sha256 of the exact board data actually used to
+    build the enclosure -- deterministic and self-contained (no extra
+    KiCad calls, no dependency on a board file path this bridge never
+    has direct filesystem access to). Only recognized holes are hashed,
+    since only they affect the physical geometry that was built."""
+    payload = json.dumps({"outline": outline, "holes": recognized_holes}, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def freecad_generate_enclosure(
+    height: float,
+    width: float = None,
+    depth: float = None,
+    wall_thickness_mm: float = 2.0,
+    clearance_mm: float = 0.5,
+    fillet_radius_mm: float = 1.0,
+    standoff_height_mm: float = 5.0,
+    project_name: str = None,
+    timeout_s: float = 30.0,
+    cancel_event=None,
+) -> dict:
+    """The freecad.generate_enclosure route (SPEC-109, CTX-109.1):
+    composes kicad_bridge's board-read functions with
+    freecad_bridge.generate_enclosure's real geometry, replacing the
+    direct `generate_enclosure` route binding SPEC-104/CTX-105.1 first
+    set up.
+
+    Mode selection is explicit, not connection-sniffed: supplying both
+    `width` and `depth` always uses the no-board-data fallback,
+    unchanged from today's behavior -- a caller who explicitly chose
+    manual dimensions is never silently overridden just because a KiCad
+    connection happens to be open. Board-driven mode only runs when the
+    caller omits `width`/`depth`, and requires a real, live connection at
+    that point -- there's no further fallback once the caller has asked
+    for it.
+
+    Only `recognized: True` mounting holes (kicad_bridge.get_mounting_
+    holes) become real standoff cylinders. An unrecognized PT_NPTH pad
+    does not fail the whole build -- SPEC-109 §3's real risk is drilling
+    a standoff where one doesn't belong, not refusing to build at all
+    over an unrelated test point or thermal via -- but it's still named
+    in this route's own `unrecognized_holes` return value, for a future
+    UI to surface rather than the daemon silently dropping it.
+
+    `library_store.save_artifact` (kind: "enclosure", a real
+    `board_revision`) only runs when the caller supplies `project_name`
+    (optional, default None) -- keeping today's frontend contract
+    (`App.tsx`'s `dims` object, no `project_name`) working unmodified
+    until the UI-wiring child context SPEC-109 already names lands."""
+    if width is not None and depth is not None:
+        outline = None
+        recognized_holes = []
+        unrecognized_holes = []
+        board_revision = f"manual:{width}x{depth}x{height}"
+    else:
+        if kicad_bridge is None:
+            raise RuntimeError(
+                "Board-driven enclosure generation requires kicad_bridge, which failed to "
+                "import. Supply width and depth for the no-board-data fallback instead."
+            )
+        outline = kicad_bridge.get_board_outline()
+        holes = kicad_bridge.get_mounting_holes()
+        recognized_holes = [h for h in holes if h["recognized"]]
+        unrecognized_holes = [h for h in holes if not h["recognized"]]
+        board_revision = _board_revision_for(outline, recognized_holes)
+
+    result = generate_enclosure(
+        height=height,
+        width=width,
+        depth=depth,
+        board_outline=outline,
+        wall_thickness_mm=wall_thickness_mm,
+        clearance_mm=clearance_mm,
+        standoffs=[
+            {
+                "x_mm": h["x_mm"],
+                "y_mm": h["y_mm"],
+                "diameter_mm": h["diameter_mm"],
+                "height_mm": standoff_height_mm,
+            }
+            for h in recognized_holes
+        ],
+        fillet_radius_mm=fillet_radius_mm,
+        timeout_s=timeout_s,
+        cancel_event=cancel_event,
+    )
+    result = {**result, "unrecognized_holes": unrecognized_holes}
+
+    if project_name:
+        if library_store is None:
+            raise RuntimeError(
+                "Saving an enclosure Artifact requires library_store, which failed to import."
+            )
+        artifact_id = uuid.uuid4().hex
+        library_store.save_artifact(project_name, {
+            "artifact_id": artifact_id,
+            "kind": "enclosure",
+            "board_revision": board_revision,
+            "glb_path": result["glb_path"],
+            "step_path": result["step_path"],
+        })
+        result["artifact_id"] = artifact_id
+
+    return result
 
 
 # --- library.*/project.* routes (SPEC-304, CTX-304.1) -----------------
@@ -430,7 +538,7 @@ def _build_routes() -> dict:
     if kicad_bridge is not None:
         routes["kicad.inject_component"] = kicad_inject_component
     if generate_enclosure is not None:
-        routes["freecad.generate_enclosure"] = generate_enclosure
+        routes["freecad.generate_enclosure"] = freecad_generate_enclosure
     if llm_providers is not None:
         routes["llm.chat"] = llm_chat
     if component_pipeline is not None:
