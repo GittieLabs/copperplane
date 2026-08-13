@@ -24,6 +24,7 @@ child_specs:
   - "../apps/tauri-ui/specs/SPEC-300-product-ia-interaction-model.md"
   - "../apps/tauri-ui/specs/SPEC-303-settings-ui.md"
   - "../specs/SPEC-110-configurable-storage-root.md"
+  - "../services/python-daemon/specs/SPEC-109-parametric-enclosure-generator.md"
 user_facing: false
 ---
 
