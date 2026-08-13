@@ -7,6 +7,9 @@ const listLibraryPartsMock = vi.fn()
 const saveProjectMock = vi.fn()
 const loadConversationMock = vi.fn()
 const appendConversationTurnMock = vi.fn()
+const generateEnclosureMock = vi.fn()
+const getCapabilitiesMock = vi.fn()
+const shellOpenMock = vi.fn()
 
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
@@ -18,6 +21,18 @@ vi.mock('./lib/projects', () => ({
   saveProject: (...args: unknown[]) => saveProjectMock(...args),
   loadConversation: (...args: unknown[]) => loadConversationMock(...args),
   appendConversationTurn: (...args: unknown[]) => appendConversationTurnMock(...args),
+}))
+
+vi.mock('./lib/enclosure', () => ({
+  generateEnclosure: (...args: unknown[]) => generateEnclosureMock(...args),
+}))
+
+vi.mock('./lib/settings', () => ({
+  getCapabilities: (...args: unknown[]) => getCapabilitiesMock(...args),
+}))
+
+vi.mock('@tauri-apps/plugin-shell', () => ({
+  open: (...args: unknown[]) => shellOpenMock(...args),
 }))
 
 vi.mock('./components/EnclosureViewer', () => ({
@@ -186,5 +201,109 @@ describe('App: chat & command surface', () => {
     await waitFor(() => screen.getByText('> hello from before'))
     screen.getByText('hi again')
     expect(loadConversationMock).toHaveBeenCalledWith('test-project')
+  })
+})
+
+/** CTX-109.2: the Enclosure tab's real board-driven mode, project_name
+ * threading, and unrecognized_holes/step_path surfacing -- CTX-109.1
+ * built the daemon side of all of this; nothing here was reachable from
+ * the UI before this context. */
+describe('App: Enclosure tab', () => {
+  beforeEach(() => {
+    submitJobMock.mockReset()
+    listProjectsMock.mockReset().mockResolvedValue(['test-project'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    saveProjectMock.mockReset()
+    loadConversationMock.mockReset().mockResolvedValue([])
+    appendConversationTurnMock.mockReset().mockResolvedValue(undefined)
+    generateEnclosureMock.mockReset()
+    getCapabilitiesMock.mockReset().mockResolvedValue({ kicad_available: false })
+    shellOpenMock.mockReset()
+  })
+
+  async function renderAppOnEnclosure() {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Manual dimensions' }))
+  }
+
+  const fakeResult = {
+    glb_path: '/tmp/enclosure.glb',
+    step_path: '/tmp/enclosure.step',
+    unrecognized_holes: [] as { x_mm: number; y_mm: number; diameter_mm: number; recognized: false }[],
+  }
+
+  it('TEST-002a: "From board" is not offered when capabilities report kicad_available: false', async () => {
+    getCapabilitiesMock.mockResolvedValueOnce({ kicad_available: false })
+    await renderAppOnEnclosure()
+
+    expect(screen.queryByRole('button', { name: 'From board' })).toBeNull()
+  })
+
+  it('TEST-002b: "From board" is offered once capabilities report kicad_available: true', async () => {
+    getCapabilitiesMock.mockResolvedValueOnce({ kicad_available: true })
+    await renderAppOnEnclosure()
+
+    await waitFor(() => screen.getByRole('button', { name: 'From board' }))
+  })
+
+  it('TEST-003: submitting from-board mode omits width/depth and includes the real project_name', async () => {
+    getCapabilitiesMock.mockResolvedValue({ kicad_available: true })
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    await renderAppOnEnclosure()
+    await waitFor(() => screen.getByRole('button', { name: 'From board' }))
+    fireEvent.click(screen.getByRole('button', { name: 'From board' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
+    const params = generateEnclosureMock.mock.calls[0][0]
+    expect(params).not.toHaveProperty('width')
+    expect(params).not.toHaveProperty('depth')
+    expect(params.project_name).toBe('test-project')
+  })
+
+  it('TEST-004: submitting manual mode includes width, depth, and height exactly as today', async () => {
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    await renderAppOnEnclosure()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
+    expect(generateEnclosureMock).toHaveBeenCalledWith({
+      width: 50,
+      depth: 30,
+      height: 20,
+      project_name: 'test-project',
+    })
+  })
+
+  it('TEST-005: a non-empty unrecognized_holes result renders a real warning naming the count', async () => {
+    generateEnclosureMock.mockResolvedValueOnce(
+      fakeJobHandle(
+        Promise.resolve({
+          ...fakeResult,
+          unrecognized_holes: [{ x_mm: 1, y_mm: 1, diameter_mm: 1, recognized: false as const }],
+        }),
+      ),
+    )
+
+    await renderAppOnEnclosure()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => screen.getByText(/1 hole\(s\) on this board weren't recognized/))
+  })
+
+  it("TEST-006: a real step_path result renders an Open button that calls shell open with that exact path", async () => {
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    await renderAppOnEnclosure()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => screen.getByRole('button', { name: 'Open .step' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open .step' }))
+
+    expect(shellOpenMock).toHaveBeenCalledWith('/tmp/enclosure.step')
   })
 })
