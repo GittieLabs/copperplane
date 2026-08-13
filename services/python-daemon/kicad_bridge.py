@@ -5,14 +5,29 @@ for the rest of the daemon's life, to avoid paying a handshake on every
 call.
 """
 import logging
+import re
 
 from kipy import KiCad
+from kipy.board_types import PadType
 from kipy.errors import ApiError, ConnectionError as KiCadConnectionError, FutureVersionError
 from kipy.geometry import Vector2
+from kipy.util.board_layer import BoardLayer
 
 import kicad_write
 
 logger = logging.getLogger(__name__)
+
+# kipy's internal unit is nanometers (confirmed against Vector2.from_xy_mm's
+# own round trip) -- every board-read function below converts back to mm
+# explicitly, the same conversion CTX-108.1 already established on the
+# KiCad-write side of this same boundary.
+_NM_PER_MM = 1_000_000
+
+# SPEC-109 §2: a footprint is a recognized mounting hole when it comes from
+# KiCad's own standard MountingHole library, or carries that library's
+# default H<digits> reference-designator convention -- not a one-off
+# heuristic invented here.
+_MOUNTING_HOLE_REF_PATTERN = re.compile(r"^H\d+$")
 
 
 class KiCadUnavailableError(Exception):
@@ -26,6 +41,16 @@ class KiCadWriteError(Exception):
     real KiCad API failure during the write itself. The board is left
     unchanged either way: drop_commit runs on any failure before the
     commit is pushed."""
+
+
+class BoardOutlineMissingError(Exception):
+    """Raised when the board has no Edge.Cuts shapes at all -- SPEC-109
+    requires a real, designed board edge to size an enclosure against,
+    never a silently guessed size."""
+
+
+def _nm_to_mm(value_nm: int) -> float:
+    return value_nm / _NM_PER_MM
 
 
 _client = None
@@ -110,6 +135,84 @@ def get_kicad_version() -> dict:
         "minor": version.minor,
         "patch": version.patch,
     }
+
+
+def get_board_outline() -> dict:
+    """SPEC-109: unions every real Edge.Cuts shape's own `bounding_box`
+    into one real board bounding box, in mm. A bounding box is the real,
+    sufficient board-outline data for SPEC-109's fixed-rectangular-
+    enclosure scope -- not a fallback standing in for a true polygon
+    trace this spec was never going to build."""
+    client = get_client()
+    try:
+        board = client.get_board()
+        shapes = board.get_shapes()
+    except (KiCadConnectionError, ApiError) as e:
+        reset_connection()
+        raise KiCadUnavailableError(
+            "Lost connection to KiCad mid-request. It may have been closed."
+        ) from e
+
+    edge_shapes = [s for s in shapes if s.layer == BoardLayer.BL_Edge_Cuts]
+    if not edge_shapes:
+        raise BoardOutlineMissingError(
+            "This board has no Edge.Cuts shapes -- draw a real board outline in KiCad "
+            "before generating an enclosure from it."
+        )
+
+    bbox = edge_shapes[0].bounding_box()
+    for shape in edge_shapes[1:]:
+        bbox.merge(shape.bounding_box())
+
+    return {
+        "x_mm": _nm_to_mm(bbox.pos.x),
+        "y_mm": _nm_to_mm(bbox.pos.y),
+        "width_mm": _nm_to_mm(bbox.size.x),
+        "height_mm": _nm_to_mm(bbox.size.y),
+    }
+
+
+def get_mounting_holes() -> list:
+    """SPEC-109: reads real FootprintInstance items (not raw pads --
+    Board.get_pads() returns Pad objects with no link back to their
+    parent footprint). A footprint is a recognized mounting hole when it
+    comes from KiCad's own standard MountingHole library, or carries that
+    library's default H<digits> reference-designator convention -- not a
+    one-off heuristic invented here. Every real non-plated-through-hole
+    (NPTH) pad is returned with its real position (the footprint
+    instance's own absolute board position -- correct for KiCad's
+    MountingHole library, whose single NPTH pad sits at the footprint's
+    local origin) and drill diameter in mm, flagged `recognized`. An
+    NPTH on an unrecognized footprint is still returned, not dropped --
+    SPEC-109 §3 fails closed on ambiguity at the calling route, not
+    silently here."""
+    client = get_client()
+    try:
+        board = client.get_board()
+        footprints = board.get_footprints()
+    except (KiCadConnectionError, ApiError) as e:
+        reset_connection()
+        raise KiCadUnavailableError(
+            "Lost connection to KiCad mid-request. It may have been closed."
+        ) from e
+
+    holes = []
+    for fp in footprints:
+        library = (fp.definition.id.library or "").lower()
+        reference = fp.reference_field.text.value if fp.reference_field else ""
+        recognized = "mountinghole" in library or bool(_MOUNTING_HOLE_REF_PATTERN.match(reference))
+
+        for pad in fp.definition.pads:
+            if pad.pad_type != PadType.PT_NPTH:
+                continue
+            holes.append({
+                "x_mm": _nm_to_mm(fp.position.x),
+                "y_mm": _nm_to_mm(fp.position.y),
+                "diameter_mm": _nm_to_mm(pad.padstack.drill.diameter.x),
+                "recognized": recognized,
+            })
+
+    return holes
 
 
 def inject_component(schema: dict, position_mm: tuple) -> dict:
