@@ -343,7 +343,16 @@ def save_project(project: dict) -> dict:
 
 
 def load_project(name: str) -> dict:
-    return _read_json(os.path.join(_project_dir(name), "project.json"))
+    """CTX-110.1 found this gap: identity is the `projects/<name>/` folder
+    name, per list_projects() below -- project.json's own `name` field is
+    just what was true at save time, and goes stale if a user renames the
+    folder on disk (outside the app). Overriding it here with the real
+    folder name this record was loaded from means every caller sees
+    disk-truth identity, never a stale one, without needing its own
+    reconciliation logic."""
+    record = _read_json(os.path.join(_project_dir(name), "project.json"))
+    record["name"] = name
+    return record
 
 
 def list_projects() -> list:

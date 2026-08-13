@@ -192,6 +192,21 @@ class TestProject(LibraryStoreTestCase):
 
         self.assertEqual(store.list_projects(), ["doorbell", "weather-pcb"])
 
+    def test_004_renaming_the_folder_on_disk_does_not_leave_a_stale_name(self):
+        """CTX-110.1/task #53: the folder name is the real identity (per
+        list_projects()); project.json's own `name` field must never be
+        allowed to silently disagree with it after a user renames the
+        folder outside the app."""
+        store.save_project({"name": "weather-pcb", "component_refs": []})
+        old_dir = store._project_dir("weather-pcb")
+        new_dir = os.path.join(os.path.dirname(old_dir), "weather-station")
+        os.rename(old_dir, new_dir)
+
+        self.assertEqual(store.list_projects(), ["weather-station"])
+        loaded = store.load_project("weather-station")
+        self.assertEqual(loaded["name"], "weather-station")
+        self.assertEqual(loaded["component_refs"], [])
+
 
 class TestArtifact(LibraryStoreTestCase):
 
