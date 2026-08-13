@@ -118,14 +118,20 @@ box.Shape.exportStep({step_path!r})
 
 
 # SPEC-109: a real hollow shell (outer box minus an inset inner box) with a
-# standoff cylinder unioned in at every real mounting-hole position, and a
-# fillet applied to every vertical edge of the result -- outer corners and
-# the inner cavity's own corners alike, a real and unremarkable enclosure
-# design choice, not an oversight. Prototyped and run for real against
-# freecadcmd 1.1.1 before being wired in here (CTX-109.1 Plan Drift):
-# Part.Shape has no exportStl/exportStep-adjacent helper for "just the
-# vertical edges", so they're selected by real geometry -- two straight-line
-# vertices whose X and Y agree but whose Z doesn't.
+# solid floor (the inner cutout starts at z=wall_thickness, not z=0) and an
+# open top -- the standard 3D-printable tray design, not a lidded box (SPEC-109
+# §1's own non-goals rule out lid/fastener hardware). A real bug found by live
+# user testing, not this module's own tests: the first version cut the inner
+# box the *full* height starting at z=0, producing an open-both-ends tube with
+# no floor at all (CTX-109.2 Plan Drift). Also has a standoff cylinder unioned
+# in at every real mounting-hole position, and a fillet applied to every
+# vertical edge of the result -- outer corners and the inner cavity's own
+# corners alike, a real and unremarkable enclosure design choice, not an
+# oversight. Prototyped and run for real against freecadcmd 1.1.1 before being
+# wired in here (CTX-109.1 Plan Drift): Part.Shape has no exportStl/exportStep-
+# adjacent helper for "just the vertical edges", so they're selected by real
+# geometry -- two straight-line vertices whose X and Y agree but whose Z
+# doesn't.
 _HOLLOW_SHELL_SCRIPT_TEMPLATE = """\
 import FreeCAD
 import Part
@@ -133,7 +139,7 @@ import Part
 doc = FreeCAD.newDocument("enclosure")
 
 outer = Part.makeBox({outer_w}, {outer_d}, {height})
-inner = Part.makeBox({inner_w}, {inner_d}, {height}, FreeCAD.Vector({wall}, {wall}, 0))
+inner = Part.makeBox({inner_w}, {inner_d}, {height} - {wall}, FreeCAD.Vector({wall}, {wall}, {wall}))
 result = outer.cut(inner)
 
 {standoff_lines}
@@ -207,8 +213,10 @@ def generate_enclosure(
     - **Board-driven** (`board_outline` given -- `kicad_bridge.get_board_
       outline`'s real return shape): a real hollow shell sized from the
       board outline plus `clearance_mm` plus `wall_thickness_mm` on every
-      side, with a standoff cylinder at every real `standoffs` position
-      (each `{"x_mm", "y_mm", "diameter_mm", "height_mm"}`), and
+      side -- a solid floor (`wall_thickness_mm` thick) and an open top,
+      the standard 3D-printable tray design, not a lidded box -- with a
+      standoff cylinder at every real `standoffs` position (each
+      `{"x_mm", "y_mm", "diameter_mm", "height_mm"}`), and
       `fillet_radius_mm` applied to every vertical edge of the result --
       the outer corners and the inner cavity's own corners alike, a real
       and unremarkable design choice, not an oversight. `height` is

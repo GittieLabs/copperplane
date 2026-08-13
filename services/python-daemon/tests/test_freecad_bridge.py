@@ -258,9 +258,15 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
         )
         try:
             mesh = trimesh.load(result["glb_path"])
-            # margin = clearance + wall = 2.5; outer 25x20x10; inner
-            # (clearance-only margin) 21x16x10 -- a real, exact shell volume.
-            expected_volume = (25 * 20 * 10) - (21 * 16 * 10)
+            # margin = clearance + wall = 2.5; outer 25x20x10; inner cavity
+            # (clearance-only margin, 21x16) starts at z=wall=2 and runs to
+            # z=height=10 (height - wall = 8 tall) -- a solid 2mm floor at
+            # the bottom, open top. A real bug (CTX-109.2 Plan Drift, found
+            # by live user testing): the first version cut the inner box
+            # the *full* height starting at z=0, producing an open-both-ends
+            # tube with no floor at all -- this expected volume is exact
+            # only under the fixed geometry.
+            expected_volume = (25 * 20 * 10) - (21 * 16 * 8)
             self.assertAlmostEqual(mesh.volume, expected_volume, delta=expected_volume * 0.01)
         finally:
             for path in (result["glb_path"], result["step_path"]):
@@ -285,7 +291,7 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
         )
         try:
             mesh = trimesh.load(result["glb_path"])
-            shell_volume = (25 * 20 * 10) - (21 * 16 * 10)
+            shell_volume = (25 * 20 * 10) - (21 * 16 * 8)
             r = standoff["diameter_mm"] / 2
             import math
             standoff_volume = math.pi * (r ** 2) * standoff["height_mm"]
