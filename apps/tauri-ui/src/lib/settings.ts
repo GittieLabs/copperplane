@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
+import { ask, open } from '@tauri-apps/plugin-dialog'
+import { relaunch } from '@tauri-apps/plugin-process'
 import { dispatch } from './ipc'
 
 /** Must match `daemon.py`'s `_KEY_BASED_PROVIDERS` and
@@ -19,14 +21,18 @@ export function secretKeyFor(provider: KeyBasedProvider): string {
 }
 
 /** Mirrors `core/tauri-rust/src/config.rs`'s `DaemonConfig`. `output_dir`
- * is deliberately omitted -- it's always Rust-computed at spawn, never a
- * real setting a human edits. */
+ * and `storage_root` are deliberately omitted -- both are always
+ * Rust-computed at spawn, never a real setting a human edits or reads
+ * back from `config.json` (the real current `storage_root` is reported
+ * via `DaemonCapabilities` instead). `storage_root_override` (SPEC-110)
+ * is the one a human actually sets. */
 export interface DaemonConfig {
   freecadcmd_path_override?: string | null
   kicad_socket_path?: string | null
   kicad_timeout_ms?: number | null
   llm_provider?: string | null
   llm_model?: string | null
+  storage_root_override?: string | null
 }
 
 /** Mirrors `daemon.py`'s `_detect_capabilities()` shape. `log_path` is
@@ -38,6 +44,10 @@ export interface DaemonCapabilities {
   llm_providers: string[]
   log_path: string | null
   python_version: string
+  /** SPEC-110: the real, currently-active storage root, whether the
+   * app's default data directory or a user's real override -- reported
+   * here (not config.json) since it's always Rust-computed at spawn. */
+  storage_root: string | null
 }
 
 /** Saves a provider API key to the OS keychain and pushes the complete
@@ -92,6 +102,38 @@ export async function setLlmProviderAndModel(
   if (response.error) {
     throw new Error(response.error.message)
   }
+}
+
+/** SPEC-110: a real native directory picker, not a raw text field --
+ * appropriate for "pick a folder" in a way a plain input isn't. Returns
+ * `null` if the user cancels. */
+export async function chooseStorageFolder(currentPath?: string | null): Promise<string | null> {
+  const selected = await open({ directory: true, defaultPath: currentPath ?? undefined })
+  if (Array.isArray(selected)) {
+    return selected[0] ?? null
+  }
+  return selected
+}
+
+/** Quits and relaunches the app for real (`@tauri-apps/plugin-process`'s
+ * `relaunch()`) -- so a restart-required Tier 2 save can actually be
+ * applied with one click, not just described in a passive text notice a
+ * user can ignore. */
+export async function restartApp(): Promise<void> {
+  await relaunch()
+}
+
+/** SPEC-110: a real native, harder-to-ignore modal (not more inline text)
+ * warning that a storage-location change needs a restart to take effect
+ * safely -- files saved between now and a restart still go to the *old*
+ * location, and nothing moves automatically once the new one is live.
+ * Returns true if the user chose to restart now. */
+export async function confirmStorageLocationChange(): Promise<boolean> {
+  return ask(
+    'New files will be saved to the new location once you restart. Anything already saved stays ' +
+      'at the old location and will not move automatically. Restart now to apply this safely?',
+    { title: 'Storage location changed', kind: 'warning', okLabel: 'Restart Now', cancelLabel: 'Later' },
+  )
 }
 
 /** The app's own version -- a compile-time Rust constant

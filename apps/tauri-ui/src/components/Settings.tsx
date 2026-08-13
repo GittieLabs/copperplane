@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react'
 import {
   ALL_PROVIDERS,
   KEY_BASED_PROVIDERS,
+  chooseStorageFolder,
   clearSecret,
+  confirmStorageLocationChange,
   copyDiagnostics,
   getCapabilities,
   getConfig,
+  restartApp,
   saveConfig,
   saveSecret,
   secretKeyFor,
@@ -36,6 +39,7 @@ export function Settings() {
     kicad_socket_path: '',
     kicad_timeout_ms: '',
     freecadcmd_path_override: '',
+    storage_root_override: '',
   })
   const [pathsSaved, setPathsSaved] = useState(false)
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false)
@@ -63,6 +67,7 @@ export function Settings() {
         kicad_socket_path: cfg.kicad_socket_path ?? '',
         kicad_timeout_ms: cfg.kicad_timeout_ms != null ? String(cfg.kicad_timeout_ms) : '',
         freecadcmd_path_override: cfg.freecadcmd_path_override ?? '',
+        storage_root_override: cfg.storage_root_override ?? '',
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -113,6 +118,17 @@ export function Settings() {
     if (!config) return
     setError(null)
     setPathsSaved(false)
+    const newStorageOverride = pathFields.storage_root_override.trim() || null
+    // Compares the real *effective* root, not just the raw override
+    // field -- a real bug found by hand: the folder picker opens at
+    // capabilities.storage_root (the current real path) as its default
+    // location, so a user who opens it and re-selects that same folder
+    // (a completely natural action) ends up with a non-null override
+    // string that's identical to the current default, which a raw
+    // field-vs-field comparison would wrongly call "changed."
+    const oldEffectiveRoot = config.storage_root_override || capabilities?.storage_root || null
+    const newEffectiveRoot = newStorageOverride || capabilities?.storage_root || null
+    const storageOverrideChanged = newEffectiveRoot !== oldEffectiveRoot
     try {
       const timeoutMs = pathFields.kicad_timeout_ms.trim()
       await saveConfig({
@@ -120,8 +136,42 @@ export function Settings() {
         kicad_socket_path: pathFields.kicad_socket_path.trim() || null,
         kicad_timeout_ms: timeoutMs ? Number(timeoutMs) : null,
         freecadcmd_path_override: pathFields.freecadcmd_path_override.trim() || null,
+        storage_root_override: newStorageOverride,
       })
       setPathsSaved(true)
+      await loadConfig()
+      // SPEC-110: a real, harder-to-ignore native modal specifically for
+      // the storage location -- unlike KiCad/FreeCAD path changes, an
+      // un-applied storage change risks real files landing in two
+      // different places depending on whether a restart happened yet.
+      if (storageOverrideChanged) {
+        const shouldRestart = await confirmStorageLocationChange()
+        if (shouldRestart) {
+          await restartApp()
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleRestartNow() {
+    setError(null)
+    try {
+      await restartApp()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleChooseStorageFolder() {
+    setError(null)
+    try {
+      const chosen = await chooseStorageFolder(pathFields.storage_root_override || capabilities?.storage_root)
+      if (chosen) {
+        setPathsSaved(false)
+        setPathFields((prev) => ({ ...prev, storage_root_override: chosen }))
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -265,9 +315,34 @@ export function Settings() {
             }}
           />
         </label>
+        <label className="flex flex-col gap-1 text-sm text-neutral-400">
+          Storage location
+          <div className="flex gap-2">
+            <input
+              aria-label="Storage location"
+              className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-1 text-sm text-neutral-100"
+              placeholder={capabilities?.storage_root ?? ''}
+              value={pathFields.storage_root_override}
+              onChange={(e) => {
+                setPathsSaved(false)
+                setPathFields((prev) => ({ ...prev, storage_root_override: e.target.value }))
+              }}
+            />
+            <button
+              type="button"
+              className="shrink-0 rounded border border-neutral-700 px-3 py-1 text-sm"
+              onClick={() => void handleChooseStorageFolder()}
+            >
+              Choose folder…
+            </button>
+          </div>
+          {capabilities?.storage_root && (
+            <span className="text-xs text-neutral-500">Currently: {capabilities.storage_root}</span>
+          )}
+        </label>
 
         <p className="text-xs text-amber-400">
-          These three fields are only read at daemon startup — restart the app to apply a change.
+          These four fields are only read at daemon startup — restart the app to apply a change.
         </p>
         <div className="flex items-center gap-2">
           <button
@@ -277,7 +352,18 @@ export function Settings() {
           >
             Save
           </button>
-          {pathsSaved && <span className="text-sm text-emerald-400">Saved — restart to apply.</span>}
+          {pathsSaved && (
+            <>
+              <span className="text-sm text-emerald-400">Saved — restart to apply.</span>
+              <button
+                type="button"
+                className="rounded border border-neutral-700 px-2 py-0.5 text-xs"
+                onClick={() => void handleRestartNow()}
+              >
+                Restart Now
+              </button>
+            </>
+          )}
         </div>
       </section>
 
