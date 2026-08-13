@@ -145,6 +145,7 @@ describe('copyDiagnostics', () => {
     llm_providers: [] as string[],
     log_path: '/var/log/daemon.log',
     python_version: '3.12.0',
+    storage_root: '/Users/test/Library/Application Support/has/storage',
   }
 
   function mockCapabilitiesAndVersion(capabilities: typeof BASE_CAPABILITIES) {

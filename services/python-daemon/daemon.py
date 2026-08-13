@@ -659,6 +659,11 @@ def _detect_capabilities() -> dict:
         # read-only log dir) -- reported honestly, not papered over.
         "log_path": _LOG_FILE_PATH,
         "python_version": platform.python_version(),
+        # SPEC-110: the real, currently-active storage root -- whether
+        # the app's default data directory or a user's real
+        # storage_root_override -- so Settings can display it without
+        # config.json ever needing to hold the Rust-computed value.
+        "storage_root": library_store.current_storage_root() if library_store is not None else None,
     }
 
 

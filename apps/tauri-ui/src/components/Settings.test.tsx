@@ -8,6 +8,9 @@ const saveSecretMock = vi.fn()
 const clearSecretMock = vi.fn()
 const setLlmProviderAndModelMock = vi.fn()
 const copyDiagnosticsMock = vi.fn()
+const chooseStorageFolderMock = vi.fn()
+const confirmStorageLocationChangeMock = vi.fn()
+const restartAppMock = vi.fn()
 
 vi.mock('../lib/settings', async () => {
   const actual = await vi.importActual<typeof import('../lib/settings')>('../lib/settings')
@@ -20,6 +23,9 @@ vi.mock('../lib/settings', async () => {
     clearSecret: (...args: unknown[]) => clearSecretMock(...args),
     setLlmProviderAndModel: (...args: unknown[]) => setLlmProviderAndModelMock(...args),
     copyDiagnostics: (...args: unknown[]) => copyDiagnosticsMock(...args),
+    chooseStorageFolder: (...args: unknown[]) => chooseStorageFolderMock(...args),
+    confirmStorageLocationChange: (...args: unknown[]) => confirmStorageLocationChangeMock(...args),
+    restartApp: (...args: unknown[]) => restartAppMock(...args),
   }
 })
 
@@ -31,6 +37,7 @@ const EMPTY_CAPABILITIES = {
   llm_providers: [],
   log_path: '/var/log/daemon.log',
   python_version: '3.12.0',
+  storage_root: '/Users/test/Library/Application Support/has/storage',
 }
 const EMPTY_CONFIG = { llm_provider: null, llm_model: null }
 
@@ -42,6 +49,9 @@ beforeEach(() => {
   saveSecretMock.mockReset().mockResolvedValue(undefined)
   clearSecretMock.mockReset().mockResolvedValue(undefined)
   setLlmProviderAndModelMock.mockReset().mockResolvedValue(undefined)
+  chooseStorageFolderMock.mockReset()
+  confirmStorageLocationChangeMock.mockReset().mockResolvedValue(false)
+  restartAppMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('Settings: Tier 1 (provider/model/keys)', () => {
@@ -124,7 +134,7 @@ describe('Settings: Tier 2 (KiCad/FreeCAD status + paths)', () => {
     await waitFor(() => expect(getConfigMock).toHaveBeenCalled())
 
     expect(
-      screen.getByText('These three fields are only read at daemon startup — restart the app to apply a change.'),
+      screen.getByText('These four fields are only read at daemon startup — restart the app to apply a change.'),
     ).toBeTruthy()
     // Tier 1's provider/model fields must not carry this notice -- they
     // apply live, no restart needed.
@@ -163,9 +173,155 @@ describe('Settings: Tier 2 (KiCad/FreeCAD status + paths)', () => {
         kicad_socket_path: '/tmp/kicad/api.sock',
         kicad_timeout_ms: null,
         freecadcmd_path_override: '/opt/freecad/bin/freecadcmd',
+        storage_root_override: null,
       }),
     )
     await waitFor(() => expect(screen.getByText('Saved — restart to apply.')).toBeTruthy())
+  })
+
+  it('SPEC-110: shows the real current storage_root from capabilities, never config.json', async () => {
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+
+    screen.getByText(`Currently: ${EMPTY_CAPABILITIES.storage_root}`)
+  })
+
+  it('SPEC-110: "Choose folder…" calls chooseStorageFolder and fills the field with the real chosen path', async () => {
+    chooseStorageFolderMock.mockResolvedValueOnce('/Volumes/External/has-storage')
+
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose folder…' }))
+
+    await waitFor(() =>
+      expect((screen.getByLabelText('Storage location') as HTMLInputElement).value).toBe(
+        '/Volumes/External/has-storage',
+      ),
+    )
+  })
+
+  it('SPEC-110: a cancelled folder picker (null) leaves the field unchanged', async () => {
+    chooseStorageFolderMock.mockResolvedValueOnce(null)
+
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose folder…' }))
+
+    await waitFor(() => expect(chooseStorageFolderMock).toHaveBeenCalledTimes(1))
+    expect((screen.getByLabelText('Storage location') as HTMLInputElement).value).toBe('')
+  })
+
+  it('SPEC-110: saving a chosen storage folder calls saveConfig with storage_root_override set, and shows the real restart-safety modal', async () => {
+    getConfigMock.mockResolvedValue({
+      llm_provider: 'anthropic',
+      llm_model: 'claude-sonnet',
+      kicad_socket_path: null,
+      kicad_timeout_ms: null,
+      freecadcmd_path_override: null,
+      storage_root_override: null,
+    })
+
+    render(<Settings />)
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalled())
+
+    fireEvent.change(screen.getByLabelText('Storage location'), {
+      target: { value: '/Volumes/External/has-storage' },
+    })
+
+    const saveButtons = screen.getAllByRole('button', { name: 'Save' })
+    fireEvent.click(saveButtons[saveButtons.length - 1])
+
+    await waitFor(() =>
+      expect(saveConfigMock).toHaveBeenCalledWith(
+        expect.objectContaining({ storage_root_override: '/Volumes/External/has-storage' }),
+      ),
+    )
+    // A real, changed storage location triggers the harder-to-ignore
+    // native modal, not just the passive "restart to apply" text.
+    await waitFor(() => expect(confirmStorageLocationChangeMock).toHaveBeenCalledTimes(1))
+  })
+
+  it('SPEC-110: confirming the restart-safety modal actually relaunches the app', async () => {
+    confirmStorageLocationChangeMock.mockResolvedValueOnce(true)
+    getConfigMock.mockResolvedValue({
+      llm_provider: 'anthropic', llm_model: 'claude-sonnet',
+      kicad_socket_path: null, kicad_timeout_ms: null, freecadcmd_path_override: null,
+      storage_root_override: null,
+    })
+
+    render(<Settings />)
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalled())
+
+    fireEvent.change(screen.getByLabelText('Storage location'), {
+      target: { value: '/Volumes/External/has-storage' },
+    })
+    const saveButtons = screen.getAllByRole('button', { name: 'Save' })
+    fireEvent.click(saveButtons[saveButtons.length - 1])
+
+    await waitFor(() => expect(restartAppMock).toHaveBeenCalledTimes(1))
+  })
+
+  it('SPEC-110: saving an unchanged storage location never shows the modal -- only a real change does', async () => {
+    getConfigMock.mockResolvedValue({
+      llm_provider: 'anthropic', llm_model: 'claude-sonnet',
+      kicad_socket_path: null, kicad_timeout_ms: null, freecadcmd_path_override: null,
+      storage_root_override: '/Volumes/External/has-storage',
+    })
+
+    render(<Settings />)
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalled())
+
+    const saveButtons = screen.getAllByRole('button', { name: 'Save' })
+    fireEvent.click(saveButtons[saveButtons.length - 1])
+
+    await waitFor(() => expect(saveConfigMock).toHaveBeenCalled())
+    expect(confirmStorageLocationChangeMock).not.toHaveBeenCalled()
+  })
+
+  it('SPEC-110 regression: re-selecting the currently-active folder via the picker must not trigger the modal', async () => {
+    /** Real bug found by hand: "Choose folder…" opens at
+     * capabilities.storage_root (the current real path) as its default
+     * location. A user who opens it and picks that same folder -- a
+     * completely natural action -- ends up with a non-null override
+     * string identical to the current default; a raw field-vs-field
+     * comparison wrongly called that "changed." */
+    getConfigMock.mockResolvedValue({
+      llm_provider: 'anthropic', llm_model: 'claude-sonnet',
+      kicad_socket_path: null, kicad_timeout_ms: null, freecadcmd_path_override: null,
+      storage_root_override: null,
+    })
+    chooseStorageFolderMock.mockResolvedValueOnce(EMPTY_CAPABILITIES.storage_root)
+
+    render(<Settings />)
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose folder…' }))
+    await waitFor(() =>
+      expect((screen.getByLabelText('Storage location') as HTMLInputElement).value).toBe(
+        EMPTY_CAPABILITIES.storage_root,
+      ),
+    )
+
+    const saveButtons = screen.getAllByRole('button', { name: 'Save' })
+    fireEvent.click(saveButtons[saveButtons.length - 1])
+
+    await waitFor(() => expect(saveConfigMock).toHaveBeenCalled())
+    expect(confirmStorageLocationChangeMock).not.toHaveBeenCalled()
+  })
+
+  it('SPEC-110: "Restart Now" next to the saved notice relaunches the app directly', async () => {
+    render(<Settings />)
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalled())
+
+    const saveButtons = screen.getAllByRole('button', { name: 'Save' })
+    fireEvent.click(saveButtons[saveButtons.length - 1])
+    await waitFor(() => screen.getByRole('button', { name: 'Restart Now' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart Now' }))
+
+    await waitFor(() => expect(restartAppMock).toHaveBeenCalledTimes(1))
   })
 })
 

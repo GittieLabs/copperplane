@@ -41,6 +41,24 @@ class TestStorageRootUnconfigured(unittest.TestCase):
             store.list_parts()
 
 
+class TestCurrentStorageRoot(unittest.TestCase):
+    """SPEC-110: unlike _root(), current_storage_root() never raises --
+    daemon.get_capabilities calls it to report the real path (or None)
+    without needing to catch StorageRootUnconfiguredError itself."""
+
+    def test_001_returns_none_before_configure(self):
+        store.configure(storage_root=None)
+        self.assertIsNone(store.current_storage_root())
+
+    def test_002_returns_the_real_configured_root(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store.configure(storage_root=tmpdir)
+            try:
+                self.assertEqual(store.current_storage_root(), tmpdir)
+            finally:
+                store.configure(storage_root=None)
+
+
 class TestPart(LibraryStoreTestCase):
 
     def test_001_save_and_load_round_trip(self):

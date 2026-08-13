@@ -35,15 +35,22 @@ pub struct DaemonConfig {
     pub output_dir: Option<String>,
     /// Root directory for SPEC-304's `library/`/`projects/`/`.index/`
     /// tree -- like `output_dir` above, always Rust-computed and never
-    /// read from `config.json`, so this field and the app's real data
-    /// directory can never disagree. Resolves the open question
-    /// `PRODUCT-PLAN.md` §8 and `SPEC-304` §3 both name (project root
-    /// location) by reusing the exact mechanism `SPEC-301`/`CTX-301.1`
-    /// already established for `output_dir`, rather than inventing a
-    /// second one: a fixed location under the app's own data directory,
-    /// not a user-chosen picker (deferred, not decided against).
+    /// read from `config.json` directly, so this field and the app's real
+    /// data directory can never disagree. `resolve_storage_root` computes
+    /// this from `storage_root_override` below when a real, usable
+    /// override is set, or from the app's own data directory otherwise
+    /// (SPEC-110).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_root: Option<String>,
+    /// A user-chosen location for `storage_root` above (SPEC-110), set via
+    /// Settings' real native folder picker. `None`/empty means "use the
+    /// default app-data-dir location" -- the same override-vs-computed
+    /// split `freecadcmd_path_override` already establishes, reused here
+    /// for a fourth field rather than a new mechanism. Only read at daemon
+    /// spawn, same "restart to apply" contract every other override field
+    /// on this struct already has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage_root_override: Option<String>,
 }
 
 /// `AppHandle`-free core of `load_config`, directly unit-testable against
@@ -145,13 +152,35 @@ pub fn ensure_storage_root(app_data_dir: &std::path::Path) -> std::io::Result<st
     Ok(dir)
 }
 
-/// The `AppHandle`-dependent half of `ensure_storage_root`; see
-/// `resolve_output_dir`'s own docstring for why this needs to agree with
-/// Tauri's own app-data-dir resolution rather than being computed twice.
-pub fn resolve_storage_root(app: &AppHandle) -> Option<String> {
-    let app_data_dir = app.path().app_data_dir().ok()?;
-    let dir = ensure_storage_root(&app_data_dir).ok()?;
+/// Tries a user-chosen override first (a real `create_dir_all`, not just
+/// a string check -- SPEC-110 §3's own named gotcha: a chosen directory
+/// that's since become unwritable or unmounted must fall back to the
+/// default, not fail the daemon's own startup), falling back to
+/// `ensure_storage_root`'s existing computed default on an empty
+/// override or a real failure to create/use it.
+fn resolve_storage_root_with_override(
+    app_data_dir: &std::path::Path,
+    override_path: Option<&str>,
+) -> Option<String> {
+    if let Some(path) = override_path {
+        if !path.trim().is_empty() {
+            let dir = std::path::PathBuf::from(path);
+            if std::fs::create_dir_all(&dir).is_ok() {
+                return Some(dir.to_string_lossy().to_string());
+            }
+        }
+    }
+    let dir = ensure_storage_root(app_data_dir).ok()?;
     Some(dir.to_string_lossy().to_string())
+}
+
+/// The `AppHandle`-dependent half of `resolve_storage_root_with_override`;
+/// see `resolve_output_dir`'s own docstring for why the default half of
+/// this needs to agree with Tauri's own app-data-dir resolution rather
+/// than being computed twice.
+pub fn resolve_storage_root(app: &AppHandle, override_path: Option<&str>) -> Option<String> {
+    let app_data_dir = app.path().app_data_dir().ok()?;
+    resolve_storage_root_with_override(&app_data_dir, override_path)
 }
 
 #[cfg(test)]
@@ -171,6 +200,7 @@ mod tests {
             llm_model: Some("claude-sonnet".to_string()),
             output_dir: None,
             storage_root: None,
+            storage_root_override: Some("/Volumes/External/has-storage".to_string()),
         };
 
         save_config_to_dir(&base, &config).expect("save_config_to_dir should succeed");
@@ -199,6 +229,7 @@ mod tests {
             llm_model: None,
             output_dir: Some("/app/data/generated".to_string()),
             storage_root: None,
+            storage_root_override: None,
         };
 
         let env = build_daemon_env(&config);
@@ -283,6 +314,65 @@ mod tests {
 
         assert_eq!(storage.parent(), generated.parent());
         assert_ne!(storage, generated);
+        std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
+    }
+
+    #[test]
+    fn resolve_storage_root_with_override_prefers_a_real_creatable_override_over_the_default() {
+        let base = std::env::temp_dir().join(format!("ctx-110.1-override-{}", std::process::id()));
+        let override_dir = std::env::temp_dir().join(format!("ctx-110.1-override-chosen-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_dir_all(&override_dir);
+
+        let resolved = resolve_storage_root_with_override(&base, Some(override_dir.to_str().unwrap()))
+            .expect("should resolve");
+
+        assert_eq!(resolved, override_dir.to_string_lossy());
+        assert!(override_dir.is_dir(), "the override directory should really exist on disk");
+        assert!(!base.join("storage").exists(), "the default location must not be created when an override wins");
+
+        std::fs::remove_dir_all(&override_dir).expect("test cleanup should succeed");
+    }
+
+    #[test]
+    fn resolve_storage_root_with_override_falls_back_to_the_default_when_override_is_none() {
+        let base = std::env::temp_dir().join(format!("ctx-110.1-none-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        let resolved = resolve_storage_root_with_override(&base, None).expect("should resolve");
+
+        assert_eq!(resolved, base.join("storage").to_string_lossy());
+        std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
+    }
+
+    #[test]
+    fn resolve_storage_root_with_override_falls_back_to_the_default_when_override_is_blank() {
+        let base = std::env::temp_dir().join(format!("ctx-110.1-blank-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        let resolved = resolve_storage_root_with_override(&base, Some("   ")).expect("should resolve");
+
+        assert_eq!(resolved, base.join("storage").to_string_lossy());
+        std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
+    }
+
+    #[test]
+    fn resolve_storage_root_with_override_falls_back_to_the_default_when_the_override_cannot_be_created() {
+        // A real failure mode, not hypothetical (SPEC-110 §3): a file
+        // already sitting at the chosen path means create_dir_all fails,
+        // exactly as it would for an unmounted external drive.
+        let base = std::env::temp_dir().join(format!("ctx-110.1-fail-{}", std::process::id()));
+        let blocked_path = std::env::temp_dir().join(format!("ctx-110.1-fail-blocker-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let _ = std::fs::remove_file(&blocked_path);
+        std::fs::write(&blocked_path, b"not a directory").expect("setup write should succeed");
+
+        let resolved = resolve_storage_root_with_override(&base, Some(blocked_path.to_str().unwrap()))
+            .expect("should still resolve via the fallback");
+
+        assert_eq!(resolved, base.join("storage").to_string_lossy());
+
+        std::fs::remove_file(&blocked_path).expect("test cleanup should succeed");
         std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
     }
 }
