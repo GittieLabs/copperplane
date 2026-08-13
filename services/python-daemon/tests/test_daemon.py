@@ -588,6 +588,30 @@ class TestDaemonCapabilities(unittest.TestCase):
         self.assertIn("log_path", response["result"])
         self.assertIn("python_version", response["result"])
 
+    def test_006_reports_the_real_currently_configured_storage_root(self):
+        """SPEC-110: storage_root reflects library_store's own real,
+        currently-active root (the Rust-computed value spawn_daemon
+        injected), so Settings can display it without config.json ever
+        needing to hold it."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_root = daemon.library_store._storage_root_override
+            daemon.library_store.configure(storage_root=tmpdir)
+            try:
+                caps = daemon._detect_capabilities()
+                self.assertEqual(caps['storage_root'], tmpdir)
+            finally:
+                daemon.library_store.configure(storage_root=original_root)
+
+    def test_007_reports_none_when_library_store_failed_to_import(self):
+        original = daemon.library_store
+        daemon.library_store = None
+        try:
+            caps = daemon._detect_capabilities()
+            self.assertIsNone(caps['storage_root'])
+        finally:
+            daemon.library_store = original
+
 
 class TestKicadGenerateComponentProviderOverride(unittest.TestCase):
     """CTX-303.2: kicad_generate_component used to always run

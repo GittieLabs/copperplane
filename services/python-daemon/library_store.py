@@ -71,6 +71,16 @@ def _root() -> str:
     return _storage_root_override
 
 
+def current_storage_root() -> str:
+    """The real, currently-active storage root, or None if never
+    configured -- unlike _root(), never raises. SPEC-110: lets
+    daemon.get_capabilities report the real resolved path (the same
+    Rust-computed value spawn_daemon injected, whether from the app's
+    default data directory or a user's real storage_root_override) so
+    Settings can display it without config.json ever needing to hold it."""
+    return _storage_root_override
+
+
 def _ensure_dir(*parts: str) -> str:
     path = os.path.join(_root(), *parts)
     os.makedirs(path, exist_ok=True)
