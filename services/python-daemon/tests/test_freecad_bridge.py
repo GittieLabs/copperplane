@@ -21,16 +21,19 @@ from freecad_bridge import (
 class TestFreeCADBridge(unittest.TestCase):
 
     def setUp(self):
-        # The path/output-dir overrides and last-glb tracker are all
-        # module-level state; make sure no test leaks one into another.
+        # The path/output-dir overrides and last-glb/last-step trackers
+        # are all module-level state; make sure no test leaks one into
+        # another.
         freecad_bridge._path_override = None
         freecad_bridge._output_dir_override = None
         freecad_bridge._last_glb_path = None
+        freecad_bridge._last_step_path = None
 
     def tearDown(self):
         freecad_bridge._path_override = None
         freecad_bridge._output_dir_override = None
         freecad_bridge._last_glb_path = None
+        freecad_bridge._last_step_path = None
 
     @patch('freecad_bridge.glob.glob', return_value=[])
     @patch('freecad_bridge.shutil.which', return_value=None)
@@ -93,7 +96,8 @@ class TestFreeCADBridge(unittest.TestCase):
                 "test for real."
             )
 
-        glb_path = generate_enclosure(width=50, depth=30, height=20)
+        result = generate_enclosure(width=50, depth=30, height=20)
+        glb_path, step_path = result["glb_path"], result["step_path"]
         try:
             self.assertTrue(os.path.exists(glb_path))
             with open(glb_path, 'rb') as f:
@@ -102,6 +106,8 @@ class TestFreeCADBridge(unittest.TestCase):
         finally:
             if os.path.exists(glb_path):
                 os.remove(glb_path)
+            if os.path.exists(step_path):
+                os.remove(step_path)
 
     @patch('freecad_bridge.subprocess.Popen')
     @patch('freecad_bridge.find_freecadcmd', return_value='/fake/freecadcmd')
@@ -160,10 +166,12 @@ class TestFreeCADBridge(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as output_dir:
             freecad_bridge.configure(output_dir=output_dir)
-            glb_path = generate_enclosure(width=50, depth=30, height=20)
+            result = generate_enclosure(width=50, depth=30, height=20)
 
-            self.assertEqual(os.path.dirname(glb_path), output_dir)
-            self.assertTrue(os.path.exists(glb_path))
+            self.assertEqual(os.path.dirname(result["glb_path"]), output_dir)
+            self.assertEqual(os.path.dirname(result["step_path"]), output_dir)
+            self.assertTrue(os.path.exists(result["glb_path"]))
+            self.assertTrue(os.path.exists(result["step_path"]))
 
     def test_009_previous_glb_is_deleted_on_next_successful_generation(self):
         """TEST-006 (CTX-301.1): SPEC-301's flagged known debt -- nothing
@@ -183,13 +191,130 @@ class TestFreeCADBridge(unittest.TestCase):
         with tempfile.TemporaryDirectory() as output_dir:
             freecad_bridge.configure(output_dir=output_dir)
 
-            first_glb = generate_enclosure(width=50, depth=30, height=20)
-            self.assertTrue(os.path.exists(first_glb))
+            first = generate_enclosure(width=50, depth=30, height=20)
+            self.assertTrue(os.path.exists(first["glb_path"]))
+            self.assertTrue(os.path.exists(first["step_path"]))
 
-            second_glb = generate_enclosure(width=60, depth=40, height=25)
+            second = generate_enclosure(width=60, depth=40, height=25)
 
-            self.assertFalse(os.path.exists(first_glb), "the previous .glb should be cleaned up")
-            self.assertTrue(os.path.exists(second_glb))
+            self.assertFalse(os.path.exists(first["glb_path"]), "the previous .glb should be cleaned up")
+            self.assertFalse(os.path.exists(first["step_path"]), "the previous .step should be cleaned up")
+            self.assertTrue(os.path.exists(second["glb_path"]))
+            self.assertTrue(os.path.exists(second["step_path"]))
+
+    def test_010_neither_board_outline_nor_width_and_depth_is_rejected(self):
+        """SPEC-109 §2: exactly one real mode must be chosen -- a call
+        with neither board_outline nor width/depth is a caller bug, not
+        a silently-guessed zero-size enclosure."""
+        with self.assertRaises(ValueError):
+            generate_enclosure(height=20)
+
+
+_TEST_BOARD_OUTLINE = {"x_mm": 0.0, "y_mm": 0.0, "width_mm": 20.0, "height_mm": 15.0}
+
+
+class TestBoardDrivenEnclosure(unittest.TestCase):
+    """SPEC-109/CTX-109.1: real geometry verification against an actually
+    installed FreeCAD (the same 'verify for real' pattern as
+    TestFreeCADBridge's TEST-004/008/009) -- a hollow shell and standoff
+    cylinders are real solid-modeling operations worth checking against
+    the real thing, not just a script that ran without raising."""
+
+    def setUp(self):
+        freecad_bridge._path_override = None
+        freecad_bridge._output_dir_override = None
+        freecad_bridge._last_glb_path = None
+        freecad_bridge._last_step_path = None
+
+    def tearDown(self):
+        freecad_bridge._path_override = None
+        freecad_bridge._output_dir_override = None
+        freecad_bridge._last_glb_path = None
+        freecad_bridge._last_step_path = None
+
+    def _skip_unless_freecad_available(self):
+        try:
+            find_freecadcmd()
+        except FreeCADUnavailableError:
+            self.skipTest(
+                "No local freecadcmd found. Install FreeCAD 0.20+ to run this "
+                "test for real."
+            )
+
+    def test_001_board_driven_mode_produces_a_real_hollow_shell(self):
+        """TEST-004 (CTX-109.1): the result's real volume matches a real
+        hollow shell (outer box minus inner cavity), not a solid box --
+        fillet/standoffs disabled here so the expected volume is exact."""
+        self._skip_unless_freecad_available()
+        import trimesh
+
+        result = generate_enclosure(
+            height=10,
+            board_outline=_TEST_BOARD_OUTLINE,
+            wall_thickness_mm=2.0,
+            clearance_mm=0.5,
+            standoffs=[],
+            fillet_radius_mm=0,
+        )
+        try:
+            mesh = trimesh.load(result["glb_path"])
+            # margin = clearance + wall = 2.5; outer 25x20x10; inner
+            # (clearance-only margin) 21x16x10 -- a real, exact shell volume.
+            expected_volume = (25 * 20 * 10) - (21 * 16 * 10)
+            self.assertAlmostEqual(mesh.volume, expected_volume, delta=expected_volume * 0.01)
+        finally:
+            for path in (result["glb_path"], result["step_path"]):
+                if os.path.exists(path):
+                    os.remove(path)
+
+    def test_002_a_standoff_adds_real_cylinder_volume(self):
+        """TEST-005 (CTX-109.1): a standoff cylinder placed well inside
+        the cavity (away from the walls, no overlap) adds its own real,
+        computable volume to the result."""
+        self._skip_unless_freecad_available()
+        import trimesh
+
+        standoff = {"x_mm": 10.0, "y_mm": 7.5, "diameter_mm": 3.2, "height_mm": 5.0}
+        result = generate_enclosure(
+            height=10,
+            board_outline=_TEST_BOARD_OUTLINE,
+            wall_thickness_mm=2.0,
+            clearance_mm=0.5,
+            standoffs=[standoff],
+            fillet_radius_mm=0,
+        )
+        try:
+            mesh = trimesh.load(result["glb_path"])
+            shell_volume = (25 * 20 * 10) - (21 * 16 * 10)
+            r = standoff["diameter_mm"] / 2
+            import math
+            standoff_volume = math.pi * (r ** 2) * standoff["height_mm"]
+            self.assertAlmostEqual(
+                mesh.volume, shell_volume + standoff_volume, delta=(shell_volume + standoff_volume) * 0.02,
+            )
+        finally:
+            for path in (result["glb_path"], result["step_path"]):
+                if os.path.exists(path):
+                    os.remove(path)
+
+    def test_003_exports_a_real_non_empty_step_file(self):
+        """TEST-006 (CTX-109.1): a real STEP file (ISO-10303-21 header),
+        not an empty placeholder -- SPEC-109's own real mechanical-CAD
+        interchange requirement."""
+        self._skip_unless_freecad_available()
+
+        result = generate_enclosure(
+            height=10, board_outline=_TEST_BOARD_OUTLINE, standoffs=[], fillet_radius_mm=0,
+        )
+        try:
+            self.assertTrue(os.path.exists(result["step_path"]))
+            with open(result["step_path"], "r", encoding="utf-8", errors="ignore") as f:
+                header = f.read(20)
+            self.assertIn("ISO-10303-21", header)
+        finally:
+            for path in (result["glb_path"], result["step_path"]):
+                if os.path.exists(path):
+                    os.remove(path)
 
 
 if __name__ == '__main__':
