@@ -285,11 +285,12 @@ Nothing in the daemon gets rewritten. This is a re-housing, not a rebuild.
     `CTX-308.1` shipped the first slice: search across a user's own *directly-configured*
     `fp-lib-table` libraries -- real, verified against kipy's own source, which has no
     library-search capability at all (bypasses it entirely via direct `fp-lib-table`/`.pretty`
-    filesystem access instead). Still open: KiCad's own ~100+ built-in libraries sit behind a
-    recursive `(type "Table")` `fp-lib-table` entry with `${KICAD_FOOTPRINT_DIR}`-style placeholders
-    -- real, separate work, deferred to `CTX-308.2`. The user's own saved library and
-    datasheet-generation sources (and how a generated footprint is marked as unverified) remain
-    fully open, not yet started.
+    filesystem access instead). `CTX-308.2` wired that search into a real UI (Part Detail's "Find
+    Footprint" section, once a saved part has no footprint yet). Still open, not yet given a
+    context number: KiCad's own ~100+ built-in libraries sit behind a recursive `(type "Table")`
+    `fp-lib-table` entry with `${KICAD_FOOTPRINT_DIR}`-style placeholders. The user's own saved
+    library and datasheet-generation sources (and how a generated footprint is marked as unverified)
+    remain fully open, not yet started.
 4.  **Project root location.** User-chosen on first run, or a fixed default under the app data dir
     with an override? Affects SPEC-304 and SPEC-106.
 5.  **Symbol generation.** SPEC-202 already produces pins with electrical types, which is most of a
