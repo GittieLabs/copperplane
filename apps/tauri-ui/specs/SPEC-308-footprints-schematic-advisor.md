@@ -125,6 +125,13 @@ user_facing: true
     they already have -- either reusing one their own KiCad install already has (fastest, most
     trusted), or generating one from the datasheet when nothing installed matches -- then get real
     guidance on how to actually connect it (decoupling, protection, power) rather than guessing.
-*   **What the user sees and does:** *Not yet decided -- depends on the corpus/search-UX design
-    question in §2/§3 above.* Left as a prompt for the implementation context, per this repo's own
-    norm against inventing an interaction design that hasn't actually been discussed.
+*   **What the user sees and does:** filled in for real by `CTX-308.2`, describing what actually
+    shipped, not an invented design. After clicking "Save to Library" in Part Detail, a real "Find
+    Footprint" section appears (reusing `ComponentDiscovery`'s own established search/select shape)
+    once the saved part has no `footprint_id` yet. The user types a query and searches this
+    machine's own configured KiCad footprint libraries (`CTX-308.1`'s real scope: direct
+    `fp-lib-table` entries only, not yet KiCad's built-in library set); each candidate shows its
+    library and footprint name with a "Use this" button. Selecting one persists the real footprint
+    and links it to the part; the section then shows "Footprint linked: `<library>:<name>`" instead
+    of the search form. A zero-result search shows an honest "no match in your configured
+    libraries" message, not an error.

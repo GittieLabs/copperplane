@@ -24,6 +24,13 @@ export interface SavedPart {
   datasheet_url: string
   symbol_id: string
   footprint_id: string | null
+  /** SPEC-300 §2.2's provenance record, keyed by field name. Real,
+   * already returned by library.save_confirmed_part/library.save_part
+   * (verified directly against library_store.py -- save_part's own
+   * schema validation requires it on every save), but never declared
+   * here until CTX-308.2 needed to round-trip it through a re-save
+   * (attaching a footprint_id) without silently dropping it. */
+  provenance: Record<string, unknown>
 }
 
 export interface SavedSymbol {
