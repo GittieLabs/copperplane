@@ -26,6 +26,7 @@ child_specs:
   - "../specs/SPEC-110-configurable-storage-root.md"
   - "../services/python-daemon/specs/SPEC-109-parametric-enclosure-generator.md"
   - "../specs/SPEC-401-python-sidecar-packaging.md"
+  - "../services/python-daemon/specs/SPEC-204-agent-tool-registry.md"
 user_facing: false
 ---
 
