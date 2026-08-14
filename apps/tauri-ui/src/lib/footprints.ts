@@ -32,16 +32,22 @@ export async function searchFootprints(query: string): Promise<FootprintCandidat
 /** Links a found footprint to an already-saved Part. No new backend
  * route needed -- library.save_footprint and library.save_part
  * (SPEC-304/CTX-304.1) already accept exactly this shape; this just
- * calls them in the right order. The footprint_id uses KiCad's own real
- * "library:name" reference convention (confirmed against kipy's
- * LibraryIdentifier shape, not invented) so it reads the same way a
- * footprint reference does inside KiCad itself. */
+ * calls them in the right order.
+ *
+ * footprint_id deliberately does NOT use KiCad's own "library:name"
+ * reference syntax (an earlier version of this function did) --
+ * footprint_id is also the on-disk filename library_store.py persists
+ * it under (`{footprint_id}.json`), and `:` is a reserved character in
+ * Windows filenames. Real, live-caught bug: a real footprint saved with
+ * a colon-containing id silently failed to round-trip through search on
+ * real windows-latest CI. "__" is a safe, still-readable separator on
+ * every platform this app ships to. */
 export async function attachFootprintToPart(
   part: SavedPart,
   library: string,
   footprintName: string,
 ): Promise<SavedPart> {
-  const footprintId = `${library}:${footprintName}`
+  const footprintId = `${library}__${footprintName}`
 
   await unwrap<unknown>(
     await dispatch('library.save_footprint', {

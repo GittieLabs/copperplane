@@ -204,7 +204,7 @@ describe('PartDetail', () => {
     ])
     attachFootprintToPartMock.mockResolvedValueOnce({
       ...SAVED_PART_NO_FOOTPRINT,
-      footprint_id: 'MyPCBLibs:MP1584EN_5V_Module',
+      footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
     })
     await saveAndReachFootprintSection()
     fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
@@ -213,7 +213,7 @@ describe('PartDetail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
 
-    await waitFor(() => screen.getByText('Footprint linked: MyPCBLibs:MP1584EN_5V_Module'))
+    await waitFor(() => screen.getByText('Footprint linked: MyPCBLibs__MP1584EN_5V_Module'))
     expect(attachFootprintToPartMock).toHaveBeenCalledWith(SAVED_PART_NO_FOOTPRINT, 'MyPCBLibs', 'MP1584EN_5V_Module')
     expect(screen.queryByText('Find Footprint')).toBeNull()
   })

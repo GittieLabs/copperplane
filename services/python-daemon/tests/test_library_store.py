@@ -181,7 +181,7 @@ class TestSymbolAndFootprint(LibraryStoreTestCase):
 
     def test_007_search_footprints_matches_on_footprint_name(self):
         store.save_footprint({
-            "footprint_id": "MyPCBLibs:MP1584EN_5V_Module",
+            "footprint_id": "MyPCBLibs__MP1584EN_5V_Module",
             "library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module",
         })
         store.save_footprint({"footprint_id": "DIP-8", "pads": []})
@@ -189,7 +189,7 @@ class TestSymbolAndFootprint(LibraryStoreTestCase):
         results = store.search_footprints("MP1584")
 
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["footprint_id"], "MyPCBLibs:MP1584EN_5V_Module")
+        self.assertEqual(results[0]["footprint_id"], "MyPCBLibs__MP1584EN_5V_Module")
 
     def test_008_search_footprints_falls_back_to_footprint_id_when_name_is_missing(self):
         """TEST-002: a real, already-possible shape -- this file's own

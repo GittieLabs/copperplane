@@ -738,7 +738,7 @@ class TestKicadSearchFootprintsRoute(unittest.TestCase):
         tagged with a real source field."""
         mock_kicad_search.return_value = [{"library": "Battery", "footprint_name": "BatteryHolder_X"}]
         mock_saved_search.return_value = [
-            {"footprint_id": "MyPCBLibs:MP1584EN_5V_Module", "library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module"},
+            {"footprint_id": "MyPCBLibs__MP1584EN_5V_Module", "library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module"},
         ]
 
         result = daemon.kicad_search_footprints("battery")
