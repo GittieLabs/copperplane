@@ -3,18 +3,8 @@ mod daemon;
 mod secrets;
 mod supervisor;
 
-use std::path::PathBuf;
-
 use daemon::DaemonHandle;
 use tauri::Manager;
-
-/// Path to the Python daemon script, resolved relative to this crate's own
-/// manifest directory rather than the process's current working directory,
-/// so `cargo tauri dev` behaves the same no matter where it's invoked from.
-fn daemon_script_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../services/python-daemon/daemon.py")
-}
 
 /// The app version the Settings screen's "Copy Diagnostics" (SPEC-303
 /// Tier 3) includes -- a compile-time constant from this crate's own
@@ -40,7 +30,7 @@ pub fn run() {
                 )?;
             }
 
-            let daemon_handle = daemon::spawn_daemon(app.handle(), daemon_script_path())?;
+            let daemon_handle = daemon::spawn_daemon(app.handle())?;
             app.manage(daemon_handle);
 
             Ok(())

@@ -34,6 +34,20 @@ src-tauri/target/
 node_modules/
 dist/
 
+# PyInstaller (SPEC-401/CTX-401.2): re-include the two placeholder sidecar
+# binaries tauri-build's own build.rs requires to exist on every `cargo
+# build`/`cargo test` invocation. These negations MUST come after the
+# blanket `dist/` rule above -- gitignore is last-match-wins, so placing
+# them earlier (as an initial attempt here did) has no effect: the later
+# `dist/` rule still re-excludes the directory. The three-step shape --
+# un-ignore the directory, wildcard-ignore its contents, then re-include
+# specific files -- is git's own documented pattern; a bare directory
+# negation alone does not un-ignore files under an already-excluded parent.
+!services/python-daemon/dist/
+services/python-daemon/dist/*
+!services/python-daemon/dist/hardware-agent-studio-daemon-aarch64-apple-darwin
+!services/python-daemon/dist/hardware-agent-studio-daemon-x86_64-apple-darwin
+
 # Claude Code machine-local permission state — not shared config
 .claude/settings.local.json
 

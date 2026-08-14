@@ -10,6 +10,75 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
 
+/// Path to the Python daemon script, resolved relative to this crate's own
+/// manifest directory rather than the process's current working directory,
+/// so `cargo tauri dev` behaves the same no matter where it's invoked from.
+/// Only ever used in a debug build (see `resolve_daemon_invocation`) --
+/// dev mode always runs from this real source checkout, so baking in
+/// `CARGO_MANIFEST_DIR` here is correct, not the SPEC-401 blocker that
+/// macro becomes when a *release* build does the same thing.
+fn daemon_script_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../services/python-daemon/daemon.py")
+}
+
+/// SPEC-401/CTX-401.2: resolves the frozen daemon sidecar's real on-disk
+/// path in a release build -- the same directory the currently-running
+/// executable itself lives in. Verified against `tauri-plugin-shell`'s own
+/// real `relative_command_path` implementation and `tauri-bundler`'s own
+/// real macOS bundling code (`copy_binaries_to_bundle`), which copies
+/// `externalBin` files into `Contents/MacOS/` -- the exact same directory
+/// the main binary lives in, not `Contents/Resources/` (what
+/// `app.path().resource_dir()` points at, and what an earlier draft of
+/// this context wrongly assumed before checking the real bundler source).
+fn sidecar_binary_path() -> PathBuf {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(PathBuf::from))
+        .expect("the running executable must have a real parent directory");
+    let name = if cfg!(windows) {
+        "hardware-agent-studio-daemon.exe"
+    } else {
+        "hardware-agent-studio-daemon"
+    };
+    exe_dir.join(name)
+}
+
+/// How to actually spawn the Python daemon process: a plain interpreter
+/// plus script in a debug build (unchanged from before this context), or
+/// the real frozen sidecar binary `CTX-401.1` built, in a release build.
+/// Resolved once, here, so `spawn_daemon`'s own `Command::new(...)` call
+/// -- and everything downstream of it: `DaemonHandle`, the Windows Job
+/// Object assignment, the whole crash shield -- never needs to know which
+/// mode is active. Both branches spawn a plain `std::process::Child`
+/// either way, so none of that downstream code changes at all.
+struct DaemonInvocation {
+    program: String,
+    args: Vec<PathBuf>,
+}
+
+/// Split from `resolve_daemon_invocation` (which reads `cfg!(debug_
+/// assertions)` itself) purely so both branches are real, deterministic
+/// unit tests instead of only whichever one the current build profile
+/// happens to be.
+fn build_daemon_invocation(is_debug_build: bool) -> DaemonInvocation {
+    if is_debug_build {
+        DaemonInvocation {
+            program: "python3".to_string(),
+            args: vec![daemon_script_path()],
+        }
+    } else {
+        DaemonInvocation {
+            program: sidecar_binary_path().to_string_lossy().into_owned(),
+            args: vec![],
+        }
+    }
+}
+
+fn resolve_daemon_invocation() -> DaemonInvocation {
+    build_daemon_invocation(cfg!(debug_assertions))
+}
+
 /// How often the macOS heartbeat monitor checks in (SPEC-107 §2/§3).
 #[cfg(target_os = "macos")]
 const HEARTBEAT_CHECK_INTERVAL_S: u64 = 5;
@@ -147,13 +216,16 @@ pub struct DaemonHandle {
     _job_handle: crate::supervisor::windows::JobHandle,
 }
 
-/// Spawns `services/python-daemon/daemon.py` relative to the app's own
-/// resource directory, wires the supervisor's crash shield onto it, and
-/// starts a background thread that forwards its `stdout` to the frontend.
-pub fn spawn_daemon(app: &AppHandle, script_path: PathBuf) -> std::io::Result<DaemonHandle> {
-    let mut command = Command::new("python3");
+/// Spawns the Python daemon -- `python3 daemon.py` in a debug build, or
+/// `CTX-401.1`'s frozen sidecar binary in a release build (SPEC-401,
+/// `resolve_daemon_invocation`) -- wires the supervisor's crash shield
+/// onto it, and starts a background thread that forwards its `stdout` to
+/// the frontend.
+pub fn spawn_daemon(app: &AppHandle) -> std::io::Result<DaemonHandle> {
+    let invocation = resolve_daemon_invocation();
+    let mut command = Command::new(&invocation.program);
     command
-        .arg(&script_path)
+        .args(&invocation.args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
@@ -395,5 +467,52 @@ mod tests {
         write_request(&mut buf, "second").unwrap();
 
         assert_eq!(buf, b"first\nsecond\n".to_vec());
+    }
+}
+
+#[cfg(test)]
+mod daemon_invocation_tests {
+    use super::{build_daemon_invocation, sidecar_binary_path};
+
+    #[test]
+    fn a_debug_build_invokes_python3_with_the_real_daemon_script_unchanged() {
+        let invocation = build_daemon_invocation(true);
+
+        assert_eq!(invocation.program, "python3");
+        assert_eq!(invocation.args.len(), 1);
+        assert!(
+            invocation.args[0].ends_with("services/python-daemon/daemon.py"),
+            "expected the real daemon.py path, got {:?}",
+            invocation.args[0],
+        );
+    }
+
+    #[test]
+    fn a_release_build_invokes_the_real_sidecar_binary_with_no_extra_args() {
+        let invocation = build_daemon_invocation(false);
+
+        assert_eq!(invocation.program, sidecar_binary_path().to_string_lossy());
+        assert!(
+            invocation.args.is_empty(),
+            "the frozen sidecar needs no script argument -- daemon.py is baked in",
+        );
+    }
+
+    #[test]
+    fn sidecar_binary_path_resolves_next_to_the_real_currently_running_executable() {
+        // SPEC-401/CTX-401.2: verified for real against tauri-bundler's own
+        // source -- externalBin files land in the exact same directory as
+        // the main binary (Contents/MacOS/ on macOS), so "next to
+        // current_exe()" is the real, correct resolution, not a guess.
+        let resolved = sidecar_binary_path();
+        let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+
+        assert_eq!(resolved.parent().unwrap(), exe_dir);
+        let expected_name = if cfg!(windows) {
+            "hardware-agent-studio-daemon.exe"
+        } else {
+            "hardware-agent-studio-daemon"
+        };
+        assert_eq!(resolved.file_name().unwrap(), expected_name);
     }
 }
