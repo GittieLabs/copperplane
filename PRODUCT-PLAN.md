@@ -279,10 +279,17 @@ Nothing in the daemon gets rewritten. This is a re-housing, not a rebuild.
     `ls /Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli && … kicad-cli pcb drc --help`
 2.  **Schematic access.** Live IPC (SPEC-103's stated preference) or reading `.kicad_sch` from disk?
     The advisor arguably needs the file, which reopens a decision SPEC-103 deliberately closed.
-3.  **Footprint sources, ranked.** Now that footprints are their own object, "find a footprint"
-    needs a defined corpus: the user's installed KiCad footprint libraries first, then the user's
-    own library, then generation from datasheet package dimensions. Which of the three are in scope
-    for SPEC-308, and how a generated footprint is marked as unverified, both need deciding.
+3.  **Footprint sources, ranked -- partially resolved 2026-08-14.** Now that footprints are their
+    own object, "find a footprint" needs a defined corpus: the user's installed KiCad footprint
+    libraries first, then the user's own library, then generation from datasheet package dimensions.
+    `CTX-308.1` shipped the first slice: search across a user's own *directly-configured*
+    `fp-lib-table` libraries -- real, verified against kipy's own source, which has no
+    library-search capability at all (bypasses it entirely via direct `fp-lib-table`/`.pretty`
+    filesystem access instead). Still open: KiCad's own ~100+ built-in libraries sit behind a
+    recursive `(type "Table")` `fp-lib-table` entry with `${KICAD_FOOTPRINT_DIR}`-style placeholders
+    -- real, separate work, deferred to `CTX-308.2`. The user's own saved library and
+    datasheet-generation sources (and how a generated footprint is marked as unverified) remain
+    fully open, not yet started.
 4.  **Project root location.** User-chosen on first run, or a fixed default under the app data dir
     with an override? Affects SPEC-304 and SPEC-106.
 5.  **Symbol generation.** SPEC-202 already produces pins with electrical types, which is most of a
