@@ -97,6 +97,12 @@ except Exception:
     logger.exception("library_store failed to import -- library.*/project.* routes will be unavailable")
     library_store = None
 
+try:
+    import tool_registry
+except Exception:
+    logger.exception("tool_registry failed to import -- agent.dispatch_tool will be unavailable")
+    tool_registry = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -522,6 +528,30 @@ def cancel_job(job_id: str) -> dict:
     return {"job_id": job_id, "cancelling": True}
 
 
+def agent_dispatch_tool(tool_name: str, tool_input: dict = None, confirmed: bool = False) -> dict:
+    """SPEC-204/CTX-204.1 Phase 2: the real JSON-RPC entry point for
+    tool_registry's confirmation-gating policy. Deliberately does NOT go
+    through tool_registry.build_tool_registry()'s ToolRegistry -- that
+    object exists for a future AgentExecutor conversation loop
+    (SPEC-204 SS1's own non-goal against a chat UI in this spec), not for
+    this route. This route reuses submit_job (SPEC-105) directly for the
+    real dispatch, exactly like every other ASYNC_ROUTES caller, rather
+    than reinventing job tracking/progress notification for tool calls.
+
+    tool_input's own `confirmed` key (if the caller nested it there
+    instead of passing the top-level parameter) is intentionally never
+    read -- only the top-level `confirmed` argument gates dispatch, so
+    there is exactly one place this decision is made."""
+    tool_input = tool_input or {}
+    if tool_name not in tool_registry.TOOL_DEFINITIONS or tool_name not in ROUTES:
+        raise InvalidParamsError(f"Unknown or unavailable tool: {tool_name}")
+
+    if tool_name in tool_registry.CONFIRMATION_REQUIRED_TOOLS and not confirmed:
+        return {"status": "pending_confirmation", "tool": tool_name, "input": tool_input}
+
+    return submit_job(tool_name, tool_input)
+
+
 def _build_routes() -> dict:
     """kicad.*/freecad.* are only registered if their bridge module
     actually imported (SPEC-107 §2) -- a broken kipy install shouldn't
@@ -563,6 +593,8 @@ def _build_routes() -> dict:
         routes["project.list_artifacts"] = project_list_artifacts
         routes["project.append_conversation_turn"] = project_append_conversation_turn
         routes["project.load_conversation"] = project_load_conversation
+    if tool_registry is not None:
+        routes["agent.dispatch_tool"] = agent_dispatch_tool
     return routes
 
 
