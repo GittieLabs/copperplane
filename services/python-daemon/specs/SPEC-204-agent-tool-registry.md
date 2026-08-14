@@ -16,9 +16,10 @@ user_facing: false
 
 ## 1. Executive Summary & Goals
 *   **High-Level Goal:** Replace `daemon.py`'s hand-rolled `ROUTES: dict[str, Callable]` dispatch
-    (`SPEC-102`) with AgentFlow's real `ToolRegistry`/`LocalToolDispatcher` (already an installed
-    dependency since `SPEC-201`, currently used only for raw provider chat completions — its
-    tool-calling machinery is entirely unused today), and define the confirmation-gating policy
+    (`SPEC-102`) with AgentFlow's real `ToolRegistry` (already an installed dependency since
+    `SPEC-201`, currently used only for raw provider chat completions — its tool-calling machinery
+    is entirely unused today), registering tools via its `add_tool()` inline path rather than
+    `LocalToolDispatcher` (see §2/§3 for why), and define the confirmation-gating policy
     that decides which registered tools execute immediately versus require explicit user approval
     before running. This is what lets a natural-language request like "put a BME280 near the ESP32
     and give me an enclosure that fits" decompose into a model-driven plan across the KiCad and
@@ -53,63 +54,61 @@ user_facing: false
         only the routes an agent plan would plausibly call (the KiCad/FreeCAD bridges, component
         search/generation) keeps the tool surface reviewable instead of dumping all ~20 routes in
         at once.
-    *   **Explicitly NOT a non-goal: changing AgentFlow itself.** AgentFlow (`~/repos/agentflow`,
-        `gittielabs-agentflow`) is Keith's own library, not a fixed third-party dependency. Where
-        §2/§3 below identify a real gap in `ToolRegistry`/`LocalToolDispatcher` that this spec's
-        confirmation-gating and structured-result needs expose, the default is to close that gap
-        upstream in AgentFlow itself, not to build a downstream workaround in this daemon.
+    *   **Not an AgentFlow change.** An earlier draft of this spec planned upstream AgentFlow work
+        for two apparent gaps; both turned out, on real verification (see §2), to already be solved
+        by the library's existing API surface via a different registration/ContextVar choice. This
+        spec's own real work is entirely inside `services/python-daemon`. The general rule that
+        AgentFlow is Keith's own library and fair game to change when a *real* gap is found still
+        stands — it just doesn't apply here.
 
 ## 2. System Architecture & Design Choices
-*   **Design Rationale — two real AgentFlow gaps, closed upstream, not adapted around.** Reading
-    `agentflow/src/agentflow/tools/` directly (not assumed) surfaces two real limitations in the
-    installed `gittielabs-agentflow==0.8.2`, both of which this app is the first real consumer to
-    hit:
-    1.  `LocalToolDispatcher.register(name, handler, description, input_schema)` requires `handler`
-        to return a plain `str` — no structured-result path exists. `kicad.generate_component`'s
-        schema and `freecad.generate_enclosure`'s `.glb` mesh reference both need more than a bare
-        string.
-    2.  `LocalToolDispatcher.dispatch` swallows handler exceptions into `"Tool error: {exc}"`
-        strings rather than raising or returning a distinguishable failure — any consumer needing
-        to tell a genuine tool failure apart from a normal string result hits this, not just a
-        board-write case.
-    Since AgentFlow is Keith's own library, the plan is to fix both **in AgentFlow itself**, per the
-    project's own established procedure (branch in `~/repos/agentflow`, tests, version bump in both
-    `pyproject.toml` and `src/agentflow/__init__.py`, changelog entry, tag-triggered PyPI release,
-    then bump the pin in `services/python-daemon/requirements.txt`) — not by JSON-encoding
-    structured payloads into strings or string-matching `"Tool error:"` downstream in this daemon.
-    The concrete shape of the AgentFlow-side change (a new structured-result type on
-    `ToolDispatcher`'s protocol; likely additive, not breaking, since existing string-returning
-    tools are still valid strings) is implementation-context work, not invented here.
-*   **Confirmation-gating policy — the actual job of this spec, and a real candidate for an
-    AgentFlow-level primitive rather than daemon-only logic.** Of every route in `daemon.py`'s
-    `ROUTES`, exactly one mutates a live, already-open board: `kicad.inject_component`. Everything
-    else (`freecad.generate_enclosure`, `kicad.generate_component`, `component.search`, `llm.chat`,
-    and all `project.*`/`library.*` local-storage routes) reads, or writes only to this app's own
-    local storage, never to a document the user has open elsewhere. The gating rule this app needs:
-    **a tool registered as requiring confirmation never executes on its first model-proposed call**
-    — it returns a pending-approval result instead of dispatching, and only a second, explicit
-    "confirmed" call actually runs the real handler. "Ask before running a destructive tool" is not
-    specific to this app's board-write case — any AgentFlow consumer wiring an LLM to a tool that
-    has real-world side effects needs the same two-phase shape. The implementation-context work
-    should evaluate adding this as a first-class `ToolRegistry`/`LocalToolDispatcher` primitive
-    upstream (e.g. a `requires_confirmation` flag at registration time, with the generic
-    pending/confirm protocol implemented once in AgentFlow) before defaulting to a bespoke
-    `pending_confirmation` shape hand-rolled only in this daemon.
-*   **Data Flow / Interactions:** model requests a tool call → registry dispatch → if the tool
-    requires confirmation, short-circuit to a pending-approval result without calling the real
-    handler → UI renders the proposed call and awaits user approval → UI's approval re-invokes the
-    same tool as confirmed, which now calls through to the real handler. The exact payload shape
-    (an AgentFlow-level primitive vs. a daemon-only convention, per the open question above) needs a
-    real sequence diagram once that's decided — left as an open question below rather than invented
-    here.
+*   **Corrected 2026-08-14, by running real code against the installed library, not just reading
+    signatures: neither AgentFlow gap this section originally claimed actually exists.** An earlier
+    draft of this spec asserted `LocalToolDispatcher` had no structured-result path and swallowed
+    exceptions in a way no other AgentFlow API avoided, and planned to fix both upstream. Two real
+    scripts run against `gittielabs-agentflow==0.8.2` (not the installed daemon — the library
+    itself) disproved both:
+    1.  **Structured results already work.** `agentflow.tools.http_dispatcher.last_raw_tool_result`
+        is a real, already-wired `ContextVar[dict | None]` — a handler sets a real dict on it before
+        returning its string, and `AgentExecutor` (`agent/runtime.py`) already reads it back into
+        the `TOOL_RESULT` event's `raw_result` field, consumable via `EventBus.on(TOOL_RESULT, ...)`.
+        Verified directly: a handler set `{'schema': {'pins': 8}, 'confidence': 0.9}` on the
+        ContextVar and it came back out through the dispatch call intact.
+    2.  **Exception propagation already works too — via a different, also-existing registration
+        path.** `ToolRegistry.add_tool()` (inline registration) has no exception handling of its own
+        and lets a handler's exception propagate straight through `ToolRegistry.dispatch()` to
+        `AgentExecutor`, which correctly sets `is_error: true` and emits an `ERROR` event.
+        `LocalToolDispatcher.register()` is the one path that swallows exceptions into
+        `"Tool error: {exc}"` strings — that behavior is real, but it's an artifact of choosing that
+        registration path, not a library-wide gap. Verified directly: the same failing handler
+        registered inline propagated its real `ValueError`; registered via `LocalToolDispatcher` it
+        was swallowed into a string, exactly as originally observed.
+    **No AgentFlow code change is needed for either.** This app's own registration choice —
+    `ToolRegistry.add_tool()` for every route this spec registers, plus setting
+    `last_raw_tool_result` in handlers that have a structured payload worth surfacing — gets both
+    properties for free from the already-released library.
+*   **Confirmation-gating policy — the actual job of this spec, and genuinely daemon-side, not an
+    AgentFlow primitive.** Of every route in `daemon.py`'s `ROUTES`, exactly one mutates a live,
+    already-open board: `kicad.inject_component`. Everything else (`freecad.generate_enclosure`,
+    `kicad.generate_component`, `component.search`, `llm.chat`, and all `project.*`/`library.*`
+    local-storage routes) reads, or writes only to this app's own local storage, never to a document
+    the user has open elsewhere. The gating rule: **the inline handler wrapping
+    `kicad.inject_component` checks its own `tool_input` for a `confirmed` flag** — absent or false,
+    it returns a pending-approval string (and, via `last_raw_tool_result`, a structured
+    `{"status": "pending_confirmation", ...}` payload) without calling the real `ROUTES` handler;
+    only `confirmed: true` calls through. This needs no interception point in `ToolRegistry` itself
+    — it's ordinary control flow inside one handler function, decided in this app because nothing
+    about it is generic enough across AgentFlow's other real consumers to justify a library-level
+    primitive (unlike the two items above, which really were library gaps once verified as real).
+*   **Data Flow / Interactions:** model requests a tool call → `ToolRegistry.dispatch(name, input)`
+    (inline handler) → if `name == "kicad.inject_component"` and `input.get("confirmed")` is not
+    true, return a pending-approval result → UI renders the proposed call and awaits user approval →
+    UI's approval re-invokes the same tool with `confirmed: true`, which now calls through to the
+    real `ROUTES["kicad.inject_component"]` handler.
 *   **Cross-Module Impacts:**
-    *   `~/repos/agentflow` (`gittielabs-agentflow`): the structured-result and confirmation-gating
-        primitives above, added upstream first, following [[agentflow-fix-upstream]]'s release
-        procedure — real, in-scope work for this spec, not a dependency this spec merely consumes
-        as fixed.
-    *   `services/python-daemon`: a new adapter module registering `ToolRegistry`/
-        `LocalToolDispatcher` tools that wrap a subset of `daemon.py`'s existing `ROUTES` handlers,
-        built against the upgraded AgentFlow pin; no change to the handlers' own business logic.
+    *   `services/python-daemon`: a new module registering `ToolRegistry.add_tool()` tools that wrap
+        a subset of `daemon.py`'s existing `ROUTES` handlers; no change to the handlers' own business
+        logic, and no AgentFlow version bump required.
     *   `apps/tauri-ui`: consumes the new pending-confirmation result shape once `SPEC-302`'s
         surface (or its `PRODUCT-PLAN.md`-scoped successor) is updated to render it — that UI work
         is explicitly out of this spec's scope, but the shape this spec emits is a real contract
@@ -119,27 +118,22 @@ user_facing: false
         rather than only its provider abstraction).
 
 ## 3. Known Constraints & Risks
-*   **Two real gaps in `gittielabs-agentflow==0.8.2`, confirmed from its own source, both slated for
-    an upstream fix rather than a downstream workaround** (see §2, [[agentflow-fix-upstream]]):
-    `LocalToolDispatcher` handlers return plain strings only, with no structured-result path; and
-    `LocalToolDispatcher.dispatch` swallows handler exceptions into `"Tool error: {exc}"` strings
-    instead of raising or returning a distinguishable failure. Implementation must not default to
-    JSON-encoding payloads into strings or string-matching `"Tool error:"` as the permanent design —
-    that's the exact pattern this repo's own norms rule out for a library Keith owns outright. A
-    downstream shim is only acceptable as a short-lived stopgap while the AgentFlow-side PR is in
-    flight, and must be removed once the upgraded pin lands.
-*   **This spec's confirmation-gating need may be generically useful enough to belong in AgentFlow
-    itself**, not just this daemon — real design work for the implementation context to resolve
-    before defaulting to a daemon-only convention (see §2).
+*   **Use `ToolRegistry.add_tool()`, not `LocalToolDispatcher.register()`, for every tool this spec
+    registers.** The two behave differently in `gittielabs-agentflow==0.8.2` — verified directly,
+    not assumed (see §2): `add_tool`'s inline handlers propagate real exceptions up to
+    `AgentExecutor`'s own `is_error`/`ERROR`-event handling, while `LocalToolDispatcher` swallows
+    them into `"Tool error: {exc}"` strings. Reaching for `LocalToolDispatcher` here — the more
+    obviously-named class for "local tools" — would silently reintroduce the exact failure-signaling
+    gap this spec originally (and wrongly) thought was a library-wide limitation.
 *   **Every existing `ROUTES` handler already assumes single-threaded, synchronous dispatch**
-    (`SPEC-102`'s own known constraint). Wrapping them in `async def` tool handlers for
-    `LocalToolDispatcher` must not silently invite concurrent dispatch the daemon was never designed
-    for — the wrapper is a signature adapter, not a concurrency change.
-*   **Open question, not yet resolved:** the exact pending-confirmation → user-approval →
-    re-dispatch round trip shape (a second tool call with the same input plus a flag, a distinct
-    `tool.confirm` route, an AgentFlow-level primitive per §2, or something `SPEC-105`'s job-progress
-    protocol already has a shape for?) needs a decision before implementation, not invented here per
-    this repo's own scaffolding norm.
+    (`SPEC-102`'s own known constraint). Wrapping them in `async def` tool handlers must not silently
+    invite concurrent dispatch the daemon was never designed for — the wrapper is a signature
+    adapter, not a concurrency change.
+*   **Resolved 2026-08-14:** the pending-confirmation round trip is a `confirmed` flag on
+    `kicad.inject_component`'s own `tool_input`, checked inside its inline handler (see §2) — not an
+    AgentFlow primitive, not a distinct route. Implementation should still confirm this composes
+    cleanly with `SPEC-105`'s job-progress protocol for surfacing the pending state to the UI, since
+    that part is genuinely open.
 
 ## 4. Module Map & Reference Links
 ```text
