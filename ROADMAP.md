@@ -404,26 +404,29 @@ produce `Artifact`s it stores.
 
 ### 3.4 `4xx` — Distribution & operations
 
-#### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — 🚧 in progress: macOS freeze done ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md)) 2026-08-14
+#### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — ✅ Completed ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md), [CTX-401.2](context/CTX-401.2-tauri-sidecar-wiring.md)) 2026-08-14
 *Module:* `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-107
 
-**The highest-risk unsolved problem in the project.** Two concrete blockers, both quoted in the spec
-itself: `env!("CARGO_MANIFEST_DIR")` bakes the developer's checkout path into the binary, and
-`Command::new("python3")` assumes a system Python with `kipy`, `pynng`, `trimesh`, and
-`gittielabs-agentflow` (already a real, shipped dependency since `SPEC-201` — not a future addition,
-corrected in the spec's own §2) all importable.
+**The highest-risk unsolved problem in the project — now solved for macOS, this spec's own scope.**
+Two concrete blockers, both quoted in the spec itself: `env!("CARGO_MANIFEST_DIR")` bakes the
+developer's checkout path into the binary, and `Command::new("python3")` assumes a system Python
+with `kipy`, `pynng`, `trimesh`, and `gittielabs-agentflow` (already a real, shipped dependency
+since `SPEC-201` — not a future addition, corrected in the spec's own §2) all importable.
 
 `CTX-401.1` landed the first real slice: a working, committed, verified macOS PyInstaller freeze of
 the daemon itself, driven directly over its real JSON-RPC wire (a real `kicad.get_version` round
 trip, a real HTTPS call to Anthropic's API). Found and corrected a real wrong prediction along the
 way — no `--hidden-import` declarations were needed for AgentFlow's lazily-imported provider SDKs,
-contrary to what this spec originally predicted. **Still open:** wiring that binary into Tauri's
-`externalBin`/sidecar mechanism and swapping `spawn_daemon`'s `Command::new("python3")` for it,
-deliberately deferred to `CTX-401.2` (not yet written) rather than done in the same sitting as the
-freeze — that's the part that actually makes the app installable by anyone else, and it touches the
-one function every route in this app depends on.
+contrary to what this spec originally predicted.
 
-*Do this before showing the app to anyone who isn't sitting at Keith's desk.*
+`CTX-401.2` finished the wiring: a dev/release-branched daemon-invocation resolver, real
+`externalBin` sidecar config (scoped to macOS via `tauri.macos.conf.json` after a genuinely
+CI-breaking discovery — a top-level `externalBin` entry makes `tauri-build`'s own build.rs require
+the resource file on *every* `cargo build`/`cargo test`, not just bundling, which broke all three CI
+platforms until scoped), and end-to-end verification against a real built `.app` bundle, including
+the user directly click-testing the running dev-mode app afterward. `SPEC-101`'s crash shield was
+left untouched, as designed. Windows/Linux freezing remains real, explicitly out-of-scope follow-up
+(`SPEC-403`).
 
 #### SPEC-402 — Release, Signing & Auto-Update
 *Module:* repo-wide · *Depends on:* SPEC-401
@@ -538,9 +541,11 @@ replace the M2/M3 originally described here, kept below for historical record.
 **Not carried forward, and not yet re-slotted anywhere — flagged, not resolved.** The original M2
 below was packaging/signing/cross-platform verification (SPEC-401/402/403). `PRODUCT-PLAN.md` §5.3
 ("Unaffected") doesn't mention distribution at all, and its M2-M5 sequence has no room for it either.
-This is a real gap, not a decision to drop packaging — SPEC-401 is still the highest-risk unsolved
-problem in the project (§1.2) — it just has no milestone right now. Needs a home once the
-product-model milestones are far enough along to package, or its own milestone number.
+This is a real gap, not a decision to drop packaging — SPEC-401 landed for macOS (CTX-401.1,
+CTX-401.2, 2026-08-14), so this is no longer the highest-risk unsolved problem §1.2 once called it,
+but SPEC-402 (signing/auto-update) and SPEC-403 (Windows/Linux verification) are still real,
+unstarted work with no milestone right now. Needs a home once the product-model milestones are far
+enough along to package, or its own milestone number.
 
 <details>
 <summary>Original M2/M3 (superseded, kept for record)</summary>
@@ -634,7 +639,7 @@ These are drawn from what already worked in this repo, not invented:
 
 | Risk | Impact | Where it's handled |
 | :--- | :--- | :--- |
-| Packaging the Python sidecar proves harder than expected (native wheels: `pynng`, `trimesh`) | The app is undeliverable; M2 slips indefinitely | SPEC-401 — worth a spike before M1 finishes, so the surprise lands early |
+| Packaging the Python sidecar proves harder than expected (native wheels: `pynng`, `trimesh`) | The app is undeliverable; M2 slips indefinitely | ✅ Closed for macOS by CTX-401.1 (freeze) + CTX-401.2 (sidecar wiring) — no `--hidden-import` issues found in practice. Windows/Linux freezing remains open (SPEC-403). |
 | An LLM hallucinates a plausible-but-wrong footprint that reaches a real board | A wasted PCB spin; the fastest way to lose a hardware engineer's trust permanently | SPEC-202 validation layer + SPEC-204 confirmation gate on all writes |
 | KiCad's IPC API changes across a major version | The KiCad bridge breaks wholesale; CTX-103.1's "patch bumps are safe" assumption is untested against a real break | SPEC-103 version gate, revisited in SPEC-108 |
 | Windows and Linux live paths stay unverified | "Cross-platform" is a claim, not a fact, at the two most fragile integration points | SPEC-403, SPEC-903 |
@@ -655,6 +660,6 @@ blocking it.
 4.  ~~Write **SPEC-902** and upgrade the validator into a full graph checker.~~ ✅ done
 5.  ~~Write **SPEC-105** (async job/progress protocol), **SPEC-106** (config & secrets store), and
     **SPEC-107** (structured logging, startup handshake & diagnostics).~~ ✅ done
-6.  Spike **SPEC-401** packaging far enough to know whether frozen `pynng`/`trimesh` is a day or a
-    fortnight. Find out now, not in M2.
+6.  ~~Spike **SPEC-401** packaging far enough to know whether frozen `pynng`/`trimesh` is a day or a
+    fortnight.~~ ✅ done — no spike needed; CTX-401.1/CTX-401.2 landed the real macOS packaging.
 7.  Start M1.
