@@ -709,6 +709,34 @@ class TestComponentSearchAndCacheDatasheetRoutes(unittest.TestCase):
         self.assertEqual(result, {"path": "/fake/library/datasheets/ATtiny85.pdf"})
 
 
+class TestKicadSearchFootprintsRoute(unittest.TestCase):
+    """CTX-308.1: kicad.search_footprints is real filesystem I/O (a
+    fp-lib-table read plus directory listings), not a kipy IPC call --
+    deliberately NOT in ASYNC_ROUTES, unlike every other kicad.*/
+    freecad.* route."""
+
+    @patch('daemon.fp_lib_table.search_footprints')
+    def test_001_dispatched_through_handle_request_returns_synchronously_not_as_a_job(self, mock_search):
+        mock_search.return_value = [{"library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module"}]
+
+        request = json.dumps({"jsonrpc": "2.0", "method": "kicad.search_footprints", "params": {"query": "MP1584"}, "id": "req_1"})
+        response = json.loads(handle_request(request))
+
+        mock_search.assert_called_once_with("MP1584")
+        self.assertNotIn("job_id", response.get("result", {}))
+        self.assertEqual(response["result"], [{"library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module"}])
+
+    def test_002_build_routes_omits_it_when_fp_lib_table_import_failed(self):
+        original = daemon.fp_lib_table
+        daemon.fp_lib_table = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.search_footprints", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.fp_lib_table = original
+
+
 _FAKE_OUTLINE = {"x_mm": 0.0, "y_mm": 0.0, "width_mm": 20.0, "height_mm": 15.0}
 _FAKE_HOLES = [
     {"x_mm": 2.0, "y_mm": 2.0, "diameter_mm": 3.2, "recognized": True},

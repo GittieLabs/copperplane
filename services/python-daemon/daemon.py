@@ -103,6 +103,12 @@ except Exception:
     logger.exception("tool_registry failed to import -- agent.dispatch_tool will be unavailable")
     tool_registry = None
 
+try:
+    import fp_lib_table
+except Exception:
+    logger.exception("fp_lib_table failed to import -- kicad.search_footprints will be unavailable")
+    fp_lib_table = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -552,6 +558,17 @@ def agent_dispatch_tool(tool_name: str, tool_input: dict = None, confirmed: bool
     return submit_job(tool_name, tool_input)
 
 
+def kicad_search_footprints(query: str) -> list:
+    """SPEC-308/CTX-308.1: real filesystem-based footprint search, not a
+    kipy IPC call -- kipy's live connection has no footprint-library
+    search capability at all (verified directly against its own source,
+    see fp_lib_table.py's own module docstring). Local disk I/O only
+    (a config file read plus directory listings), so unlike every other
+    kicad.*/freecad.* route this is NOT registered in ASYNC_ROUTES below
+    -- a synchronous return is the honest reflection of its real cost."""
+    return fp_lib_table.search_footprints(query)
+
+
 def _build_routes() -> dict:
     """kicad.*/freecad.* are only registered if their bridge module
     actually imported (SPEC-107 §2) -- a broken kipy install shouldn't
@@ -595,6 +612,8 @@ def _build_routes() -> dict:
         routes["project.load_conversation"] = project_load_conversation
     if tool_registry is not None:
         routes["agent.dispatch_tool"] = agent_dispatch_tool
+    if fp_lib_table is not None:
+        routes["kicad.search_footprints"] = kicad_search_footprints
     return routes
 
 
