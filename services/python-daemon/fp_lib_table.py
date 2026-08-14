@@ -91,8 +91,18 @@ def _resolve_placeholder(uri: str, footprints_base_dir: str) -> str:
     with the real footprints directory. Matched by digits, not the
     literal "KICAD10" -- a future KiCad major version uses a different
     number, and a literal match would silently stop working the moment
-    this machine (or any user's) KiCad version changes."""
-    return _PLACEHOLDER_RE.sub(footprints_base_dir, uri)
+    this machine (or any user's) KiCad version changes.
+
+    A real, Windows-only bug caught by CI, not local testing (this
+    machine's own macOS paths never hit it): re.sub's string replacement
+    argument parses backslash sequences in it as backreferences
+    (\\1, \\g<...>). A Windows path like
+    C:\\hostedtoolcache\\...\\footprints contains "\\U", which re.sub
+    tried to parse as an escape sequence and raised `re.error: bad
+    escape \\U`. A callable replacement sidesteps this entirely -- its
+    return value is inserted literally, never re-parsed for
+    backreferences."""
+    return _PLACEHOLDER_RE.sub(lambda _match: footprints_base_dir, uri)
 
 
 def _parse_raw_entries(path: str) -> list[dict]:

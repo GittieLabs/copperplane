@@ -96,6 +96,18 @@ class TestTableEntryResolution(unittest.TestCase):
         self.assertEqual(flt._resolve_placeholder("${KICAD11_FOOTPRINT_DIR}/X.pretty", "/real/dir"), "/real/dir/X.pretty")
         self.assertEqual(flt._resolve_placeholder("${KICAD99_FOOTPRINT_DIR}/X.pretty", "/real/dir"), "/real/dir/X.pretty")
 
+    def test_002b_windows_backslash_paths_do_not_raise_re_error(self):
+        """Real regression test for a real windows-latest CI failure:
+        re.sub's *string* replacement argument parses backslashes as
+        backreferences (\\1, \\g<...>), and a Windows path like
+        C:\\hostedtoolcache\\...\\footprints contains "\\U" -- raised
+        `re.error: bad escape \\U` before _resolve_placeholder switched
+        to a callable replacement. This exact path shape is what broke
+        on the real CI runner, not a synthetic worst case."""
+        windows_path = r"C:\hostedtoolcache\windows\Python\3.12.10\x64\footprints"
+        result = flt._resolve_placeholder("${KICAD10_FOOTPRINT_DIR}/Battery.pretty", windows_path)
+        self.assertEqual(result, windows_path + "/Battery.pretty")
+
     def test_003_unrecognized_placeholder_is_skipped_not_a_crash(self):
         """TEST-003: an entry using a placeholder this module doesn't
         recognize is logged and skipped, not a crash and not silently
