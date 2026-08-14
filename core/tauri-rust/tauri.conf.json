@@ -42,9 +42,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": [
-      "../../services/python-daemon/dist/hardware-agent-studio-daemon"
-    ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }
