@@ -404,22 +404,24 @@ produce `Artifact`s it stores.
 
 ### 3.4 `4xx` — Distribution & operations
 
-#### SPEC-401 — Python Sidecar Packaging
+#### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — 🚧 in progress: macOS freeze done ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md)) 2026-08-14
 *Module:* `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-107
 
-**The highest-risk unsolved problem in the project.** Two concrete blockers, both quoted in §1.2:
-`env!("CARGO_MANIFEST_DIR")` bakes the developer's checkout path into the binary, and
-`Command::new("python3")` assumes a system Python with `kipy`, `pynng`, and `trimesh` importable.
+**The highest-risk unsolved problem in the project.** Two concrete blockers, both quoted in the spec
+itself: `env!("CARGO_MANIFEST_DIR")` bakes the developer's checkout path into the binary, and
+`Command::new("python3")` assumes a system Python with `kipy`, `pynng`, `trimesh`, and
+`gittielabs-agentflow` (already a real, shipped dependency since `SPEC-201` — not a future addition,
+corrected in the spec's own §2) all importable.
 
-Scope: freeze the daemon (PyInstaller or equivalent) into a per-target binary, ship it via Tauri's
-`externalBin`/sidecar mechanism, resolve it from the app's resource directory at runtime, and keep
-the crash shield working across that change. Budget real time for `pynng`'s native extension and
-`trimesh`'s optional dependencies — frozen native wheels are where this kind of work goes wrong.
-
-Adopting AgentFlow (§3.2: SPEC-201/202/204) adds `pydantic`, `httpx`, and whichever provider SDK is
-selected (e.g. `anthropic`, `openai` — the latter also covers the Ollama path) to whatever gets
-frozen into the sidecar. One more native-adjacent dependency set this spike needs to budget time
-for, alongside `pynng` and `trimesh`.
+`CTX-401.1` landed the first real slice: a working, committed, verified macOS PyInstaller freeze of
+the daemon itself, driven directly over its real JSON-RPC wire (a real `kicad.get_version` round
+trip, a real HTTPS call to Anthropic's API). Found and corrected a real wrong prediction along the
+way — no `--hidden-import` declarations were needed for AgentFlow's lazily-imported provider SDKs,
+contrary to what this spec originally predicted. **Still open:** wiring that binary into Tauri's
+`externalBin`/sidecar mechanism and swapping `spawn_daemon`'s `Command::new("python3")` for it,
+deliberately deferred to `CTX-401.2` (not yet written) rather than done in the same sitting as the
+freeze — that's the part that actually makes the app installable by anyone else, and it touches the
+one function every route in this app depends on.
 
 *Do this before showing the app to anyone who isn't sitting at Keith's desk.*
 
