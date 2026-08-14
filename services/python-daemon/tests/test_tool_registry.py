@@ -1,6 +1,8 @@
 import json
 import os
 import sys
+import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -86,6 +88,85 @@ class TestExceptionPropagation(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(ValueError):
             await registry.dispatch("kicad.inject_component", {"confirmed": True})
+
+
+class TestAgentDispatchToolEndToEnd(unittest.TestCase):
+    """TEST-005: drives daemon.py's real JSON-RPC surface end to end through
+    the agent.dispatch_tool route (CTX-204.1 Phase 2) -- not the wrapped
+    functions in isolation, but the same handle_request path a real Tauri
+    caller uses. A fake test tool (registered the same way test_daemon.py's
+    own test_004_async_route_returns_job_id_immediately does) stands in for
+    a real bridge call, so this test needs no live KiCad/FreeCAD."""
+
+    def setUp(self):
+        self.captured = []
+        self.original_write_line = daemon._write_line
+        daemon._write_line = lambda text: self.captured.append(json.loads(text))
+
+        self.calls = []
+
+        def fake_gated_route(**kwargs):
+            self.calls.append(kwargs)
+            return {"status": "written"}
+
+        daemon.ROUTES['test.gated_tool'] = fake_gated_route
+        daemon.ASYNC_ROUTES.add('test.gated_tool')
+        tool_registry.TOOL_DEFINITIONS['test.gated_tool'] = {
+            "description": "test-only", "input_schema": {"type": "object", "properties": {}},
+        }
+        tool_registry.CONFIRMATION_REQUIRED_TOOLS.add('test.gated_tool')
+
+    def tearDown(self):
+        daemon._write_line = self.original_write_line
+        daemon.ROUTES.pop('test.gated_tool', None)
+        daemon.ASYNC_ROUTES.discard('test.gated_tool')
+        tool_registry.TOOL_DEFINITIONS.pop('test.gated_tool', None)
+        tool_registry.CONFIRMATION_REQUIRED_TOOLS.discard('test.gated_tool')
+
+    def _dispatch(self, tool_input=None, confirmed=None, req_id="req_1"):
+        params = {"tool_name": "test.gated_tool"}
+        if tool_input is not None:
+            params["tool_input"] = tool_input
+        if confirmed is not None:
+            params["confirmed"] = confirmed
+        request = json.dumps({"jsonrpc": "2.0", "method": "agent.dispatch_tool", "params": params, "id": req_id})
+        return json.loads(daemon.handle_request(request))
+
+    def test_005a_unconfirmed_call_returns_pending_and_submits_no_job(self):
+        response = self._dispatch(tool_input={"x": 1})
+
+        self.assertNotIn("error", response)
+        self.assertEqual(response["result"], {"status": "pending_confirmation", "tool": "test.gated_tool", "input": {"x": 1}})
+        self.assertEqual(self.calls, [])  # the real handler was never invoked
+        self.assertEqual(self.captured, [])  # no job.* notifications either
+
+    def test_005b_confirmed_call_actually_dispatches_through_the_real_async_job_protocol(self):
+        response = self._dispatch(tool_input={"x": 1}, confirmed=True)
+
+        self.assertIn("job_id", response.get("result", {}))
+        job_id = response["result"]["job_id"]
+
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            completed = [n for n in self.captured if n.get("method") == "job.completed" and n["params"]["job_id"] == job_id]
+            if completed:
+                break
+            time.sleep(0.05)
+        else:
+            self.fail("job.completed notification never arrived")
+
+        self.assertEqual(self.calls, [{"x": 1}])  # the real handler ran with exactly tool_input, nothing else
+        self.assertEqual(completed[0]["params"]["result"], {"status": "written"})
+
+    def test_005c_unknown_tool_returns_a_real_jsonrpc_error(self):
+        request = json.dumps({
+            "jsonrpc": "2.0", "method": "agent.dispatch_tool",
+            "params": {"tool_name": "not.a.real.tool"}, "id": "req_2",
+        })
+        response = json.loads(daemon.handle_request(request))
+
+        self.assertIn("error", response)
+        self.assertIn("Unknown or unavailable tool", response["error"]["message"])
 
 
 if __name__ == '__main__':
