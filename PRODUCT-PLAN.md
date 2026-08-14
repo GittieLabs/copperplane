@@ -279,20 +279,18 @@ Nothing in the daemon gets rewritten. This is a re-housing, not a rebuild.
     `ls /Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli && … kicad-cli pcb drc --help`
 2.  **Schematic access.** Live IPC (SPEC-103's stated preference) or reading `.kicad_sch` from disk?
     The advisor arguably needs the file, which reopens a decision SPEC-103 deliberately closed.
-3.  **Footprint sources, ranked -- two of three now real, 2026-08-14.** Now that footprints are
-    their own object, "find a footprint" needs a defined corpus: the user's installed KiCad
-    footprint libraries first, then the user's own library, then generation from datasheet package
-    dimensions. `CTX-308.1` shipped search across a user's own *directly-configured* `fp-lib-table`
-    libraries -- real, verified against kipy's own source, which has no library-search capability at
-    all (bypasses it entirely via direct `fp-lib-table`/`.pretty` filesystem access instead).
-    `CTX-308.2` wired that search into a real UI (Part Detail's "Find Footprint" section, once a
-    saved part has no footprint yet). `CTX-308.3` closed the rest of source one: KiCad's own ~100+
-    built-in libraries, previously invisible behind a recursive `(type "Table")` `fp-lib-table` entry
-    with `${KICAD_FOOTPRINT_DIR}`-style placeholders, are now resolved too (156 real libraries
-    searchable, up from 1) -- found and fixed two real Windows-only bugs along the way, both only
-    catchable by real CI (no Windows machine this session). Still fully open: the user's own saved
-    library (source two) and datasheet-generation (source three, and how a generated footprint is
-    marked as unverified) -- neither started.
+3.  **Footprint sources, ranked -- two of three real, 2026-08-14.** Now that footprints are their
+    own object, "find a footprint" needs a defined corpus: the user's installed KiCad footprint
+    libraries first, then the user's own library, then generation from datasheet package dimensions.
+    Source one (installed KiCad libraries) is fully real: `CTX-308.1` shipped direct
+    `fp-lib-table` entries, `CTX-308.3` added KiCad's own ~100+ built-in libraries behind the
+    recursive `(type "Table")` entry (156 real libraries searchable, up from 1). Source two (the
+    user's own saved library) is real too, as of `CTX-308.4`: results from both sources are merged
+    and tagged (`kicad_library`/`your_library`) in the real UI `CTX-308.2` built. Both `CTX-308.3`
+    and `CTX-308.4` found and fixed real Windows-only bugs along the way -- separator/placeholder
+    handling and a `:` reserved character in `footprint_id`'s own on-disk filename -- all only
+    catchable by real CI (no Windows machine this session). Still fully open: source three
+    (datasheet generation, and how a generated footprint is marked as unverified) -- not started.
 4.  **Project root location.** User-chosen on first run, or a fixed default under the app data dir
     with an override? Affects SPEC-304 and SPEC-106.
 5.  **Symbol generation.** SPEC-202 already produces pins with electrical types, which is most of a
