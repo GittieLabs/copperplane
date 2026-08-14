@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.gittielabs.hardware-agent-studio",
   "build": {
-    "frontendDist": "../apps/tauri-ui/dist",
+    "frontendDist": "../../apps/tauri-ui/dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev --prefix ../apps/tauri-ui",
     "beforeBuildCommand": "npm run build --prefix ../apps/tauri-ui"
@@ -41,6 +41,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "externalBin": [
+      "../../services/python-daemon/dist/hardware-agent-studio-daemon"
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
