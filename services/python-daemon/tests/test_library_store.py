@@ -173,6 +173,40 @@ class TestSymbolAndFootprint(LibraryStoreTestCase):
         self.assertEqual(store.load_part("PartA")["footprint_id"], "SOIC-8")
         self.assertEqual(store.load_part("PartB")["footprint_id"], "SOIC-8")
 
+    def test_006_list_footprints_returns_every_saved_id_sorted(self):
+        store.save_footprint({"footprint_id": "SOIC-8", "pads": []})
+        store.save_footprint({"footprint_id": "DIP-8", "pads": []})
+
+        self.assertEqual(store.list_footprints(), ["DIP-8", "SOIC-8"])
+
+    def test_007_search_footprints_matches_on_footprint_name(self):
+        store.save_footprint({
+            "footprint_id": "MyPCBLibs__MP1584EN_5V_Module",
+            "library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module",
+        })
+        store.save_footprint({"footprint_id": "DIP-8", "pads": []})
+
+        results = store.search_footprints("MP1584")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["footprint_id"], "MyPCBLibs__MP1584EN_5V_Module")
+
+    def test_008_search_footprints_falls_back_to_footprint_id_when_name_is_missing(self):
+        """TEST-002: a real, already-possible shape -- this file's own
+        test_003/test_005 above save footprints with no footprint_name
+        at all. Search must still find them, by footprint_id."""
+        store.save_footprint({"footprint_id": "SOIC-8", "pads": []})
+
+        results = store.search_footprints("SOIC")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["footprint_id"], "SOIC-8")
+
+    def test_009_search_footprints_no_match_returns_an_empty_list(self):
+        store.save_footprint({"footprint_id": "SOIC-8", "pads": []})
+
+        self.assertEqual(store.search_footprints("definitely_not_present"), [])
+
 
 class TestProject(LibraryStoreTestCase):
 

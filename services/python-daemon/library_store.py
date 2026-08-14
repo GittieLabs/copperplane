@@ -328,6 +328,31 @@ def load_footprint(footprint_id: str) -> dict:
     return _read_json(os.path.join(_footprints_dir(), f"{footprint_id}.json"))
 
 
+def list_footprints() -> list:
+    """Mirrors list_parts()'s own real pattern -- .json files in the
+    footprints dir, extension stripped, sorted."""
+    suffix = ".json"
+    return sorted(f[: -len(suffix)] for f in os.listdir(_footprints_dir()) if f.endswith(suffix))
+
+
+def search_footprints(query: str) -> list:
+    """SPEC-308/CTX-308.4: the second of PRODUCT-PLAN.md SS8 item 3's
+    three ranked footprint sources -- footprints this app has already
+    saved, not KiCad's own libraries (fp_lib_table.py's job). Falls back
+    to matching on footprint_id when footprint_name is missing -- a real,
+    already-possible shape (this module's own tests save footprints with
+    no footprint_name at all, e.g. {"footprint_id": "SOIC-8", "pads":
+    [...]}), not a hypothetical edge case."""
+    query_lower = query.lower()
+    results = []
+    for footprint_id in list_footprints():
+        record = load_footprint(footprint_id)
+        name = record.get("footprint_name") or footprint_id
+        if query_lower in name.lower():
+            results.append(record)
+    return results
+
+
 # --- Project --------------------------------------------------------------
 def _project_dir(name: str) -> str:
     return _ensure_dir("projects", name)

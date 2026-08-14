@@ -559,14 +559,28 @@ def agent_dispatch_tool(tool_name: str, tool_input: dict = None, confirmed: bool
 
 
 def kicad_search_footprints(query: str) -> list:
-    """SPEC-308/CTX-308.1: real filesystem-based footprint search, not a
-    kipy IPC call -- kipy's live connection has no footprint-library
-    search capability at all (verified directly against its own source,
-    see fp_lib_table.py's own module docstring). Local disk I/O only
-    (a config file read plus directory listings), so unlike every other
-    kicad.*/freecad.* route this is NOT registered in ASYNC_ROUTES below
-    -- a synchronous return is the honest reflection of its real cost."""
-    return fp_lib_table.search_footprints(query)
+    """SPEC-308/CTX-308.1/CTX-308.4: merges the two footprint sources
+    PRODUCT-PLAN.md §8 item 3 ranks first -- KiCad's own installed
+    libraries (fp_lib_table.py; no kipy IPC call is possible here at
+    all, verified directly against its own source), then footprints this
+    app has already saved (library_store.py) -- each tagged with a real
+    `source` field so the UI can tell them apart. Still local disk I/O
+    only, so unlike every other kicad.*/freecad.* route this is NOT
+    registered in ASYNC_ROUTES below -- a synchronous return is the
+    honest reflection of its real cost. Source three (datasheet
+    generation) remains fully open, not attempted here."""
+    kicad_results = [{**r, "source": "kicad_library"} for r in fp_lib_table.search_footprints(query)]
+
+    saved_results = []
+    if library_store is not None:
+        for r in library_store.search_footprints(query):
+            saved_results.append({
+                "library": r.get("library", ""),
+                "footprint_name": r.get("footprint_name") or r["footprint_id"],
+                "source": "your_library",
+            })
+
+    return kicad_results + saved_results
 
 
 def _build_routes() -> dict:
