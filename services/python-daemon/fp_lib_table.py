@@ -1,5 +1,6 @@
 """
-SPEC-308/CTX-308.1: real, installed KiCad footprint-library search.
+SPEC-308/CTX-308.1/CTX-308.3: real, installed KiCad footprint-library
+search.
 
 kipy's live IPC connection has no footprint-library-search capability at
 all -- confirmed directly against kipy 0.7.1's own source (every class in
@@ -7,11 +8,14 @@ kipy.kicad/board/project, every proto command message), not assumed. This
 module bypasses kicad_bridge.py's IPC pattern entirely and reads KiCad's
 own fp-lib-table config file plus real .pretty directories on disk.
 
-Scope, deliberate: only direct (type "KiCad") fp-lib-table entries are
-resolved here. A (type "Table") entry recursively points to another
-fp-lib-table file (KiCad's own ~100+ built-in libraries, each using a
-${KICAD<N>_FOOTPRINT_DIR}-style placeholder) -- real, separate work,
-explicitly deferred to CTX-308.2, not attempted here.
+CTX-308.1 handled only direct (type "KiCad") entries. CTX-308.3 adds real
+resolution of (type "Table") entries too -- a recursive pointer to
+another fp-lib-table file (KiCad's own ~100+ built-in libraries, each
+using a ${KICAD<N>_FOOTPRINT_DIR}-style placeholder). One level of
+nesting only: a Table entry found inside an already-nested table is
+logged and skipped, not recursed into further -- this real machine's own
+KiCad install never nests more than one level, and going further is
+speculative complexity, not something observed to actually be needed.
 """
 from __future__ import annotations
 
@@ -79,17 +83,49 @@ def default_fp_lib_table_path() -> str | None:
     return os.path.join(candidates[0], "fp-lib-table")
 
 
-def parse_fp_lib_table(path: str) -> list[dict]:
+_PLACEHOLDER_RE = re.compile(r"\$\{KICAD\d+_FOOTPRINT_DIR\}")
+
+
+def _resolve_placeholder(uri: str, footprints_base_dir: str) -> str:
+    """Substitutes any ${KICAD<digits>_FOOTPRINT_DIR}-shaped placeholder
+    with the real footprints directory. Matched by digits, not the
+    literal "KICAD10" -- a future KiCad major version uses a different
+    number, and a literal match would silently stop working the moment
+    this machine (or any user's) KiCad version changes.
+
+    A real, Windows-only bug caught by CI, not local testing (this
+    machine's own macOS paths never hit it): re.sub's string replacement
+    argument parses backslash sequences in it as backreferences
+    (\\1, \\g<...>). A Windows path like
+    C:\\hostedtoolcache\\...\\footprints contains "\\U", which re.sub
+    tried to parse as an escape sequence and raised `re.error: bad
+    escape \\U`. A callable replacement sidesteps this entirely -- its
+    return value is inserted literally, never re-parsed for
+    backreferences.
+
+    A second real Windows-only bug, also caught by real CI after the
+    first fix: real KiCad fp-lib-table files always write the path
+    *after* the placeholder with a forward slash (confirmed against
+    this machine's own real file: `${KICAD10_FOOTPRINT_DIR}/Battery.
+    pretty`), even inside files a Windows KiCad install itself writes.
+    `footprints_base_dir` is OS-native (backslash-joined on Windows), so
+    a naive substitution produced a *mixed*-separator path
+    (`...footprints/Battery.pretty` -- backslash directory, forward-
+    slash filename). `os.path.normpath` cleans this into one consistent,
+    OS-native path -- required for the test's own string-equality
+    assertion to hold, and the honest fix even though Windows' own APIs
+    tolerate mixed separators for file I/O."""
+    return os.path.normpath(_PLACEHOLDER_RE.sub(lambda _match: footprints_base_dir, uri))
+
+
+def _parse_raw_entries(path: str) -> list[dict]:
     """Real, deliberately minimal parser for KiCad's fp-lib-table format
     -- verified directly against this machine's own real file, not a
     generic S-expression parser (the format is flat, one (lib ...) entry
     per real-world line, and neither kipy nor anything already pinned in
-    requirements.txt parses S-expressions generically).
-
-    A (type "Table") entry is recognized and skipped with a logged
-    warning, not silently dropped and not a crash -- see this module's
-    own docstring for why that's this context's deliberate scope, not an
-    oversight."""
+    requirements.txt parses S-expressions generically). Returns every
+    entry as written, including (type "Table") ones -- resolving those
+    is parse_fp_lib_table's own job, one level up."""
     if not os.path.isfile(path):
         raise FpLibTableNotFoundError(f"No fp-lib-table found at {path}")
 
@@ -99,13 +135,63 @@ def parse_fp_lib_table(path: str) -> list[dict]:
     entries = []
     for match in _LIB_ENTRY_RE.finditer(content):
         name, lib_type, uri = match.group(1), match.group(2), match.group(3)
-        if lib_type == "Table":
-            logger.info(
-                "fp-lib-table entry %r is a nested Table (uri=%r) -- skipped, "
-                "CTX-308.1's own scope covers direct entries only.", name, uri,
+        entries.append({"name": name, "type": lib_type, "uri": uri})
+    return entries
+
+
+def parse_fp_lib_table(path: str) -> list[dict]:
+    """Real entries from a real fp-lib-table, including KiCad's own
+    built-in library set behind a (type "Table") entry (CTX-308.3). The
+    nested table's own real footprints directory is derived from the
+    Table entry's own uri (two directories up, then "footprints") --
+    verified directly against this real machine's KiCad install, not a
+    guessed per-OS default install path, so it correctly follows
+    wherever this machine's own fp-lib-table actually points, not where
+    KiCad usually gets installed."""
+    entries = []
+    for entry in _parse_raw_entries(path):
+        if entry["type"] != "Table":
+            entries.append(entry)
+            continue
+
+        nested_path = entry["uri"]
+        if not os.path.isfile(nested_path):
+            logger.warning(
+                "Table entry %r points at a missing nested fp-lib-table: %r",
+                entry["name"], nested_path,
             )
             continue
-        entries.append({"name": name, "type": lib_type, "uri": uri})
+
+        footprints_base_dir = os.path.join(os.path.dirname(os.path.dirname(nested_path)), "footprints")
+        try:
+            nested_entries = _parse_raw_entries(nested_path)
+        except FpLibTableNotFoundError:
+            continue
+
+        for nested in nested_entries:
+            if nested["type"] == "Table":
+                logger.info(
+                    "Nested Table entry %r inside %r skipped -- multi-level "
+                    "nesting is out of this module's scope.", nested["name"], nested_path,
+                )
+                continue
+
+            # Checked before substitution/normpath, not by comparing
+            # before/after strings -- normpath's own separator cleanup
+            # (see _resolve_placeholder's own docstring on the real
+            # Windows mixed-separator bug) would otherwise make an
+            # already-clean, placeholder-free URI look "changed" on
+            # Windows just from forward-slash-to-backslash conversion,
+            # a false positive for "unrecognized placeholder."
+            if "${" in nested["uri"] and not _PLACEHOLDER_RE.search(nested["uri"]):
+                logger.warning(
+                    "Unrecognized placeholder in nested entry %r, uri=%r -- skipped.",
+                    nested["name"], nested["uri"],
+                )
+                continue
+            resolved_uri = _resolve_placeholder(nested["uri"], footprints_base_dir)
+            entries.append({"name": nested["name"], "type": nested["type"], "uri": resolved_uri})
+
     return entries
 
 

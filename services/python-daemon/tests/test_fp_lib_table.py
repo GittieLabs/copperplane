@@ -7,13 +7,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 import fp_lib_table as flt
 
-# Captured directly from this machine's own real global fp-lib-table
-# (~/Library/Preferences/kicad/10.0/fp-lib-table) -- not fabricated. Real
-# content the parser must handle correctly: one direct entry, one nested
-# Table entry it must skip without crashing.
+# Modeled on this machine's own real global fp-lib-table
+# (~/Library/Preferences/kicad/10.0/fp-lib-table) -- one direct entry,
+# one Table entry. The Table entry's uri is deliberately a nonexistent
+# path (not this machine's real nested table path, unlike an earlier
+# version of this fixture) so this test stays isolated from whatever
+# KiCad install happens to be on the machine running it -- real
+# Table-entry *resolution* is TestTableEntryResolution's own job, with
+# its own fully self-contained temp-dir fixture.
 _REAL_FP_LIB_TABLE_CONTENT = '''(fp_lib_table
 \t(version 7)
-\t(lib (name "KiCad") (type "Table") (uri "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table") (options "") (descr "KiCad Default Libraries"))
+\t(lib (name "KiCad") (type "Table") (uri "/nonexistent/template/fp-lib-table") (options "") (descr "KiCad Default Libraries"))
 \t(lib (name "MyPCBLibs") (type "KiCad") (uri "/Users/keithelliott/repos/PCBs/MyPCBLibs.pretty") (options "") (descr ""))
 )
 '''
@@ -21,9 +25,11 @@ _REAL_FP_LIB_TABLE_CONTENT = '''(fp_lib_table
 
 class TestParseFpLibTable(unittest.TestCase):
 
-    def test_001_extracts_direct_entry_and_skips_table_entry(self):
-        """TEST-001: the real direct entry is extracted; the real nested
-        Table entry is skipped, not a crash, per CTX-308.1's own scope."""
+    def test_001_extracts_direct_entry_and_skips_a_table_entry_with_a_missing_nested_file(self):
+        """TEST-001: the real direct entry is extracted; a Table entry
+        pointing at a missing nested file is skipped, not a crash --
+        real Table-entry resolution against an actually-present nested
+        file is CTX-308.3's own TestTableEntryResolution, below."""
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "fp-lib-table")
             with open(path, "w") as f:
@@ -38,6 +44,107 @@ class TestParseFpLibTable(unittest.TestCase):
     def test_001b_missing_file_raises_a_clean_error(self):
         with self.assertRaises(flt.FpLibTableNotFoundError):
             flt.parse_fp_lib_table("/nonexistent/fp-lib-table")
+
+
+class TestTableEntryResolution(unittest.TestCase):
+    """CTX-308.3: (type "Table") entries -- KiCad's own built-in library
+    set -- are now resolved for real, not skipped."""
+
+    def test_001_table_entry_is_resolved_not_skipped(self):
+        """TEST-001/TEST-005: an outer table's Table entry is followed to
+        a real nested table, and the nested table's own real entries
+        (with placeholders resolved) come back alongside the outer
+        table's own direct entries -- neither list regresses the other."""
+        with tempfile.TemporaryDirectory() as tmp:
+            kicad_root = os.path.join(tmp, "KiCad.app", "Contents", "SharedSupport")
+            template_dir = os.path.join(kicad_root, "template")
+            footprints_dir = os.path.join(kicad_root, "footprints", "Battery.pretty")
+            os.makedirs(template_dir)
+            os.makedirs(footprints_dir)
+            open(os.path.join(footprints_dir, "BatteryHolder_Test.kicad_mod"), "w").close()
+
+            nested_table_path = os.path.join(template_dir, "fp-lib-table")
+            with open(nested_table_path, "w") as f:
+                f.write(
+                    '(fp_lib_table\n'
+                    '\t(lib (name "Battery") (type "KiCad") '
+                    '(uri "${KICAD10_FOOTPRINT_DIR}/Battery.pretty") (options "") (descr ""))\n'
+                    ')\n'
+                )
+
+            outer_table_path = os.path.join(tmp, "fp-lib-table")
+            with open(outer_table_path, "w") as f:
+                f.write(
+                    '(fp_lib_table\n'
+                    f'\t(lib (name "KiCad") (type "Table") (uri "{nested_table_path}") (options "") (descr ""))\n'
+                    '\t(lib (name "MyPCBLibs") (type "KiCad") (uri "/some/user/MyPCBLibs.pretty") (options "") (descr ""))\n'
+                    ')\n'
+                )
+
+            entries = flt.parse_fp_lib_table(outer_table_path)
+
+            names = {e["name"] for e in entries}
+            self.assertIn("MyPCBLibs", names)  # the direct entry, not regressed
+            self.assertIn("Battery", names)  # the nested entry, now resolved
+            battery = next(e for e in entries if e["name"] == "Battery")
+            self.assertEqual(battery["uri"], footprints_dir)
+
+    def test_002_resolve_placeholder_matches_any_kicad_version_number(self):
+        """TEST-002: matched by digits, not the literal "KICAD10" -- a
+        future KiCad major version must not silently break this. Expected
+        values go through os.path.normpath too, matching what the real
+        code under test does -- a hardcoded forward-slash expectation was
+        exactly the shape of bug that broke this same test on real
+        windows-latest CI (see CTX-308.3 Plan Drift Deviation 3)."""
+        expected = os.path.normpath("/real/dir/X.pretty")
+        self.assertEqual(flt._resolve_placeholder("${KICAD10_FOOTPRINT_DIR}/X.pretty", "/real/dir"), expected)
+        self.assertEqual(flt._resolve_placeholder("${KICAD11_FOOTPRINT_DIR}/X.pretty", "/real/dir"), expected)
+        self.assertEqual(flt._resolve_placeholder("${KICAD99_FOOTPRINT_DIR}/X.pretty", "/real/dir"), expected)
+
+    def test_002b_windows_backslash_paths_do_not_raise_re_error(self):
+        """Real regression test for a real windows-latest CI failure:
+        re.sub's *string* replacement argument parses backslashes as
+        backreferences (\\1, \\g<...>), and a Windows path like
+        C:\\hostedtoolcache\\...\\footprints contains "\\U" -- raised
+        `re.error: bad escape \\U` before _resolve_placeholder switched
+        to a callable replacement. This exact path shape is what broke
+        on the real CI runner, not a synthetic worst case. The expected
+        value is built with os.path.normpath too (not a hardcoded
+        forward-slash string) -- a real second Windows-only bug, also
+        only caught by real CI, found the naive version of this
+        assertion produced a mixed-separator path that only coincidentally
+        looked right when this test ran on this session's own macOS
+        machine."""
+        windows_path = r"C:\hostedtoolcache\windows\Python\3.12.10\x64\footprints"
+        result = flt._resolve_placeholder("${KICAD10_FOOTPRINT_DIR}/Battery.pretty", windows_path)
+        self.assertEqual(result, os.path.normpath(windows_path + "/Battery.pretty"))
+
+    def test_003_unrecognized_placeholder_is_skipped_not_a_crash(self):
+        """TEST-003: an entry using a placeholder this module doesn't
+        recognize is logged and skipped, not a crash and not silently
+        treated as a literal (nonexistent) path."""
+        with tempfile.TemporaryDirectory() as tmp:
+            template_dir = os.path.join(tmp, "template")
+            os.makedirs(template_dir)
+            nested_table_path = os.path.join(template_dir, "fp-lib-table")
+            with open(nested_table_path, "w") as f:
+                f.write(
+                    '(fp_lib_table\n'
+                    '\t(lib (name "Weird") (type "KiCad") '
+                    '(uri "${SOME_OTHER_VAR}/Weird.pretty") (options "") (descr ""))\n'
+                    ')\n'
+                )
+            outer_table_path = os.path.join(tmp, "fp-lib-table")
+            with open(outer_table_path, "w") as f:
+                f.write(
+                    '(fp_lib_table\n'
+                    f'\t(lib (name "KiCad") (type "Table") (uri "{nested_table_path}") (options "") (descr ""))\n'
+                    ')\n'
+                )
+
+            entries = flt.parse_fp_lib_table(outer_table_path)
+
+            self.assertEqual(entries, [])
 
 
 class TestDefaultFpLibTablePath(unittest.TestCase):
@@ -96,6 +203,37 @@ class TestSearchFootprintsReal(unittest.TestCase):
             self.skipTest("No KiCad config directory found on this machine.")
 
         self.assertEqual(flt.search_footprints("definitely_not_a_real_footprint_name_xyz"), [])
+
+    def test_005_real_search_finds_a_builtin_library_result(self):
+        """TEST-004 (CTX-308.3): real, live -- KiCad's own built-in
+        Battery library is now reachable through the Table entry, not
+        just a user's own directly-configured libraries."""
+        path = flt.default_fp_lib_table_path()
+        if path is None:
+            self.skipTest("No KiCad config directory found on this machine.")
+
+        entries = flt.parse_fp_lib_table(path)
+        battery = next((e for e in entries if e["name"] == "Battery"), None)
+        if battery is None or not os.path.isdir(battery["uri"]):
+            self.skipTest("This machine's own KiCad install has no built-in Battery.pretty library.")
+
+        results = flt.search_footprints("Battery")
+
+        self.assertTrue(any(r["library"] == "Battery" for r in results))
+
+    def test_005b_builtin_results_do_not_crowd_out_the_users_own_library(self):
+        """TEST-005 (CTX-308.3): the pre-existing direct-entry result
+        still appears once built-in libraries are also searched --
+        real regression check, not just a new-feature check."""
+        path = flt.default_fp_lib_table_path()
+        if path is None:
+            self.skipTest("No KiCad config directory found on this machine.")
+
+        results = flt.search_footprints("MP1584")
+        if not results:
+            self.skipTest("This machine's own MyPCBLibs.pretty library is not present.")
+
+        self.assertIn({"library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module"}, results)
 
 
 if __name__ == '__main__':
