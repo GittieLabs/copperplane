@@ -101,8 +101,21 @@ def _resolve_placeholder(uri: str, footprints_base_dir: str) -> str:
     tried to parse as an escape sequence and raised `re.error: bad
     escape \\U`. A callable replacement sidesteps this entirely -- its
     return value is inserted literally, never re-parsed for
-    backreferences."""
-    return _PLACEHOLDER_RE.sub(lambda _match: footprints_base_dir, uri)
+    backreferences.
+
+    A second real Windows-only bug, also caught by real CI after the
+    first fix: real KiCad fp-lib-table files always write the path
+    *after* the placeholder with a forward slash (confirmed against
+    this machine's own real file: `${KICAD10_FOOTPRINT_DIR}/Battery.
+    pretty`), even inside files a Windows KiCad install itself writes.
+    `footprints_base_dir` is OS-native (backslash-joined on Windows), so
+    a naive substitution produced a *mixed*-separator path
+    (`...footprints/Battery.pretty` -- backslash directory, forward-
+    slash filename). `os.path.normpath` cleans this into one consistent,
+    OS-native path -- required for the test's own string-equality
+    assertion to hold, and the honest fix even though Windows' own APIs
+    tolerate mixed separators for file I/O."""
+    return os.path.normpath(_PLACEHOLDER_RE.sub(lambda _match: footprints_base_dir, uri))
 
 
 def _parse_raw_entries(path: str) -> list[dict]:
@@ -163,13 +176,20 @@ def parse_fp_lib_table(path: str) -> list[dict]:
                 )
                 continue
 
-            resolved_uri = _resolve_placeholder(nested["uri"], footprints_base_dir)
-            if resolved_uri == nested["uri"] and "${" in nested["uri"]:
+            # Checked before substitution/normpath, not by comparing
+            # before/after strings -- normpath's own separator cleanup
+            # (see _resolve_placeholder's own docstring on the real
+            # Windows mixed-separator bug) would otherwise make an
+            # already-clean, placeholder-free URI look "changed" on
+            # Windows just from forward-slash-to-backslash conversion,
+            # a false positive for "unrecognized placeholder."
+            if "${" in nested["uri"] and not _PLACEHOLDER_RE.search(nested["uri"]):
                 logger.warning(
                     "Unrecognized placeholder in nested entry %r, uri=%r -- skipped.",
                     nested["name"], nested["uri"],
                 )
                 continue
+            resolved_uri = _resolve_placeholder(nested["uri"], footprints_base_dir)
             entries.append({"name": nested["name"], "type": nested["type"], "uri": resolved_uri})
 
     return entries

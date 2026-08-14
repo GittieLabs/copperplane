@@ -103,10 +103,16 @@ class TestTableEntryResolution(unittest.TestCase):
         C:\\hostedtoolcache\\...\\footprints contains "\\U" -- raised
         `re.error: bad escape \\U` before _resolve_placeholder switched
         to a callable replacement. This exact path shape is what broke
-        on the real CI runner, not a synthetic worst case."""
+        on the real CI runner, not a synthetic worst case. The expected
+        value is built with os.path.normpath too (not a hardcoded
+        forward-slash string) -- a real second Windows-only bug, also
+        only caught by real CI, found the naive version of this
+        assertion produced a mixed-separator path that only coincidentally
+        looked right when this test ran on this session's own macOS
+        machine."""
         windows_path = r"C:\hostedtoolcache\windows\Python\3.12.10\x64\footprints"
         result = flt._resolve_placeholder("${KICAD10_FOOTPRINT_DIR}/Battery.pretty", windows_path)
-        self.assertEqual(result, windows_path + "/Battery.pretty")
+        self.assertEqual(result, os.path.normpath(windows_path + "/Battery.pretty"))
 
     def test_003_unrecognized_placeholder_is_skipped_not_a_crash(self):
         """TEST-003: an entry using a placeholder this module doesn't
