@@ -1,9 +1,11 @@
 import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import type { ComponentCandidate } from '../lib/components'
-import { exportSymbol, extractPartDetail, saveConfirmedPart, type ExtractedSchema, type SavedSymbol } from '../lib/partDetail'
+import { attachFootprintToPart, searchFootprints, type FootprintCandidate } from '../lib/footprints'
+import { exportSymbol, extractPartDetail, saveConfirmedPart, type ExtractedSchema, type SavedPart, type SavedSymbol } from '../lib/partDetail'
 
 type Status = 'extracting' | 'ready' | 'error'
+type FootprintSearchStatus = 'idle' | 'searching' | 'error'
 
 /** SPEC-307: replaces SPEC-306's confirmed-candidate dead end with a
  * real pin diagram/table -- a second, real re-run of SPEC-202's
@@ -17,11 +19,21 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
   const [error, setError] = useState<string | null>(null)
   const [extraction, setExtraction] = useState<ExtractedSchema | null>(null)
   const [savedSymbol, setSavedSymbol] = useState<SavedSymbol | null>(null)
+  const [savedPart, setSavedPart] = useState<SavedPart | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [exportedPath, setExportedPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
+
+  // CTX-308.2: the found-or-create footprint flow, once a Part exists but
+  // has no footprint_id yet. Only searches this machine's own directly
+  // configured KiCad libraries (CTX-308.1's own real scope limit).
+  const [footprintQuery, setFootprintQuery] = useState('')
+  const [footprintStatus, setFootprintStatus] = useState<FootprintSearchStatus>('idle')
+  const [footprintError, setFootprintError] = useState<string | null>(null)
+  const [footprintCandidates, setFootprintCandidates] = useState<FootprintCandidate[] | null>(null)
+  const [attachingFootprint, setAttachingFootprint] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -29,9 +41,14 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     setError(null)
     setExtraction(null)
     setSavedSymbol(null)
+    setSavedPart(null)
     setExportedPath(null)
     setSaveError(null)
     setExportError(null)
+    setFootprintQuery('')
+    setFootprintStatus('idle')
+    setFootprintError(null)
+    setFootprintCandidates(null)
 
     extractPartDetail(candidate.part_number)
       .then((schema) => {
@@ -57,10 +74,41 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     try {
       const saved = await saveConfirmedPart(candidate, extraction)
       setSavedSymbol(saved.symbol)
+      setSavedPart(saved.part)
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleFootprintSearch() {
+    const trimmed = footprintQuery.trim()
+    if (!trimmed) return
+
+    setFootprintStatus('searching')
+    setFootprintError(null)
+    try {
+      const results = await searchFootprints(trimmed)
+      setFootprintCandidates(results)
+      setFootprintStatus('idle')
+    } catch (err) {
+      setFootprintCandidates(null)
+      setFootprintError(err instanceof Error ? err.message : String(err))
+      setFootprintStatus('error')
+    }
+  }
+
+  async function handleAttachFootprint(candidateFootprint: FootprintCandidate) {
+    if (!savedPart) return
+    setAttachingFootprint(candidateFootprint.footprint_name)
+    try {
+      const updated = await attachFootprintToPart(savedPart, candidateFootprint.library, candidateFootprint.footprint_name)
+      setSavedPart(updated)
+    } catch (err) {
+      setFootprintError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAttachingFootprint(null)
     }
   }
 
@@ -153,6 +201,70 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
             </div>
           )}
           {exportError && <p className="text-sm text-red-400">{exportError}</p>}
+        </div>
+      )}
+
+      {savedPart && (
+        <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
+          {savedPart.footprint_id ? (
+            <p className="text-sm text-emerald-400">Footprint linked: {savedPart.footprint_id}</p>
+          ) : (
+            <>
+              <p className="text-xs font-medium uppercase text-neutral-500">Find Footprint</p>
+              <div className="flex gap-2">
+                <input
+                  className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                  placeholder="search this machine's own KiCad libraries"
+                  value={footprintQuery}
+                  onChange={(e) => setFootprintQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleFootprintSearch()
+                  }}
+                />
+                <button
+                  type="button"
+                  className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                  onClick={handleFootprintSearch}
+                  disabled={footprintQuery.trim().length === 0 || footprintStatus === 'searching'}
+                >
+                  {footprintStatus === 'searching' ? 'Searching…' : 'Search'}
+                </button>
+              </div>
+
+              {footprintStatus === 'error' && footprintError && (
+                <p className="text-sm text-red-400">{footprintError}</p>
+              )}
+
+              {footprintCandidates !== null && footprintCandidates.length === 0 && (
+                <p className="text-xs text-neutral-500">
+                  No match in this machine's own configured KiCad libraries.
+                </p>
+              )}
+
+              {footprintCandidates !== null && footprintCandidates.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {footprintCandidates.map((fp) => (
+                    <div
+                      key={`${fp.library}:${fp.footprint_name}`}
+                      className="flex items-center justify-between gap-3 rounded border border-neutral-800 p-2"
+                    >
+                      <p className="text-xs text-neutral-300">
+                        {fp.footprint_name} <span className="text-neutral-500">{fp.library}</span>
+                      </p>
+                      <button
+                        type="button"
+                        className="rounded border border-neutral-700 px-2 py-0.5 text-xs font-medium disabled:opacity-50"
+                        onClick={() => handleAttachFootprint(fp)}
+                        disabled={attachingFootprint !== null}
+                      >
+                        {attachingFootprint === fp.footprint_name ? 'Linking…' : 'Use this'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
