@@ -23,6 +23,10 @@ __pycache__/
 venv/
 *.egg-info/
 
+# PyInstaller (SPEC-401/CTX-401.1): daemon.spec's own real build output --
+# a machine/platform-specific frozen binary, never a repo artifact.
+services/python-daemon/build/
+
 # Tauri/Rust
 src-tauri/target/
 
