@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const submitJobMock = vi.fn()
+const dispatchToolMock = vi.fn()
 const listProjectsMock = vi.fn()
 const listLibraryPartsMock = vi.fn()
 const saveProjectMock = vi.fn()
@@ -13,6 +14,7 @@ const shellOpenMock = vi.fn()
 
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
+  dispatchTool: (...args: unknown[]) => dispatchToolMock(...args),
 }))
 
 vi.mock('./lib/projects', () => ({
@@ -70,6 +72,7 @@ function sendMessage(text: string) {
 describe('App: chat & command surface', () => {
   beforeEach(() => {
     submitJobMock.mockReset()
+    dispatchToolMock.mockReset()
     listProjectsMock.mockReset().mockResolvedValue(['test-project'])
     listLibraryPartsMock.mockReset().mockResolvedValue([])
     saveProjectMock.mockReset()
@@ -91,12 +94,14 @@ describe('App: chat & command surface', () => {
     screen.getByText('Generated ATtiny85 (SOIC-8)')
   })
 
-  it('TEST-002: "inject" with a schema already generated calls kicad.inject_component and reports success', async () => {
+  it('TEST-002: "inject" with a schema already generated proposes the write via agent.dispatch_tool and awaits confirmation, mutating nothing yet', async () => {
     const schema = { part_number: 'ATtiny85', package: 'SOIC-8', pins: [] }
     submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(schema)))
-    submitJobMock.mockResolvedValueOnce(
-      fakeJobHandle(Promise.resolve({ part_number: 'ATtiny85', package: 'SOIC-8', pins: 8 })),
-    )
+    dispatchToolMock.mockResolvedValueOnce({
+      kind: 'pending_confirmation',
+      tool: 'kicad.inject_component',
+      input: { schema, x_mm: 50, y_mm: 50 },
+    })
 
     await renderAppOnOverview()
     sendMessage('generate ATtiny85')
@@ -104,12 +109,63 @@ describe('App: chat & command surface', () => {
 
     sendMessage('inject')
 
-    await waitFor(() => screen.getByText('Injected into the open board.'))
-    expect(submitJobMock).toHaveBeenLastCalledWith('kicad.inject_component', {
+    await waitFor(() => screen.getByText('This will write into the board KiCad currently has open. Confirm?'))
+    expect(dispatchToolMock).toHaveBeenLastCalledWith('kicad.inject_component', {
       schema,
       x_mm: 50,
       y_mm: 50,
     })
+    expect(screen.queryByText('Injected into the open board.')).toBeNull()
+  })
+
+  it('TEST-002b: confirming the pending write re-dispatches with confirmed: true and reports success (SPEC-204/CTX-108.4)', async () => {
+    const schema = { part_number: 'ATtiny85', package: 'SOIC-8', pins: [] }
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(schema)))
+    dispatchToolMock.mockResolvedValueOnce({
+      kind: 'pending_confirmation',
+      tool: 'kicad.inject_component',
+      input: { schema, x_mm: 50, y_mm: 50 },
+    })
+    dispatchToolMock.mockResolvedValueOnce({
+      kind: 'dispatched',
+      handle: fakeJobHandle(Promise.resolve({ part_number: 'ATtiny85', package: 'SOIC-8', pins: 8 })),
+    })
+
+    await renderAppOnOverview()
+    sendMessage('generate ATtiny85')
+    await waitFor(() => screen.getByText(/"part_number": "ATtiny85"/))
+    sendMessage('inject')
+    await waitFor(() => screen.getByText('This will write into the board KiCad currently has open. Confirm?'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => screen.getByText('Injected into the open board.'))
+    expect(dispatchToolMock).toHaveBeenLastCalledWith(
+      'kicad.inject_component',
+      { schema, x_mm: 50, y_mm: 50 },
+      true,
+    )
+  })
+
+  it('TEST-002c: cancelling the pending write never calls the daemon again and mutates nothing', async () => {
+    const schema = { part_number: 'ATtiny85', package: 'SOIC-8', pins: [] }
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(schema)))
+    dispatchToolMock.mockResolvedValueOnce({
+      kind: 'pending_confirmation',
+      tool: 'kicad.inject_component',
+      input: { schema, x_mm: 50, y_mm: 50 },
+    })
+
+    await renderAppOnOverview()
+    sendMessage('generate ATtiny85')
+    await waitFor(() => screen.getByText(/"part_number": "ATtiny85"/))
+    sendMessage('inject')
+    await waitFor(() => screen.getByText('This will write into the board KiCad currently has open. Confirm?'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => screen.getByText('Cancelled — board not modified.'))
+    expect(dispatchToolMock).toHaveBeenCalledTimes(1)
   })
 
   it('TEST-003: "inject" with nothing generated yet shows a clean message, never calls the route', async () => {
@@ -117,7 +173,7 @@ describe('App: chat & command surface', () => {
     sendMessage('inject')
 
     await waitFor(() => screen.getByText('Nothing to inject yet — generate a component first.'))
-    expect(submitJobMock).not.toHaveBeenCalled()
+    expect(dispatchToolMock).not.toHaveBeenCalled()
   })
 
   it('TEST-004: an unrecognized message is a plain chat turn against llm.chat, rendering the real reply, and persists both turns', async () => {

@@ -4,7 +4,7 @@ title: "KiCad Write Path: Footprint & Symbol Injection"
 status: Draft
 type: Feature
 created: 2026-08-09
-last_updated: 2026-08-09
+last_updated: 2026-08-14
 target_version: v0.1.0
 location: "services/python-daemon/specs/SPEC-108-kicad-write-path-footprint-symbol-injection.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
@@ -144,8 +144,18 @@ user_facing: true
 
 ## 5. User & Interaction
 
-*TODO (pre-existing debt, flagged by `CTX-901.2`): `user_facing: true` was backfilled onto this
-spec's frontmatter when the field became required, after this spec had already shipped
-(`CTX-108.1`, `CTX-108.3`). Writing the three bullets below now, without a product conversation
-that predates the shipped UI, would be inventing an answer rather than recording one — see
-`CTX-108.3`'s own note on this gap. Fill this in for real the next time this surface changes.*
+*Filled in for real by `CTX-108.4`, the first time this surface actually changed since the TODO
+below was written — not invented after the fact; the confirmation step it describes is real,
+shipped behavior.*
+
+*   **Product Stage:** Overview's chat surface, after a component has already been generated
+    (`kicad.generate_component`) and the user is deciding whether to commit it to their real,
+    currently-open board.
+*   **What the user is trying to accomplish:** place a validated footprint onto their live PCB
+    without an LLM's mistake — or their own typo in the chat box — silently mutating a board they
+    didn't mean to touch yet.
+*   **What the user sees and does:** types `inject` → sees an explicit, real confirmation prompt
+    ("This will write into the board KiCad currently has open. Confirm?") with **Confirm**/**Cancel**
+    buttons, before anything happens to the board → clicking **Confirm** actually performs the write
+    and shows success/error exactly as before; **Cancel** leaves the board untouched and requires no
+    second daemon call.

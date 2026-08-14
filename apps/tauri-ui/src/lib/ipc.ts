@@ -163,26 +163,11 @@ export async function dispatch(
   }
 }
 
-/**
- * Dispatches a request to an async-flagged route (CTX-105.1) and returns
- * a handle for tracking that job's progress, completion, and cancellation
- * -- rather than the immediate `{"job_id": ...}` acknowledgement response
- * itself, which callers rarely want directly.
- */
-export async function submitJob<T = unknown>(
-  method: string,
-  params: Record<string, unknown> = {},
-): Promise<JobHandle<T>> {
-  const response = await dispatch(method, params)
-  if (response.error) {
-    throw new Error(response.error.message)
-  }
-
-  const jobId = (response.result as { job_id?: string } | undefined)?.job_id
-  if (!jobId) {
-    throw new Error(`${method} did not return a job_id -- is it registered in ASYNC_ROUTES?`)
-  }
-
+/** Builds a `JobHandle` for an already-known `job_id` -- the shared tail
+ * end of `submitJob` and `dispatchTool` (CTX-204.1's `agent.dispatch_tool`
+ * only sometimes returns a job_id; when it does, tracking it works
+ * identically to any other async route). */
+function buildJobHandle<T>(jobId: string): JobHandle<T> {
   let resolveResult!: (result: T) => void
   let rejectResult!: (error: Error) => void
   const result = new Promise<T>((resolve, reject) => {
@@ -211,4 +196,72 @@ export async function submitJob<T = unknown>(
       }
     },
   }
+}
+
+/**
+ * Dispatches a request to an async-flagged route (CTX-105.1) and returns
+ * a handle for tracking that job's progress, completion, and cancellation
+ * -- rather than the immediate `{"job_id": ...}` acknowledgement response
+ * itself, which callers rarely want directly.
+ */
+export async function submitJob<T = unknown>(
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<JobHandle<T>> {
+  const response = await dispatch(method, params)
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+
+  const jobId = (response.result as { job_id?: string } | undefined)?.job_id
+  if (!jobId) {
+    throw new Error(`${method} did not return a job_id -- is it registered in ASYNC_ROUTES?`)
+  }
+
+  return buildJobHandle<T>(jobId)
+}
+
+/**
+ * `dispatchTool`'s result -- a real discriminated union tagged on `kind`,
+ * not `PendingToolConfirmation`/`JobHandle` structurally distinguished by
+ * which fields happen to be present. `JobHandle` is a plain interface
+ * used elsewhere (`submitJob`) with no exclusions on extra fields, so
+ * TypeScript's structural typing can't safely narrow "not pending" to
+ * "must be a JobHandle" without an explicit tag -- confirmed directly by
+ * `tsc` rejecting the untagged version of this type during Phase 1.
+ */
+export type ToolDispatchOutcome<T> =
+  | { kind: 'pending_confirmation'; tool: string; input: Record<string, unknown> }
+  | { kind: 'dispatched'; handle: JobHandle<T> }
+
+/**
+ * Calls a SPEC-204-registered tool through `agent.dispatch_tool`. An
+ * unconfirmed call to a gated tool (e.g. `kicad.inject_component`)
+ * returns `{kind: 'pending_confirmation', ...}` synchronously, with no
+ * side effects and no job -- the caller must re-invoke with
+ * `confirmed: true` to actually run it. A non-gated tool, or an
+ * already-confirmed call, returns `{kind: 'dispatched', handle}` with a
+ * real `JobHandle` exactly like `submitJob`, since `agent.dispatch_tool`
+ * reuses the same async job protocol underneath (CTX-204.1 SS2).
+ */
+export async function dispatchTool<T = unknown>(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  confirmed = false,
+): Promise<ToolDispatchOutcome<T>> {
+  const response = await dispatch('agent.dispatch_tool', { tool_name: toolName, tool_input: toolInput, confirmed })
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+
+  const result = response.result as { status?: string; tool?: string; input?: Record<string, unknown>; job_id?: string } | undefined
+  if (result?.status === 'pending_confirmation') {
+    return { kind: 'pending_confirmation', tool: result.tool ?? toolName, input: result.input ?? toolInput }
+  }
+
+  if (!result?.job_id) {
+    throw new Error(`agent.dispatch_tool for ${toolName} returned neither pending_confirmation nor a job_id`)
+  }
+
+  return { kind: 'dispatched', handle: buildJobHandle<T>(result.job_id) }
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-shell'
-import { submitJob, type JobHandle } from './lib/ipc'
+import { submitJob, dispatchTool, type JobHandle } from './lib/ipc'
 import { parseCommand } from './lib/commands'
 import { generateEnclosure, type EnclosureParams, type EnclosureResult } from './lib/enclosure'
 import {
@@ -25,11 +25,12 @@ import { Settings } from './components/Settings'
 const _INJECT_DEFAULT_POSITION_MM = { x: 50, y: 50 }
 
 type Status = 'pending' | 'done' | 'error'
+type InjectStatus = Status | 'awaiting_confirmation'
 
 type ChatMessage =
   | { id: string; kind: 'user'; text: string }
   | { id: string; kind: 'generate'; status: Status; partNumber: string; schema?: Record<string, unknown>; error?: string }
-  | { id: string; kind: 'inject'; status: Status; error?: string }
+  | { id: string; kind: 'inject'; status: InjectStatus; error?: string; pendingInput?: Record<string, unknown> }
   | { id: string; kind: 'chat'; status: Status; text?: string; error?: string }
 
 let nextMessageId = 1
@@ -262,17 +263,28 @@ function Overview({ projectName }: { projectName: string }) {
         return
       }
       setMessages((prev) => [...prev, { id, kind: 'inject', status: 'pending' }])
+      const toolInput = {
+        schema: latestSchema,
+        x_mm: _INJECT_DEFAULT_POSITION_MM.x,
+        y_mm: _INJECT_DEFAULT_POSITION_MM.y,
+      }
       try {
-        // SPEC-108: writes the most recently generated schema into
-        // whatever board KiCad already has open. Mutates the real
-        // board the instant it succeeds -- no confirmation step here
-        // yet (SPEC-204, not written).
-        const handle = await submitJob<Record<string, unknown>>('kicad.inject_component', {
-          schema: latestSchema,
-          x_mm: _INJECT_DEFAULT_POSITION_MM.x,
-          y_mm: _INJECT_DEFAULT_POSITION_MM.y,
-        })
-        await handle.result
+        // SPEC-108/CTX-204.1: kicad.inject_component writes into
+        // whatever board KiCad already has open -- the only tool
+        // SPEC-204 gates behind explicit confirmation, since it's the
+        // only one that mutates a document the user didn't ask this
+        // app to open. The first (unconfirmed) call never touches the
+        // real board; awaitInjectConfirmation below sends the second.
+        const outcome = await dispatchTool<Record<string, unknown>>('kicad.inject_component', toolInput)
+        if (outcome.kind === 'pending_confirmation') {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === id && m.kind === 'inject' ? { ...m, status: 'awaiting_confirmation', pendingInput: outcome.input } : m,
+            ),
+          )
+          return
+        }
+        await outcome.handle.result
         setMessages((prev) => prev.map((m) => (m.id === id && m.kind === 'inject' ? { ...m, status: 'done' } : m)))
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
@@ -310,6 +322,37 @@ function Overview({ projectName }: { projectName: string }) {
     }
   }
 
+  /** SPEC-204's confirmation gate, actually reachable: re-dispatches the
+   * exact proposed input with `confirmed: true`, which now runs through
+   * the real async job protocol identically to any other route. */
+  async function handleConfirmInject(id: string) {
+    const message = messages.find((m) => m.id === id)
+    if (!message || message.kind !== 'inject' || !message.pendingInput) return
+
+    setMessages((prev) => prev.map((m) => (m.id === id && m.kind === 'inject' ? { ...m, status: 'pending' } : m)))
+    try {
+      const outcome = await dispatchTool<Record<string, unknown>>('kicad.inject_component', message.pendingInput, true)
+      if (outcome.kind === 'pending_confirmation') {
+        throw new Error('Expected a confirmed dispatch to run, got pending_confirmation again')
+      }
+      await outcome.handle.result
+      setMessages((prev) => prev.map((m) => (m.id === id && m.kind === 'inject' ? { ...m, status: 'done' } : m)))
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err)
+      setMessages((prev) => prev.map((m) => (m.id === id && m.kind === 'inject' ? { ...m, status: 'error', error } : m)))
+    }
+  }
+
+  /** Never calls the daemon at all -- declining a proposed board write
+   * is a purely local decision, not something the daemon needs to know
+   * about (there is nothing running to cancel; the first, unconfirmed
+   * call never started any work). */
+  function handleCancelInject(id: string) {
+    setMessages((prev) =>
+      prev.map((m) => (m.id === id && m.kind === 'inject' ? { ...m, status: 'error', error: 'Cancelled — board not modified.' } : m)),
+    )
+  }
+
   if (!loaded) {
     return <p className="text-sm text-neutral-500">Loading conversation…</p>
   }
@@ -319,7 +362,12 @@ function Overview({ projectName }: { projectName: string }) {
       {loadError && <p className="text-sm text-red-400">{loadError}</p>}
       <div className="flex flex-col gap-2">
         {messages.map((message) => (
-          <ChatMessageView key={message.id} message={message} />
+          <ChatMessageView
+            key={message.id}
+            message={message}
+            onConfirmInject={handleConfirmInject}
+            onCancelInject={handleCancelInject}
+          />
         ))}
       </div>
       <div className="flex gap-2">
@@ -349,8 +397,20 @@ function Overview({ projectName }: { projectName: string }) {
  * real schema, an inject message shows success/failure exactly as
  * CTX-108.3's plain button did, a chat message shows the model's real
  * text response. Per-message state, not one global pending boolean
- * (SPEC-302 §3's own named risk). */
-function ChatMessageView({ message }: { message: ChatMessage }) {
+ * (SPEC-302 §3's own named risk). An `awaiting_confirmation` inject
+ * message (CTX-204.1/CTX-108.4) is the one place this view has its own
+ * buttons, rather than only reflecting state `handleSend` already
+ * decided -- SPEC-204's whole point is that this decision needs a real
+ * person in the loop before the daemon runs it. */
+function ChatMessageView({
+  message,
+  onConfirmInject,
+  onCancelInject,
+}: {
+  message: ChatMessage
+  onConfirmInject: (id: string) => void
+  onCancelInject: (id: string) => void
+}) {
   if (message.kind === 'user') {
     return <p className="text-sm text-neutral-100">{'> '}{message.text}</p>
   }
@@ -375,6 +435,31 @@ function ChatMessageView({ message }: { message: ChatMessage }) {
 
   if (message.kind === 'inject') {
     if (message.status === 'pending') return <p className="text-sm text-neutral-400">Injecting…</p>
+    if (message.status === 'awaiting_confirmation') {
+      return (
+        <div className="flex flex-col gap-2 rounded border border-amber-700 bg-neutral-900 p-3">
+          <p className="text-sm text-amber-400">
+            This will write into the board KiCad currently has open. Confirm?
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-neutral-950"
+              onClick={() => onConfirmInject(message.id)}
+            >
+              Confirm
+            </button>
+            <button
+              type="button"
+              className="rounded bg-neutral-800 px-3 py-1 text-xs font-medium text-neutral-200"
+              onClick={() => onCancelInject(message.id)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )
+    }
     if (message.status === 'error') return <p className="text-sm text-red-400">{message.error}</p>
     return <p className="text-sm text-emerald-400">Injected into the open board.</p>
   }
