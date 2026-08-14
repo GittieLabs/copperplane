@@ -91,10 +91,15 @@ class TestTableEntryResolution(unittest.TestCase):
 
     def test_002_resolve_placeholder_matches_any_kicad_version_number(self):
         """TEST-002: matched by digits, not the literal "KICAD10" -- a
-        future KiCad major version must not silently break this."""
-        self.assertEqual(flt._resolve_placeholder("${KICAD10_FOOTPRINT_DIR}/X.pretty", "/real/dir"), "/real/dir/X.pretty")
-        self.assertEqual(flt._resolve_placeholder("${KICAD11_FOOTPRINT_DIR}/X.pretty", "/real/dir"), "/real/dir/X.pretty")
-        self.assertEqual(flt._resolve_placeholder("${KICAD99_FOOTPRINT_DIR}/X.pretty", "/real/dir"), "/real/dir/X.pretty")
+        future KiCad major version must not silently break this. Expected
+        values go through os.path.normpath too, matching what the real
+        code under test does -- a hardcoded forward-slash expectation was
+        exactly the shape of bug that broke this same test on real
+        windows-latest CI (see CTX-308.3 Plan Drift Deviation 3)."""
+        expected = os.path.normpath("/real/dir/X.pretty")
+        self.assertEqual(flt._resolve_placeholder("${KICAD10_FOOTPRINT_DIR}/X.pretty", "/real/dir"), expected)
+        self.assertEqual(flt._resolve_placeholder("${KICAD11_FOOTPRINT_DIR}/X.pretty", "/real/dir"), expected)
+        self.assertEqual(flt._resolve_placeholder("${KICAD99_FOOTPRINT_DIR}/X.pretty", "/real/dir"), expected)
 
     def test_002b_windows_backslash_paths_do_not_raise_re_error(self):
         """Real regression test for a real windows-latest CI failure:
