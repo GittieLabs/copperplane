@@ -1,9 +1,17 @@
 import { dispatch } from './ipc'
 import type { SavedPart } from './partDetail'
 
+/** CTX-308.4: kicad.search_footprints now merges two real sources --
+ * KiCad's own installed libraries (CTX-308.1/CTX-308.3) and footprints
+ * this app has already saved (CTX-308.2's own attach flow) -- each
+ * result tagged with which one it came from, so the UI can tell them
+ * apart instead of presenting an undifferentiated list. */
+export type FootprintSource = 'kicad_library' | 'your_library'
+
 export interface FootprintCandidate {
   library: string
   footprint_name: string
+  source: FootprintSource
 }
 
 function unwrap<T>(response: { error?: { message: string }; result?: unknown }): T {

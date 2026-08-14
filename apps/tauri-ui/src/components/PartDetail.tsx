@@ -249,7 +249,10 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
                       className="flex items-center justify-between gap-3 rounded border border-neutral-800 p-2"
                     >
                       <p className="text-xs text-neutral-300">
-                        {fp.footprint_name} <span className="text-neutral-500">{fp.library}</span>
+                        {fp.footprint_name} <span className="text-neutral-500">{fp.library}</span>{' '}
+                        <span className="text-neutral-600">
+                          {fp.source === 'your_library' ? '· previously saved' : '· KiCad library'}
+                        </span>
                       </p>
                       <button
                         type="button"

@@ -710,21 +710,58 @@ class TestComponentSearchAndCacheDatasheetRoutes(unittest.TestCase):
 
 
 class TestKicadSearchFootprintsRoute(unittest.TestCase):
-    """CTX-308.1: kicad.search_footprints is real filesystem I/O (a
-    fp-lib-table read plus directory listings), not a kipy IPC call --
-    deliberately NOT in ASYNC_ROUTES, unlike every other kicad.*/
-    freecad.* route."""
+    """CTX-308.1/CTX-308.4: kicad.search_footprints is real filesystem
+    I/O (fp-lib-table + a user's own saved library, no kipy IPC call
+    involved at all), deliberately NOT in ASYNC_ROUTES, unlike every
+    other kicad.*/freecad.* route."""
 
+    @patch('daemon.library_store.search_footprints')
     @patch('daemon.fp_lib_table.search_footprints')
-    def test_001_dispatched_through_handle_request_returns_synchronously_not_as_a_job(self, mock_search):
-        mock_search.return_value = [{"library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module"}]
+    def test_001_dispatched_through_handle_request_returns_synchronously_not_as_a_job(self, mock_kicad_search, mock_saved_search):
+        mock_kicad_search.return_value = [{"library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module"}]
+        mock_saved_search.return_value = []
 
         request = json.dumps({"jsonrpc": "2.0", "method": "kicad.search_footprints", "params": {"query": "MP1584"}, "id": "req_1"})
         response = json.loads(handle_request(request))
 
-        mock_search.assert_called_once_with("MP1584")
+        mock_kicad_search.assert_called_once_with("MP1584")
         self.assertNotIn("job_id", response.get("result", {}))
-        self.assertEqual(response["result"], [{"library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module"}])
+        self.assertEqual(response["result"], [
+            {"library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module", "source": "kicad_library"},
+        ])
+
+    @patch('daemon.library_store.search_footprints')
+    @patch('daemon.fp_lib_table.search_footprints')
+    def test_003_merges_both_sources_kicad_installed_first(self, mock_kicad_search, mock_saved_search):
+        """TEST-003: real merge of both real sources, KiCad-installed
+        results first per PRODUCT-PLAN.md's own stated ranking, each
+        tagged with a real source field."""
+        mock_kicad_search.return_value = [{"library": "Battery", "footprint_name": "BatteryHolder_X"}]
+        mock_saved_search.return_value = [
+            {"footprint_id": "MyPCBLibs:MP1584EN_5V_Module", "library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module"},
+        ]
+
+        result = daemon.kicad_search_footprints("battery")
+
+        self.assertEqual(result, [
+            {"library": "Battery", "footprint_name": "BatteryHolder_X", "source": "kicad_library"},
+            {"library": "MyPCBLibs", "footprint_name": "MP1584EN_5V_Module", "source": "your_library"},
+        ])
+
+    @patch('daemon.fp_lib_table.search_footprints')
+    def test_003b_missing_library_store_degrades_to_kicad_only_results(self, mock_kicad_search):
+        """TEST-003: library_store failing to import must not take down
+        kicad.search_footprints entirely -- mirrors every other route's
+        own graceful-degradation pattern in this file."""
+        mock_kicad_search.return_value = [{"library": "Battery", "footprint_name": "BatteryHolder_X"}]
+        original = daemon.library_store
+        daemon.library_store = None
+        try:
+            result = daemon.kicad_search_footprints("battery")
+        finally:
+            daemon.library_store = original
+
+        self.assertEqual(result, [{"library": "Battery", "footprint_name": "BatteryHolder_X", "source": "kicad_library"}])
 
     def test_002_build_routes_omits_it_when_fp_lib_table_import_failed(self):
         original = daemon.fp_lib_table

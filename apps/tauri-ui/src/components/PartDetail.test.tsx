@@ -171,7 +171,7 @@ describe('PartDetail', () => {
 
   it('TEST-002: searching renders real candidates from kicad.search_footprints', async () => {
     searchFootprintsMock.mockResolvedValueOnce([
-      { library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module' },
+      { library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module', source: 'kicad_library' },
     ])
     await saveAndReachFootprintSection()
 
@@ -181,6 +181,21 @@ describe('PartDetail', () => {
     await waitFor(() => screen.getByText('MP1584EN_5V_Module'))
     screen.getByText('MyPCBLibs')
     expect(searchFootprintsMock).toHaveBeenCalledWith('MP1584')
+  })
+
+  it('TEST-004 (CTX-308.4): each candidate shows a real, distinguishing label for its source', async () => {
+    searchFootprintsMock.mockResolvedValueOnce([
+      { library: 'Battery', footprint_name: 'BatteryHolder_X', source: 'kicad_library' },
+      { library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module', source: 'your_library' },
+    ])
+    await saveAndReachFootprintSection()
+
+    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'x' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+    await waitFor(() => screen.getByText('BatteryHolder_X'))
+    screen.getByText(/KiCad library/)
+    screen.getByText(/previously saved/)
   })
 
   it('TEST-003: selecting a candidate calls attachFootprintToPart and shows the linked footprint', async () => {
