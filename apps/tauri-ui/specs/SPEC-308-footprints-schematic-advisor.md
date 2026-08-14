@@ -42,37 +42,66 @@ user_facing: true
         works.
 
 ## 2. System Architecture & Design Choices
-*   **Design Rationale:** Left as an open design question, not invented here -- `PRODUCT-PLAN.md`
-    §8 open question 3 already names the real unresolved scoping call: *"Now that footprints are
-    their own object, 'find a footprint' needs a defined corpus: the user's installed KiCad
-    footprint libraries first, then the user's own library, then generation from datasheet package
-    dimensions. Which of the three are in scope for SPEC-308, and how a generated footprint is
-    marked as unverified, both need deciding."* The implementation context should resolve this
-    against kipy's real library-search API (not yet checked against real kipy source for this spec)
-    before writing any search code.
-*   **Data Flow / Interactions:** Not designed here -- depends on the corpus decision above.
+*   **Corpus decision, resolved 2026-08-14 for the first real slice:** `PRODUCT-PLAN.md` §8 open
+    question 3 named three possible sources (installed KiCad libraries, the user's own saved
+    library, datasheet generation). Installed-library search is the first slice this spec's own
+    implementation work targets; the other two remain real, explicitly deferred follow-up, not
+    silently dropped.
+*   **A real, significant finding, verified directly against kipy's own source, not assumed:**
+    `kicad-python==0.7.1`'s live IPC connection (`kipy.kicad.KiCad`, the class
+    `kicad_bridge.py` already wraps) has **no footprint-library-search capability at all**. Checked
+    every class/method in `kipy/kicad.py`, `kipy/board.py`, `kipy/project.py`, and every proto
+    command message under `kipy/proto/` for anything containing "library"/"fplib"/"footprint" --
+    `Board.get_footprints()` only returns footprints already placed on the currently-open board, and
+    no `GetLibraries`/`GetFootprintLibraryTable`/`SearchFootprints`-shaped RPC exists anywhere in the
+    protocol. `kicad_write.py`'s own existing comment already flagged half of this ("kipy's real API
+    has no call to write one" [into a library]); this confirms it also has no call to *read* one.
+    **This means installed-library search cannot reuse `kicad_bridge.py`'s IPC connection pattern at
+    all** -- it needs direct filesystem/config access instead: KiCad's own `fp-lib-table` config
+    file(s) (global, plus a project-local one next to the `.kicad_pro`) enumerate configured
+    `.pretty` library paths; footprint names inside each are `.kicad_mod` filenames, readable by
+    directory listing alone for a name-searchable list. **Actually placing a found footprint**
+    (parsing a `.kicad_mod` file's real pad/courtyard geometry into the plain-dict shape
+    `kicad_write.build_footprint_instance` already expects) is real, separate, harder work --
+    `.kicad_mod` is KiCad's S-expression format, and neither kipy nor any dependency already pinned
+    in `requirements.txt` (`sexpdata`, `kiutils`, or equivalent) parses it. A new dependency, or a
+    hand-rolled parser, is a real decision this spec defers to the implementation context rather than
+    silently picking one here.
+*   **Data Flow / Interactions:** `fp-lib-table` parsed once (or cached) → configured `.pretty`
+    directory paths → directory-listed for `.kicad_mod` filenames → name-filtered against the user's
+    search query → candidate list returned. No live KiCad IPC round trip needed for this slice at
+    all, unlike every other route this daemon has shipped so far.
 *   **Cross-Module Impacts:**
-    *   `services/python-daemon`: likely a new `kicad_bridge` capability (installed-library search --
-        genuinely new; nothing in `kicad_bridge.py` does this today) and/or a footprint-generation
-        path in `component_pipeline.py`-adjacent code (datasheet package dimensions → footprint,
-        parallel to `SPEC-202`'s existing datasheet → Part pipeline). `library_store.save_footprint`/
-        `load_footprint` (`CTX-304.1`) are reused as-is for persistence.
+    *   `services/python-daemon`: a genuinely new module (filesystem-based, not `kicad_bridge.py`'s
+        IPC pattern) for `fp-lib-table` parsing and `.pretty` directory search. Real footprint
+        geometry parsing (S-expression) is separate, harder work, real dependency decision deferred.
+        `library_store.save_footprint`/`load_footprint` (`CTX-304.1`) reused as-is for persistence --
+        verified directly: `save_footprint` only requires a `footprint_id` key, no schema changes
+        needed to persist a found footprint through it.
     *   `apps/tauri-ui`: a real find-or-create UI, distinct from `SPEC-306`'s part-search flow.
     *   Depends on `SPEC-307` (Part Detail & Library Export) per `PRODUCT-PLAN.md` §5.1 -- a
         footprint gets linked to an already-real Part.
 
 ## 3. Known Constraints & Risks
-*   **The three-source corpus question (`PRODUCT-PLAN.md` §8, item 3) is the real scoping risk for
-    this spec** -- not a mechanical detail. Getting it wrong either ships a footprint search that
-    only ever generates (never reuses a real installed library footprint a user already trusts) or
-    one that never generates (leaving parts with no footprint path when nothing installed matches).
-*   **Provenance applies to footprints too**, per `PRODUCT-PLAN.md` §2.2's general rule -- a
-    generated-from-datasheet footprint needs to be marked as such (and as unverified) with the same
-    honesty `SPEC-202` already applies to Part fields. Not yet designed how that's represented on the
-    `Footprint` object `library_store.py` already persists.
-*   **kipy's real installed-library-search API has not yet been checked against source** -- unlike
-    prior specs in this repo, this spec's own Executive Summary above is honest that this gap
-    exists rather than assuming an API shape. Implementation context must verify before designing.
+*   **Name-searchable browsing and actually-placeable footprints are two different amounts of work,
+    confirmed by real source verification, not assumed equal.** Enumerating `.pretty` library paths
+    and `.kicad_mod` filenames needs no new dependency and no geometry parsing. Turning a chosen
+    footprint into real pads `kicad_write.build_footprint_instance` can consume requires parsing
+    `.kicad_mod`'s S-expression format -- genuinely separate, harder work. Splitting these into
+    separate implementation phases (or separate contexts) is the honest reflection of that gap, not
+    an artificial phase boundary.
+*   **`fp-lib-table` itself is also S-expression-shaped** (`(fp_lib_table (lib (name ...)...))`) --
+    real verification needed on whether it's simple enough to parse with a small hand-written reader
+    or whether it also wants a real S-expression library, before implementation starts.
+*   **Provenance applies to footprints too**, per `PRODUCT-PLAN.md` §2.2's general rule -- when the
+    datasheet-generation source (deferred, not this slice) eventually lands, a generated footprint
+    needs to be marked as such and as unverified, with the same honesty `SPEC-202` already applies to
+    Part fields. Not yet designed how that's represented on the `Footprint` object `library_store.py`
+    already persists -- irrelevant to this slice specifically, since installed-library footprints are
+    real KiCad library content, not model output.
+*   **The user's own saved library and datasheet-generation sources remain real, explicitly deferred
+    follow-up** -- `PRODUCT-PLAN.md` §8's open question isn't fully closed by this spec, only its
+    first slice.
 
 ## 4. Module Map & Reference Links
 ```text
