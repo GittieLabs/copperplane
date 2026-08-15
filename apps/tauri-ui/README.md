@@ -1,32 +1,48 @@
-# React + TypeScript + Vite
+# Hardware Agent Studio — Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+The Tauri app's UI: React 19 + TypeScript + Vite, styled with Tailwind. This is one of three real
+layers in the project — see [the root README](../../README.md) for the full picture and
+[`core/tauri-rust`](../../core/tauri-rust)/[`services/python-daemon`](../../services/python-daemon)
+for the other two.
 
-Currently, two official plugins are available:
+## What's here
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+*   `src/components/` — real UI surfaces: `Rail` (the project/library navigation shell),
+    `ComponentDiscovery` (part search + disambiguation), `PartDetail` (pin table, save-to-library,
+    footprint search/attach), `EnclosureViewer` (the 3D `.glb` viewer), `Settings`.
+*   `src/lib/` — typed clients for the daemon's real JSON-RPC routes (`ipc.ts` is the shared
+    request/job-tracking layer everything else builds on), plus `commands.ts` (the chat surface's
+    string-command recognizer — being phased out per `PRODUCT-PLAN.md` §7 in favor of dedicated
+    per-stage surfaces like `ComponentDiscovery`).
 
-## React Compiler
+Every non-trivial piece here has a real `SPEC-*.md`/`CTX-*.md` pair under `specs/`/`context/` in
+this directory (or the repo root, for cross-cutting work) — read those before assuming why
+something is shaped the way it is.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Running it
 
-## Expanding the Oxlint configuration
+This app doesn't run standalone in a useful way — it's the UI half of a Tauri app whose other half
+(the Rust process supervisor) spawns and owns the Python daemon it talks to. From the repo root:
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+cd core/tauri-rust
+npx @tauri-apps/cli@2 dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+That starts this frontend's own dev server for you (`npm run dev`, i.e. plain Vite) as part of
+bringing up the whole app. Running `npm run dev` here in isolation is only useful for iterating on
+markup/styling without a live daemon connection.
+
+## Testing
+
+```bash
+npm install
+npx tsc -b            # typecheck
+npx oxlint             # lint
+npx vitest run         # unit tests (vi.mock'd daemon calls, no live KiCad/FreeCAD needed)
+npx vite build          # production build
+```
+
+`vitest` tests are colocated with the code they cover (`*.test.ts`/`*.test.tsx`). None of them talk
+to a real daemon — they mock `lib/ipc.ts`'s `dispatch`/`submitJob` and assert on the real UI
+behavior around the mocked response, which is why they run identically on every platform in CI.
