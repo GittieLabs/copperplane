@@ -14,6 +14,7 @@ child_specs:
   - "SPEC-306-component-discovery.md"
   - "SPEC-307-part-detail-library-export.md"
   - "SPEC-308-footprints-schematic-advisor.md"
+  - "SPEC-309-board-advisor.md"
 user_facing: true
 ---
 
