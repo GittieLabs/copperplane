@@ -109,9 +109,10 @@ pulled from a shared, reusable **Library** — with every AI-assisted step confi
     fixes via a real LLM call. DRC auto-targets whatever board is open in KiCad; ERC takes an
     explicit, user-picked file (schematic documents have no live-resolution path — a real,
     confirmed KiCad IPC limitation, not a shortcut). Done.
-*   ⏳ **M5 — Enclosure from geometry, then ambition.** Import a real `.kicad_pcb`, generate a
-    starter enclosure body from its actual outline. Auto-layout and assisted routing stay explicitly
-    out of scope until everything above it is solid.
+*   ✅ **M5 — Enclosure from geometry, then ambition.** Import a real `.kicad_pcb` file, no live
+    KiCad connection required, and generate a starter enclosure body from its actual outline and
+    mounting holes via `kicad-cli`'s own DXF/drill export. Auto-layout and assisted routing stay
+    explicitly out of scope. Done.
 
 Distribution work — code signing, auto-update, verified Windows/Linux builds — is tracked
 separately and is real but intentionally *after* the product model, not before it. A macOS
