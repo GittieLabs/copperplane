@@ -39,6 +39,13 @@ export interface SavedSymbol {
   pins: ExtractedPin[]
 }
 
+/** Mirrors component_pipeline.py's connection_guidance response shape
+ * (CTX-308.7). */
+export interface ConnectionGuidance {
+  pin_guidance: { pin_number: string; guidance: string }[]
+  general_notes: string
+}
+
 function unwrap<T>(response: { error?: { message: string }; result?: unknown }): T {
   if (response.error) {
     throw new Error(response.error.message)
@@ -67,4 +74,13 @@ export async function saveConfirmedPart(
 export async function exportSymbol(symbolId: string): Promise<string> {
   const result = await unwrap<{ path: string }>(await dispatch('library.export_symbol', { symbol_id: symbolId }))
   return result.path
+}
+
+/** CTX-308.7: SPEC-308's third named concern (decoupling, protection,
+ * power), once a part and its footprint are both real. A real LLM call
+ * (kicad.generate_connection_guidance is async-registered), so
+ * submitJob -- matching extractPartDetail's own precedent. */
+export async function getConnectionGuidance(partId: string): Promise<ConnectionGuidance> {
+  const handle = await submitJob<ConnectionGuidance>('kicad.generate_connection_guidance', { part_id: partId })
+  return handle.result
 }

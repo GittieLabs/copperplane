@@ -653,6 +653,28 @@ def kicad_generate_footprint_from_part(part_id: str) -> dict:
     })
 
 
+def kicad_generate_connection_guidance(part_id: str) -> dict:
+    """The kicad.generate_connection_guidance route -- SPEC-308's third
+    named concern (decoupling, protection, power), once a part and its
+    footprint are both real (PRODUCT-PLAN.md §6 M3's own framing). A
+    real LLM call, so registered in ASYNC_ROUTES below like
+    kicad.generate_component/component.search -- unlike
+    kicad.generate_footprint_from_part, this genuinely needs one.
+
+    Threads CONFIG["llm_provider"]/["llm_model"] through exactly like
+    kicad_generate_component/component_search already do, for the same
+    reason: a fresh install with nothing configured in Settings yet must
+    still use whichever provider IS configured, not a hardcoded default
+    baked into connection_guidance.prompt.md."""
+    part = library_store.load_part(part_id)
+    return component_pipeline.generate_connection_guidance(
+        part["part_id"], part["package"], part["pins"],
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+    )
+
+
 def _build_routes() -> dict:
     """kicad.*/freecad.* are only registered if their bridge module
     actually imported (SPEC-107 §2) -- a broken kipy install shouldn't
@@ -701,6 +723,8 @@ def _build_routes() -> dict:
         routes["kicad.search_footprints"] = kicad_search_footprints
     if kicad_write is not None and library_store is not None:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
+    if component_pipeline is not None and library_store is not None:
+        routes["kicad.generate_connection_guidance"] = kicad_generate_connection_guidance
     return routes
 
 
@@ -712,7 +736,7 @@ ROUTES = _build_routes()
 # arrives later as a job.* notification (SPEC-105 §2).
 ASYNC_ROUTES = {
     "freecad.generate_enclosure", "llm.chat", "kicad.generate_component", "kicad.inject_component",
-    "component.search", "component.cache_datasheet",
+    "component.search", "component.cache_datasheet", "kicad.generate_connection_guidance",
 } & ROUTES.keys()
 
 # job_id -> {"cancel_event": threading.Event()} for every job currently

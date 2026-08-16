@@ -9,11 +9,13 @@ const searchFootprintsMock = vi.fn()
 const attachFootprintToPartMock = vi.fn()
 const generateFootprintFromPartMock = vi.fn()
 const exportFootprintMock = vi.fn()
+const getConnectionGuidanceMock = vi.fn()
 
 vi.mock('../lib/partDetail', () => ({
   extractPartDetail: (...args: unknown[]) => extractPartDetailMock(...args),
   saveConfirmedPart: (...args: unknown[]) => saveConfirmedPartMock(...args),
   exportSymbol: (...args: unknown[]) => exportSymbolMock(...args),
+  getConnectionGuidance: (...args: unknown[]) => getConnectionGuidanceMock(...args),
 }))
 
 vi.mock('../lib/footprints', () => ({
@@ -47,6 +49,7 @@ beforeEach(() => {
   attachFootprintToPartMock.mockReset()
   generateFootprintFromPartMock.mockReset()
   exportFootprintMock.mockReset()
+  getConnectionGuidanceMock.mockReset()
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -323,5 +326,75 @@ describe('PartDetail', () => {
 
     await waitFor(() => screen.getByText(/has no pad geometry to export/))
     expect(screen.queryByText('Exported:', { exact: false })).toBeNull()
+  })
+
+  it('CTX-308.7: Get Connection Guidance calls getConnectionGuidance and renders real per-pin guidance', async () => {
+    getConnectionGuidanceMock.mockResolvedValueOnce({
+      pin_guidance: [{ pin_number: '8', guidance: 'Add a 100nF ceramic decoupling capacitor from VCC to GND.' }],
+      general_notes: 'Tie RESET high through a pull-up if unused.',
+    })
+    searchFootprintsMock.mockResolvedValueOnce([{ library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module' }])
+    attachFootprintToPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
+    })
+    await saveAndReachFootprintSection()
+    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Get Connection Guidance' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Get Connection Guidance' }))
+
+    await waitFor(() => screen.getByText(/Add a 100nF ceramic decoupling capacitor/))
+    expect(getConnectionGuidanceMock).toHaveBeenCalledWith('ATtiny85')
+    screen.getByText('Pin 8:')
+    screen.getByText(/Tie RESET high through a pull-up/)
+  })
+
+  it('CTX-308.7: available once a footprint is linked, not gated on it being generated', async () => {
+    searchFootprintsMock.mockResolvedValueOnce([{ library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module' }])
+    attachFootprintToPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
+    })
+    await saveAndReachFootprintSection()
+    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
+
+    await waitFor(() => screen.getByRole('button', { name: 'Get Connection Guidance' }))
+  })
+
+  it('CTX-308.7: a guidance failure shows the real error, not a crash', async () => {
+    getConnectionGuidanceMock.mockRejectedValueOnce(new Error('Connection guidance did not return a JSON object.'))
+    generateFootprintFromPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'generated__ATtiny85',
+    })
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate from datasheet dimensions' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Get Connection Guidance' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Get Connection Guidance' }))
+
+    await waitFor(() => screen.getByText(/Connection guidance did not return a JSON object/))
+  })
+
+  it('CTX-308.7: an empty pin_guidance list renders an honest "no guidance" message, not an error', async () => {
+    getConnectionGuidanceMock.mockResolvedValueOnce({ pin_guidance: [], general_notes: '' })
+    generateFootprintFromPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'generated__ATtiny85',
+    })
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate from datasheet dimensions' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Get Connection Guidance' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Get Connection Guidance' }))
+
+    await waitFor(() => screen.getByText('No pin-specific guidance for this part.'))
   })
 })
