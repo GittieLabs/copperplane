@@ -54,3 +54,9 @@ services/python-daemon/dist/*
 # Local secrets (SPEC-201 provider API keys, etc.) — never committed
 .env.local
 .env*.local
+
+# KiCad-generated local settings sidecar (CTX-309.1): kicad-cli itself
+# writes this next to any .kicad_pcb it processes -- machine/session-
+# specific UI state, not part of the real fixture content, regenerated
+# identically on every run.
+*.kicad_prl
