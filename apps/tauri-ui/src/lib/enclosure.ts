@@ -1,15 +1,20 @@
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { submitJob, type JobHandle } from './ipc'
 
 /** Mirrors `daemon.py`'s real `freecad_generate_enclosure` params
- * (CTX-109.1). `width`/`depth` are the real mode-selection signal --
- * supplying both means manual mode, always; omitting them means
- * board-driven mode, which requires a live KiCad connection. The four
- * `*_mm` geometry params and `project_name` are all optional, matching
- * the same defaults/gating the daemon route itself applies. */
+ * (CTX-109.1, `pcb_path` added by CTX-310.1/SPEC-310). Mode selection is
+ * explicit, in the daemon's own fixed priority order: `width`+`depth`
+ * (manual) > `pcb_path` (file) > live board (board-driven, requires a
+ * live KiCad connection) -- supplying more than one is never
+ * ambiguous, since the daemon route only ever picks the highest-priority
+ * one present. The four `*_mm` geometry params and `project_name` are
+ * all optional, matching the same defaults/gating the daemon route
+ * itself applies. */
 export interface EnclosureParams {
   height: number
   width?: number
   depth?: number
+  pcb_path?: string
   wall_thickness_mm?: number
   clearance_mm?: number
   fillet_radius_mm?: number
@@ -36,4 +41,17 @@ export interface EnclosureResult {
  * today. */
 export async function generateEnclosure(params: EnclosureParams): Promise<JobHandle<EnclosureResult>> {
   return submitJob<EnclosureResult>('freecad.generate_enclosure', { ...params })
+}
+
+/** SPEC-310: the file-based board-driven mode needs no live KiCad
+ * connection at all, so it asks for a `.kicad_pcb` path via a real
+ * native file picker -- mirrors `boardAdvisor.ts`'s own
+ * `pickSchematicFile` pattern exactly, filtered to `.kicad_pcb` instead
+ * of `.kicad_sch`. Returns `null` on cancel, not an error -- the user
+ * closing the dialog is a normal, expected outcome. */
+export async function pickPcbFile(): Promise<string | null> {
+  const selected = await openDialog({
+    filters: [{ name: 'KiCad PCB', extensions: ['kicad_pcb'] }],
+  })
+  return typeof selected === 'string' ? selected : null
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-shell'
 import { submitJob, dispatchTool, type JobHandle } from './lib/ipc'
 import { parseCommand } from './lib/commands'
-import { generateEnclosure, type EnclosureParams, type EnclosureResult } from './lib/enclosure'
+import { generateEnclosure, pickPcbFile, type EnclosureParams, type EnclosureResult } from './lib/enclosure'
 import {
   appendConversationTurn,
   listLibraryParts,
@@ -478,10 +478,17 @@ function ChatMessageView({
  * shell) is threaded through as `project_name`, so a generated
  * enclosure is actually saved as a real Artifact instead of the daemon
  * route silently skipping persistence the way it does with no
- * project_name at all. */
+ * project_name at all.
+ *
+ * CTX-310.2 adds a third mode, "Import board file…", reusing the same
+ * geometry fields "From board" already collects (the outline/hole
+ * *source* differs -- a picked `.kicad_pcb` file vs. a live connection
+ * -- but `freecad_generate_enclosure`'s geometry params are identical
+ * either way). Unlike "From board", this is always offered, live KiCad
+ * connection or not -- SPEC-310's whole point is not needing one. */
 function EnclosurePanel({ projectName }: { projectName: string }) {
   const [kicadAvailable, setKicadAvailable] = useState(false)
-  const [mode, setMode] = useState<'manual' | 'board'>('manual')
+  const [mode, setMode] = useState<'manual' | 'board' | 'file'>('manual')
   const [dims, setDims] = useState({ width: 50, depth: 30, height: 20 })
   const [boardParams, setBoardParams] = useState({
     height: 20,
@@ -490,6 +497,7 @@ function EnclosurePanel({ projectName }: { projectName: string }) {
     fillet_radius_mm: 1.0,
     standoff_height_mm: 5.0,
   })
+  const [pcbPath, setPcbPath] = useState<string | null>(null)
   const [job, setJob] = useState<JobHandle<EnclosureResult> | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [result, setResult] = useState<EnclosureResult | null>(null)
@@ -512,6 +520,14 @@ function EnclosurePanel({ projectName }: { projectName: string }) {
     }
   }, [])
 
+  async function handlePickPcbFile() {
+    // pickPcbFile returning null (the user closed the dialog) is a
+    // normal, silent no-op -- not an error state, matching
+    // BoardAdvisor's own pickSchematicFile handling.
+    const path = await pickPcbFile()
+    if (path) setPcbPath(path)
+  }
+
   async function handleGenerate() {
     setError(null)
     setResult(null)
@@ -520,7 +536,9 @@ function EnclosurePanel({ projectName }: { projectName: string }) {
     const params: EnclosureParams =
       mode === 'manual'
         ? { height: dims.height, width: dims.width, depth: dims.depth, project_name: projectName }
-        : { ...boardParams, project_name: projectName }
+        : mode === 'file'
+          ? { ...boardParams, pcb_path: pcbPath ?? undefined, project_name: projectName }
+          : { ...boardParams, project_name: projectName }
 
     try {
       const handle = await generateEnclosure(params)
@@ -564,6 +582,16 @@ function EnclosurePanel({ projectName }: { projectName: string }) {
             From board
           </button>
         )}
+        <button
+          type="button"
+          className={`rounded px-3 py-1 text-sm ${
+            mode === 'file' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
+          }`}
+          onClick={() => setMode('file')}
+          disabled={running}
+        >
+          Import board file…
+        </button>
       </div>
 
       {mode === 'manual' ? (
@@ -582,6 +610,19 @@ function EnclosurePanel({ projectName }: { projectName: string }) {
         </div>
       ) : (
         <div className="flex flex-col gap-2">
+          {mode === 'file' && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="rounded border border-neutral-700 px-3 py-2 text-sm disabled:opacity-50"
+                onClick={handlePickPcbFile}
+                disabled={running}
+              >
+                Choose .kicad_pcb file…
+              </button>
+              <p className="truncate text-xs text-neutral-500">{pcbPath ?? 'No file selected.'}</p>
+            </div>
+          )}
           {(
             [
               ['height', 'height (mm)'],
@@ -609,7 +650,7 @@ function EnclosurePanel({ projectName }: { projectName: string }) {
           type="button"
           className="flex-1 rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
           onClick={handleGenerate}
-          disabled={running}
+          disabled={running || (mode === 'file' && !pcbPath)}
         >
           {running ? 'Generating…' : 'Generate Enclosure'}
         </button>
