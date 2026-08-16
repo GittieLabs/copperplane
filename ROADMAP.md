@@ -446,12 +446,18 @@ the user directly click-testing the running dev-mode app afterward. `SPEC-101`'s
 left untouched, as designed. Windows/Linux freezing remains real, explicitly out-of-scope follow-up
 (`SPEC-403`).
 
-#### SPEC-402 — Release, Signing & Auto-Update
+#### [SPEC-402](specs/SPEC-402-release-signing-and-auto-update.md) — Release, Signing & Auto-Update
 *Module:* repo-wide · *Depends on:* SPEC-401
 
-Tagged releases, macOS notarization, Windows code signing, Tauri updater, and a changelog derived
-from the `CTX-*.md` implementation logs — which the framework already collects, and which nothing
-currently reads.
+**Rescoped 2026-08-16: unsigned first, deliberately.** A real macOS-only release pipeline (unsigned
+`.dmg` via GitHub Actions, a real Gatekeeper-bypass doc), the Tauri auto-updater (its own real,
+maintainer-generated keypair — no OS-level code-signing certificate, no cost, no identity tied to
+one person), and a changelog derived from the `CTX-*.md` implementation logs — which the framework
+already collects, and which nothing currently reads. Code signing/notarization is explicitly
+deferred: it requires either a personal Apple/Windows identity tied to releases indefinitely, or a
+real *organization* account under a project entity (GittieLabs, if it becomes the enrolled entity)
+— a real, separate, future decision this spec doesn't make. Windows/Linux builds wait on
+`SPEC-403`'s own cross-platform verification, which hasn't happened.
 
 #### SPEC-403 — Cross-Platform Verification Matrix
 *Module:* repo-wide · *Depends on:* SPEC-903
