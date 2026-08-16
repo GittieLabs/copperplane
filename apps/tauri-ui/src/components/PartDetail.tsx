@@ -1,7 +1,7 @@
 import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import type { ComponentCandidate } from '../lib/components'
-import { attachFootprintToPart, generateFootprintFromPart, searchFootprints, type FootprintCandidate } from '../lib/footprints'
+import { attachFootprintToPart, exportFootprint, generateFootprintFromPart, searchFootprints, type FootprintCandidate } from '../lib/footprints'
 import { exportSymbol, extractPartDetail, saveConfirmedPart, type ExtractedSchema, type SavedPart, type SavedSymbol } from '../lib/partDetail'
 
 type Status = 'extracting' | 'ready' | 'error'
@@ -44,6 +44,14 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
   const [generatingFootprint, setGeneratingFootprint] = useState(false)
   const [footprintGenerated, setFootprintGenerated] = useState(false)
 
+  // CTX-308.6: export the linked footprint to a real .pretty library
+  // (SPEC-308 §1's own stated goal). Only ever succeeds for a footprint
+  // with real pad geometry -- the daemon route itself returns a clear
+  // error otherwise, surfaced here the same way footprintError already is.
+  const [exportedFootprintPath, setExportedFootprintPath] = useState<string | null>(null)
+  const [exportingFootprint, setExportingFootprint] = useState(false)
+  const [exportFootprintError, setExportFootprintError] = useState<string | null>(null)
+
   useEffect(() => {
     let cancelled = false
     setStatus('extracting')
@@ -60,6 +68,9 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     setFootprintCandidates(null)
     setGeneratingFootprint(false)
     setFootprintGenerated(false)
+    setExportedFootprintPath(null)
+    setExportingFootprint(false)
+    setExportFootprintError(null)
 
     extractPartDetail(candidate.part_number)
       .then((schema) => {
@@ -137,6 +148,20 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
       setFootprintStatus('error')
     } finally {
       setGeneratingFootprint(false)
+    }
+  }
+
+  async function handleExportFootprint() {
+    if (!savedPart?.footprint_id) return
+    setExportingFootprint(true)
+    setExportFootprintError(null)
+    try {
+      const path = await exportFootprint(savedPart.footprint_id)
+      setExportedFootprintPath(path)
+    } catch (err) {
+      setExportFootprintError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setExportingFootprint(false)
     }
   }
 
@@ -235,14 +260,38 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
       {savedPart && (
         <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
           {savedPart.footprint_id ? (
-            <p className="text-sm text-emerald-400">
-              Footprint linked: {savedPart.footprint_id}
-              {footprintGenerated && (
-                <span className="ml-2 text-xs font-medium text-amber-400">
-                  (generated from datasheet dimensions — unverified)
-                </span>
+            <>
+              <p className="text-sm text-emerald-400">
+                Footprint linked: {savedPart.footprint_id}
+                {footprintGenerated && (
+                  <span className="ml-2 text-xs font-medium text-amber-400">
+                    (generated from datasheet dimensions — unverified)
+                  </span>
+                )}
+              </p>
+              {!exportedFootprintPath ? (
+                <button
+                  type="button"
+                  className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                  onClick={handleExportFootprint}
+                  disabled={exportingFootprint}
+                >
+                  {exportingFootprint ? 'Exporting…' : 'Export Footprint (.kicad_mod)'}
+                </button>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <p className="text-xs text-neutral-500">Exported: {exportedFootprintPath}</p>
+                  <button
+                    type="button"
+                    className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
+                    onClick={() => open(exportedFootprintPath)}
+                  >
+                    Open footprint
+                  </button>
+                </div>
               )}
-            </p>
+              {exportFootprintError && <p className="text-sm text-red-400">{exportFootprintError}</p>}
+            </>
           ) : (
             <>
               <p className="text-xs font-medium uppercase text-neutral-500">Find Footprint</p>

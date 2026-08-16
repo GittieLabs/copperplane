@@ -544,5 +544,115 @@ class TestExportSymbolKicadSym(LibraryStoreTestCase):
         self.assertIn('weird\\"name', text)
 
 
+_SOIC8_PADS = [
+    {"number": str(i), "x_mm": -2.0 if i <= 4 else 2.0, "y_mm": (i - 2.5) * 1.27 if i <= 4 else (6.5 - i) * 1.27,
+     "width_mm": 1.5, "height_mm": 0.6, "pad_type": "smd", "drill_mm": None}
+    for i in range(1, 9)
+]
+_SOIC8_COURTYARD = {"length_mm": 5.4, "width_mm": 4.4}
+
+
+class TestExportFootprintKicadMod(LibraryStoreTestCase):
+    """CTX-308.6: SPEC-308 §1's "export it to a real .pretty library" --
+    only meaningful for a footprint with real pad geometry, which today
+    only a CTX-308.5-generated footprint has."""
+
+    def test_001_writes_a_real_file_to_a_real_pretty_directory(self):
+        """KiCad's own convention: a footprint library is a directory
+        named *.pretty/, unlike a symbol library's single .kicad_sym
+        file -- confirmed by reading real footprint libraries on this
+        machine before writing this, not assumed."""
+        store.save_footprint({
+            "footprint_id": "generated__ATtiny85", "pads": _SOIC8_PADS, "courtyard": _SOIC8_COURTYARD,
+        })
+        path = store.export_footprint_kicad_mod("generated__ATtiny85")
+        self.assertTrue(
+            path.endswith(os.path.join("library", "footprints.pretty", "generated__ATtiny85.kicad_mod"))
+        )
+        with open(path) as f:
+            text = f.read()
+        self.assertIn('(footprint "generated__ATtiny85"', text)
+        self.assertEqual(text.count('(pad '), 8)
+
+    def test_002_a_real_kicad_cli_parses_and_renders_the_exported_file(self):
+        """The real bar this repo holds itself to: a file KiCad's own
+        parser accepts and can render, not just plausible-looking text.
+        kicad-cli fp export svg (unlike sym export svg) takes the
+        containing .pretty directory plus --footprint, not the file
+        path directly -- confirmed by actually running it before writing
+        this assertion, not assumed from the --help text alone. Skips
+        cleanly if kicad-cli isn't found, same convention as symbol
+        export's own test."""
+        kicad_cli = _find_kicad_cli()
+        if not kicad_cli:
+            self.skipTest("kicad-cli not found on this machine.")
+
+        store.save_footprint({
+            "footprint_id": "generated__ATtiny85", "pads": _SOIC8_PADS, "courtyard": _SOIC8_COURTYARD,
+        })
+        path = store.export_footprint_kicad_mod("generated__ATtiny85")
+        pretty_dir = os.path.dirname(path)
+
+        with tempfile.TemporaryDirectory() as svg_dir:
+            result = subprocess.run(
+                [kicad_cli, "fp", "export", "svg", "-o", svg_dir, "--footprint", "generated__ATtiny85", pretty_dir],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            svgs = [f for f in os.listdir(svg_dir) if f.endswith(".svg")]
+            self.assertEqual(len(svgs), 1)
+
+    def test_003_a_thru_hole_pad_round_trips_through_real_kicad_cli_too(self):
+        """Real, not hypothetical: DIP packages (kicad_write.
+        THROUGH_HOLE_PACKAGES) produce pth pads with a real drill --
+        the smd-only test above doesn't exercise that branch."""
+        kicad_cli = _find_kicad_cli()
+        if not kicad_cli:
+            self.skipTest("kicad-cli not found on this machine.")
+
+        pads = [
+            {"number": "1", "x_mm": -1.27, "y_mm": -3.81, "width_mm": 1.6, "height_mm": 1.6,
+             "pad_type": "pth", "drill_mm": 0.8},
+        ]
+        store.save_footprint({
+            "footprint_id": "generated__DIPTest", "pads": pads, "courtyard": {"length_mm": 10.0, "width_mm": 8.0},
+        })
+        path = store.export_footprint_kicad_mod("generated__DIPTest")
+        pretty_dir = os.path.dirname(path)
+
+        with open(path) as f:
+            text = f.read()
+        self.assertIn("thru_hole", text)
+        self.assertIn("(drill 0.8)", text)
+
+        with tempfile.TemporaryDirectory() as svg_dir:
+            result = subprocess.run(
+                [kicad_cli, "fp", "export", "svg", "-o", svg_dir, "--footprint", "generated__DIPTest", pretty_dir],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_004_a_footprint_with_no_pad_geometry_fails_closed_not_a_meaningless_file(self):
+        """A footprint attached via CTX-308.2's own find flow
+        ({footprint_id, library, footprint_name}, no pads at all) has
+        nothing real to export -- it's already a real .kicad_mod
+        sitting in the user's own KiCad library. Must raise, not write
+        an empty/meaningless file."""
+        store.save_footprint({"footprint_id": "MyPCBLibs__MP1584EN_5V_Module", "library": "MyPCBLibs",
+                               "footprint_name": "MP1584EN_5V_Module"})
+        with self.assertRaises(store.SchemaValidationError):
+            store.export_footprint_kicad_mod("MyPCBLibs__MP1584EN_5V_Module")
+
+    # Deliberately no "footprint_id containing a double quote" test here,
+    # unlike TestExportSymbolKicadSym.test_003: footprint_id doubles as
+    # this file's own on-disk filename (unlike a symbol's pin *name*,
+    # which is just text inside the file) -- a literal `"` is invalid on
+    # Windows, the same class of bug CTX-308.4 already found and fixed
+    # for `:`. footprint_id is already required to be filesystem-safe by
+    # that established convention, so this isn't a realistic input to
+    # defend against here. _sexpr_str's own escaping is already covered
+    # by the symbol export test above (same shared helper).
+
+
 if __name__ == '__main__':
     unittest.main()

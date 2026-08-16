@@ -89,3 +89,16 @@ export async function generateFootprintFromPart(part: SavedPart): Promise<SavedP
 
   return updatedPart
 }
+
+/** CTX-308.6: SPEC-308 §1's "export it to a real .pretty library" --
+ * only meaningful for a footprint with real pad geometry (one
+ * generateFootprintFromPart produced). A found footprint (installed
+ * KiCad library or your own saved library) is already a real
+ * .kicad_mod file; the daemon route itself returns a clear error for
+ * that case rather than writing a meaningless pad-less file. */
+export async function exportFootprint(footprintId: string): Promise<string> {
+  const result = await unwrap<{ path: string }>(
+    await dispatch('library.export_footprint', { footprint_id: footprintId }),
+  )
+  return result.path
+}
