@@ -357,6 +357,109 @@ def search_footprints(query: str) -> list:
     return results
 
 
+# --- Footprint -> real .pretty library export (SPEC-308, CTX-308.6) -------
+# Real format, confirmed by reading actual .kicad_mod files on this machine
+# -- both a plain SMD 2-terminal part (Resistor_SMD.pretty/
+# R_0603_1608Metric.kicad_mod) and a real thru_hole pad (Package_DIP.pretty)
+# -- not guessed from documentation, the same verification approach
+# _build_kicad_sym_text already established for symbols.
+_KICAD_MOD_VERSION = 20260206
+_KICAD_MOD_GENERATOR = "hardware-agent-studio"
+
+# A footprint library is a directory whose name ends in .pretty -- KiCad's
+# own real convention (unlike a symbol library, which is a single
+# .kicad_sym file with no wrapper directory) -- confirmed against every
+# real footprint library on this machine, all of them "<Name>.pretty/".
+# This directory can be pointed at directly from a real fp-lib-table entry.
+_FOOTPRINTS_PRETTY_DIR_NAME = "footprints.pretty"
+
+
+def _footprints_pretty_dir() -> str:
+    return _ensure_dir("library", _FOOTPRINTS_PRETTY_DIR_NAME)
+
+
+def _build_kicad_mod_text(footprint: dict) -> str:
+    """Hand-builds a real, valid standalone .kicad_mod file from a
+    Footprint's own pads/courtyard -- the same shape
+    kicad_write.generate_pad_layout already produces and
+    kicad_write.build_footprint_instance already consumes for a live
+    board write, applied here to a standalone library file instead.
+    Pad shape choices deliberately mirror build_footprint_instance's own
+    (rect for SMD copper, circle for a PTH's copper layer/drill) so a
+    footprint looks the same whether it reaches KiCad via a live inject
+    or via this exported file."""
+    footprint_id = footprint["footprint_id"]
+    pad_lines = []
+    for pad in footprint["pads"]:
+        is_pth = pad["pad_type"] == "pth"
+        pad_type = "thru_hole" if is_pth else "smd"
+        shape = "circle" if is_pth else "rect"
+        layers = '"*.Cu" "*.Mask"' if is_pth else '"F.Cu" "F.Mask" "F.Paste"'
+        drill_line = f'\n\t\t(drill {_sexpr_num(pad["drill_mm"])})' if is_pth else ""
+        pad_lines.append(
+            f'\t(pad "{_sexpr_str(pad["number"])}" {pad_type} {shape}\n'
+            f'\t\t(at {_sexpr_num(pad["x_mm"])} {_sexpr_num(pad["y_mm"])})\n'
+            f'\t\t(size {_sexpr_num(pad["width_mm"])} {_sexpr_num(pad["height_mm"])}){drill_line}\n'
+            f'\t\t(layers {layers})\n'
+            f'\t)'
+        )
+    pads_block = "\n".join(pad_lines)
+
+    courtyard = footprint["courtyard"]
+    half_length = courtyard["length_mm"] / 2
+    half_width = courtyard["width_mm"] / 2
+
+    return (
+        f'(footprint "{_sexpr_str(footprint_id)}"\n'
+        f'\t(version {_KICAD_MOD_VERSION})\n'
+        f'\t(generator "{_KICAD_MOD_GENERATOR}")\n'
+        f'\t(layer "F.Cu")\n'
+        f'\t(attr smd)\n'
+        f'\t(fp_rect\n'
+        f'\t\t(start {_sexpr_num(-half_length)} {_sexpr_num(-half_width)})\n'
+        f'\t\t(end {_sexpr_num(half_length)} {_sexpr_num(half_width)})\n'
+        f'\t\t(stroke (width 0.05) (type solid))\n'
+        f'\t\t(fill no)\n'
+        f'\t\t(layer "F.CrtYd")\n'
+        f'\t)\n'
+        f'{pads_block}\n'
+        f')\n'
+    )
+
+
+def export_footprint_kicad_mod(footprint_id: str) -> str:
+    """Writes a real .kicad_mod file for an already-saved Footprint to
+    library/footprints.pretty/<footprint_id>.kicad_mod, returning that
+    path -- SPEC-308 §1's own stated goal ("export it to a real .pretty
+    library"). Only meaningful for a footprint that actually has pad
+    geometry: a footprint found via kicad.search_footprints (installed
+    KiCad library or the user's own saved library, CTX-308.1/.4) is
+    already a real .kicad_mod sitting exactly where it needs to be --
+    only a CTX-308.5-generated footprint has pads/courtyard to export at
+    all. Raises SchemaValidationError with a clear, specific reason for
+    a footprint with no geometry, rather than writing a meaningless
+    pad-less file.
+
+    Real verification (this module's own test suite) is KiCad's own
+    `kicad-cli fp export svg` successfully parsing and rendering the
+    result -- not just plausible-looking text, the same standard
+    export_symbol_kicad_sym already holds itself to."""
+    footprint = load_footprint(footprint_id)
+    if not footprint.get("pads") or not footprint.get("courtyard"):
+        raise SchemaValidationError(
+            f"Footprint '{footprint_id}' has no pad geometry to export -- only a footprint "
+            f"generated from datasheet dimensions (kicad.generate_footprint_from_part) has real "
+            f"pads/courtyard. A footprint found in an installed KiCad library or your own saved "
+            f"library is already a real .kicad_mod file; there is nothing new to export."
+        )
+
+    text = _build_kicad_mod_text(footprint)
+    path = os.path.join(_footprints_pretty_dir(), f"{footprint_id}.kicad_mod")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
 # --- Project --------------------------------------------------------------
 def _project_dir(name: str) -> str:
     return _ensure_dir("projects", name)

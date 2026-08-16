@@ -8,6 +8,7 @@ const openMock = vi.fn()
 const searchFootprintsMock = vi.fn()
 const attachFootprintToPartMock = vi.fn()
 const generateFootprintFromPartMock = vi.fn()
+const exportFootprintMock = vi.fn()
 
 vi.mock('../lib/partDetail', () => ({
   extractPartDetail: (...args: unknown[]) => extractPartDetailMock(...args),
@@ -19,6 +20,7 @@ vi.mock('../lib/footprints', () => ({
   searchFootprints: (...args: unknown[]) => searchFootprintsMock(...args),
   attachFootprintToPart: (...args: unknown[]) => attachFootprintToPartMock(...args),
   generateFootprintFromPart: (...args: unknown[]) => generateFootprintFromPartMock(...args),
+  exportFootprint: (...args: unknown[]) => exportFootprintMock(...args),
 }))
 
 vi.mock('@tauri-apps/plugin-shell', () => ({
@@ -44,6 +46,7 @@ beforeEach(() => {
   searchFootprintsMock.mockReset()
   attachFootprintToPartMock.mockReset()
   generateFootprintFromPartMock.mockReset()
+  exportFootprintMock.mockReset()
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -279,5 +282,46 @@ describe('PartDetail', () => {
 
     await waitFor(() => screen.getByText('Footprint linked: MyPCBLibs__MP1584EN_5V_Module'))
     expect(screen.queryByText(/unverified/)).toBeNull()
+  })
+
+  it('CTX-308.6: Export Footprint writes the real file and "Open footprint" opens it via the shell plugin', async () => {
+    generateFootprintFromPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'generated__ATtiny85',
+    })
+    exportFootprintMock.mockResolvedValueOnce('/storage/library/footprints.pretty/generated__ATtiny85.kicad_mod')
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate from datasheet dimensions' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Export Footprint (.kicad_mod)' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export Footprint (.kicad_mod)' }))
+
+    await waitFor(() => screen.getByText(/Exported: \/storage\/library\/footprints\.pretty\/generated__ATtiny85\.kicad_mod/))
+    expect(exportFootprintMock).toHaveBeenCalledWith('generated__ATtiny85')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open footprint' }))
+    expect(openMock).toHaveBeenCalledWith('/storage/library/footprints.pretty/generated__ATtiny85.kicad_mod')
+  })
+
+  it('CTX-308.6: an export failure (e.g. a found, not generated, footprint) shows the real error', async () => {
+    searchFootprintsMock.mockResolvedValueOnce([{ library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module' }])
+    attachFootprintToPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
+    })
+    exportFootprintMock.mockRejectedValueOnce(
+      new Error("Footprint 'MyPCBLibs__MP1584EN_5V_Module' has no pad geometry to export."),
+    )
+    await saveAndReachFootprintSection()
+    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Export Footprint (.kicad_mod)' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export Footprint (.kicad_mod)' }))
+
+    await waitFor(() => screen.getByText(/has no pad geometry to export/))
+    expect(screen.queryByText('Exported:', { exact: false })).toBeNull()
   })
 })

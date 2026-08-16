@@ -436,6 +436,49 @@ class TestLibraryRoutes(unittest.TestCase):
         self.assertTrue(response["result"]["path"].endswith(".kicad_sym"))
         self.assertTrue(os.path.exists(response["result"]["path"]))
 
+    def test_007_export_footprint_dispatches_and_returns_a_real_path(self):
+        """CTX-308.6: the full real chain -- save a Part with real
+        dimensions (CTX-308.5's own fix), generate a real Footprint from
+        them, then export it to a real .kicad_mod file -- through
+        handle_request end to end, not calling library_store directly."""
+        candidate = {
+            "part_number": "ATtiny85", "manufacturer": "Microchip",
+            "datasheet_url": "https://example.com/attiny85.pdf", "confidence": "high",
+        }
+        extraction = {
+            "part_number": "ATtiny85",
+            "package": "SOIC-8",
+            "pins": [{"number": str(i), "name": f"P{i}", "electrical_type": "passive"} for i in range(1, 9)],
+            "package_dimensions": {"length_mm": 4.9, "width_mm": 3.9, "height_mm": 1.75, "pitch_mm": 1.27},
+            "courtyard": {"length_mm": 5.4, "width_mm": 4.4},
+        }
+        saved = self._dispatch(
+            "library.save_confirmed_part", {"candidate": candidate, "extraction": extraction},
+        )
+        self.assertNotIn("error", saved)
+        generated = self._dispatch("kicad.generate_footprint_from_part", {"part_id": "ATtiny85"})
+        self.assertNotIn("error", generated)
+        footprint_id = generated["result"]["footprint_id"]
+
+        response = self._dispatch("library.export_footprint", {"footprint_id": footprint_id})
+        self.assertNotIn("error", response)
+        self.assertTrue(response["result"]["path"].endswith(".kicad_mod"))
+        self.assertTrue(os.path.exists(response["result"]["path"]))
+
+    def test_008_export_footprint_on_a_found_not_generated_footprint_fails_closed(self):
+        """A footprint from CTX-308.2's own attach flow has no pads at
+        all -- the real route error, not a crash, surfaced through
+        handle_request the same way every other library_store
+        SchemaValidationError already is."""
+        saved = self._dispatch("library.save_footprint", {
+            "footprint": {"footprint_id": "MyPCBLibs__X", "library": "MyPCBLibs", "footprint_name": "X"},
+        })
+        self.assertNotIn("error", saved)
+
+        response = self._dispatch("library.export_footprint", {"footprint_id": "MyPCBLibs__X"})
+        self.assertIn("error", response)
+        self.assertIn("no pad geometry", response["error"]["message"])
+
 
 class TestLlmChatProviderFallback(unittest.TestCase):
     """CTX-302.1: llm_chat's provider resolution -- found by actually

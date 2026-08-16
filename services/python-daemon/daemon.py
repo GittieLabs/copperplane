@@ -436,6 +436,10 @@ def library_load_footprint(footprint_id: str) -> dict:
     return library_store.load_footprint(footprint_id)
 
 
+def library_export_footprint(footprint_id: str) -> dict:
+    return {"path": library_store.export_footprint_kicad_mod(footprint_id)}
+
+
 def project_save(project: dict) -> dict:
     return library_store.save_project(project)
 
@@ -682,6 +686,7 @@ def _build_routes() -> dict:
         routes["library.export_symbol"] = library_export_symbol
         routes["library.save_footprint"] = library_save_footprint
         routes["library.load_footprint"] = library_load_footprint
+        routes["library.export_footprint"] = library_export_footprint
         routes["project.save"] = project_save
         routes["project.load"] = project_load
         routes["project.list"] = project_list
