@@ -15,6 +15,7 @@ child_specs:
   - "SPEC-307-part-detail-library-export.md"
   - "SPEC-308-footprints-schematic-advisor.md"
   - "SPEC-309-board-advisor.md"
+  - "SPEC-310-enclosure-from-board-profile.md"
 user_facing: true
 ---
 
