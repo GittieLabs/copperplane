@@ -1279,5 +1279,86 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
         self.assertEqual(loaded["board_revision"], "manual:50x30x20")
 
 
+class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
+    """CTX-310.1: the file-based mode SPEC-310 adds -- composes
+    kicad_pcb_import's file-based outline/hole extraction the same way
+    TestFreecadGenerateEnclosureRoute's live-mode tests already cover
+    kicad_bridge; the real DXF/Excellon parsing itself is already
+    verified for real in test_kicad_pcb_import.py."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_pcb_import.extract_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_pcb_import.extract_board_outline', return_value=_FAKE_OUTLINE)
+    @patch('daemon.kicad_bridge.get_board_outline')
+    def test_001_pcb_path_reads_the_file_never_touches_kicad_bridge(
+        self, mock_bridge_outline, mock_extract_outline, mock_extract_holes, mock_generate,
+    ):
+        """Mode selection is explicit (daemon.py's own fixed priority
+        order, manual > file > live) -- a caller who passed pcb_path
+        must never fall through to a live connection, even if one is
+        open."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+
+        daemon.freecad_generate_enclosure(height=20, pcb_path='/real/board.kicad_pcb')
+
+        mock_extract_outline.assert_called_once_with('/real/board.kicad_pcb')
+        mock_extract_holes.assert_called_once_with('/real/board.kicad_pcb')
+        mock_bridge_outline.assert_not_called()
+        _, kwargs = mock_generate.call_args
+        self.assertEqual(kwargs["board_outline"], _FAKE_OUTLINE)
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_pcb_import.extract_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_pcb_import.extract_board_outline', return_value=_FAKE_OUTLINE)
+    def test_002_every_file_mode_hole_becomes_a_standoff_none_are_unrecognized(
+        self, mock_extract_outline, mock_extract_holes, mock_generate,
+    ):
+        """SPEC-310 §2's own real, accepted tradeoff: a drill file has no
+        recognized/unrecognized signal at all, so file mode must never
+        report an unrecognized hole -- unlike live mode's _FAKE_HOLES
+        fixture, which has one."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+
+        result = daemon.freecad_generate_enclosure(height=20, pcb_path='/real/board.kicad_pcb')
+
+        _, kwargs = mock_generate.call_args
+        self.assertEqual(len(kwargs["standoffs"]), len(_FAKE_HOLES))
+        self.assertEqual(result["unrecognized_holes"], [])
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_pcb_import.extract_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_pcb_import.extract_board_outline', return_value=_FAKE_OUTLINE)
+    def test_003_pcb_path_wins_over_a_live_connection_when_both_could_apply(
+        self, mock_extract_outline, mock_extract_holes, mock_generate,
+    ):
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+        daemon.library_store.save_project({"name": "weather-pcb"})
+
+        result = daemon.freecad_generate_enclosure(
+            height=20, pcb_path='/real/board.kicad_pcb', project_name="weather-pcb",
+        )
+
+        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
+        self.assertTrue(loaded["board_revision"].startswith("file:/real/board.kicad_pcb:"))
+
+    def test_004_kicad_pcb_import_import_failure_raises_a_clean_error(self):
+        original = daemon.kicad_pcb_import
+        daemon.kicad_pcb_import = None
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                daemon.freecad_generate_enclosure(height=20, pcb_path='/real/board.kicad_pcb')
+            self.assertIn("kicad_pcb_import", str(ctx.exception))
+        finally:
+            daemon.kicad_pcb_import = original
+
+
 if __name__ == '__main__':
     unittest.main()

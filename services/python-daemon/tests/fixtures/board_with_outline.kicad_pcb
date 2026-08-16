@@ -1,0 +1,52 @@
+(kicad_pcb
+	(version 20240108)
+	(generator "hardware-agent-studio")
+	(general
+		(thickness 1.6)
+	)
+	(paper "A4")
+	(layers
+		(0 "F.Cu" signal)
+		(31 "B.Cu" signal)
+	)
+	(setup
+		(pad_to_mask_clearance 0)
+	)
+	(gr_rect
+		(start 0 0)
+		(end 50 30)
+		(stroke
+			(width 0.1)
+			(type default)
+		)
+		(fill no)
+		(layer "Edge.Cuts")
+		(uuid "00000000-0000-0000-0000-00000000e001")
+	)
+	(footprint "MountingHole_3.2mm"
+		(layer "F.Cu")
+		(uuid "00000000-0000-0000-0000-00000000f001")
+		(at 5 5)
+		(attr exclude_from_pos_files exclude_from_bom)
+		(pad "" np_thru_hole circle
+			(at 0 0)
+			(size 3.2 3.2)
+			(drill 3.2)
+			(layers "*.Cu" "*.Mask")
+			(uuid "00000000-0000-0000-0000-00000000f002")
+		)
+	)
+	(footprint "MountingHole_3.2mm"
+		(layer "F.Cu")
+		(uuid "00000000-0000-0000-0000-00000000f003")
+		(at 45 25)
+		(attr exclude_from_pos_files exclude_from_bom)
+		(pad "" np_thru_hole circle
+			(at 0 0)
+			(size 3.2 3.2)
+			(drill 3.2)
+			(layers "*.Cu" "*.Mask")
+			(uuid "00000000-0000-0000-0000-00000000f004")
+		)
+	)
+)
