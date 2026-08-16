@@ -12,6 +12,7 @@ import {
   type ConversationTurn,
 } from './lib/projects'
 import { getCapabilities } from './lib/settings'
+import { BoardAdvisor } from './components/BoardAdvisor'
 import { ComponentDiscovery } from './components/ComponentDiscovery'
 import { EnclosureViewer } from './components/EnclosureViewer'
 import { NotBuiltPlaceholder } from './components/NotBuiltPlaceholder'
@@ -149,13 +150,7 @@ function App() {
                 description="Schematic-level advice for the parts in this project."
               />
             )}
-            {view.area === 'pcb' && (
-              <NotBuiltPlaceholder
-                specId="SPEC-309"
-                title="PCB"
-                description="Layout and routing advice for this project's board."
-              />
-            )}
+            {view.area === 'pcb' && <BoardAdvisor />}
           </>
         )}
       </main>
