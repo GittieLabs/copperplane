@@ -101,7 +101,11 @@ def _read_json(path: str) -> dict:
 # Every field a Part carries that came from an inference (not a plain
 # identifier) must record where it came from -- SPEC-300 §2.2's required-
 # provenance promise, enforced here as a schema check, not a convention.
-PART_PROVENANCE_REQUIRED_FIELDS = ("manufacturer", "package", "pins", "datasheet_url")
+# package_dimensions/courtyard (CTX-308.5) are exactly as LLM-inferred as
+# package/pins -- required for the same reason, not a lesser field.
+PART_PROVENANCE_REQUIRED_FIELDS = (
+    "manufacturer", "package", "pins", "datasheet_url", "package_dimensions", "courtyard",
+)
 
 
 def _parts_dir() -> str:
