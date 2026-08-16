@@ -253,10 +253,16 @@ surfaced in the PCB area (`CTX-309.2`). A real, current live-IPC gap confirmed d
 schematic documents have no path-resolution RPC at all, unlike PCB -- so DRC auto-targets whatever
 board is open in KiCad; ERC always needs an explicit file picked by the user.
 
-### M5 — Enclosure from geometry, then ambition
+### M5 — Enclosure from geometry, then ambition ✅ done 2026-08-16
 
-SPEC-310 first (low stakes, high usefulness). Auto-layout and assisted routing stay explicitly out
-of scope until everything above is solid.
+SPEC-310: a real `.kicad_pcb` file, no live KiCad connection required, produces a real enclosure --
+`kicad-cli`'s own DXF/drill export plus two hand-rolled parsers (`CTX-310.1`), an "Import board
+file…" mode alongside the existing live-board mode in the Enclosure area (`CTX-310.2`). A real,
+confirmed coordinate-convention bug found and fixed during this work: `kicad-cli`'s DXF/Excellon
+export uses the standard drafting Y-up convention, the opposite of the live IPC path's Y-down board
+coordinates -- left uncorrected, it would have silently mirrored standoff placement on any board
+whose mounting holes aren't symmetric top-to-bottom. Auto-layout and assisted routing stay
+explicitly out of scope; nothing beyond SPEC-310 is currently planned against this milestone.
 
 ---
 
