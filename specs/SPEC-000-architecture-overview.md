@@ -28,6 +28,7 @@ child_specs:
   - "../specs/SPEC-401-python-sidecar-packaging.md"
   - "../services/python-daemon/specs/SPEC-204-agent-tool-registry.md"
   - "../services/python-daemon/specs/SPEC-203-supplier-api-integration.md"
+  - "../specs/SPEC-402-release-signing-and-auto-update.md"
 user_facing: false
 ---
 
