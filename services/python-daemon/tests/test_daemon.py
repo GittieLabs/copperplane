@@ -209,6 +209,43 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
         caps = daemon._detect_capabilities()
         self.assertFalse(caps["kicad_cli_available"])
 
+    def test_002d_detect_capabilities_reports_suppliers_unconfigured_by_default(self):
+        """SPEC-203 (CTX-203.1): no credentials configured -- CLAUDE.md's
+        norm applied here means these must default to False, not silently
+        True, since no real supplier client exists to have verified
+        anything against yet."""
+        caps = daemon._detect_capabilities()
+        self.assertFalse(caps["digikey_available"])
+        self.assertFalse(caps["mouser_available"])
+        self.assertFalse(caps["octopart_available"])
+
+    def test_002e_digikey_available_requires_both_real_secrets_not_just_one(self):
+        """DigiKey's real OAuth2 client-credentials flow needs both an ID
+        and a secret -- a lone digikey_client_id can't actually
+        authenticate, so it must not report as configured."""
+        original_secrets = daemon.CONFIG.get("secrets", {})
+        daemon.CONFIG["secrets"] = {"digikey_client_id": "abc"}
+        try:
+            caps = daemon._detect_capabilities()
+            self.assertFalse(caps["digikey_available"])
+
+            daemon.CONFIG["secrets"] = {"digikey_client_id": "abc", "digikey_client_secret": "xyz"}
+            caps = daemon._detect_capabilities()
+            self.assertTrue(caps["digikey_available"])
+        finally:
+            daemon.CONFIG["secrets"] = original_secrets
+
+    def test_002f_mouser_and_octopart_each_need_only_their_own_single_key(self):
+        original_secrets = daemon.CONFIG.get("secrets", {})
+        daemon.CONFIG["secrets"] = {"mouser_api_key": "m-key", "octopart_api_key": "o-key"}
+        try:
+            caps = daemon._detect_capabilities()
+            self.assertTrue(caps["mouser_available"])
+            self.assertTrue(caps["octopart_available"])
+            self.assertFalse(caps["digikey_available"])
+        finally:
+            daemon.CONFIG["secrets"] = original_secrets
+
     @patch('daemon.os.path.exists', return_value=True)
     def test_003_detect_capabilities_reports_kicad_available_when_socket_present(self, mock_exists):
         """TEST-001: kicad_available reflects whether the IPC socket path exists."""

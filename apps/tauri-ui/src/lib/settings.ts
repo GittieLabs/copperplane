@@ -20,6 +20,38 @@ export function secretKeyFor(provider: KeyBasedProvider): string {
   return `${provider}_api_key`
 }
 
+/** SPEC-203 (CTX-203.1): the supplier credentials Settings offers, ready
+ * to be saved before any real per-supplier HTTP client exists -- this is
+ * deliberately just the OS-keychain plumbing, not a live API integration.
+ * Must match `core/tauri-rust/src/daemon.rs`'s `KNOWN_SECRET_KEYS`
+ * exactly. Unlike `KEY_BASED_PROVIDERS` (always exactly one key per
+ * provider), DigiKey's real OAuth2 client-credentials flow needs two
+ * secrets -- so each supplier carries its own list of fields rather than
+ * a single implied key name. */
+export interface SupplierField {
+  key: string
+  label: string
+}
+
+export interface SupplierDefinition {
+  id: 'digikey' | 'mouser' | 'octopart'
+  label: string
+  fields: SupplierField[]
+}
+
+export const SUPPLIERS: SupplierDefinition[] = [
+  {
+    id: 'digikey',
+    label: 'DigiKey',
+    fields: [
+      { key: 'digikey_client_id', label: 'Client ID' },
+      { key: 'digikey_client_secret', label: 'Client Secret' },
+    ],
+  },
+  { id: 'mouser', label: 'Mouser', fields: [{ key: 'mouser_api_key', label: 'API Key' }] },
+  { id: 'octopart', label: 'Octopart', fields: [{ key: 'octopart_api_key', label: 'API Key' }] },
+]
+
 /** Mirrors `core/tauri-rust/src/config.rs`'s `DaemonConfig`. `output_dir`
  * and `storage_root` are deliberately omitted -- both are always
  * Rust-computed at spawn, never a real setting a human edits or reads
@@ -48,6 +80,13 @@ export interface DaemonCapabilities {
    * app's default data directory or a user's real override -- reported
    * here (not config.json) since it's always Rust-computed at spawn. */
   storage_root: string | null
+  /** SPEC-203 (CTX-203.1): whether each supplier's real credentials are
+   * currently configured -- mirrors `freecad_available`'s own capability-
+   * gating pattern. True here means "ready to call," not "a real call has
+   * been made" -- no per-supplier HTTP client exists yet. */
+  digikey_available: boolean
+  mouser_available: boolean
+  octopart_available: boolean
 }
 
 /** Saves a provider API key to the OS keychain and pushes the complete
