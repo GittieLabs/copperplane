@@ -67,6 +67,29 @@ commit hashes, test results, and honestly-recorded mistakes.
 
 ## 🚀 Getting Started
 
+### Download a prebuilt build (macOS)
+
+Grab the latest `.dmg` from [Releases](../../releases). **These builds are unsigned** — this is a
+young open source project, and code signing means tying every release to a personal Apple Developer
+identity indefinitely, or standing up a real organization account first (see `SPEC-402` for the
+reasoning). Because of that, macOS Gatekeeper will refuse to open it with a normal double-click. To
+run it anyway:
+
+1. Open the `.dmg` and drag **Hardware Agent Studio** into `/Applications`.
+2. **Right-click** (or Control-click) the app in Finder and choose **Open**.
+3. In the dialog that appears, click **Open** again. macOS remembers this choice — future launches
+   work normally.
+
+If macOS still blocks it with an "is damaged and can't be opened" message instead (a stricter,
+newer-macOS variant of the same unsigned-app warning), run this once in Terminal, then retry the
+right-click-Open steps above:
+
+```bash
+xattr -cr /Applications/Hardware\ Agent\ Studio.app
+```
+
+### Build from source
+
 You'll need [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) 18+, and
 [uv](https://github.com/astral-sh/uv) for the Python daemon.
 
