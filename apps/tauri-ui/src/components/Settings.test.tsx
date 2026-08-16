@@ -11,6 +11,8 @@ const copyDiagnosticsMock = vi.fn()
 const chooseStorageFolderMock = vi.fn()
 const confirmStorageLocationChangeMock = vi.fn()
 const restartAppMock = vi.fn()
+const checkForUpdatesMock = vi.fn()
+const installUpdateAndRelaunchMock = vi.fn()
 
 vi.mock('../lib/settings', async () => {
   const actual = await vi.importActual<typeof import('../lib/settings')>('../lib/settings')
@@ -28,6 +30,11 @@ vi.mock('../lib/settings', async () => {
     restartApp: (...args: unknown[]) => restartAppMock(...args),
   }
 })
+
+vi.mock('../lib/updater', () => ({
+  checkForUpdates: (...args: unknown[]) => checkForUpdatesMock(...args),
+  installUpdateAndRelaunch: (...args: unknown[]) => installUpdateAndRelaunchMock(...args),
+}))
 
 const { Settings } = await import('./Settings')
 
@@ -52,6 +59,8 @@ beforeEach(() => {
   chooseStorageFolderMock.mockReset()
   confirmStorageLocationChangeMock.mockReset().mockResolvedValue(false)
   restartAppMock.mockReset().mockResolvedValue(undefined)
+  checkForUpdatesMock.mockReset()
+  installUpdateAndRelaunchMock.mockReset().mockResolvedValue(undefined)
 })
 
 describe('Settings: Tier 1 (provider/model/keys)', () => {
@@ -382,6 +391,72 @@ describe('Settings: Tier 2 (KiCad/FreeCAD status + paths)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Restart Now' }))
 
     await waitFor(() => expect(restartAppMock).toHaveBeenCalledTimes(1))
+  })
+})
+
+describe('Settings: Updates (SPEC-402, CTX-402.2)', () => {
+  it('checking for updates with none available shows "up to date", no install button', async () => {
+    checkForUpdatesMock.mockResolvedValueOnce(null)
+
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+
+    await waitFor(() => screen.getByText("You're up to date."))
+    expect(screen.queryByRole('button', { name: 'Install & Restart' })).toBeNull()
+  })
+
+  it('a real available update shows its version, notes, and an Install & Restart button', async () => {
+    checkForUpdatesMock.mockResolvedValueOnce({
+      version: '0.2.0',
+      currentVersion: '0.1.0',
+      body: 'Real release notes.',
+    })
+
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+
+    await waitFor(() => screen.getByText(/Version 0.2.0 is available/))
+    screen.getByText(/you have 0.1.0/)
+    screen.getByText('Real release notes.')
+    screen.getByRole('button', { name: 'Install & Restart' })
+  })
+
+  it('clicking Install & Restart calls installUpdateAndRelaunch with the real checked update', async () => {
+    const fakeUpdate = { version: '0.2.0', currentVersion: '0.1.0', body: null }
+    checkForUpdatesMock.mockResolvedValueOnce(fakeUpdate)
+
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Install & Restart' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install & Restart' }))
+
+    await waitFor(() => expect(installUpdateAndRelaunchMock).toHaveBeenCalledWith(fakeUpdate))
+  })
+
+  it('a failed check surfaces the real error, not a crash', async () => {
+    checkForUpdatesMock.mockRejectedValueOnce(new Error('update server unreachable'))
+
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+
+    await waitFor(() => screen.getByText('update server unreachable'))
+  })
+
+  it('a failed install surfaces the real error and does not relaunch', async () => {
+    checkForUpdatesMock.mockResolvedValueOnce({ version: '0.2.0', currentVersion: '0.1.0', body: null })
+    installUpdateAndRelaunchMock.mockReset().mockRejectedValueOnce(new Error('download failed'))
+
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Install & Restart' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Install & Restart' }))
+
+    await waitFor(() => screen.getByText('download failed'))
   })
 })
 
