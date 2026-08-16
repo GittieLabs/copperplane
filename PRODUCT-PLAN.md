@@ -246,10 +246,12 @@ SPEC-308: footprint search and creation into the KiCad library (all three ranked
 guidance -- decoupling, protection, power -- via a real LLM call once a part and its footprint are
 both real (`CTX-308.7`).
 
-### M4 — Advisors
+### M4 — Advisors ✅ done 2026-08-16
 
-SPEC-309: connect a schematic or board, read ERC/DRC, explain and suggest. Deliberately after M3 —
-it depends on file access patterns M3 will have already established.
+SPEC-309: real ERC/DRC via `kicad-cli` (`CTX-309.1`), explained and suggested via a real LLM call,
+surfaced in the PCB area (`CTX-309.2`). A real, current live-IPC gap confirmed during this work --
+schematic documents have no path-resolution RPC at all, unlike PCB -- so DRC auto-targets whatever
+board is open in KiCad; ERC always needs an explicit file picked by the user.
 
 ### M5 — Enclosure from geometry, then ambition
 
@@ -274,14 +276,16 @@ Nothing in the daemon gets rewritten. This is a re-housing, not a rebuild.
 
 ## 8. Open questions
 
-1.  **`kicad-cli` specifically.** KiCad itself is confirmed installed and launching. The board
-    advisor (SPEC-309) plausibly shells out to `kicad-cli sch erc` / `kicad-cli pcb drc` for
-    machine-readable reports rather than parsing files or driving the IPC API. `kicad-cli` is a
-    *separate binary shipped inside the app bundle*, not the app — KiCad 9+ ships it, so it is very
-    likely present, but confirm before SPEC-309 is written:
-    `ls /Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli && … kicad-cli pcb drc --help`
-2.  **Schematic access.** Live IPC (SPEC-103's stated preference) or reading `.kicad_sch` from disk?
-    The advisor arguably needs the file, which reopens a decision SPEC-103 deliberately closed.
+1.  **`kicad-cli` specifically -- resolved, 2026-08-16.** Confirmed present and real:
+    `kicad-cli sch erc`/`pcb drc` both exist, both support `--format json`, both actually run
+    against real board files (`CTX-309.1`). `SPEC-309`'s board advisor shells out to it as a real
+    subprocess -- live IPC has no ERC/DRC-shaped RPC at all (confirmed by grepping the installed
+    `kipy` proto definitions; the only hit is `InjectDrcError`, a test utility).
+2.  **Schematic access -- resolved, 2026-08-16.** Confirmed live, not just assumed: a PCB's real
+    path resolves automatically via `kc.get_open_documents(DOCTYPE_PCB)`, but the identical call
+    for `DOCTYPE_SCHEMATIC` raises a real `no handler available` `ApiError` -- schematic access has
+    no live IPC path at all, confirming `SPEC-103`'s own deferred decision still holds. `SPEC-309`'s
+    ERC path always takes an explicit, user-picked file; DRC auto-targets whatever board is open.
 3.  **Footprint sources, ranked -- all three real, 2026-08-16.** Now that footprints are their
     own object, "find a footprint" needs a defined corpus: the user's installed KiCad footprint
     libraries first, then the user's own library, then generation from datasheet package dimensions.

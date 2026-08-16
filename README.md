@@ -105,8 +105,10 @@ pulled from a shared, reusable **Library** — with every AI-assisted step confi
     across installed and saved libraries, generate from datasheet dimensions, export to a real
     `.pretty` library, plus per-pin connection guidance (decoupling, protection, power) via a real
     LLM call. Done.
-*   ⏳ **M4 — Advisors.** Read a schematic or board's real ERC/DRC output and explain it in plain
-    language, with suggested fixes.
+*   ✅ **M4 — Advisors.** Real ERC/DRC via `kicad-cli`, explained in plain language with suggested
+    fixes via a real LLM call. DRC auto-targets whatever board is open in KiCad; ERC takes an
+    explicit, user-picked file (schematic documents have no live-resolution path — a real,
+    confirmed KiCad IPC limitation, not a shortcut). Done.
 *   ⏳ **M5 — Enclosure from geometry, then ambition.** Import a real `.kicad_pcb`, generate a
     starter enclosure body from its actual outline. Auto-layout and assisted routing stay explicitly
     out of scope until everything above it is solid.
