@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   ALL_PROVIDERS,
   KEY_BASED_PROVIDERS,
+  SUPPLIERS,
   chooseStorageFolder,
   clearSecret,
   confirmStorageLocationChange,
@@ -16,6 +17,7 @@ import {
   type DaemonCapabilities,
   type DaemonConfig,
   type KeyBasedProvider,
+  type SupplierDefinition,
 } from '../lib/settings'
 
 /** SPEC-303 Tier 1 (provider/model/keys) and Tier 2 (KiCad/FreeCAD
@@ -34,6 +36,8 @@ export function Settings() {
   const [config, setConfig] = useState<DaemonConfig | null>(null)
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({})
   const [busyProvider, setBusyProvider] = useState<string | null>(null)
+  const [supplierKeyInputs, setSupplierKeyInputs] = useState<Record<string, string>>({})
+  const [busySupplier, setBusySupplier] = useState<string | null>(null)
   const [providerModel, setProviderModel] = useState('')
   const [pathFields, setPathFields] = useState({
     kicad_socket_path: '',
@@ -100,6 +104,46 @@ export function Settings() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusyProvider(null)
+    }
+  }
+
+  /** SPEC-203 (CTX-203.1): unlike `handleSaveKey` (always exactly one
+   * key), a supplier can carry more than one field (DigiKey's real
+   * OAuth2 client-credentials flow needs both an ID and a secret) --
+   * saves every field for this supplier in one action, sequentially, so
+   * a partial digikey save is never left half-configured because of a
+   * dropped concurrent write. */
+  async function handleSaveSupplier(supplier: SupplierDefinition) {
+    setBusySupplier(supplier.id)
+    setError(null)
+    try {
+      for (const field of supplier.fields) {
+        const value = supplierKeyInputs[field.key]?.trim()
+        if (value) await saveSecret(field.key, value)
+      }
+      setSupplierKeyInputs((prev) => {
+        const next = { ...prev }
+        for (const field of supplier.fields) delete next[field.key]
+        return next
+      })
+      await refreshCapabilities()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusySupplier(null)
+    }
+  }
+
+  async function handleClearSupplier(supplier: SupplierDefinition) {
+    setBusySupplier(supplier.id)
+    setError(null)
+    try {
+      for (const field of supplier.fields) await clearSecret(field.key)
+      await refreshCapabilities()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusySupplier(null)
     }
   }
 
@@ -263,6 +307,60 @@ export function Settings() {
             )}
           </div>
         ))}
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium text-neutral-400">Supplier APIs</h3>
+        {SUPPLIERS.map((supplier) => {
+          const configured = Boolean(capabilities?.[`${supplier.id}_available` as keyof DaemonCapabilities])
+          const allFieldsFilled = supplier.fields.every((field) => supplierKeyInputs[field.key]?.trim())
+          return (
+            <div key={supplier.id} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="w-24 text-sm">{supplier.label}</span>
+                {configured ? (
+                  <>
+                    <span className="flex-1 text-sm text-emerald-400">configured</span>
+                    <button
+                      type="button"
+                      className="rounded border border-neutral-700 px-3 py-1 text-sm disabled:opacity-50"
+                      onClick={() => void handleClearSupplier(supplier)}
+                      disabled={busySupplier === supplier.id}
+                    >
+                      Clear
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-1 flex-col gap-1">
+                      {supplier.fields.map((field) => (
+                        <input
+                          key={field.key}
+                          type="password"
+                          aria-label={`${supplier.label} ${field.label}`}
+                          className="rounded border border-neutral-700 bg-neutral-900 px-3 py-1 text-sm"
+                          placeholder={field.label}
+                          value={supplierKeyInputs[field.key] ?? ''}
+                          onChange={(e) =>
+                            setSupplierKeyInputs((prev) => ({ ...prev, [field.key]: e.target.value }))
+                          }
+                        />
+                      ))}
+                    </div>
+                    <button
+                      type="button"
+                      className="self-start rounded bg-neutral-100 px-3 py-1 text-sm font-medium text-neutral-950 disabled:opacity-50"
+                      onClick={() => void handleSaveSupplier(supplier)}
+                      disabled={busySupplier === supplier.id || !allFieldsFilled}
+                    >
+                      Save
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </section>
 
       <section className="flex flex-col gap-2">
