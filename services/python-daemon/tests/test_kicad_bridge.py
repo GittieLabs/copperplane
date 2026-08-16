@@ -224,6 +224,70 @@ class _FakeShape:
         return self._bounding_box
 
 
+class TestGetOpenBoardPath(unittest.TestCase):
+    """SPEC-309/CTX-309.1: the PCB-path auto-resolution DRC's route
+    relies on -- confirmed live against a real running KiCad 10.0.3
+    instance before this test suite was written (see CTX-309.1)."""
+
+    def setUp(self):
+        kicad_bridge._client = None
+
+    def tearDown(self):
+        kicad_bridge._client = None
+
+    @patch('kicad_bridge.KiCad')
+    def test_001_resolves_project_path_plus_board_filename(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_doc = MagicMock()
+        mock_doc.board_filename = "Arduino_Pro_Mini.kicad_pcb"
+        mock_doc.project.path = "/Users/dev/boards/arduino"
+        mock_client.get_open_documents.return_value = [mock_doc]
+        mock_kicad_cls.return_value = mock_client
+
+        path = kicad_bridge.get_open_board_path()
+
+        self.assertEqual(path, os.path.join("/Users/dev/boards/arduino", "Arduino_Pro_Mini.kicad_pcb"))
+
+    @patch('kicad_bridge.KiCad')
+    def test_002_nothing_open_returns_none_not_an_error(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_client.get_open_documents.return_value = []
+        mock_kicad_cls.return_value = mock_client
+
+        self.assertIsNone(kicad_bridge.get_open_board_path())
+
+    @patch('kicad_bridge.KiCad')
+    def test_003_a_broken_connection_mid_call_resets_and_raises_clean(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_client.get_open_documents.side_effect = KiCadConnectionError("gone")
+        mock_kicad_cls.return_value = mock_client
+        kicad_bridge._client = mock_client
+
+        with self.assertRaises(KiCadUnavailableError):
+            kicad_bridge.get_open_board_path()
+
+        self.assertIsNone(kicad_bridge._client)
+
+    def test_004_real_round_trip_against_a_live_kicad_instance(self):
+        """Skips itself cleanly when no live KiCad is running, same
+        convention as test_002_real_kicad_version_round_trip above."""
+        socket_path = '/tmp/kicad/api.sock'
+        if not os.path.exists(socket_path):
+            self.skipTest(
+                f"No live KiCad IPC socket at {socket_path}. Enable the IPC API "
+                "(Preferences > Plugins) and launch KiCad to run this test for real."
+            )
+
+        path = kicad_bridge.get_open_board_path()
+
+        # None (nothing open) or a real, well-formed .kicad_pcb path are
+        # both legitimate real outcomes -- this test only proves the
+        # real IPC call itself succeeds, not that a board happens to be
+        # open on whatever machine runs this.
+        if path is not None:
+            self.assertTrue(path.endswith(".kicad_pcb"))
+
+
 class TestGetBoardOutline(unittest.TestCase):
 
     def setUp(self):

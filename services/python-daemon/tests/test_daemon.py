@@ -4,7 +4,7 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import sys
 import os
 
@@ -190,6 +190,24 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
         mock_find.side_effect = daemon.freecad_bridge.FreeCADUnavailableError("not found")
         caps = daemon._detect_capabilities()
         self.assertFalse(caps["freecad_available"])
+
+    def test_002b_detect_capabilities_matches_find_kicad_cli_for_real(self):
+        """CTX-309.1: same real, non-hardcoded pattern as test_001 above,
+        for kicad_cli_available."""
+        try:
+            daemon.kicad_cli.find_kicad_cli()
+            expected = True
+        except daemon.kicad_cli.KicadCliUnavailableError:
+            expected = False
+
+        caps = daemon._detect_capabilities()
+        self.assertEqual(caps["kicad_cli_available"], expected)
+
+    @patch('daemon.kicad_cli.find_kicad_cli')
+    def test_002c_detect_capabilities_reports_kicad_cli_unavailable_on_error(self, mock_find):
+        mock_find.side_effect = daemon.kicad_cli.KicadCliUnavailableError("not found")
+        caps = daemon._detect_capabilities()
+        self.assertFalse(caps["kicad_cli_available"])
 
     @patch('daemon.os.path.exists', return_value=True)
     def test_003_detect_capabilities_reports_kicad_available_when_socket_present(self, mock_exists):
@@ -998,6 +1016,137 @@ class TestKicadGenerateConnectionGuidanceRoute(unittest.TestCase):
 
     def test_003_registered_as_an_async_route(self):
         self.assertIn("kicad.generate_connection_guidance", daemon.ASYNC_ROUTES)
+
+
+_FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
+_EMPTY_BOARD_FIXTURE = os.path.join(_FIXTURES_DIR, 'empty_board.kicad_pcb')
+_EMPTY_SCHEMATIC_FIXTURE = os.path.join(_FIXTURES_DIR, 'empty_schematic.kicad_sch')
+
+
+class TestKicadCheckBoardRoute(unittest.TestCase):
+    """CTX-309.1: SPEC-309's DRC route."""
+
+    def test_001_no_path_given_and_nothing_open_raises_a_clean_error(self):
+        with patch('daemon.kicad_bridge.get_open_board_path', return_value=None):
+            with self.assertRaises(daemon.kicad_cli.KicadCliError) as ctx:
+                daemon.kicad_check_board()
+            self.assertIn("No board is currently open", str(ctx.exception))
+
+    def test_002_no_path_given_auto_resolves_the_currently_open_board(self):
+        """Routing only -- kicad_cli.run_drc/component_pipeline.
+        explain_violations are both mocked here; TestRealKicadCheckBoardRoute
+        below is the real, non-mocked end-to-end version."""
+        with patch('daemon.kicad_bridge.get_open_board_path', return_value='/real/open/board.kicad_pcb'), \
+             patch('daemon.kicad_cli.run_drc', return_value={"violations": []}) as mock_run_drc, \
+             patch('daemon.component_pipeline.explain_violations', return_value={"violations": [], "summary": "clean", "truncated_count": 0}):
+            result = daemon.kicad_check_board()
+
+        mock_run_drc.assert_called_once_with('/real/open/board.kicad_pcb')
+        self.assertEqual(result["source_path"], '/real/open/board.kicad_pcb')
+
+    def test_003_an_explicit_path_skips_auto_resolution_entirely(self):
+        with patch('daemon.kicad_bridge.get_open_board_path') as mock_get_open, \
+             patch('daemon.kicad_cli.run_drc', return_value={"violations": []}), \
+             patch('daemon.component_pipeline.explain_violations', return_value={"violations": [], "summary": "clean", "truncated_count": 0}):
+            daemon.kicad_check_board(pcb_path='/explicit/path.kicad_pcb')
+
+        mock_get_open.assert_not_called()
+
+    def test_004_build_routes_omits_it_when_kicad_bridge_import_failed(self):
+        original = daemon.kicad_bridge
+        daemon.kicad_bridge = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.check_board", routes)
+            self.assertIn("kicad.check_schematic", routes, "no auto-resolution dependency on kicad_bridge")
+        finally:
+            daemon.kicad_bridge = original
+
+    def test_005_build_routes_omits_both_when_kicad_cli_import_failed(self):
+        original = daemon.kicad_cli
+        daemon.kicad_cli = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.check_board", routes)
+            self.assertNotIn("kicad.check_schematic", routes)
+        finally:
+            daemon.kicad_cli = original
+
+    def test_006_both_registered_as_async_routes(self):
+        self.assertIn("kicad.check_board", daemon.ASYNC_ROUTES)
+        self.assertIn("kicad.check_schematic", daemon.ASYNC_ROUTES)
+
+
+class TestKicadCheckSchematicRoute(unittest.TestCase):
+    """CTX-309.1: SPEC-309's ERC route -- always an explicit path, no
+    auto-resolution (SPEC-309 §2's own confirmed, real IPC limitation)."""
+
+    def test_001_flattens_violations_across_sheets_tagged_with_their_real_sheet_path(self):
+        fake_report = {
+            "sheets": [
+                {"path": "/", "violations": [{"description": "v1", "severity": "error", "type": "t1"}]},
+                {"path": "/sub", "violations": [{"description": "v2", "severity": "warning", "type": "t2"}]},
+            ],
+        }
+        with patch('daemon.kicad_cli.run_erc', return_value=fake_report) as mock_run_erc, \
+             patch('daemon.component_pipeline.explain_violations') as mock_explain:
+            mock_explain.return_value = {"violations": [], "summary": "s", "truncated_count": 0}
+            daemon.kicad_check_schematic('/real/board.kicad_sch')
+
+        mock_run_erc.assert_called_once_with('/real/board.kicad_sch')
+        flattened = mock_explain.call_args[0][0]
+        self.assertEqual(len(flattened), 2)
+        self.assertEqual(flattened[0]["sheet_path"], "/")
+        self.assertEqual(flattened[1]["sheet_path"], "/sub")
+
+    def test_002_real_end_to_end_against_the_committed_clean_fixture(self):
+        """Real kicad_cli.run_erc, real explain_violations short-circuit
+        (0 violations, TestExplainViolations.test_000 already covers
+        that this never calls an LLM) -- no ANTHROPIC_API_KEY needed for
+        this particular real path. Skips cleanly if kicad-cli isn't on
+        this machine."""
+        if not daemon.kicad_cli:
+            self.skipTest("kicad_cli module unavailable.")
+        try:
+            daemon.kicad_cli.find_kicad_cli()
+        except daemon.kicad_cli.KicadCliUnavailableError:
+            self.skipTest("kicad-cli not found on this machine.")
+
+        result = daemon.kicad_check_schematic(_EMPTY_SCHEMATIC_FIXTURE)
+
+        self.assertEqual(result["violations"], [])
+        self.assertEqual(result["source_path"], _EMPTY_SCHEMATIC_FIXTURE)
+
+
+class TestRealKicadCheckBoardRoute(unittest.TestCase):
+    """Real, non-mocked end-to-end: real kicad-cli DRC against the
+    committed empty_board.kicad_pcb fixture (a real, deterministic
+    invalid_outline violation), then a real LLM call to explain it."""
+
+    def test_001_real_drc_plus_real_explanation_for_the_real_committed_fixture(self):
+        if not daemon.kicad_cli:
+            self.skipTest("kicad_cli module unavailable.")
+        try:
+            daemon.kicad_cli.find_kicad_cli()
+        except daemon.kicad_cli.KicadCliUnavailableError:
+            self.skipTest("kicad-cli not found on this machine.")
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            self.skipTest("ANTHROPIC_API_KEY not set. Add it to .env.local to run this test for real.")
+
+        original_config = dict(daemon.CONFIG)
+        daemon.CONFIG["secrets"] = {"anthropic_api_key": api_key}
+        try:
+            result = daemon.kicad_check_board(pcb_path=_EMPTY_BOARD_FIXTURE)
+        finally:
+            daemon.CONFIG.clear()
+            daemon.CONFIG.update(original_config)
+
+        self.assertEqual(result["source_path"], _EMPTY_BOARD_FIXTURE)
+        self.assertEqual(len(result["violations"]), 1)
+        self.assertEqual(result["violations"][0]["type"], "invalid_outline")
+        self.assertTrue(result["violations"][0]["explanation"])
+        self.assertTrue(result["violations"][0]["suggested_fix"])
 
 
 _FAKE_OUTLINE = {"x_mm": 0.0, "y_mm": 0.0, "width_mm": 20.0, "height_mm": 15.0}

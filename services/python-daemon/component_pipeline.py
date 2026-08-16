@@ -326,6 +326,121 @@ def generate_connection_guidance(
     return _validate_connection_guidance(response, pins)
 
 
+# How many violations go into a single explain-and-suggest LLM call.
+# Real, named decision (SPEC-309 §3 flagged this explicitly as
+# unresolved) -- errors first, then warnings, then exclusions (the same
+# real severity vocabulary kicad_cli.py's JSON reports use), so a capped
+# call still covers the violations that matter most rather than an
+# arbitrary prefix of the raw list. component_search's own real
+# max_tokens truncation bug (CTX-308.7 Plan Drift) is exactly the failure
+# mode capping the violation *count* going in is meant to avoid.
+_MAX_VIOLATIONS_PER_EXPLANATION_CALL = 15
+_VIOLATION_SEVERITY_ORDER = {"error": 0, "warning": 1, "exclusion": 2}
+
+
+def _prioritize_violations(violations: list) -> list:
+    return sorted(violations, key=lambda v: _VIOLATION_SEVERITY_ORDER.get(v.get("severity"), 99))
+
+
+def _validate_board_advisor_response(response, violation_count: int) -> dict:
+    """SPEC-309's own real safety check: every index the response
+    references must be a real index into the violations it was given,
+    and every one of those violations must get an explanation -- a
+    skipped violation would silently hide a real problem from the user,
+    the opposite of what this feature exists to do."""
+    if not isinstance(response, dict):
+        raise ComponentValidationError("Board advisor did not return a JSON object.")
+
+    missing_top = [f for f in ("violation_explanations", "summary") if f not in response]
+    if missing_top:
+        raise ComponentValidationError(
+            f"Board advisor response is missing required field(s): {', '.join(missing_top)}."
+        )
+
+    explanations = response["violation_explanations"]
+    if not isinstance(explanations, list):
+        raise ComponentValidationError("Board advisor's violation_explanations must be a list.")
+
+    seen_indexes = set()
+    for entry in explanations:
+        # "index" is checked for key presence, not truthiness -- a real
+        # index of 0 is falsy in Python and must not be mistaken for a
+        # missing field the way `not entry.get("index")` would.
+        entry_missing = [f for f in ("explanation", "suggested_fix") if not entry.get(f)]
+        if "index" not in entry:
+            entry_missing.append("index")
+        if entry_missing:
+            raise ComponentValidationError(
+                f"Board advisor explanation entry is missing required field(s): {', '.join(entry_missing)}."
+            )
+        index = entry["index"]
+        if not isinstance(index, int) or not (0 <= index < violation_count):
+            raise ComponentValidationError(
+                f"Board advisor references violation index {index!r}, out of range for the "
+                f"{violation_count} violation(s) given."
+            )
+        seen_indexes.add(index)
+
+    missing_indexes = sorted(set(range(violation_count)) - seen_indexes)
+    if missing_indexes:
+        raise ComponentValidationError(
+            f"Board advisor did not explain violation index(es): {missing_indexes}."
+        )
+
+    if not isinstance(response.get("summary"), str):
+        raise ComponentValidationError("Board advisor's summary must be a string.")
+
+    return response
+
+
+def explain_violations(
+    violations: list, check_type: str, secrets: dict = None, provider: str = None, model: str = None,
+) -> dict:
+    """The kicad.check_board/kicad.check_schematic routes' own real
+    substance (SPEC-309): a single standalone agent call (like
+    search_components/generate_connection_guidance -- no DAG) that turns
+    KiCad's own real, structured ERC/DRC violations into plain-language
+    explanation and a concrete suggested fix per violation. `check_type`
+    is "erc" or "sch" -- passed straight through to the prompt so its
+    own advice stays grounded in which real check produced these
+    violations, never invented.
+
+    Returns each real violation dict enriched with `explanation`/
+    `suggested_fix`, plus `summary` and `truncated_count` (0 unless
+    _MAX_VIOLATIONS_PER_EXPLANATION_CALL capped the real list) -- ready
+    for the daemon route to return as-is, no re-indexing needed by the
+    caller. A clean (empty) violations list short-circuits before any
+    LLM call -- there is nothing to explain, and the honest, deterministic
+    answer costs nothing, rather than spending a real network call asking
+    a model to describe an empty list."""
+    if not violations:
+        return {"violations": [], "summary": "No violations found.", "truncated_count": 0}
+
+    secrets = secrets or {}
+
+    prioritized = _prioritize_violations(violations)
+    truncated_count = max(0, len(prioritized) - _MAX_VIOLATIONS_PER_EXPLANATION_CALL)
+    prioritized = prioritized[:_MAX_VIOLATIONS_PER_EXPLANATION_CALL]
+
+    loader = ConfigLoader(_AGENTFLOW_DIR)
+    loader.load()
+    executor, provider_client = _build_agent_executor("board_advisor", loader, secrets, provider, model)
+
+    indexed = [{"index": i, **v} for i, v in enumerate(prioritized)]
+    message = json.dumps({"check_type": check_type, "violations": indexed})
+    text = asyncio.run(_run_agent_and_close(executor, message, provider_client))
+    response = _extract_json(text)
+    validated = _validate_board_advisor_response(response, len(prioritized))
+
+    explanations_by_index = {e["index"]: e for e in validated["violation_explanations"]}
+    enriched = [
+        {**prioritized[i], "explanation": explanations_by_index[i]["explanation"],
+         "suggested_fix": explanations_by_index[i]["suggested_fix"]}
+        for i in range(len(prioritized))
+    ]
+    return {"violations": enriched, "summary": validated["summary"], "truncated_count": truncated_count}
+
+
 async def _run_workflow_and_close(executor: WorkflowExecutor, part_number: str, provider_clients: list) -> dict:
     """Runs the workflow and closes every provider client built along the
     way, all inside the same event loop -- see _build_agent_executor's

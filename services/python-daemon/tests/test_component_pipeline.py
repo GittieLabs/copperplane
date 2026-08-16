@@ -1,7 +1,9 @@
 import copy
+import json
 import os
 import sys
 import unittest
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -421,6 +423,145 @@ class TestRealGenerateConnectionGuidance(unittest.TestCase):
         # schema itself (an empty list is valid, TEST-007 above), but a
         # real signal the prompt is actually producing useful guidance.
         self.assertTrue(any(e["pin_number"] == "8" for e in result["pin_guidance"]))
+
+
+_REAL_INVALID_OUTLINE_VIOLATION = {
+    "description": "Board has malformed outline (no edges found on Edge.Cuts layer)",
+    "items": [{"description": "PCB", "pos": {"x": 0.0, "y": 0.0}, "uuid": "fake-uuid"}],
+    "severity": "error",
+    "type": "invalid_outline",
+}
+
+
+class TestPrioritizeViolations(unittest.TestCase):
+
+    def test_001_errors_sort_before_warnings_before_exclusions(self):
+        violations = [
+            {"severity": "exclusion", "description": "c"},
+            {"severity": "error", "description": "a"},
+            {"severity": "warning", "description": "b"},
+        ]
+        result = cp._prioritize_violations(violations)
+        self.assertEqual([v["severity"] for v in result], ["error", "warning", "exclusion"])
+
+    def test_002_an_unrecognized_severity_sorts_last_not_a_crash(self):
+        violations = [{"severity": "weird"}, {"severity": "error"}]
+        result = cp._prioritize_violations(violations)
+        self.assertEqual(result[0]["severity"], "error")
+
+
+class TestValidateBoardAdvisorResponse(unittest.TestCase):
+
+    def _response(self, **overrides):
+        base = {
+            "violation_explanations": [
+                {"index": 0, "explanation": "The board has no outline.", "suggested_fix": "Draw a closed shape on Edge.Cuts."},
+            ],
+            "summary": "One error found.",
+        }
+        base.update(overrides)
+        return base
+
+    def test_001_a_well_formed_response_passes_through_unchanged(self):
+        response = self._response()
+        self.assertEqual(cp._validate_board_advisor_response(response, 1), response)
+
+    def test_002_a_non_dict_response_is_rejected(self):
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_board_advisor_response([], 1)
+
+    def test_003_an_out_of_range_index_is_rejected(self):
+        response = self._response(violation_explanations=[
+            {"index": 5, "explanation": "x", "suggested_fix": "y"},
+        ])
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_board_advisor_response(response, 1)
+
+    def test_004_a_missing_index_is_rejected_not_silently_skipped(self):
+        """The real bar: every violation must be explained -- a
+        skipped one would silently hide a real problem."""
+        response = self._response(violation_explanations=[])
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_board_advisor_response(response, 1)
+
+    def test_005_index_zero_is_not_treated_as_falsy_and_missing(self):
+        """A real footgun: `entry.get("index")` on a real 0 index is
+        falsy in Python -- this must not be mistaken for a missing
+        field."""
+        response = self._response(violation_explanations=[
+            {"index": 0, "explanation": "x", "suggested_fix": "y"},
+        ])
+        self.assertEqual(cp._validate_board_advisor_response(response, 1), response)
+
+
+class TestExplainViolations(unittest.TestCase):
+    """Mocked pipeline-level tests -- truncation and enrichment logic,
+    not the LLM call itself (TestRealExplainViolations below is real)."""
+
+    @patch('component_pipeline._build_agent_executor')
+    def test_000_an_empty_violations_list_never_calls_the_llm(self, mock_build):
+        result = cp.explain_violations([], "drc")
+
+        mock_build.assert_not_called()
+        self.assertEqual(result, {"violations": [], "summary": "No violations found.", "truncated_count": 0})
+
+    @patch('component_pipeline._build_agent_executor')
+    @patch('component_pipeline._run_agent_and_close')
+    def test_001_caps_at_the_real_limit_and_reports_the_real_truncated_count(self, mock_run, mock_build):
+        violations = [{"severity": "error", "description": f"v{i}", "type": "t"} for i in range(20)]
+        mock_build.return_value = (MagicMock(), MagicMock())
+        response = {
+            "violation_explanations": [
+                {"index": i, "explanation": "x", "suggested_fix": "y"}
+                for i in range(cp._MAX_VIOLATIONS_PER_EXPLANATION_CALL)
+            ],
+            "summary": "s",
+        }
+        mock_run.return_value = json.dumps(response)
+
+        result = cp.explain_violations(violations, "drc")
+
+        self.assertEqual(len(result["violations"]), cp._MAX_VIOLATIONS_PER_EXPLANATION_CALL)
+        self.assertEqual(result["truncated_count"], 20 - cp._MAX_VIOLATIONS_PER_EXPLANATION_CALL)
+
+    @patch('component_pipeline._build_agent_executor')
+    @patch('component_pipeline._run_agent_and_close')
+    def test_002_enriches_each_real_violation_with_its_own_explanation(self, mock_run, mock_build):
+        violations = [{"severity": "error", "description": "d1", "type": "t1"}]
+        mock_build.return_value = (MagicMock(), MagicMock())
+        mock_run.return_value = json.dumps({
+            "violation_explanations": [{"index": 0, "explanation": "explained", "suggested_fix": "fixed"}],
+            "summary": "s",
+        })
+
+        result = cp.explain_violations(violations, "drc")
+
+        self.assertEqual(result["violations"][0]["description"], "d1")
+        self.assertEqual(result["violations"][0]["explanation"], "explained")
+        self.assertEqual(result["violations"][0]["suggested_fix"], "fixed")
+        self.assertEqual(result["truncated_count"], 0)
+
+
+class TestRealExplainViolations(unittest.TestCase):
+    """Real, non-mocked call against the actual prompt file, using the
+    exact real violation kicad_cli.run_drc produces against this repo's
+    own committed empty_board.kicad_pcb fixture -- CLAUDE.md's 'verify
+    for real' norm."""
+
+    def test_001_real_explanation_for_a_real_kicad_violation(self):
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            self.skipTest("ANTHROPIC_API_KEY not set. Add it to .env.local to run this test for real.")
+
+        result = cp.explain_violations(
+            [_REAL_INVALID_OUTLINE_VIOLATION], "drc", secrets={"anthropic_api_key": api_key},
+        )
+
+        self.assertEqual(len(result["violations"]), 1)
+        self.assertTrue(result["violations"][0]["explanation"])
+        self.assertTrue(result["violations"][0]["suggested_fix"])
+        self.assertTrue(result["summary"])
+        self.assertEqual(result["truncated_count"], 0)
 
 
 if __name__ == '__main__':

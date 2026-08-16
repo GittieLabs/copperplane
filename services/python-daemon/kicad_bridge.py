@@ -5,12 +5,14 @@ for the rest of the daemon's life, to avoid paying a handshake on every
 call.
 """
 import logging
+import os
 import re
 
 from kipy import KiCad
 from kipy.board_types import PadType
 from kipy.errors import ApiError, ConnectionError as KiCadConnectionError, FutureVersionError
 from kipy.geometry import Vector2
+from kipy.proto.common.types import DocumentType
 from kipy.util.board_layer import BoardLayer
 
 import kicad_write
@@ -135,6 +137,36 @@ def get_kicad_version() -> dict:
         "minor": version.minor,
         "patch": version.patch,
     }
+
+
+def get_open_board_path() -> str | None:
+    """SPEC-309: resolves the real, full filesystem path of whatever
+    board is currently open in KiCad -- `project.path` + `board_filename`
+    from `get_open_documents(DOCTYPE_PCB)`, confirmed live against a real
+    running KiCad 10.0.3 instance during SPEC-309's own research. Returns
+    `None` if nothing is open, rather than raising -- "no board open" is
+    a normal, expected state for the board-advisor route to handle
+    (report it plainly and ask for an explicit path), not an error.
+
+    Deliberately PCB-only: the identical call for `DOCTYPE_SCHEMATIC`
+    raises a real `no handler available` `ApiError` -- confirmed the
+    same way, not assumed -- so this function doesn't attempt it; the
+    schematic side of SPEC-309 always needs an explicit user-supplied
+    path."""
+    client = get_client()
+    try:
+        docs = list(client.get_open_documents(DocumentType.DOCTYPE_PCB))
+    except (KiCadConnectionError, ApiError) as e:
+        reset_connection()
+        raise KiCadUnavailableError(
+            "Lost connection to KiCad mid-request. It may have been closed."
+        ) from e
+
+    if not docs:
+        return None
+
+    doc = docs[0]
+    return os.path.join(doc.project.path, doc.board_filename)
 
 
 def get_board_outline() -> dict:

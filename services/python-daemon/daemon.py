@@ -117,6 +117,14 @@ except Exception:
     )
     kicad_write = None
 
+try:
+    import kicad_cli
+except Exception:
+    logger.exception(
+        "kicad_cli failed to import -- kicad.check_board/kicad.check_schematic will be unavailable"
+    )
+    kicad_cli = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -675,6 +683,62 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
     )
 
 
+def kicad_check_board(pcb_path: str = None) -> dict:
+    """The kicad.check_board route (SPEC-309): a real DRC via kicad-cli
+    against `pcb_path`, or -- when not given -- whatever board is
+    currently open in KiCad (kicad_bridge.get_open_board_path(),
+    confirmed live during SPEC-309's own research). Explains the real
+    violations via a real LLM call. Async: a real subprocess plus a real
+    LLM call, both genuinely multi-second, like every other real
+    kicad.*/component.* route in ASYNC_ROUTES below."""
+    if not pcb_path:
+        pcb_path = kicad_bridge.get_open_board_path()
+        if not pcb_path:
+            raise kicad_cli.KicadCliError(
+                "No board is currently open in KiCad, and no pcb_path was given. "
+                "Open a board in KiCad, or pass an explicit path."
+            )
+
+    report = kicad_cli.run_drc(pcb_path)
+    result = component_pipeline.explain_violations(
+        report["violations"], "drc",
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+    )
+    result["source_path"] = pcb_path
+    return result
+
+
+def kicad_check_schematic(sch_path: str) -> dict:
+    """The kicad.check_schematic route (SPEC-309): a real ERC via
+    kicad-cli against `sch_path` -- always an explicit, user-supplied
+    path. Unlike kicad_check_board, there is no auto-resolution: live
+    IPC has no schematic-document capability at all (a real
+    `no handler available` ApiError, confirmed live -- see SPEC-309 §2),
+    consistent with SPEC-103's own deferred-schematic-access decision.
+
+    ERC's real JSON nests violations per schematic sheet
+    (kicad_cli.run_erc's own docstring); flattened here into one list,
+    each violation tagged with its real sheet_path, before handing off
+    to the same explain_violations component_pipeline function
+    kicad_check_board uses."""
+    report = kicad_cli.run_erc(sch_path)
+    flattened = [
+        {**violation, "sheet_path": sheet["path"]}
+        for sheet in report["sheets"]
+        for violation in sheet["violations"]
+    ]
+    result = component_pipeline.explain_violations(
+        flattened, "erc",
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+    )
+    result["source_path"] = sch_path
+    return result
+
+
 def _build_routes() -> dict:
     """kicad.*/freecad.* are only registered if their bridge module
     actually imported (SPEC-107 §2) -- a broken kipy install shouldn't
@@ -725,6 +789,10 @@ def _build_routes() -> dict:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
     if component_pipeline is not None and library_store is not None:
         routes["kicad.generate_connection_guidance"] = kicad_generate_connection_guidance
+    if kicad_cli is not None and component_pipeline is not None:
+        if kicad_bridge is not None:
+            routes["kicad.check_board"] = kicad_check_board
+        routes["kicad.check_schematic"] = kicad_check_schematic
     return routes
 
 
@@ -737,6 +805,7 @@ ROUTES = _build_routes()
 ASYNC_ROUTES = {
     "freecad.generate_enclosure", "llm.chat", "kicad.generate_component", "kicad.inject_component",
     "component.search", "component.cache_datasheet", "kicad.generate_connection_guidance",
+    "kicad.check_board", "kicad.check_schematic",
 } & ROUTES.keys()
 
 # job_id -> {"cancel_event": threading.Event()} for every job currently
@@ -915,11 +984,24 @@ def _detect_capabilities() -> dict:
         except Exception:
             freecad_available = False
 
+    # SPEC-309: whether kicad-cli was actually located on this machine --
+    # a broken/missing kicad-cli shouldn't take down the rest of the app,
+    # it should surface as an honest capability gap, same pattern
+    # freecad_available already established for freecadcmd.
+    kicad_cli_available = False
+    if kicad_cli is not None:
+        try:
+            kicad_cli.find_kicad_cli()
+            kicad_cli_available = True
+        except Exception:
+            kicad_cli_available = False
+
     configured_secrets = CONFIG.get("secrets", {})
 
     return {
         "kicad_available": kicad_available,
         "freecad_available": freecad_available,
+        "kicad_cli_available": kicad_cli_available,
         # SPEC-303: reflects which providers actually have a key configured
         # right now, fixed from a hardcoded [] that predated any real
         # settings surface to populate it.
