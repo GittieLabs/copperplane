@@ -125,6 +125,14 @@ except Exception:
     )
     kicad_cli = None
 
+try:
+    import kicad_pcb_import
+except Exception:
+    logger.exception(
+        "kicad_pcb_import failed to import -- file-based freecad.generate_enclosure will be unavailable"
+    )
+    kicad_pcb_import = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -242,6 +250,7 @@ def freecad_generate_enclosure(
     height: float,
     width: float = None,
     depth: float = None,
+    pcb_path: str = None,
     wall_thickness_mm: float = 2.0,
     clearance_mm: float = 0.5,
     fillet_radius_mm: float = 1.0,
@@ -250,28 +259,34 @@ def freecad_generate_enclosure(
     timeout_s: float = 30.0,
     cancel_event=None,
 ) -> dict:
-    """The freecad.generate_enclosure route (SPEC-109, CTX-109.1):
-    composes kicad_bridge's board-read functions with
+    """The freecad.generate_enclosure route (SPEC-109, CTX-109.1;
+    file-based mode added by SPEC-310, CTX-310.1): composes a real
+    board outline/mounting-hole source with
     freecad_bridge.generate_enclosure's real geometry, replacing the
     direct `generate_enclosure` route binding SPEC-104/CTX-105.1 first
     set up.
 
-    Mode selection is explicit, not connection-sniffed: supplying both
-    `width` and `depth` always uses the no-board-data fallback,
-    unchanged from today's behavior -- a caller who explicitly chose
-    manual dimensions is never silently overridden just because a KiCad
-    connection happens to be open. Board-driven mode only runs when the
-    caller omits `width`/`depth`, and requires a real, live connection at
-    that point -- there's no further fallback once the caller has asked
-    for it.
+    Mode selection is explicit, not connection-sniffed, in a fixed
+    priority order: `width`+`depth` (manual) > `pcb_path` (file,
+    SPEC-310) > live board (the original, still-default board-driven
+    mode) -- a caller who explicitly chose one mode is never silently
+    overridden by another just because, say, a KiCad connection happens
+    to also be open. File mode needs no live KiCad connection at all
+    (only `kicad_pcb_import`, a real subprocess wrapper around
+    `kicad-cli` -- unlike live mode, `kicad_bridge`/kipy failing to
+    import doesn't block it).
 
-    Only `recognized: True` mounting holes (kicad_bridge.get_mounting_
-    holes) become real standoff cylinders. An unrecognized PT_NPTH pad
-    does not fail the whole build -- SPEC-109 §3's real risk is drilling
-    a standoff where one doesn't belong, not refusing to build at all
-    over an unrelated test point or thermal via -- but it's still named
-    in this route's own `unrecognized_holes` return value, for a future
-    UI to surface rather than the daemon silently dropping it.
+    Only `recognized: True` mounting holes become real standoff
+    cylinders (both `kicad_bridge.get_mounting_holes` live and
+    `kicad_pcb_import.extract_mounting_holes` from a file already return
+    only ever-recognized-or-real-NPTH holes in that shape). An
+    unrecognized PT_NPTH pad (live mode only -- file mode has no
+    unrecognized case, see SPEC-310 §2) does not fail the whole build --
+    SPEC-109 §3's real risk is drilling a standoff where one doesn't
+    belong, not refusing to build at all over an unrelated test point or
+    thermal via -- but it's still named in this route's own
+    `unrecognized_holes` return value, for a future UI to surface rather
+    than the daemon silently dropping it.
 
     `library_store.save_artifact` (kind: "enclosure", a real
     `board_revision`) only runs when the caller supplies `project_name`
@@ -283,11 +298,22 @@ def freecad_generate_enclosure(
         recognized_holes = []
         unrecognized_holes = []
         board_revision = f"manual:{width}x{depth}x{height}"
+    elif pcb_path:
+        if kicad_pcb_import is None:
+            raise RuntimeError(
+                "File-based enclosure generation requires kicad_pcb_import, which failed to "
+                "import."
+            )
+        outline = kicad_pcb_import.extract_board_outline(pcb_path)
+        recognized_holes = kicad_pcb_import.extract_mounting_holes(pcb_path)
+        unrecognized_holes = []
+        board_revision = f"file:{pcb_path}:{_board_revision_for(outline, recognized_holes)}"
     else:
         if kicad_bridge is None:
             raise RuntimeError(
                 "Board-driven enclosure generation requires kicad_bridge, which failed to "
-                "import. Supply width and depth for the no-board-data fallback instead."
+                "import. Supply width and depth for the no-board-data fallback, or pcb_path "
+                "for the file-based mode, instead."
             )
         outline = kicad_bridge.get_board_outline()
         holes = kicad_bridge.get_mounting_holes()
