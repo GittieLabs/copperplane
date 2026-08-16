@@ -1,0 +1,78 @@
+name: "Release"
+
+# SPEC-402, CTX-402.1: an unsigned, macOS-only release pipeline. Signing is
+# deliberately deferred (see SPEC-402 §1 Non-Goals) -- this publishes a
+# real, working .dmg with no Apple Developer identity attached to it.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-and-release-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify the pushed tag matches Cargo.toml and tauri.conf.json's real versions
+        run: python3 scripts/check_release_version.py "$GITHUB_REF_NAME"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core/tauri-rust
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        working-directory: apps/tauri-ui
+        run: npm ci
+
+      # PyInstaller requires a Python built with a real shared library
+      # (--enable-shared/--enable-framework) -- CTX-401.1's own real,
+      # concrete finding. A Homebrew python@3.11 is the verified-working
+      # interpreter for this freeze specifically; this is a deliberate
+      # departure from python-ci.yml's own uv-managed venv (uv's own
+      # downloaded interpreter is exactly the kind PyInstaller refuses).
+      - name: Install Homebrew Python 3.11 (framework build, required by PyInstaller)
+        run: brew install python@3.11
+
+      - name: Install daemon runtime + build dependencies
+        working-directory: services/python-daemon
+        run: |
+          "$(brew --prefix python@3.11)/bin/python3.11" -m venv .build-venv
+          .build-venv/bin/pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Freeze the Python daemon (SPEC-401's committed daemon.spec)
+        working-directory: services/python-daemon
+        run: .build-venv/bin/pyinstaller daemon.spec
+
+      - name: Rename the frozen binary to Tauri's real target-triple sidecar convention
+        working-directory: services/python-daemon
+        run: |
+          HOST_TRIPLE=$(rustc -vV | awk '/^host:/ { print $2 }')
+          mv dist/hardware-agent-studio-daemon "dist/hardware-agent-studio-daemon-${HOST_TRIPLE}"
+
+      # tauri.macos.conf.json (CTX-401.2) merges automatically -- Tauri v2's
+      # own platform-config-override convention picks it up because this
+      # step runs on macOS, no explicit --config flag needed.
+      - name: Build the Tauri app bundle
+        working-directory: core/tauri-rust
+        run: npx @tauri-apps/cli@2 build
+
+      - name: Generate release notes from CTX-*.md implementation logs
+        run: python3 scripts/generate_release_notes.py --to-ref "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
+
+      - name: Publish the GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: ${{ runner.temp }}/release-notes.md
+          files: core/tauri-rust/target/release/bundle/dmg/*.dmg
