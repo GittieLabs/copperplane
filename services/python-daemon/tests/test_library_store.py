@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -468,9 +469,21 @@ class TestSupplierPricingCache(LibraryStoreTestCase):
         self.assertIsNone(store.load_supplier_pricing("NEVER-CACHED", "mouser"))
 
     def test_004_an_entry_older_than_max_age_s_is_treated_as_a_miss(self):
+        """Backdates the real, saved cached_at directly rather than racing
+        the wall clock between two now() calls -- a real bug this exact
+        approach was needed to fix: on Windows' coarser clock resolution
+        (~15ms), two datetime.now() calls in quick succession can return
+        an identical timestamp, making a real elapsed age of exactly 0.0
+        never exceed a max_age_s=0 threshold. Rewriting cached_at to a
+        real hour in the past makes the staleness check deterministic on
+        every platform, not dependent on real elapsed time at all."""
         store.save_supplier_pricing("ATTINY85", "mouser", _VALID_PRICING)
+        path = store._supplier_pricing_path("ATTINY85", "mouser")
+        record = store._read_json(path)
+        record["cached_at"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        store._write_json(path, record)
 
-        self.assertIsNone(store.load_supplier_pricing("ATTINY85", "mouser", max_age_s=0))
+        self.assertIsNone(store.load_supplier_pricing("ATTINY85", "mouser", max_age_s=1800))
 
     def test_005_different_suppliers_for_the_same_part_are_cached_independently(self):
         store.save_supplier_pricing("ATTINY85", "mouser", _VALID_PRICING)
