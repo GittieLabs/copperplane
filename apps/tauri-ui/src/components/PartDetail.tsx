@@ -2,7 +2,7 @@ import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import type { ComponentCandidate } from '../lib/components'
 import { attachFootprintToPart, exportFootprint, generateFootprintFromPart, searchFootprints, type FootprintCandidate } from '../lib/footprints'
-import { exportSymbol, extractPartDetail, saveConfirmedPart, type ExtractedSchema, type SavedPart, type SavedSymbol } from '../lib/partDetail'
+import { exportSymbol, extractPartDetail, getConnectionGuidance, saveConfirmedPart, type ConnectionGuidance, type ExtractedSchema, type SavedPart, type SavedSymbol } from '../lib/partDetail'
 
 type Status = 'extracting' | 'ready' | 'error'
 type FootprintSearchStatus = 'idle' | 'searching' | 'error'
@@ -52,6 +52,15 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
   const [exportingFootprint, setExportingFootprint] = useState(false)
   const [exportFootprintError, setExportFootprintError] = useState<string | null>(null)
 
+  // CTX-308.7: SPEC-308's third named concern (decoupling, protection,
+  // power) -- available once a part and its footprint are both real
+  // (SPEC-308 §5's own stated product stage), not gated on
+  // footprintGenerated -- guidance is just as useful for a found
+  // footprint as a generated one.
+  const [guidance, setGuidance] = useState<ConnectionGuidance | null>(null)
+  const [loadingGuidance, setLoadingGuidance] = useState(false)
+  const [guidanceError, setGuidanceError] = useState<string | null>(null)
+
   useEffect(() => {
     let cancelled = false
     setStatus('extracting')
@@ -71,6 +80,9 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     setExportedFootprintPath(null)
     setExportingFootprint(false)
     setExportFootprintError(null)
+    setGuidance(null)
+    setLoadingGuidance(false)
+    setGuidanceError(null)
 
     extractPartDetail(candidate.part_number)
       .then((schema) => {
@@ -162,6 +174,20 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
       setExportFootprintError(err instanceof Error ? err.message : String(err))
     } finally {
       setExportingFootprint(false)
+    }
+  }
+
+  async function handleGetGuidance() {
+    if (!savedPart) return
+    setLoadingGuidance(true)
+    setGuidanceError(null)
+    try {
+      const result = await getConnectionGuidance(savedPart.part_id)
+      setGuidance(result)
+    } catch (err) {
+      setGuidanceError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoadingGuidance(false)
     }
   }
 
@@ -291,6 +317,41 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
                 </div>
               )}
               {exportFootprintError && <p className="text-sm text-red-400">{exportFootprintError}</p>}
+
+              {/* CTX-308.7: SPEC-308's third named concern -- available
+                  now that a part and its footprint are both real. */}
+              <div className="flex flex-col gap-2 border-t border-neutral-800 pt-2">
+                {!guidance ? (
+                  <button
+                    type="button"
+                    className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                    onClick={handleGetGuidance}
+                    disabled={loadingGuidance}
+                  >
+                    {loadingGuidance ? 'Getting guidance…' : 'Get Connection Guidance'}
+                  </button>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs font-medium uppercase text-neutral-500">Connection Guidance</p>
+                    {guidance.pin_guidance.length === 0 ? (
+                      <p className="text-xs text-neutral-500">No pin-specific guidance for this part.</p>
+                    ) : (
+                      <ul className="flex flex-col gap-1">
+                        {guidance.pin_guidance.map((entry) => (
+                          <li key={entry.pin_number} className="text-xs text-neutral-300">
+                            <span className="font-medium text-neutral-100">Pin {entry.pin_number}:</span>{' '}
+                            {entry.guidance}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {guidance.general_notes && (
+                      <p className="text-xs text-neutral-400">{guidance.general_notes}</p>
+                    )}
+                  </div>
+                )}
+                {guidanceError && <p className="text-sm text-red-400">{guidanceError}</p>}
+              </div>
             </>
           ) : (
             <>

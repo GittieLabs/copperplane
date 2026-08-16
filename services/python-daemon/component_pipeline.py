@@ -262,6 +262,70 @@ def search_components(query: str, secrets: dict = None, provider: str = None, mo
     return _validate_candidates(candidates)
 
 
+_GUIDANCE_REQUIRED_FIELDS = ("pin_guidance", "general_notes")
+
+
+def _validate_connection_guidance(response, pins: list) -> dict:
+    """SPEC-308's own real safety check for this concern: every
+    pin_number the response references must be a real pin on this part
+    -- a hallucinated pin reference would point the user at the wrong
+    physical pin, the same category of consequence validate_schema's
+    checks exist to prevent for footprint geometry, applied here to
+    advisory text instead of pad placement."""
+    if not isinstance(response, dict):
+        raise ComponentValidationError("Connection guidance did not return a JSON object.")
+
+    missing = [f for f in _GUIDANCE_REQUIRED_FIELDS if f not in response]
+    if missing:
+        raise ComponentValidationError(
+            f"Connection guidance response is missing required field(s): {', '.join(missing)}."
+        )
+
+    pin_guidance = response["pin_guidance"]
+    if not isinstance(pin_guidance, list):
+        raise ComponentValidationError("Connection guidance's pin_guidance must be a list.")
+
+    real_pin_numbers = {str(p["number"]) for p in pins}
+    for entry in pin_guidance:
+        entry_missing = [f for f in ("pin_number", "guidance") if not entry.get(f)]
+        if entry_missing:
+            raise ComponentValidationError(
+                f"Connection guidance pin entry is missing required field(s): {', '.join(entry_missing)}."
+            )
+        if str(entry["pin_number"]) not in real_pin_numbers:
+            raise ComponentValidationError(
+                f"Connection guidance references pin '{entry['pin_number']}', which is not a real "
+                f"pin on this part."
+            )
+
+    if not isinstance(response.get("general_notes"), str):
+        raise ComponentValidationError("Connection guidance's general_notes must be a string.")
+
+    return response
+
+
+def generate_connection_guidance(
+    part_number: str, package: str, pins: list, secrets: dict = None, provider: str = None, model: str = None,
+) -> dict:
+    """The kicad.generate_connection_guidance route -- SPEC-308's third
+    named concern (decoupling, protection, power), once a part and its
+    footprint are both real (PRODUCT-PLAN.md's own framing). A single
+    standalone agent call, like search_components -- no deterministic
+    validate DAG step, since the one real safety check here (every
+    referenced pin_number is real) is cheap enough to run inline rather
+    than warranting a separate handler node."""
+    secrets = secrets or {}
+
+    loader = ConfigLoader(_AGENTFLOW_DIR)
+    loader.load()
+    executor, provider_client = _build_agent_executor("connection_guidance", loader, secrets, provider, model)
+
+    message = json.dumps({"part_number": part_number, "package": package, "pins": pins})
+    text = asyncio.run(_run_agent_and_close(executor, message, provider_client))
+    response = _extract_json(text)
+    return _validate_connection_guidance(response, pins)
+
+
 async def _run_workflow_and_close(executor: WorkflowExecutor, part_number: str, provider_clients: list) -> dict:
     """Runs the workflow and closes every provider client built along the
     way, all inside the same event loop -- see _build_agent_executor's

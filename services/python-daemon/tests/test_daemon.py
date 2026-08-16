@@ -945,6 +945,61 @@ class TestKicadGenerateFootprintFromPartRoute(unittest.TestCase):
             daemon.kicad_write = original
 
 
+class TestKicadGenerateConnectionGuidanceRoute(unittest.TestCase):
+    """CTX-308.7: SPEC-308's third named concern (decoupling, protection,
+    power). A real LLM call, so the pipeline call itself is mocked here
+    (matching TestKicadGenerateComponentProviderOverride's own
+    precedent) -- component_pipeline.TestRealGenerateConnectionGuidance
+    is where the real, non-mocked model call is verified. What this
+    class verifies is the daemon-level wiring: real part loading and
+    real provider/model/secrets threading."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    @patch('daemon.component_pipeline.generate_connection_guidance')
+    def test_001_loads_the_real_part_and_passes_its_real_fields_through(self, mock_guidance):
+        pins = [{"number": "8", "name": "VCC", "electrical_type": "power"}]
+        daemon.library_store.save_part({
+            "part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8", "pins": pins,
+            "datasheet_url": "https://example.com/x.pdf", "package_dimensions": {}, "courtyard": {},
+            "provenance": {f: {"source": "test"} for f in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS},
+        })
+        daemon.CONFIG['llm_provider'] = "google"
+        daemon.CONFIG['llm_model'] = "gemini-flash"
+        daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
+        mock_guidance.return_value = {"pin_guidance": [], "general_notes": ""}
+
+        daemon.kicad_generate_connection_guidance("ATtiny85")
+
+        args, kwargs = mock_guidance.call_args
+        self.assertEqual(args, ("ATtiny85", "SOIC-8", pins))
+        self.assertEqual(kwargs['provider'], "google")
+        self.assertEqual(kwargs['model'], "gemini-flash")
+        self.assertEqual(kwargs['secrets'], {"google_api_key": "fake"})
+
+    def test_002_build_routes_omits_it_when_component_pipeline_import_failed(self):
+        original = daemon.component_pipeline
+        daemon.component_pipeline = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.generate_connection_guidance", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.component_pipeline = original
+
+    def test_003_registered_as_an_async_route(self):
+        self.assertIn("kicad.generate_connection_guidance", daemon.ASYNC_ROUTES)
+
+
 _FAKE_OUTLINE = {"x_mm": 0.0, "y_mm": 0.0, "width_mm": 20.0, "height_mm": 15.0}
 _FAKE_HOLES = [
     {"x_mm": 2.0, "y_mm": 2.0, "diameter_mm": 3.2, "recognized": True},

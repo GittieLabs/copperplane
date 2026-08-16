@@ -239,9 +239,12 @@ save it to the parts library, reopen the app and it's still there, use it in a s
 Footprints are explicitly out of M2 — a part is useful with pins and a datasheet before any
 footprint exists, and footprints get their own flow in SPEC-308.
 
-### M3 — Schematic stage
+### M3 — Schematic stage ✅ done 2026-08-16
 
-SPEC-308: footprint search and creation into the KiCad library, per-pin connection guidance.
+SPEC-308: footprint search and creation into the KiCad library (all three ranked sources real --
+`CTX-308.1`/`.3`/`.4`/`.5`), export to a real `.pretty` library (`CTX-308.6`), and per-pin connection
+guidance -- decoupling, protection, power -- via a real LLM call once a part and its footprint are
+both real (`CTX-308.7`).
 
 ### M4 — Advisors
 

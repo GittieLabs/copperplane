@@ -334,5 +334,94 @@ class TestRealGenerateComponent(unittest.TestCase):
         self.assertIn(schema["package"], cp.PACKAGE_REFERENCE)
 
 
+_ATTINY85_PINS = [
+    {"number": "1", "name": "RESET", "electrical_type": "bidirectional"},
+    {"number": "4", "name": "GND", "electrical_type": "ground"},
+    {"number": "8", "name": "VCC", "electrical_type": "power"},
+]
+
+
+class TestValidateConnectionGuidance(unittest.TestCase):
+    """CTX-308.7: SPEC-308's own real safety check -- a pin_number the
+    response references must be a real pin on this part, the same class
+    of fail-closed check validate_schema already applies to footprint
+    geometry, applied here to advisory text instead."""
+
+    def _response(self, **overrides):
+        base = {
+            "pin_guidance": [
+                {"pin_number": "8", "guidance": "Add a 100nF ceramic decoupling capacitor from VCC to GND."},
+            ],
+            "general_notes": "Tie RESET high through a pull-up if not using it for reset control.",
+        }
+        base.update(overrides)
+        return base
+
+    def test_001_a_well_formed_response_passes_through_unchanged(self):
+        response = self._response()
+        self.assertEqual(cp._validate_connection_guidance(response, _ATTINY85_PINS), response)
+
+    def test_002_a_non_dict_response_is_rejected(self):
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_connection_guidance([], _ATTINY85_PINS)
+
+    def test_003_a_response_missing_a_required_top_level_field_is_rejected(self):
+        response = self._response()
+        del response["general_notes"]
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_connection_guidance(response, _ATTINY85_PINS)
+
+    def test_004_a_pin_entry_missing_guidance_is_rejected(self):
+        response = self._response(pin_guidance=[{"pin_number": "8"}])
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_connection_guidance(response, _ATTINY85_PINS)
+
+    def test_005_a_hallucinated_pin_number_is_rejected(self):
+        """The real bar: a pin_number that doesn't exist on this part
+        would point the user at the wrong physical pin -- must fail
+        closed, not pass through as plausible-looking advice."""
+        response = self._response(pin_guidance=[{"pin_number": "99", "guidance": "Decouple this."}])
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_connection_guidance(response, _ATTINY85_PINS)
+
+    def test_006_an_empty_general_notes_string_is_allowed(self):
+        response = self._response(general_notes="")
+        self.assertEqual(cp._validate_connection_guidance(response, _ATTINY85_PINS)["general_notes"], "")
+
+    def test_007_an_empty_pin_guidance_list_is_allowed(self):
+        """Not every part needs per-pin advice beyond what's already in
+        the prompt's own instruction to skip plain I/O pins -- an empty
+        list is a legitimate, honest answer, not a malformed one."""
+        response = self._response(pin_guidance=[])
+        self.assertEqual(cp._validate_connection_guidance(response, _ATTINY85_PINS)["pin_guidance"], [])
+
+
+class TestRealGenerateConnectionGuidance(unittest.TestCase):
+    """Real, non-mocked calls against the actual prompt file -- CLAUDE.md's
+    'verify for real' norm. Skips itself cleanly when no real credential
+    is available."""
+
+    def test_001_real_guidance_for_a_real_part_references_only_real_pins(self):
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            self.skipTest("ANTHROPIC_API_KEY not set. Add it to .env.local to run this test for real.")
+
+        result = cp.generate_connection_guidance(
+            "ATtiny85", "SOIC-8", _ATTINY85_PINS, secrets={"anthropic_api_key": api_key},
+        )
+
+        self.assertIn("pin_guidance", result)
+        self.assertIn("general_notes", result)
+        real_pin_numbers = {p["number"] for p in _ATTINY85_PINS}
+        for entry in result["pin_guidance"]:
+            self.assertIn(entry["pin_number"], real_pin_numbers)
+            self.assertTrue(entry["guidance"])
+        # The real model consistently has something to say about a real
+        # power pin's decoupling -- not a strict requirement of the
+        # schema itself (an empty list is valid, TEST-007 above), but a
+        # real signal the prompt is actually producing useful guidance.
+        self.assertTrue(any(e["pin_number"] == "8" for e in result["pin_guidance"]))
+
+
 if __name__ == '__main__':
     unittest.main()
