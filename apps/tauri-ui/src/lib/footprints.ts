@@ -14,6 +14,18 @@ export interface FootprintCandidate {
   source: FootprintSource
 }
 
+/** CTX-308.5: the shape kicad.generate_footprint_from_part returns --
+ * mirrors what library_store.py actually persists (pads/courtyard from
+ * kicad_write.generate_pad_layout, a real provenance record marking it
+ * generated and unverified). The UI only reads footprint_id/provenance
+ * from this; pads/courtyard exist purely for a future real board-write
+ * path (out of this spec's own scope -- SPEC-308 §1's non-goal). */
+export interface GeneratedFootprint {
+  footprint_id: string
+  footprint_name: string
+  provenance: { source: string; generated_from_part_id: string; verified: boolean }
+}
+
 function unwrap<T>(response: { error?: { message: string }; result?: unknown }): T {
   if (response.error) {
     throw new Error(response.error.message)
@@ -56,6 +68,23 @@ export async function attachFootprintToPart(
   )
 
   const updatedPart: SavedPart = { ...part, footprint_id: footprintId }
+  await unwrap<unknown>(await dispatch('library.save_part', { part: updatedPart }))
+
+  return updatedPart
+}
+
+/** SPEC-308's third footprint source (PRODUCT-PLAN.md §8 item 3,
+ * CTX-308.5): generates a footprint from the part's own already-saved
+ * datasheet dimensions -- no new search, no LLM call here (the daemon
+ * route reuses the extraction this part was already saved with). Like
+ * kicad.search_footprints, this is real but cheap local computation, so
+ * plain dispatch -- not submitJob. */
+export async function generateFootprintFromPart(part: SavedPart): Promise<SavedPart> {
+  const footprint = await unwrap<GeneratedFootprint>(
+    await dispatch('kicad.generate_footprint_from_part', { part_id: part.part_id }),
+  )
+
+  const updatedPart: SavedPart = { ...part, footprint_id: footprint.footprint_id }
   await unwrap<unknown>(await dispatch('library.save_part', { part: updatedPart }))
 
   return updatedPart

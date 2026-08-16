@@ -279,7 +279,7 @@ Nothing in the daemon gets rewritten. This is a re-housing, not a rebuild.
     `ls /Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli && … kicad-cli pcb drc --help`
 2.  **Schematic access.** Live IPC (SPEC-103's stated preference) or reading `.kicad_sch` from disk?
     The advisor arguably needs the file, which reopens a decision SPEC-103 deliberately closed.
-3.  **Footprint sources, ranked -- two of three real, 2026-08-14.** Now that footprints are their
+3.  **Footprint sources, ranked -- all three real, 2026-08-16.** Now that footprints are their
     own object, "find a footprint" needs a defined corpus: the user's installed KiCad footprint
     libraries first, then the user's own library, then generation from datasheet package dimensions.
     Source one (installed KiCad libraries) is fully real: `CTX-308.1` shipped direct
@@ -289,8 +289,14 @@ Nothing in the daemon gets rewritten. This is a re-housing, not a rebuild.
     and tagged (`kicad_library`/`your_library`) in the real UI `CTX-308.2` built. Both `CTX-308.3`
     and `CTX-308.4` found and fixed real Windows-only bugs along the way -- separator/placeholder
     handling and a `:` reserved character in `footprint_id`'s own on-disk filename -- all only
-    catchable by real CI (no Windows machine this session). Still fully open: source three
-    (datasheet generation, and how a generated footprint is marked as unverified) -- not started.
+    catchable by real CI (no Windows machine this session). Source three (datasheet generation) is
+    real as of `CTX-308.5`: turned out to need no second LLM call at all -- the extraction Part
+    Detail already runs (`SPEC-202`) already returns `package_dimensions`/`courtyard`, previously
+    silently dropped before being saved; `CTX-308.5` fixed that and reused `kicad_write`'s existing
+    pad-layout geometry (the same function `SPEC-108`'s live inject path calls) to turn them into a
+    real Footprint, marked `source: "datasheet_generation"`, `verified: false`. Fails closed for any
+    package outside `kicad_write.SUPPORTED_PACKAGES`, the same choice `SPEC-202`'s own validation
+    already makes for an unrecognized package.
 4.  **Project root location.** User-chosen on first run, or a fixed default under the app data dir
     with an override? Affects SPEC-304 and SPEC-106.
 5.  **Symbol generation.** SPEC-202 already produces pins with electrical types, which is most of a

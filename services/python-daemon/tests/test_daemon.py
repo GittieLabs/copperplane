@@ -363,6 +363,8 @@ class TestLibraryRoutes(unittest.TestCase):
                 {"number": "1", "name": "RESET", "electrical_type": "bidirectional"},
                 {"number": "2", "name": "GND", "electrical_type": "ground"},
             ],
+            "package_dimensions": {"length_mm": 4.9, "width_mm": 3.9, "height_mm": 1.75, "pitch_mm": 1.27},
+            "courtyard": {"length_mm": 5.4, "width_mm": 4.4},
         }
 
         original_config = dict(daemon.CONFIG)
@@ -384,6 +386,14 @@ class TestLibraryRoutes(unittest.TestCase):
         self.assertEqual(part["provenance"]["manufacturer"]["confidence"], "high")
         self.assertEqual(part["provenance"]["package"]["source"], "llm_extraction")
         self.assertEqual(part["provenance"]["package"]["model"], "gemini-flash")
+        # CTX-308.5: package_dimensions/courtyard were previously dropped
+        # by this route even though the extraction call already returns
+        # them -- required for SPEC-308's datasheet-generated footprint
+        # source, which reuses these fields with no second LLM call.
+        self.assertEqual(part["package_dimensions"], extraction["package_dimensions"])
+        self.assertEqual(part["courtyard"], extraction["courtyard"])
+        self.assertEqual(part["provenance"]["package_dimensions"]["source"], "llm_extraction")
+        self.assertEqual(part["provenance"]["courtyard"]["source"], "llm_extraction")
 
         symbol = daemon.library_store.load_symbol(part["symbol_id"])
         self.assertEqual(len(symbol["pins"]), 2)
@@ -772,6 +782,124 @@ class TestKicadSearchFootprintsRoute(unittest.TestCase):
             self.assertIn("job.cancel", routes)
         finally:
             daemon.fp_lib_table = original
+
+
+class TestKicadGenerateFootprintFromPartRoute(unittest.TestCase):
+    """CTX-308.5: PRODUCT-PLAN.md §8 item 3's third footprint source
+    (datasheet generation). No mocking of the geometry itself -- this
+    reuses kicad_write.generate_pad_layout, a pure function with no kipy
+    live-connection dependency, so real file I/O against a real temp
+    storage_root is the honest verification, matching TestLibraryRoutes'
+    own pattern rather than mocking what's actually cheap to run for
+    real."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def _dispatch(self, method, params):
+        request = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": "req"})
+        return json.loads(handle_request(request))
+
+    def test_001_generates_real_pads_matching_kicad_write_directly(self):
+        """A saved Part (with CTX-308.5's now-persisted package_dimensions/
+        courtyard) round-trips through the real route to a real Footprint
+        record whose pads exactly match calling kicad_write.generate_pad_layout
+        directly -- no second, possibly-drifted computation."""
+        candidate = {
+            "part_number": "ATtiny85", "manufacturer": "Microchip",
+            "datasheet_url": "https://example.com/attiny85.pdf", "confidence": "high",
+        }
+        extraction = {
+            "part_number": "ATtiny85",
+            "package": "SOIC-8",
+            "pins": [{"number": str(i), "name": f"P{i}", "electrical_type": "passive"} for i in range(1, 9)],
+            "package_dimensions": {"length_mm": 4.9, "width_mm": 3.9, "height_mm": 1.75, "pitch_mm": 1.27},
+            "courtyard": {"length_mm": 5.4, "width_mm": 4.4},
+        }
+        saved = self._dispatch(
+            "library.save_confirmed_part", {"candidate": candidate, "extraction": extraction},
+        )
+        self.assertNotIn("error", saved)
+
+        response = self._dispatch("kicad.generate_footprint_from_part", {"part_id": "ATtiny85"})
+        self.assertNotIn("error", response)
+        footprint = response["result"]
+
+        expected_pads = daemon.kicad_write.generate_pad_layout(
+            "SOIC-8", [str(i) for i in range(1, 9)], extraction["package_dimensions"],
+        )
+        self.assertEqual(footprint["footprint_id"], "generated__ATtiny85")
+        self.assertEqual(footprint["pads"], expected_pads)
+        self.assertEqual(footprint["courtyard"], extraction["courtyard"])
+        self.assertEqual(footprint["provenance"]["source"], "datasheet_generation")
+        self.assertEqual(footprint["provenance"]["generated_from_part_id"], "ATtiny85")
+        self.assertFalse(footprint["provenance"]["verified"])
+
+        # Immediately reusable through source two's own search (CTX-308.4) --
+        # a generated footprint isn't a dead end, it's real saved-library content.
+        found = daemon.library_store.search_footprints("SOIC-8")
+        self.assertEqual([f["footprint_id"] for f in found], ["generated__ATtiny85"])
+
+    def test_002_a_part_missing_datasheet_dimensions_fails_closed_not_a_crash(self):
+        """A Part saved before CTX-308.5 (or any other way package_dimensions
+        ends up falsy) must return a clean route error naming the real
+        reason, not a raw KeyError from deep inside generate_pad_layout."""
+        provenance = {
+            field: {"source": "manual"} for field in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS
+        }
+        part = {
+            "part_id": "OldPart", "manufacturer": "Acme", "package": "SOIC-8",
+            "pins": [{"number": "1", "name": "P1", "electrical_type": "passive"}],
+            "datasheet_url": "https://example.com/x.pdf",
+            "package_dimensions": None, "courtyard": None,
+            "provenance": provenance,
+        }
+        saved = self._dispatch("library.save_part", {"part": part})
+        self.assertNotIn("error", saved)
+
+        response = self._dispatch("kicad.generate_footprint_from_part", {"part_id": "OldPart"})
+        self.assertIn("error", response)
+        self.assertIn("package_dimensions", response["error"]["message"])
+
+    def test_003_an_unsupported_package_fails_closed_not_a_silent_guess(self):
+        """TQFP-32 is real (in component_pipeline.PACKAGE_REFERENCE) but
+        outside kicad_write.SUPPORTED_PACKAGES -- must surface as a clean
+        route error, the same fail-closed choice generate_pad_layout
+        already makes internally."""
+        candidate = {
+            "part_number": "STM32F103", "manufacturer": "ST",
+            "datasheet_url": "https://example.com/stm32.pdf", "confidence": "high",
+        }
+        extraction = {
+            "part_number": "STM32F103",
+            "package": "TQFP-32",
+            "pins": [{"number": str(i), "name": f"P{i}", "electrical_type": "passive"} for i in range(1, 33)],
+            "package_dimensions": {"length_mm": 7.0, "width_mm": 7.0, "height_mm": 1.4, "pitch_mm": 0.8},
+            "courtyard": {"length_mm": 7.5, "width_mm": 7.5},
+        }
+        saved = self._dispatch(
+            "library.save_confirmed_part", {"candidate": candidate, "extraction": extraction},
+        )
+        self.assertNotIn("error", saved)
+
+        response = self._dispatch("kicad.generate_footprint_from_part", {"part_id": "STM32F103"})
+        self.assertIn("error", response)
+        self.assertIn("No pad-layout generator", response["error"]["message"])
+
+    def test_004_build_routes_omits_it_when_kicad_write_import_failed(self):
+        original = daemon.kicad_write
+        daemon.kicad_write = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.generate_footprint_from_part", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.kicad_write = original
 
 
 _FAKE_OUTLINE = {"x_mm": 0.0, "y_mm": 0.0, "width_mm": 20.0, "height_mm": 15.0}

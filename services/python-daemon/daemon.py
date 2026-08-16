@@ -109,6 +109,14 @@ except Exception:
     logger.exception("fp_lib_table failed to import -- kicad.search_footprints will be unavailable")
     fp_lib_table = None
 
+try:
+    import kicad_write
+except Exception:
+    logger.exception(
+        "kicad_write failed to import -- kicad.generate_footprint_from_part will be unavailable"
+    )
+    kicad_write = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -389,6 +397,17 @@ def library_save_confirmed_part(candidate: dict, extraction: dict) -> dict:
         "manufacturer": candidate.get("manufacturer"),
         "package": extraction.get("package"),
         "pins": pins,
+        # CTX-308.5: previously dropped on the floor even though the
+        # extraction call already returns them -- component_extraction's
+        # own schema (agentflow/agents/component_extraction.prompt.md)
+        # includes package_dimensions/courtyard alongside package/pins.
+        # Persisting them here is what makes SPEC-308's datasheet-
+        # generated footprint source possible without a second LLM call:
+        # kicad_write.generate_pad_layout only needs package + pin
+        # numbers + package_dimensions, all already produced by this
+        # same extraction.
+        "package_dimensions": extraction.get("package_dimensions"),
+        "courtyard": extraction.get("courtyard"),
         "datasheet_url": candidate.get("datasheet_url"),
         "footprint_id": None,
         "symbol_id": symbol_id,
@@ -397,6 +416,8 @@ def library_save_confirmed_part(candidate: dict, extraction: dict) -> dict:
             "datasheet_url": search_provenance,
             "package": extraction_provenance,
             "pins": extraction_provenance,
+            "package_dimensions": extraction_provenance,
+            "courtyard": extraction_provenance,
         },
     })
 
@@ -583,6 +604,51 @@ def kicad_search_footprints(query: str) -> list:
     return kicad_results + saved_results
 
 
+def kicad_generate_footprint_from_part(part_id: str) -> dict:
+    """The kicad.generate_footprint_from_part route -- SPEC-308/CTX-308.5:
+    PRODUCT-PLAN.md §8 item 3's third and, until now, fully open footprint
+    source (datasheet generation), for a Part whose own package_dimensions/
+    courtyard the LLM extraction already returned (CTX-308.5's own fix to
+    library_save_confirmed_part, which previously dropped them).
+
+    No second LLM call: kicad_write.generate_pad_layout is the same pure
+    geometry function SPEC-108's live inject path already uses, given
+    exactly the fields a saved Part already carries. Synchronous, like
+    kicad.search_footprints -- pure computation over already-known data,
+    no network, no live KiCad IPC round trip, so this is NOT registered
+    in ASYNC_ROUTES below.
+
+    Fails closed for a package outside kicad_write.SUPPORTED_PACKAGES --
+    the same fail-closed choice component_pipeline.validate_schema
+    already makes for a package outside its own PACKAGE_REFERENCE, not a
+    silent guess at pad geometry."""
+    part = library_store.load_part(part_id)
+
+    missing = [f for f in ("package", "pins", "package_dimensions", "courtyard") if not part.get(f)]
+    if missing:
+        raise library_store.SchemaValidationError(
+            f"Part '{part_id}' is missing {', '.join(missing)} -- cannot generate a footprint "
+            f"without the datasheet dimensions the extraction step returns. Parts saved before "
+            f"CTX-308.5 don't have these; re-run generate + save to pick them up."
+        )
+
+    pin_numbers = [pin["number"] for pin in part["pins"]]
+    pads = kicad_write.generate_pad_layout(part["package"], pin_numbers, part["package_dimensions"])
+
+    footprint_id = f"generated__{part_id}"
+    return library_store.save_footprint({
+        "footprint_id": footprint_id,
+        "footprint_name": f"{part['package']} (generated)",
+        "pads": pads,
+        "courtyard": part["courtyard"],
+        "provenance": {
+            "source": "datasheet_generation",
+            "generated_from_part_id": part_id,
+            "verified": False,
+        },
+    })
+
+
 def _build_routes() -> dict:
     """kicad.*/freecad.* are only registered if their bridge module
     actually imported (SPEC-107 §2) -- a broken kipy install shouldn't
@@ -628,6 +694,8 @@ def _build_routes() -> dict:
         routes["agent.dispatch_tool"] = agent_dispatch_tool
     if fp_lib_table is not None:
         routes["kicad.search_footprints"] = kicad_search_footprints
+    if kicad_write is not None and library_store is not None:
+        routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
     return routes
 
 

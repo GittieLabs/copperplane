@@ -101,9 +101,9 @@ pulled from a shared, reusable **Library** — with every AI-assisted step confi
     parametric enclosures. Done — this is the backend the rest of the product stands on.
 *   ✅ **M2 — Shell, Projects, Components.** A real project/library workspace replacing the original
     single-text-box demo: search, disambiguate, save to library, reuse across projects. Done.
-*   🚧 **M3 — Schematic stage.** Footprints as first-class, searchable, reusable objects (in
-    progress — installed-library and saved-library search both real; datasheet-generated footprints
-    still open) and per-pin connection guidance.
+*   🚧 **M3 — Schematic stage.** Footprints as first-class, searchable, reusable objects — done:
+    installed-library search, saved-library search, and datasheet-dimension generation are all
+    real. Still open: per-pin connection guidance (decoupling, protection, power).
 *   ⏳ **M4 — Advisors.** Read a schematic or board's real ERC/DRC output and explain it in plain
     language, with suggested fixes.
 *   ⏳ **M5 — Enclosure from geometry, then ambition.** Import a real `.kicad_pcb`, generate a

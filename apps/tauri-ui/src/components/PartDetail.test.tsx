@@ -7,6 +7,7 @@ const exportSymbolMock = vi.fn()
 const openMock = vi.fn()
 const searchFootprintsMock = vi.fn()
 const attachFootprintToPartMock = vi.fn()
+const generateFootprintFromPartMock = vi.fn()
 
 vi.mock('../lib/partDetail', () => ({
   extractPartDetail: (...args: unknown[]) => extractPartDetailMock(...args),
@@ -17,6 +18,7 @@ vi.mock('../lib/partDetail', () => ({
 vi.mock('../lib/footprints', () => ({
   searchFootprints: (...args: unknown[]) => searchFootprintsMock(...args),
   attachFootprintToPart: (...args: unknown[]) => attachFootprintToPartMock(...args),
+  generateFootprintFromPart: (...args: unknown[]) => generateFootprintFromPartMock(...args),
 }))
 
 vi.mock('@tauri-apps/plugin-shell', () => ({
@@ -41,6 +43,7 @@ beforeEach(() => {
   openMock.mockReset()
   searchFootprintsMock.mockReset()
   attachFootprintToPartMock.mockReset()
+  generateFootprintFromPartMock.mockReset()
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -226,5 +229,55 @@ describe('PartDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
     await waitFor(() => screen.getByText("No match in this machine's own configured KiCad libraries."))
+  })
+
+  it('CTX-308.5: Generate from datasheet dimensions calls generateFootprintFromPart and shows an unverified badge', async () => {
+    generateFootprintFromPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'generated__ATtiny85',
+    })
+    await saveAndReachFootprintSection()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate from datasheet dimensions' }))
+
+    await waitFor(() => screen.getByText('Footprint linked: generated__ATtiny85'))
+    expect(generateFootprintFromPartMock).toHaveBeenCalledWith(SAVED_PART_NO_FOOTPRINT)
+    screen.getByText(/generated from datasheet dimensions — unverified/)
+    expect(screen.queryByText('Find Footprint')).toBeNull()
+  })
+
+  it('CTX-308.5: does not require a search first -- available immediately in Find Footprint', async () => {
+    await saveAndReachFootprintSection()
+
+    screen.getByRole('button', { name: 'Generate from datasheet dimensions' })
+    expect(searchFootprintsMock).not.toHaveBeenCalled()
+  })
+
+  it('CTX-308.5: a generation failure (e.g. unsupported package) shows the real error, not a crash', async () => {
+    generateFootprintFromPartMock.mockRejectedValueOnce(
+      new Error("No pad-layout generator for package 'TQFP-32'."),
+    )
+    await saveAndReachFootprintSection()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate from datasheet dimensions' }))
+
+    await waitFor(() => screen.getByText(/No pad-layout generator for package 'TQFP-32'/))
+    expect(screen.queryByText('Footprint linked:', { exact: false })).toBeNull()
+  })
+
+  it('a found footprint (not generated) never shows the unverified badge', async () => {
+    searchFootprintsMock.mockResolvedValueOnce([{ library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module' }])
+    attachFootprintToPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
+    })
+    await saveAndReachFootprintSection()
+    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
+
+    await waitFor(() => screen.getByText('Footprint linked: MyPCBLibs__MP1584EN_5V_Module'))
+    expect(screen.queryByText(/unverified/)).toBeNull()
   })
 })

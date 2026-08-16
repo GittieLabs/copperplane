@@ -1,7 +1,7 @@
 import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import type { ComponentCandidate } from '../lib/components'
-import { attachFootprintToPart, searchFootprints, type FootprintCandidate } from '../lib/footprints'
+import { attachFootprintToPart, generateFootprintFromPart, searchFootprints, type FootprintCandidate } from '../lib/footprints'
 import { exportSymbol, extractPartDetail, saveConfirmedPart, type ExtractedSchema, type SavedPart, type SavedSymbol } from '../lib/partDetail'
 
 type Status = 'extracting' | 'ready' | 'error'
@@ -35,6 +35,15 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
   const [footprintCandidates, setFootprintCandidates] = useState<FootprintCandidate[] | null>(null)
   const [attachingFootprint, setAttachingFootprint] = useState<string | null>(null)
 
+  // CTX-308.5: source three (PRODUCT-PLAN.md §8 item 3) -- generate a
+  // footprint from this part's own datasheet dimensions when nothing
+  // installed matches. footprintGenerated is deliberately local-only UI
+  // state (like exportedPath above), not derived from savedPart itself --
+  // there's no cheap way to tell "generated" from "found" apart just by
+  // looking at footprint_id without a second load_footprint round trip.
+  const [generatingFootprint, setGeneratingFootprint] = useState(false)
+  const [footprintGenerated, setFootprintGenerated] = useState(false)
+
   useEffect(() => {
     let cancelled = false
     setStatus('extracting')
@@ -49,6 +58,8 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     setFootprintStatus('idle')
     setFootprintError(null)
     setFootprintCandidates(null)
+    setGeneratingFootprint(false)
+    setFootprintGenerated(false)
 
     extractPartDetail(candidate.part_number)
       .then((schema) => {
@@ -109,6 +120,23 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
       setFootprintError(err instanceof Error ? err.message : String(err))
     } finally {
       setAttachingFootprint(null)
+    }
+  }
+
+  async function handleGenerateFootprint() {
+    if (!savedPart) return
+    setGeneratingFootprint(true)
+    setFootprintError(null)
+    try {
+      const updated = await generateFootprintFromPart(savedPart)
+      setSavedPart(updated)
+      setFootprintGenerated(true)
+      setFootprintStatus('idle')
+    } catch (err) {
+      setFootprintError(err instanceof Error ? err.message : String(err))
+      setFootprintStatus('error')
+    } finally {
+      setGeneratingFootprint(false)
     }
   }
 
@@ -207,7 +235,14 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
       {savedPart && (
         <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
           {savedPart.footprint_id ? (
-            <p className="text-sm text-emerald-400">Footprint linked: {savedPart.footprint_id}</p>
+            <p className="text-sm text-emerald-400">
+              Footprint linked: {savedPart.footprint_id}
+              {footprintGenerated && (
+                <span className="ml-2 text-xs font-medium text-amber-400">
+                  (generated from datasheet dimensions — unverified)
+                </span>
+              )}
+            </p>
           ) : (
             <>
               <p className="text-xs font-medium uppercase text-neutral-500">Find Footprint</p>
@@ -240,6 +275,22 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
                   No match in this machine's own configured KiCad libraries.
                 </p>
               )}
+
+              {/* CTX-308.5: source three -- generate from this part's own
+                  datasheet dimensions (PRODUCT-PLAN.md §8 item 3), no new
+                  search needed. Always available, not gated on a zero-result
+                  search -- a user who already knows nothing installed will
+                  match shouldn't have to search first. */}
+              <div className="flex items-center gap-2 border-t border-neutral-800 pt-2">
+                <button
+                  type="button"
+                  className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                  onClick={handleGenerateFootprint}
+                  disabled={generatingFootprint}
+                >
+                  {generatingFootprint ? 'Generating…' : 'Generate from datasheet dimensions'}
+                </button>
+              </div>
 
               {footprintCandidates !== null && footprintCandidates.length > 0 && (
                 <div className="flex flex-col gap-2">
