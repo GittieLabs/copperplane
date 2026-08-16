@@ -22,6 +22,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
+            // SPEC-402 (CTX-402.2): desktop-only, matching the updater
+            // plugin's own real platform support -- registered here
+            // rather than in the plugin chain above so it can be guarded
+            // by cfg(desktop) without an empty no-op on mobile targets.
+            #[cfg(desktop)]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

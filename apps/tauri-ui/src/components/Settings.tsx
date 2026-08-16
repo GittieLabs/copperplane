@@ -19,6 +19,7 @@ import {
   type KeyBasedProvider,
   type SupplierDefinition,
 } from '../lib/settings'
+import { checkForUpdates, installUpdateAndRelaunch, type Update } from '../lib/updater'
 
 /** SPEC-303 Tier 1 (provider/model/keys) and Tier 2 (KiCad/FreeCAD
  * reachability + path overrides). Every secret save/clear re-fetches
@@ -48,6 +49,11 @@ export function Settings() {
   const [pathsSaved, setPathsSaved] = useState(false)
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [installingUpdate, setInstallingUpdate] = useState(false)
+  const [availableUpdate, setAvailableUpdate] = useState<Update | null>(null)
+  const [upToDate, setUpToDate] = useState(false)
+  const [updateError, setUpdateError] = useState<string | null>(null)
 
   useEffect(() => {
     void refreshCapabilities()
@@ -218,6 +224,33 @@ export function Settings() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleCheckForUpdates() {
+    setCheckingUpdate(true)
+    setUpdateError(null)
+    setUpToDate(false)
+    try {
+      const update = await checkForUpdates()
+      setAvailableUpdate(update)
+      setUpToDate(update === null)
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCheckingUpdate(false)
+    }
+  }
+
+  async function handleInstallUpdate() {
+    if (!availableUpdate) return
+    setInstallingUpdate(true)
+    setUpdateError(null)
+    try {
+      await installUpdateAndRelaunch(availableUpdate)
+    } catch (err) {
+      setUpdateError(err instanceof Error ? err.message : String(err))
+      setInstallingUpdate(false)
     }
   }
 
@@ -463,6 +496,40 @@ export function Settings() {
             </>
           )}
         </div>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium text-neutral-400">Updates</h3>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="self-start rounded border border-neutral-700 px-3 py-1 text-sm disabled:opacity-50"
+            onClick={() => void handleCheckForUpdates()}
+            disabled={checkingUpdate || installingUpdate}
+          >
+            {checkingUpdate ? 'Checking…' : 'Check for Updates'}
+          </button>
+          {upToDate && !availableUpdate && (
+            <span className="text-sm text-neutral-400">You're up to date.</span>
+          )}
+        </div>
+        {updateError && <p className="text-sm text-red-400">{updateError}</p>}
+        {availableUpdate && (
+          <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
+            <p className="text-sm text-neutral-100">
+              Version {availableUpdate.version} is available (you have {availableUpdate.currentVersion}).
+            </p>
+            {availableUpdate.body && <p className="text-sm text-neutral-400">{availableUpdate.body}</p>}
+            <button
+              type="button"
+              className="self-start rounded bg-neutral-100 px-3 py-1 text-sm font-medium text-neutral-950 disabled:opacity-50"
+              onClick={() => void handleInstallUpdate()}
+              disabled={installingUpdate}
+            >
+              {installingUpdate ? 'Installing…' : 'Install & Restart'}
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="flex flex-col gap-2">

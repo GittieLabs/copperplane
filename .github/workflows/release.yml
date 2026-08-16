@@ -64,15 +64,48 @@ jobs:
       # tauri.macos.conf.json (CTX-401.2) merges automatically -- Tauri v2's
       # own platform-config-override convention picks it up because this
       # step runs on macOS, no explicit --config flag needed.
+      # createUpdaterArtifacts (tauri.conf.json, CTX-402.2) plus these two
+      # signing env vars makes this step also produce a real
+      # <app>.app.tar.gz + matching .sig, signed with the real, maintainer-
+      # generated Ed25519 keypair (never an Apple/Windows code-signing
+      # certificate -- see SPEC-402 §2 for why those are two unrelated
+      # trust mechanisms).
       - name: Build the Tauri app bundle
         working-directory: core/tauri-rust
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx @tauri-apps/cli@2 build
 
       - name: Generate release notes from CTX-*.md implementation logs
         run: python3 scripts/generate_release_notes.py --to-ref "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
 
+      # This pipeline only ever builds the CI runner's single native macOS
+      # architecture (CTX-401.2's own established, real scope -- no
+      # universal binary), so latest.json always carries exactly one
+      # platform entry -- a real, named limitation (CTX-402.2 Plan Drift),
+      # not silently glossed over.
+      - name: Generate the real Tauri updater manifest (latest.json)
+        run: |
+          HOST_TRIPLE=$(rustc -vV | awk '/^host:/ { print $2 }')
+          SIG_FILE=$(find core/tauri-rust/target/release/bundle/macos -name '*.app.tar.gz.sig')
+          TARBALL_NAME=$(basename "${SIG_FILE%.sig}")
+          PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          python3 scripts/generate_update_manifest.py \
+            --version "$GITHUB_REF_NAME" \
+            --pub-date "$PUB_DATE" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --target-triple "$HOST_TRIPLE" \
+            --signature-file "$SIG_FILE" \
+            --download-url "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${TARBALL_NAME}" \
+            > "$RUNNER_TEMP/latest.json"
+
       - name: Publish the GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: ${{ runner.temp }}/release-notes.md
-          files: core/tauri-rust/target/release/bundle/dmg/*.dmg
+          files: |
+            core/tauri-rust/target/release/bundle/dmg/*.dmg
+            core/tauri-rust/target/release/bundle/macos/*.app.tar.gz
+            core/tauri-rust/target/release/bundle/macos/*.app.tar.gz.sig
+            ${{ runner.temp }}/latest.json
