@@ -34,16 +34,27 @@ def _run_git(*args: str) -> str:
     return result.stdout
 
 
-def latest_tag() -> str:
-    """The most recent real git tag, or None if this repo has never been
-    tagged -- a real, expected state for this pipeline's first-ever
-    release, not an error."""
-    result = subprocess.run(['git', 'describe', '--tags', '--abbrev=0'], capture_output=True, text=True)
+def latest_tag(before_ref: str = 'HEAD') -> str:
+    """The most recent real git tag reachable *before* before_ref, or None
+    if none exists yet -- a real, expected state for this pipeline's
+    first-ever release, not an error.
+
+    Deliberately describes `{before_ref}^`, not before_ref itself: a real
+    bug found in production (v0.1.1's release notes) was `git describe
+    --tags --abbrev=0` called with no ref at all, which describes HEAD --
+    and in CI, HEAD *is* the commit the just-pushed tag points at, so it
+    returned that same tag back, producing a null from_ref==to_ref diff.
+    Walking to the parent commit first guarantees the tag on to_ref itself
+    is never the answer."""
+    result = subprocess.run(
+        ['git', 'describe', '--tags', '--abbrev=0', f'{before_ref}^'],
+        capture_output=True, text=True,
+    )
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def first_commit() -> str:
-    return _run_git('rev-list', '--max-parents=0', 'HEAD').strip().splitlines()[0]
+def first_commit(ref: str = 'HEAD') -> str:
+    return _run_git('rev-list', '--max-parents=0', ref).strip().splitlines()[0]
 
 
 def changed_ctx_files(from_ref: str, to_ref: str) -> list:
@@ -131,7 +142,7 @@ def main():
     parser.add_argument('--to-ref', default='HEAD')
     args = parser.parse_args()
 
-    from_ref = args.from_ref or latest_tag() or first_commit()
+    from_ref = args.from_ref or latest_tag(args.to_ref) or first_commit(args.to_ref)
     print(generate_release_notes(from_ref, args.to_ref))
 
 
