@@ -4,7 +4,7 @@ title: "Release, Signing & Auto-Update"
 status: Draft
 type: Module
 created: 2026-08-16
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 target_version: v0.1.0
 location: "specs/SPEC-402-release-signing-and-auto-update.md"
 parent_spec: "SPEC-000-architecture-overview.md"
@@ -15,23 +15,25 @@ user_facing: true
 # SPEC-402: Release, Signing & Auto-Update
 
 ## 1. Executive Summary & Goals
-*   **High-Level Goal:** A real, tag-triggered GitHub Actions pipeline that builds an unsigned
-    macOS `.app`/`.dmg` (`SPEC-401`'s own packaging, unchanged), publishes it as a real GitHub
-    Release asset, wires the Tauri auto-updater so installed copies can update in place, and
-    generates real release notes from the `CTX-*.md` implementation logs this framework already
-    collects. Deliberately **unsigned** -- see Non-Goals.
+*   **High-Level Goal:** A real, tag-triggered GitHub Actions pipeline that builds a macOS
+    `.app`/`.dmg` (`SPEC-401`'s own packaging, unchanged), publishes it as a real GitHub Release
+    asset, wires the Tauri auto-updater so installed copies can update in place, and generates real
+    release notes from the `CTX-*.md` implementation logs this framework already collects.
+    `CTX-402.1`/`.2` shipped this **unsigned** first, deliberately (see Non-Goals' original text,
+    kept below for the real reasoning); `CTX-402.3` adds real code signing and notarization now
+    that a real GittieLabs, LLC Apple Developer *Organization* account exists (Team ID
+    `834C8Q72TG`) -- exactly the future decision this spec's own text originally named as separate
+    and not yet made.
 *   **Business / Technical Value:** `SPEC-401` solved building a real, working, sidecar-bundled
     `.app`; nothing since has ever produced a downloadable artifact a person outside this repo could
-    actually get. This closes that gap now, without the cost or governance commitment code signing
-    requires -- explicitly deferred by this project's owner rather than rushed into a personal
-    Apple/Windows identity that would tie future releases to one person indefinitely.
+    actually get. This closes that gap now. Signing was initially deferred rather than rushed into a
+    personal Apple/Windows identity that would tie future releases to one person indefinitely --
+    once a real organization account existed, that concern no longer applied, and signing became
+    real, in-scope work rather than a deferred decision.
 *   **Non-Goals:**
-    *   **Not code signing or notarization.** A real, deliberate decision, not an oversight -- see
-        §3 for the concrete Gatekeeper cost this creates and how this spec mitigates it with
-        documentation rather than a certificate. Revisiting this later (an Apple Developer
-        *Organization* account under a real project entity, not an individual) is a real, separate,
-        future decision this spec doesn't make.
-    *   **Not Windows or Linux builds.** `SPEC-403`'s own cross-platform verification of the live
+    *   **Not Windows code signing or notarization, and not Windows/Linux builds at all.** No
+        Windows signing account or dev environment exists yet, and (separately) `SPEC-403`'s own
+        cross-platform verification of the live
         KiCad/FreeCAD integration paths hasn't happened -- every real live-CAD test in this repo's
         history has run on exactly one Mac. Shipping a release artifact for a platform whose core
         integrations have never been exercised for real would be a false "it works" claim, not just
