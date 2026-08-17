@@ -21,8 +21,6 @@ import re
 import subprocess
 import sys
 
-import yaml
-
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
@@ -62,10 +60,27 @@ def changed_ctx_files(from_ref: str, to_ref: str) -> list:
 
 
 def parse_frontmatter(text: str) -> dict:
+    """A minimal, hand-rolled parser for exactly the two real scalar
+    fields this script needs (`id`, `title`) -- deliberately not a real
+    YAML parser. PyYAML isn't installed on a bare CI runner by default
+    (confirmed for real: this repo's own release.yml failed with
+    ModuleNotFoundError on its first actual run), and every CTX/SPEC
+    frontmatter's `id`/`title` are always simple top-level scalars, never
+    something that needs real YAML semantics to parse correctly."""
     match = re.match(r'^---\s*\n(.*?)\n---\s*\n', text, re.DOTALL)
     if not match:
         return {}
-    return yaml.safe_load(match.group(1)) or {}
+    frontmatter = {}
+    for line in match.group(1).splitlines():
+        key_match = re.match(r'^([a-zA-Z_]+):\s*(.*)$', line.strip())
+        if not key_match:
+            continue
+        key, value = key_match.group(1), key_match.group(2).strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        if value:
+            frontmatter[key] = value
+    return frontmatter
 
 
 def extract_implementation_log_table(text: str) -> str:
