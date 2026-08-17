@@ -50,11 +50,17 @@ user_facing: true
     `get_app_version_matches_this_crates_own_cargo_toml` (an existing, real test) already enforces
     internally. `apps/tauri-ui/package.json` carries no version field of its own today, confirmed by
     reading it directly -- Cargo.toml's stays the one real source, not a second one to keep in sync.
-*   **Builds via the real Tauri CLI, on `macos-latest`.** `npm run build` (frontend) then
-    `cargo tauri build`, producing `SPEC-401`'s own real `.app` with the frozen Python daemon sidecar
-    already inside it, wrapped in Tauri's own default macOS bundle target (`.dmg`) -- unsigned.
-    `cargo-tauri` isn't installed in every dev environment today (confirmed directly this session);
-    CI installs it explicitly rather than assuming it's present.
+*   **Builds via the real Tauri CLI, on `macos-latest`, as a real two-architecture matrix
+    (`CTX-402.4`).** `npm run build` (frontend) then `cargo tauri build --target <triple>`, run twice
+    -- once for `aarch64-apple-darwin` (Apple Silicon), once for `x86_64-apple-darwin` (Intel),
+    cross-compiled from the same arm64 runner rather than a separate hosted Intel runner (GitHub's
+    hosted Intel macOS runners are gated behind the paid Larger Runners offering, confirmed directly
+    against `actions/runner-images`' current README). Each leg produces `SPEC-401`'s own real `.app`
+    with its own architecture-matched frozen Python daemon sidecar already inside it, wrapped in
+    Tauri's own default macOS bundle target (`.dmg`). A separate `publish` job, gated on both matrix
+    legs finishing, assembles one real GitHub Release carrying both. `cargo-tauri` isn't installed in
+    every dev environment today (confirmed directly this session); CI installs it explicitly rather
+    than assuming it's present.
 *   **Tauri's auto-updater, signed with its own real, maintainer-generated keypair -- not an
     OS-level code-signing certificate.** `tauri-plugin-updater`'s trust model is a standalone
     Ed25519/minisign keypair (`cargo tauri signer generate`), unrelated to Apple/Windows signing: no
