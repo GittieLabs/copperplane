@@ -69,11 +69,12 @@ commit hashes, test results, and honestly-recorded mistakes.
 
 ### Download a prebuilt build (macOS)
 
-Grab the latest `.dmg` from [Releases](../../releases). **These builds are unsigned** — this is a
-young open source project, and code signing means tying every release to a personal Apple Developer
-identity indefinitely, or standing up a real organization account first (see `SPEC-402` for the
-reasoning). Because of that, macOS Gatekeeper will refuse to open it with a normal double-click. To
-run it anyway:
+Grab the latest `.dmg` from [Releases](../../releases). As of `v0.1.1`, builds are **signed and
+notarized** under a real GittieLabs, LLC Apple Developer identity — open the `.dmg` and drag
+**Hardware Agent Studio** into `/Applications`; it should launch normally with no Gatekeeper warning.
+
+**`v0.1.0` was unsigned** (see `SPEC-402` for the reasoning that shipped it that way first). If
+you're on that specific release, macOS will refuse to open it with a normal double-click:
 
 1. Open the `.dmg` and drag **Hardware Agent Studio** into `/Applications`.
 2. **Right-click** (or Control-click) the app in Finder and choose **Open**.
