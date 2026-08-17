@@ -1,6 +1,6 @@
 [package]
 name = "hardware-agent-studio-core"
-version = "0.1.1"
+version = "0.1.2"
 description = "Rust process manager and OS-level lifecycle supervisor for Hardware Agent Studio"
 authors = ["Hardware Agent Studio contributors"]
 license = "Apache-2.0"

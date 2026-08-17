@@ -69,9 +69,16 @@ commit hashes, test results, and honestly-recorded mistakes.
 
 ### Download a prebuilt build (macOS)
 
-Grab the latest `.dmg` from [Releases](../../releases). As of `v0.1.1`, builds are **signed and
-notarized** under a real GittieLabs, LLC Apple Developer identity — open the `.dmg` and drag
-**Hardware Agent Studio** into `/Applications`; it should launch normally with no Gatekeeper warning.
+Grab the latest release from [Releases](../../releases). As of `v0.1.2`, each release ships **two**
+macOS `.dmg` files — pick the one matching your Mac:
+
+*   **Apple Silicon (M-series Macs)** — filename ends in `_aarch64.dmg`. This is almost certainly
+    your Mac if you bought it 2020 or later; check via  **Menu → About This Mac**.
+*   **Intel Macs** — filename ends in `_x86_64.dmg`.
+
+As of `v0.1.1`, builds are **signed and notarized** under a real GittieLabs, LLC Apple Developer
+identity (both architectures, as of `v0.1.2`) — open the `.dmg` and drag **Hardware Agent Studio**
+into `/Applications`; it should launch normally with no Gatekeeper warning.
 
 **`v0.1.0` was unsigned** (see `SPEC-402` for the reasoning that shipped it that way first). If
 you're on that specific release, macOS will refuse to open it with a normal double-click:

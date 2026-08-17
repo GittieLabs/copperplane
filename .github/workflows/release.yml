@@ -2,8 +2,17 @@ name: "Release"
 
 # SPEC-402: a macOS release pipeline. CTX-402.1/.2 shipped it unsigned
 # first, deliberately (see SPEC-402 §1 Non-Goals at the time). CTX-402.3
-# adds real signing and notarization now that a real GittieLabs, LLC
-# Apple Developer org account exists -- Team ID 834C8Q72TG.
+# added real signing and notarization once a real GittieLabs, LLC Apple
+# Developer org account existed -- Team ID 834C8Q72TG. CTX-402.4 adds a
+# real second build leg for Intel Macs (x86_64-apple-darwin), matrix-built
+# alongside the existing Apple Silicon leg (aarch64-apple-darwin) on the
+# SAME arm64 macos-latest runner rather than a separate hosted Intel
+# runner -- GitHub's hosted Intel macOS runners are gated behind the paid
+# Larger Runners offering today (confirmed directly against
+# actions/runner-images' own current README, CTX-402.4), so this
+# cross-compiles instead. KiCad/FreeCAD are never bundled by this app (both
+# are resolved via PATH/glob against a separately-installed copy), so their
+# own architecture support has no bearing on this build matrix.
 
 on:
   push:
@@ -11,8 +20,11 @@ on:
       - "v*"
 
 jobs:
-  build-and-release-macos:
+  build-macos:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -22,11 +34,14 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: core/tauri-rust
+          key: ${{ matrix.target }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -37,30 +52,55 @@ jobs:
         working-directory: apps/tauri-ui
         run: npm ci
 
-      # PyInstaller requires a Python built with a real shared library
-      # (--enable-shared/--enable-framework) -- CTX-401.1's own real,
-      # concrete finding. A Homebrew python@3.11 is the verified-working
-      # interpreter for this freeze specifically; this is a deliberate
-      # departure from python-ci.yml's own uv-managed venv (uv's own
-      # downloaded interpreter is exactly the kind PyInstaller refuses).
-      - name: Install Homebrew Python 3.11 (framework build, required by PyInstaller)
-        run: brew install python@3.11
+      # The x86_64-apple-darwin leg needs Rosetta 2 to actually execute an
+      # x86_64 Python interpreter for PyInstaller's freeze -- PyInstaller
+      # can't cross-compile, it runs the target-arch interpreter directly
+      # to introspect real imports. GitHub's arm64 macOS runner images do
+      # not ship Rosetta pre-installed (confirmed directly against the
+      # real, current runner-images README -- CTX-402.4 Plan Drift), so
+      # it's installed explicitly here. A harmless no-op on the aarch64 leg.
+      - name: Install Rosetta 2 (needed to run an x86_64 Python interpreter on this arm64 runner)
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: softwareupdate --install-rosetta --agree-to-license
+
+      # A single, real python.org universal2 3.11 framework build serves
+      # BOTH matrix legs -- `arch -x86_64`/`arch -arm64` select the real
+      # slice each leg's freeze needs (CTX-402.4's own real, local
+      # end-to-end verification confirmed this works, including that
+      # PYTHONFRAMEWORK is set under either slice, satisfying the same
+      # framework-build requirement CTX-401.1 established). This replaces
+      # the single-arch-only Homebrew install CTX-401.1/CTX-402.1 used
+      # when only one architecture existed.
+      - name: Install python.org's official universal2 Python 3.11 (framework build, required by PyInstaller)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/python311.pkg" https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg
+          sudo installer -pkg "$RUNNER_TEMP/python311.pkg" -target /
 
       - name: Install daemon runtime + build dependencies
         working-directory: services/python-daemon
+        env:
+          ARCH_PREFIX: ${{ matrix.target == 'x86_64-apple-darwin' && 'arch -x86_64' || 'arch -arm64' }}
         run: |
-          "$(brew --prefix python@3.11)/bin/python3.11" -m venv .build-venv
-          .build-venv/bin/pip install -r requirements.txt -r requirements-build.txt
+          $ARCH_PREFIX /Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 -m venv .build-venv
+          $ARCH_PREFIX .build-venv/bin/pip install -r requirements.txt -r requirements-build.txt
 
       - name: Freeze the Python daemon (SPEC-401's committed daemon.spec)
         working-directory: services/python-daemon
-        run: .build-venv/bin/pyinstaller daemon.spec
+        env:
+          ARCH_PREFIX: ${{ matrix.target == 'x86_64-apple-darwin' && 'arch -x86_64' || 'arch -arm64' }}
+        run: $ARCH_PREFIX .build-venv/bin/pyinstaller daemon.spec
 
+      # Tauri's externalBin convention appends the real BUILD-TARGET's
+      # triple to the sidecar's base name, not the build HOST's -- using
+      # `rustc -vV`'s host field here (as the pre-CTX-402.4 single-arch
+      # pipeline did) would silently name the x86_64 leg's real frozen
+      # binary with the wrong (aarch64) suffix, since rustc's own host
+      # triple never changes on this arm64 runner even when cross-
+      # compiling. Keying off matrix.target directly is the real fix
+      # (CTX-402.4 Plan Drift).
       - name: Rename the frozen binary to Tauri's real target-triple sidecar convention
         working-directory: services/python-daemon
-        run: |
-          HOST_TRIPLE=$(rustc -vV | awk '/^host:/ { print $2 }')
-          mv dist/hardware-agent-studio-daemon "dist/hardware-agent-studio-daemon-${HOST_TRIPLE}"
+        run: mv dist/hardware-agent-studio-daemon "dist/hardware-agent-studio-daemon-${{ matrix.target }}"
 
       # The App Store Connect API key (CTX-402.3) is stored as a GitHub
       # secret holding the real .p8 file *content* -- notarytool (invoked
@@ -86,7 +126,11 @@ jobs:
       # certificate and notarize + staple via notarytool automatically --
       # confirmed for real via direct local testing (CTX-402.3): these
       # exact variable names are Tauri's own real, working contract, not
-      # assumed from documentation.
+      # assumed from documentation. --target makes this a real explicit
+      # cross-compile on both legs (CTX-402.4) -- Cargo always writes
+      # output under target/<triple>/release/ once --target is passed
+      # explicitly, even for the native architecture, so every path below
+      # is target-triple-namespaced accordingly.
       - name: Build the Tauri app bundle
         working-directory: core/tauri-rust
         env:
@@ -99,29 +143,56 @@ jobs:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx @tauri-apps/cli@2 build
+        run: npx @tauri-apps/cli@2 build --target ${{ matrix.target }}
+
+      - name: Upload this leg's real build artifacts for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.target }}
+          path: |
+            core/tauri-rust/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            core/tauri-rust/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
+            core/tauri-rust/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
+          if-no-files-found: error
+
+  # A separate job, not a third matrix leg: publishing must happen exactly
+  # once, after BOTH real architectures have built, so the GitHub Release
+  # and latest.json each carry both real artifacts together rather than
+  # one job racing to publish a partial release (CTX-402.4).
+  publish:
+    needs: build-macos
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download both matrix legs' real build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*
+          path: artifacts
 
       - name: Generate release notes from CTX-*.md implementation logs
         run: python3 scripts/generate_release_notes.py --to-ref "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
 
-      # This pipeline only ever builds the CI runner's single native macOS
-      # architecture (CTX-401.2's own established, real scope -- no
-      # universal binary), so latest.json always carries exactly one
-      # platform entry -- a real, named limitation (CTX-402.2 Plan Drift),
-      # not silently glossed over.
+      # Two real --platform groups, one per real, independently-signed
+      # architecture (CTX-402.4) -- generate_update_manifest.py folds them
+      # into a single latest.json's platforms object.
       - name: Generate the real Tauri updater manifest (latest.json)
         run: |
-          HOST_TRIPLE=$(rustc -vV | awk '/^host:/ { print $2 }')
-          SIG_FILE=$(find core/tauri-rust/target/release/bundle/macos -name '*.app.tar.gz.sig')
-          TARBALL_NAME=$(basename "${SIG_FILE%.sig}")
           PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          AARCH64_SIG=$(find artifacts/macos-aarch64-apple-darwin -name '*.app.tar.gz.sig')
+          AARCH64_TARBALL=$(basename "${AARCH64_SIG%.sig}")
+          X86_64_SIG=$(find artifacts/macos-x86_64-apple-darwin -name '*.app.tar.gz.sig')
+          X86_64_TARBALL=$(basename "${X86_64_SIG%.sig}")
           python3 scripts/generate_update_manifest.py \
             --version "$GITHUB_REF_NAME" \
             --pub-date "$PUB_DATE" \
             --notes-file "$RUNNER_TEMP/release-notes.md" \
-            --target-triple "$HOST_TRIPLE" \
-            --signature-file "$SIG_FILE" \
-            --download-url "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${TARBALL_NAME}" \
+            --platform aarch64-apple-darwin "$AARCH64_SIG" \
+              "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${AARCH64_TARBALL}" \
+            --platform x86_64-apple-darwin "$X86_64_SIG" \
+              "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${X86_64_TARBALL}" \
             > "$RUNNER_TEMP/latest.json"
 
       - name: Publish the GitHub Release
@@ -129,7 +200,10 @@ jobs:
         with:
           body_path: ${{ runner.temp }}/release-notes.md
           files: |
-            core/tauri-rust/target/release/bundle/dmg/*.dmg
-            core/tauri-rust/target/release/bundle/macos/*.app.tar.gz
-            core/tauri-rust/target/release/bundle/macos/*.app.tar.gz.sig
+            artifacts/macos-aarch64-apple-darwin/**/*.dmg
+            artifacts/macos-aarch64-apple-darwin/**/*.app.tar.gz
+            artifacts/macos-aarch64-apple-darwin/**/*.app.tar.gz.sig
+            artifacts/macos-x86_64-apple-darwin/**/*.dmg
+            artifacts/macos-x86_64-apple-darwin/**/*.app.tar.gz
+            artifacts/macos-x86_64-apple-darwin/**/*.app.tar.gz.sig
             ${{ runner.temp }}/latest.json
