@@ -144,15 +144,34 @@ class TestLatestTagAndFirstCommit(_RealGitRepoTestCase):
         self._commit_file('README.md', 'hello', 'initial commit')
         self.assertIsNone(grn.latest_tag())
 
-    def test_002_latest_tag_returns_the_real_most_recent_tag(self):
+    def test_002_latest_tag_returns_the_most_recent_tag_before_the_given_ref(self):
+        self._commit_file('README.md', 'hello', 'initial commit')
+        self._git('tag', 'v0.1.0')
+        self._commit_file('a.txt', 'a', 'second commit')
+        self._commit_file('b.txt', 'b', 'third commit')
+        self._git('tag', 'v0.2.0')
+
+        self.assertEqual(grn.latest_tag(), 'v0.1.0')
+
+    def test_003_latest_tag_excludes_a_tag_on_the_ref_itself(self):
+        """The real production bug (v0.1.1's release notes): a CI run
+        checks out a commit that is itself the just-pushed tag, so
+        describing that ref naively returns its own tag back, producing a
+        from_ref == to_ref null diff. latest_tag() must skip past it."""
         self._commit_file('README.md', 'hello', 'initial commit')
         self._git('tag', 'v0.1.0')
         self._commit_file('a.txt', 'a', 'second commit')
         self._git('tag', 'v0.2.0')
 
-        self.assertEqual(grn.latest_tag(), 'v0.2.0')
+        self.assertEqual(grn.latest_tag('v0.2.0'), 'v0.1.0')
 
-    def test_003_first_commit_returns_the_real_root_commit(self):
+    def test_004_latest_tag_returns_none_when_the_only_tag_is_on_the_ref_itself(self):
+        self._commit_file('README.md', 'hello', 'initial commit')
+        self._git('tag', 'v0.1.0')
+
+        self.assertIsNone(grn.latest_tag('v0.1.0'))
+
+    def test_005_first_commit_returns_the_real_root_commit(self):
         self._commit_file('README.md', 'hello', 'initial commit')
         root = grn._run_git('rev-parse', 'HEAD').strip()
         self._commit_file('a.txt', 'a', 'second commit')
@@ -180,6 +199,26 @@ class TestGenerateReleaseNotes(_RealGitRepoTestCase):
         notes = grn.generate_release_notes('v0.1.0', 'HEAD')
 
         self.assertIn('No CTX-*.md changes', notes)
+
+    def test_003_cli_invocation_with_only_to_ref_finds_real_notes_not_a_null_diff(self):
+        """End-to-end reproduction of the real v0.1.1 production bug via
+        the actual CLI entry point, the same way release.yml invokes it:
+        `--to-ref <tag>` only, no explicit --from-ref. HEAD is checked out
+        at a commit that is itself tagged v0.1.1 -- exactly CI's real
+        state after `git push` of a tag triggers the workflow."""
+        self._commit_file('README.md', 'hello', 'initial commit')
+        self._git('tag', 'v0.1.0')
+        self._commit_file('context/CTX-100.1-fixture.md', _SAMPLE_CTX, 'add ctx')
+        self._git('tag', 'v0.1.1')
+
+        script = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'generate_release_notes.py'))
+        result = subprocess.run(
+            [sys.executable, script, '--to-ref', 'v0.1.1'],
+            capture_output=True, text=True, check=True,
+        )
+
+        self.assertIn('CTX-999.1: Fixture Context', result.stdout)
+        self.assertNotIn('No CTX-*.md changes', result.stdout)
 
 
 if __name__ == '__main__':
