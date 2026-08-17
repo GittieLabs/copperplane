@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPEC-401/CTX-401.2 pattern, extended by CTX-402.5: a tiny, permanently-
+# committed PLACEHOLDER, not a real frozen daemon. tauri-build's own
+# build.rs checks that this externalBin resource path exists on every
+# `cargo build`/`cargo test` -- even a plain debug build -- so this file
+# exists purely to satisfy that existence check without requiring a real,
+# PyInstaller-frozen binary (see daemon.spec, CTX-401.1) to be present
+# just to compile the Rust crate. Needed once tauri.linux.conf.json
+# (CTX-402.5) gave Linux its own real externalBin entry -- before that, no
+# Linux sidecar was configured at all, so no placeholder was required
+# there.
+#
+# A real release build must overwrite this file with the real frozen
+# binary (`pyinstaller daemon.spec`, see services/python-daemon/daemon.spec)
+# before running `tauri build` -- if this placeholder is ever actually
+# bundled and executed by mistake, it fails loudly here rather than
+# silently pretending to be the daemon.
+echo "This is a CTX-402.5 build placeholder, not the real frozen daemon. Run 'pyinstaller daemon.spec' in services/python-daemon/ first." >&2
+exit 1
