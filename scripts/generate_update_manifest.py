@@ -3,19 +3,19 @@ Assembles a real Tauri updater manifest (SPEC-402, CTX-402.2) -- the exact
 `latest.json` shape `tauri-plugin-updater` expects:
 {version, notes, pub_date, platforms: {<platform-key>: {signature, url}}}.
 
-This repo's own release pipeline only ever builds for the CI runner's
-single native macOS architecture (CTX-401.2's own established, real scope
--- no universal binary), so the generated manifest always carries exactly
-one platform key. A real, honest, pre-existing limitation, not something
-this script hides: users on the other macOS architecture get no update
-entry at all until a universal build exists.
+CTX-402.4 added a real second macOS build leg (Intel, x86_64-apple-darwin,
+matrix-built alongside the existing Apple Silicon leg) -- this generator
+now takes one or more --platform groups and folds them all into a single
+manifest's platforms object, rather than assuming exactly one architecture
+was ever built (CTX-402.1/.2/.3's own real, honest scope at the time).
 
 Usage:
     python scripts/generate_update_manifest.py \
-        --version v0.1.0 --pub-date 2026-08-16T21:00:00Z \
-        --notes-file notes.md --target-triple aarch64-apple-darwin \
-        --signature-file bundle/macos/hardware-agent-studio.app.tar.gz.sig \
-        --download-url https://github.com/.../hardware-agent-studio.app.tar.gz
+        --version v0.1.0 --pub-date 2026-08-16T21:00:00Z --notes-file notes.md \
+        --platform aarch64-apple-darwin bundle/macos/aarch64.app.tar.gz.sig \
+            https://github.com/.../hardware-agent-studio_aarch64.app.tar.gz \
+        --platform x86_64-apple-darwin bundle/macos/x86_64.app.tar.gz.sig \
+            https://github.com/.../hardware-agent-studio_x86_64.app.tar.gz
 """
 import argparse
 import json
@@ -48,8 +48,10 @@ def platform_key_for(target_triple: str) -> str:
         ) from None
 
 
-def generate_manifest(version: str, pub_date: str, notes: str, target_triple: str,
-                       signature: str, download_url: str) -> dict:
+def generate_manifest(version: str, pub_date: str, notes: str, platforms: list) -> dict:
+    """`platforms` is a real list of (target_triple, signature, download_url)
+    tuples -- one real, independently-signed artifact per architecture
+    actually built, never fabricated for one that wasn't."""
     return {
         "version": version,
         "notes": notes,
@@ -58,7 +60,8 @@ def generate_manifest(version: str, pub_date: str, notes: str, target_triple: st
             platform_key_for(target_triple): {
                 "signature": signature,
                 "url": download_url,
-            },
+            }
+            for target_triple, signature, download_url in platforms
         },
     }
 
@@ -68,19 +71,25 @@ def main():
     parser.add_argument('--version', required=True, help="e.g. v0.1.0")
     parser.add_argument('--pub-date', required=True, help="ISO 8601 UTC timestamp, e.g. 2026-08-16T21:00:00Z")
     parser.add_argument('--notes-file', required=True)
-    parser.add_argument('--target-triple', required=True, help="e.g. aarch64-apple-darwin")
-    parser.add_argument('--signature-file', required=True, help="Tauri's own real .sig output file")
-    parser.add_argument('--download-url', required=True, help="The real GitHub Release asset URL for the .app.tar.gz")
+    parser.add_argument(
+        '--platform', dest='platforms', nargs=3, action='append', required=True,
+        metavar=('TARGET_TRIPLE', 'SIGNATURE_FILE', 'DOWNLOAD_URL'),
+        help="Repeatable -- one real, independently-built architecture's Tauri .sig file and its "
+             "real GitHub Release asset download URL, e.g. --platform aarch64-apple-darwin "
+             "bundle/macos/aarch64.app.tar.gz.sig https://github.com/.../aarch64.app.tar.gz",
+    )
     args = parser.parse_args()
 
     with open(args.notes_file, encoding='utf-8') as f:
         notes = f.read()
-    with open(args.signature_file, encoding='utf-8') as f:
-        signature = f.read().strip()
 
-    manifest = generate_manifest(
-        args.version, args.pub_date, notes, args.target_triple, signature, args.download_url,
-    )
+    platforms = []
+    for target_triple, signature_file, download_url in args.platforms:
+        with open(signature_file, encoding='utf-8') as f:
+            signature = f.read().strip()
+        platforms.append((target_triple, signature, download_url))
+
+    manifest = generate_manifest(args.version, args.pub_date, notes, platforms)
     print(json.dumps(manifest, indent=2))
 
 
