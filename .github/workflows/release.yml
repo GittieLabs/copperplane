@@ -12,7 +12,11 @@ name: "Release"
 # actions/runner-images' own current README, CTX-402.4), so this
 # cross-compiles instead. KiCad/FreeCAD are never bundled by this app (both
 # are resolved via PATH/glob against a separately-installed copy), so their
-# own architecture support has no bearing on this build matrix.
+# own architecture support has no bearing on this build matrix. CTX-402.5
+# adds real, UNSIGNED Windows and Linux builds -- explicitly pre-release
+# (see SPEC-402 §1 Non-Goals): windows-latest/ubuntu-latest are free-tier
+# GitHub-hosted runners (unlike macOS Intel), so no cross-compile trick is
+# needed there, just their own native build legs.
 
 on:
   push:
@@ -155,29 +159,215 @@ jobs:
             core/tauri-rust/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error
 
+  # CTX-402.5: a real, unsigned, PRE-RELEASE Windows build. windows-latest
+  # is a free-tier GitHub-hosted runner (unlike macOS Intel), so this is a
+  # plain native build, no cross-compile trick needed. No APPLE_*-style
+  # signing vars exist for Windows yet -- a real, separate, not-yet-made
+  # decision (SPEC-402 §1 Non-Goals), so the .exe/.msi ship unsigned;
+  # Windows SmartScreen will warn on first launch, documented in README.
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify the pushed tag matches Cargo.toml and tauri.conf.json's real versions
+        shell: bash
+        run: python3 scripts/check_release_version.py "$GITHUB_REF_NAME"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core/tauri-rust
+          key: x86_64-pc-windows-msvc
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        working-directory: apps/tauri-ui
+        run: npm ci
+
+      # Unlike macOS, PyInstaller has no shared-library/framework-build
+      # requirement on Windows -- a standard actions/setup-python CPython
+      # freezes directly, no special interpreter sourcing needed (real
+      # dependency wheel availability for every requirements.txt/
+      # requirements-build.txt package on win_amd64/cp311 was confirmed
+      # directly against PyPI before writing this job -- CTX-402.5).
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install daemon runtime + build dependencies
+        shell: bash
+        working-directory: services/python-daemon
+        run: |
+          python -m venv .build-venv
+          .build-venv/Scripts/pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Freeze the Python daemon (SPEC-401's committed daemon.spec)
+        shell: bash
+        working-directory: services/python-daemon
+        run: .build-venv/Scripts/pyinstaller daemon.spec
+
+      # PyInstaller already names its Windows output with a real .exe
+      # extension; Tauri's externalBin convention still needs the real
+      # target-triple suffix inserted before that extension (CTX-402.5).
+      - name: Rename the frozen binary to Tauri's real target-triple sidecar convention
+        shell: bash
+        working-directory: services/python-daemon
+        run: mv dist/hardware-agent-studio-daemon.exe dist/hardware-agent-studio-daemon-x86_64-pc-windows-msvc.exe
+
+      # tauri.windows.conf.json (CTX-402.5) merges automatically on this
+      # runner. No APPLE_*-equivalent signing vars -- only the Tauri
+      # updater keypair, shared across every platform (SPEC-402 §2: the
+      # updater's own trust model was always platform-agnostic).
+      - name: Build the Tauri app bundle
+        working-directory: core/tauri-rust
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx @tauri-apps/cli@2 build --target x86_64-pc-windows-msvc
+
+      - name: Upload this leg's real build artifacts for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64-pc-windows-msvc
+          path: |
+            core/tauri-rust/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+            core/tauri-rust/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            core/tauri-rust/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.sig
+          if-no-files-found: error
+
+  # CTX-402.5: a real, unsigned, PRE-RELEASE Linux build. ubuntu-latest is
+  # a free-tier GitHub-hosted runner. --bundles deb,appimage deliberately
+  # excludes rpm -- ubuntu-latest has no rpmbuild installed, and .deb +
+  # .AppImage already cover the large majority of desktop Linux users;
+  # adding an unverified rpmbuild dependency wasn't worth it for this
+  # pre-release pass (CTX-402.5 Plan Drift). Linux has no OS-level signing
+  # concept equivalent to Gatekeeper/SmartScreen for this distribution
+  # method, so there's no unsigned-launch warning to document here.
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify the pushed tag matches Cargo.toml and tauri.conf.json's real versions
+        run: python3 scripts/check_release_version.py "$GITHUB_REF_NAME"
+
+      # Tauri links against WebKitGTK/GTK on Linux; these aren't
+      # preinstalled on the runner image the way WebView2 (Windows) and
+      # WKWebView (macOS) are (same real package list rust-core-ci.yml's
+      # own Linux leg already uses successfully).
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            libssl-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core/tauri-rust
+          key: x86_64-unknown-linux-gnu
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        working-directory: apps/tauri-ui
+        run: npm ci
+
+      # Same real reasoning as the Windows leg: no shared-library/
+      # framework-build requirement on Linux, a standard actions/setup-
+      # python CPython freezes directly. Every requirements.txt/
+      # requirements-build.txt dependency's manylinux_2_28_x86_64/cp311
+      # wheel availability was confirmed directly against PyPI before
+      # writing this job (CTX-402.5).
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install daemon runtime + build dependencies
+        working-directory: services/python-daemon
+        run: |
+          python -m venv .build-venv
+          .build-venv/bin/pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Freeze the Python daemon (SPEC-401's committed daemon.spec)
+        working-directory: services/python-daemon
+        run: .build-venv/bin/pyinstaller daemon.spec
+
+      - name: Rename the frozen binary to Tauri's real target-triple sidecar convention
+        working-directory: services/python-daemon
+        run: mv dist/hardware-agent-studio-daemon dist/hardware-agent-studio-daemon-x86_64-unknown-linux-gnu
+
+      # tauri.linux.conf.json (CTX-402.5) merges automatically on this
+      # runner. createUpdaterArtifacts (tauri.conf.json) makes this also
+      # produce a real <app>_<version>_amd64.AppImage.tar.gz + matching
+      # .sig -- confirmed directly against tauri-plugin-updater's own real
+      # source (the exact version pinned in Cargo.lock) that AppImage is
+      # the real Linux updater artifact format, not .deb/.rpm.
+      - name: Build the Tauri app bundle
+        working-directory: core/tauri-rust
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx @tauri-apps/cli@2 build --target x86_64-unknown-linux-gnu --bundles deb,appimage
+
+      - name: Upload this leg's real build artifacts for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-unknown-linux-gnu
+          path: |
+            core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+            core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.tar.gz
+            core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.tar.gz.sig
+          if-no-files-found: error
+
   # A separate job, not a third matrix leg: publishing must happen exactly
-  # once, after BOTH real architectures have built, so the GitHub Release
-  # and latest.json each carry both real artifacts together rather than
-  # one job racing to publish a partial release (CTX-402.4).
+  # once, after every real build leg has finished, so the GitHub Release
+  # and latest.json each carry every real artifact together rather than
+  # one job racing to publish a partial release (CTX-402.4, extended by
+  # CTX-402.5 to also wait on Windows/Linux).
   publish:
-    needs: build-macos
+    needs: [build-macos, build-windows, build-linux]
     runs-on: macos-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download both matrix legs' real build artifacts
+      - name: Download every real build leg's artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: macos-*
           path: artifacts
 
       - name: Generate release notes from CTX-*.md implementation logs
         run: python3 scripts/generate_release_notes.py --to-ref "$GITHUB_REF_NAME" > "$RUNNER_TEMP/release-notes.md"
 
-      # Two real --platform groups, one per real, independently-signed
-      # architecture (CTX-402.4) -- generate_update_manifest.py folds them
-      # into a single latest.json's platforms object.
+      # Four real --platform groups, one per real, independently-built
+      # leg (two macOS architectures signed/notarized -- CTX-402.4 --
+      # plus unsigned Windows/Linux pre-release builds -- CTX-402.5) --
+      # generate_update_manifest.py folds them all into one latest.json.
       - name: Generate the real Tauri updater manifest (latest.json)
         run: |
           PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -185,6 +375,10 @@ jobs:
           AARCH64_TARBALL=$(basename "${AARCH64_SIG%.sig}")
           X86_64_SIG=$(find artifacts/macos-x86_64-apple-darwin -name '*.app.tar.gz.sig')
           X86_64_TARBALL=$(basename "${X86_64_SIG%.sig}")
+          WINDOWS_SIG=$(find artifacts/windows-x86_64-pc-windows-msvc -name '*.sig')
+          WINDOWS_ARTIFACT=$(basename "${WINDOWS_SIG%.sig}")
+          LINUX_SIG=$(find artifacts/linux-x86_64-unknown-linux-gnu -name '*.sig')
+          LINUX_ARTIFACT=$(basename "${LINUX_SIG%.sig}")
           python3 scripts/generate_update_manifest.py \
             --version "$GITHUB_REF_NAME" \
             --pub-date "$PUB_DATE" \
@@ -193,6 +387,10 @@ jobs:
               "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${AARCH64_TARBALL}" \
             --platform x86_64-apple-darwin "$X86_64_SIG" \
               "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${X86_64_TARBALL}" \
+            --platform x86_64-pc-windows-msvc "$WINDOWS_SIG" \
+              "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${WINDOWS_ARTIFACT}" \
+            --platform x86_64-unknown-linux-gnu "$LINUX_SIG" \
+              "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${LINUX_ARTIFACT}" \
             > "$RUNNER_TEMP/latest.json"
 
       - name: Publish the GitHub Release
@@ -206,4 +404,11 @@ jobs:
             artifacts/macos-x86_64-apple-darwin/**/*.dmg
             artifacts/macos-x86_64-apple-darwin/**/*.app.tar.gz
             artifacts/macos-x86_64-apple-darwin/**/*.app.tar.gz.sig
+            artifacts/windows-x86_64-pc-windows-msvc/**/*.msi
+            artifacts/windows-x86_64-pc-windows-msvc/**/*.exe
+            artifacts/windows-x86_64-pc-windows-msvc/**/*.sig
+            artifacts/linux-x86_64-unknown-linux-gnu/**/*.deb
+            artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage
+            artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage.tar.gz
+            artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage.tar.gz.sig
             ${{ runner.temp }}/latest.json

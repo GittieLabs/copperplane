@@ -5,9 +5,10 @@ Assembles a real Tauri updater manifest (SPEC-402, CTX-402.2) -- the exact
 
 CTX-402.4 added a real second macOS build leg (Intel, x86_64-apple-darwin,
 matrix-built alongside the existing Apple Silicon leg) -- this generator
-now takes one or more --platform groups and folds them all into a single
+takes one or more --platform groups and folds them all into a single
 manifest's platforms object, rather than assuming exactly one architecture
 was ever built (CTX-402.1/.2/.3's own real, honest scope at the time).
+CTX-402.5 added real, unsigned Windows/Linux pre-release legs on top.
 
 Usage:
     python scripts/generate_update_manifest.py \
@@ -23,12 +24,17 @@ import sys
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-# Tauri v2's own real platform-key convention for latest.json -- "darwin"
-# (not "macos"), and "aarch64" (not "arm64"), confirmed against the
-# updater plugin's own documented manifest format.
+# Tauri v2's own real platform-key convention for latest.json -- "{os}-{arch}",
+# where os is "darwin"/"windows"/"linux" (not "macos") and arch is
+# "aarch64"/"x86_64" (not "arm64") -- confirmed directly against
+# tauri-plugin-updater's own real source (updater_os()/updater_arch()/
+# target() in updater.rs) at the exact version pinned in this repo's
+# Cargo.lock (2.10.1), not assumed from documentation.
 _TARGET_TRIPLE_TO_PLATFORM_KEY = {
     "aarch64-apple-darwin": "darwin-aarch64",
     "x86_64-apple-darwin": "darwin-x86_64",
+    "x86_64-pc-windows-msvc": "windows-x86_64",
+    "x86_64-unknown-linux-gnu": "linux-x86_64",
 }
 
 
