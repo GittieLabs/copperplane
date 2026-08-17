@@ -18,9 +18,15 @@ class TestPlatformKeyFor(unittest.TestCase):
     def test_002_x86_64_apple_darwin_maps_to_the_real_darwin_x86_64_key(self):
         self.assertEqual(gum.platform_key_for('x86_64-apple-darwin'), 'darwin-x86_64')
 
-    def test_003_an_unknown_target_triple_raises_a_clean_error_naming_the_known_ones(self):
+    def test_003_x86_64_pc_windows_msvc_maps_to_the_real_windows_x86_64_key(self):
+        self.assertEqual(gum.platform_key_for('x86_64-pc-windows-msvc'), 'windows-x86_64')
+
+    def test_004_x86_64_unknown_linux_gnu_maps_to_the_real_linux_x86_64_key(self):
+        self.assertEqual(gum.platform_key_for('x86_64-unknown-linux-gnu'), 'linux-x86_64')
+
+    def test_005_an_unknown_target_triple_raises_a_clean_error_naming_the_known_ones(self):
         with self.assertRaises(gum.UnknownTargetTripleError) as ctx:
-            gum.platform_key_for('x86_64-unknown-linux-gnu')
+            gum.platform_key_for('aarch64-unknown-linux-gnu')
         self.assertIn('aarch64-apple-darwin', str(ctx.exception))
 
 
@@ -74,6 +80,23 @@ class TestGenerateManifest(unittest.TestCase):
         self.assertEqual(len(manifest['platforms']), 2)
         self.assertEqual(manifest['platforms']['darwin-aarch64'], {'signature': 'sig-arm', 'url': 'url-arm'})
         self.assertEqual(manifest['platforms']['darwin-x86_64'], {'signature': 'sig-x86', 'url': 'url-x86'})
+
+    def test_005_real_four_platform_manifest_carries_all_four_keys(self):
+        """CTX-402.5: a real release now carries two macOS architectures
+        plus real, unsigned pre-release Windows and Linux builds -- all
+        four must appear, each under its own real platform key."""
+        manifest = gum.generate_manifest(
+            'v0.1.3', '2026-08-18T21:00:00Z', 'notes',
+            [
+                ('aarch64-apple-darwin', 'sig-arm', 'url-arm'),
+                ('x86_64-apple-darwin', 'sig-x86-mac', 'url-x86-mac'),
+                ('x86_64-pc-windows-msvc', 'sig-win', 'url-win'),
+                ('x86_64-unknown-linux-gnu', 'sig-linux', 'url-linux'),
+            ],
+        )
+        self.assertEqual(len(manifest['platforms']), 4)
+        self.assertEqual(manifest['platforms']['windows-x86_64'], {'signature': 'sig-win', 'url': 'url-win'})
+        self.assertEqual(manifest['platforms']['linux-x86_64'], {'signature': 'sig-linux', 'url': 'url-linux'})
 
 
 class TestCliInvocation(unittest.TestCase):

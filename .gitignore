@@ -50,6 +50,8 @@ dist/
 services/python-daemon/dist/*
 !services/python-daemon/dist/hardware-agent-studio-daemon-aarch64-apple-darwin
 !services/python-daemon/dist/hardware-agent-studio-daemon-x86_64-apple-darwin
+!services/python-daemon/dist/hardware-agent-studio-daemon-x86_64-pc-windows-msvc.exe
+!services/python-daemon/dist/hardware-agent-studio-daemon-x86_64-unknown-linux-gnu
 
 # Claude Code machine-local permission state — not shared config
 .claude/settings.local.json

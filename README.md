@@ -96,6 +96,26 @@ right-click-Open steps above:
 xattr -cr /Applications/Hardware\ Agent\ Studio.app
 ```
 
+### Download a prebuilt build (Windows / Linux) — pre-release, needs testers
+
+As of `v0.1.3`, each release also ships real Windows and Linux builds. **These are pre-release**:
+real, working builds you can install and try, but — unlike the macOS build — not yet backed by the
+same depth of real, day-to-day usage on those platforms. **If you try one, we'd genuinely like to
+hear how it goes** (open an issue, good or bad) — that's what turns "pre-release" into a fully
+supported build.
+
+**Windows** — grab either the `.msi` or the `-setup.exe` from [Releases](../../releases). **The
+build is currently unsigned** (no Windows code-signing certificate exists yet — the cost/process for
+one is still being worked out), so Windows SmartScreen will show a "Windows protected your PC"
+warning on first launch:
+
+1. Click **More info** on the SmartScreen dialog.
+2. Click **Run anyway**.
+
+**Linux** — grab the `.deb` (Debian/Ubuntu: `sudo dpkg -i *.deb`) or the `.AppImage` (any distro:
+`chmod +x *.AppImage && ./*.AppImage`) from [Releases](../../releases). No OS-level signing/warning
+concept applies to either format the way Gatekeeper/SmartScreen do on macOS/Windows.
+
 ### Build from source
 
 You'll need [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) 18+, and
