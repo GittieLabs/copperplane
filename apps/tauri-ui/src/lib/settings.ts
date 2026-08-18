@@ -72,7 +72,19 @@ export interface DaemonConfig {
  * reported honestly by the daemon, not papered over here. */
 export interface DaemonCapabilities {
   kicad_available: boolean
+  /** CTX-303.4: the real path the daemon actually checked for KiCad's IPC
+   * socket -- the configured override, or the real default
+   * (`/tmp/kicad/api.sock`) -- reported whether or not it exists, so a
+   * "not reachable" state can say exactly where it looked. */
+  kicad_socket_path_checked: string | null
   freecad_available: boolean
+  /** CTX-303.4: the real, resolved freecadcmd path on success -- never
+   * set alongside a real freecad_error. */
+  freecad_path_checked: string | null
+  /** CTX-303.4: the real, specific reason freecadcmd couldn't be found,
+   * straight from find_freecadcmd()'s own exception message -- never set
+   * alongside a real freecad_path_checked. */
+  freecad_error: string | null
   llm_providers: string[]
   log_path: string | null
   python_version: string
