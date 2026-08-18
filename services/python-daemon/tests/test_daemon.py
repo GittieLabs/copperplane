@@ -191,6 +191,29 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
         caps = daemon._detect_capabilities()
         self.assertFalse(caps["freecad_available"])
 
+    @patch('daemon.freecad_bridge.find_freecadcmd')
+    def test_002g_freecad_unavailable_reports_the_real_error_message_not_just_a_bool(self, mock_find):
+        """CTX-303.4: the real, specific reason find_freecadcmd() raised is
+        surfaced, not discarded down to a bare False -- and no path is
+        reported alongside a real failure."""
+        mock_find.side_effect = daemon.freecad_bridge.FreeCADUnavailableError(
+            "Could not find the freecadcmd executable. Install FreeCAD 0.20+, or ensure it's on PATH."
+        )
+        caps = daemon._detect_capabilities()
+        self.assertEqual(
+            caps["freecad_error"],
+            "Could not find the freecadcmd executable. Install FreeCAD 0.20+, or ensure it's on PATH.",
+        )
+        self.assertIsNone(caps["freecad_path_checked"])
+
+    @patch('daemon.freecad_bridge.find_freecadcmd', return_value='/opt/freecad/bin/freecadcmd')
+    def test_002h_freecad_available_reports_the_real_found_path_with_no_error(self, mock_find):
+        """CTX-303.4: a successful resolution reports the real path
+        find_freecadcmd() actually returned, with no error alongside it."""
+        caps = daemon._detect_capabilities()
+        self.assertEqual(caps["freecad_path_checked"], '/opt/freecad/bin/freecadcmd')
+        self.assertIsNone(caps["freecad_error"])
+
     def test_002b_detect_capabilities_matches_find_kicad_cli_for_real(self):
         """CTX-309.1: same real, non-hardcoded pattern as test_001 above,
         for kicad_cli_available."""
@@ -251,6 +274,26 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
         """TEST-001: kicad_available reflects whether the IPC socket path exists."""
         caps = daemon._detect_capabilities()
         self.assertTrue(caps["kicad_available"])
+
+    def test_003b_kicad_socket_path_checked_reports_the_real_default_path(self):
+        """CTX-303.4: the real, resolved path is reported regardless of
+        whether it exists -- so the UI can say exactly where it looked."""
+        original_override = daemon.kicad_bridge._socket_path_override
+        daemon.kicad_bridge._socket_path_override = None
+        try:
+            caps = daemon._detect_capabilities()
+            self.assertEqual(caps["kicad_socket_path_checked"], "/tmp/kicad/api.sock")
+        finally:
+            daemon.kicad_bridge._socket_path_override = original_override
+
+    def test_003c_kicad_socket_path_checked_reports_a_real_configured_override(self):
+        original_override = daemon.kicad_bridge._socket_path_override
+        daemon.kicad_bridge._socket_path_override = "/custom/kicad.sock"
+        try:
+            caps = daemon._detect_capabilities()
+            self.assertEqual(caps["kicad_socket_path_checked"], "/custom/kicad.sock")
+        finally:
+            daemon.kicad_bridge._socket_path_override = original_override
 
     def test_004_main_emits_daemon_ready_before_reading_any_input(self):
         """TEST-002: main() emits daemon.ready -- reporting detected

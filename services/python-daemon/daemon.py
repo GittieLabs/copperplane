@@ -1055,18 +1055,33 @@ def _detect_capabilities() -> dict:
     """Cheap, non-blocking checks only (SPEC-107 §3) -- SPEC-103/104 both
     connect to KiCad/FreeCAD lazily on first real use, and this probe must
     not itself pay for a slow handshake on every single startup."""
+    # CTX-303.4: the real path actually checked, reported unconditionally
+    # (whether or not it exists) -- so a real "not reachable" state in
+    # Settings can say exactly where it looked instead of leaving the
+    # user to guess. The check itself stays the same cheap, non-blocking
+    # os.path.exists (see docstring); only its own diagnostic detail was
+    # ever being discarded.
+    kicad_socket_path_checked = None
     kicad_available = False
     if kicad_bridge is not None:
-        socket_path = kicad_bridge._socket_path_override or "/tmp/kicad/api.sock"
-        kicad_available = os.path.exists(socket_path)
+        kicad_socket_path_checked = kicad_bridge._socket_path_override or "/tmp/kicad/api.sock"
+        kicad_available = os.path.exists(kicad_socket_path_checked)
 
+    # CTX-303.4: find_freecadcmd() already returns the real, resolved path
+    # on success or raises a real, specific FreeCADUnavailableError message
+    # on failure -- both were being computed and immediately discarded down
+    # to a bare boolean. Captured here so Settings can show the user the
+    # real reason instead of a flat "not reachable".
     freecad_available = False
+    freecad_path_checked = None
+    freecad_error = None
     if freecad_bridge is not None:
         try:
-            freecad_bridge.find_freecadcmd()
+            freecad_path_checked = freecad_bridge.find_freecadcmd()
             freecad_available = True
-        except Exception:
+        except Exception as e:
             freecad_available = False
+            freecad_error = str(e)
 
     # SPEC-309: whether kicad-cli was actually located on this machine --
     # a broken/missing kicad-cli shouldn't take down the rest of the app,
@@ -1084,7 +1099,10 @@ def _detect_capabilities() -> dict:
 
     return {
         "kicad_available": kicad_available,
+        "kicad_socket_path_checked": kicad_socket_path_checked,
         "freecad_available": freecad_available,
+        "freecad_path_checked": freecad_path_checked,
+        "freecad_error": freecad_error,
         "kicad_cli_available": kicad_cli_available,
         # SPEC-303: reflects which providers actually have a key configured
         # right now, fixed from a hardcoded [] that predated any real

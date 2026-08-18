@@ -40,7 +40,10 @@ const { Settings } = await import('./Settings')
 
 const EMPTY_CAPABILITIES = {
   kicad_available: false,
+  kicad_socket_path_checked: '/tmp/kicad/api.sock',
   freecad_available: false,
+  freecad_path_checked: null,
+  freecad_error: null,
   llm_providers: [],
   log_path: '/var/log/daemon.log',
   python_version: '3.12.0',
@@ -196,6 +199,44 @@ describe('Settings: Tier 2 (KiCad/FreeCAD status + paths)', () => {
 
     await waitFor(() => expect(screen.getByText('KiCad: reachable')).toBeTruthy())
     screen.getByText('FreeCAD: not reachable')
+  })
+
+  it('CTX-303.4: KiCad not reachable shows the real checked socket path and a concrete explanation', async () => {
+    getCapabilitiesMock.mockResolvedValue({
+      ...EMPTY_CAPABILITIES,
+      kicad_available: false,
+      kicad_socket_path_checked: '/tmp/kicad/api.sock',
+    })
+
+    render(<Settings />)
+
+    await waitFor(() => screen.getByText('KiCad: not reachable'))
+    screen.getByText('/tmp/kicad/api.sock', { exact: false })
+    screen.getByText(/Preferences → Plugins/)
+  })
+
+  it('CTX-303.4: FreeCAD not reachable shows the real, specific error message', async () => {
+    getCapabilitiesMock.mockResolvedValue({
+      ...EMPTY_CAPABILITIES,
+      freecad_available: false,
+      freecad_error: 'Could not find the freecadcmd executable. Install FreeCAD 0.20+, or ensure it\'s on PATH.',
+    })
+
+    render(<Settings />)
+
+    await waitFor(() => screen.getByText(/Could not find the freecadcmd executable/))
+  })
+
+  it('CTX-303.4: FreeCAD reachable shows the real path it was found at', async () => {
+    getCapabilitiesMock.mockResolvedValue({
+      ...EMPTY_CAPABILITIES,
+      freecad_available: true,
+      freecad_path_checked: '/opt/freecad/bin/freecadcmd',
+    })
+
+    render(<Settings />)
+
+    await waitFor(() => screen.getByText('/opt/freecad/bin/freecadcmd', { exact: false }))
   })
 
   it('TEST-007: the restart-to-apply notice is present once, scoped to the path fields section', async () => {

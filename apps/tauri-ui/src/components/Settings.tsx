@@ -398,13 +398,32 @@ export function Settings() {
 
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-medium text-neutral-400">Connectivity</h3>
-        <div className="flex gap-4 text-sm">
+        <div className="flex flex-col gap-1 text-sm">
           <span className={capabilities?.kicad_available ? 'text-emerald-400' : 'text-neutral-500'}>
             KiCad: {capabilities?.kicad_available ? 'reachable' : 'not reachable'}
           </span>
+          {/* CTX-303.4: real user feedback -- "not reachable" alone gave no
+           * way to tell why. The check itself is a cheap, non-blocking
+           * file-existence probe (SPEC-107 §3), not a live connection
+           * attempt, so this can only ever suggest the likely real causes,
+           * not diagnose with certainty -- stated plainly, not overclaimed. */}
+          {!capabilities?.kicad_available && capabilities?.kicad_socket_path_checked && (
+            <p className="text-xs text-neutral-500">
+              Checked: <code>{capabilities.kicad_socket_path_checked}</code> — no socket found there.
+              Likely KiCad isn't running, or its IPC API isn't enabled (Preferences → Plugins).
+            </p>
+          )}
           <span className={capabilities?.freecad_available ? 'text-emerald-400' : 'text-neutral-500'}>
             FreeCAD: {capabilities?.freecad_available ? 'reachable' : 'not reachable'}
           </span>
+          {capabilities?.freecad_available && capabilities.freecad_path_checked && (
+            <p className="text-xs text-neutral-500">
+              Found at: <code>{capabilities.freecad_path_checked}</code>
+            </p>
+          )}
+          {!capabilities?.freecad_available && capabilities?.freecad_error && (
+            <p className="text-xs text-neutral-500">{capabilities.freecad_error}</p>
+          )}
         </div>
 
         <label className="flex flex-col gap-1 text-sm text-neutral-400">
@@ -419,6 +438,11 @@ export function Settings() {
               setPathFields((prev) => ({ ...prev, kicad_socket_path: e.target.value }))
             }}
           />
+          <span className="text-xs text-neutral-500">
+            Optional. Leave blank for a standard KiCad install — the app finds the real socket KiCad
+            itself creates automatically. Only set this if KiCad's IPC socket lives somewhere
+            non-standard.
+          </span>
         </label>
         <label className="flex flex-col gap-1 text-sm text-neutral-400">
           KiCad IPC timeout (ms)
@@ -432,6 +456,10 @@ export function Settings() {
               setPathFields((prev) => ({ ...prev, kicad_timeout_ms: e.target.value }))
             }}
           />
+          <span className="text-xs text-neutral-500">
+            Optional. How long to wait for a KiCad IPC response before giving up. Leave blank to use
+            the built-in default.
+          </span>
         </label>
         <label className="flex flex-col gap-1 text-sm text-neutral-400">
           freecadcmd path override
@@ -445,6 +473,11 @@ export function Settings() {
               setPathFields((prev) => ({ ...prev, freecadcmd_path_override: e.target.value }))
             }}
           />
+          <span className="text-xs text-neutral-500">
+            Optional. Leave blank for a standard FreeCAD install — the app searches PATH and the usual
+            per-OS install locations automatically. Only set this if <code>freecadcmd</code> lives
+            somewhere non-standard.
+          </span>
         </label>
         <label className="flex flex-col gap-1 text-sm text-neutral-400">
           Storage location
