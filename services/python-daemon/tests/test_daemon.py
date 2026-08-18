@@ -1448,6 +1448,45 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
         loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
         self.assertEqual(loaded["board_revision"], "manual:50x30x20")
 
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_007_zero_holes_of_any_kind_sets_the_honest_no_holes_found_flag(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        """SPEC-311 §2: distinct from the existing unrecognized_holes
+        warning, which only ever fires when *some* NPTH pads exist but
+        aren't recognized -- a board with zero holes of any kind
+        previously triggered no warning at all."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+
+        result = daemon.freecad_generate_enclosure(height=20)
+
+        self.assertTrue(result["no_mounting_holes_found"])
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_008_any_real_hole_found_clears_the_no_holes_found_flag(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+
+        result = daemon.freecad_generate_enclosure(height=20)
+
+        self.assertFalse(result["no_mounting_holes_found"])
+
+    @patch('daemon.generate_enclosure')
+    def test_009_manual_mode_never_sets_the_no_holes_found_flag(self, mock_generate):
+        """Manual mode has no board data to have found holes on in the
+        first place -- the flag is meaningless there, not falsely
+        reported as True."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+
+        result = daemon.freecad_generate_enclosure(height=20, width=50, depth=30)
+
+        self.assertNotIn("no_mounting_holes_found", result)
+
 
 class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
     """CTX-310.1: the file-based mode SPEC-310 adds -- composes
@@ -1528,6 +1567,197 @@ class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
             self.assertIn("kicad_pcb_import", str(ctx.exception))
         finally:
             daemon.kicad_pcb_import = original
+
+
+class TestKicadGetComponentHeightsRoute(unittest.TestCase):
+    """CTX-311.1: kicad_get_component_heights composes kicad_bridge's
+    real per-footprint model list with freecad_bridge's real STEP
+    bounding-box reader -- these tests cover the composition/routing
+    logic itself (which model wins, what counts as unknown), mocked at
+    both bridge boundaries; the real geometry read is already verified
+    against a real freecadcmd in test_freecad_bridge.py, and the real
+    live model-list/path-resolution round trip in test_kicad_bridge.py."""
+
+    def test_001_a_resolved_step_model_becomes_a_known_real_height(self):
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{
+                "reference": "J3",
+                "models": [{
+                    "filename": "${KICAD10_3DMODEL_DIR}/x.step",
+                    "resolved_path": "/real/x.step",
+                    "visible": True,
+                }],
+            }],
+        ), patch(
+            'daemon.freecad_bridge.get_step_bounding_box_mm',
+            return_value={"x_mm": 2.54, "y_mm": 10.16, "z_mm": 11.54},
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["known"], [{"reference": "J3", "height_mm": 11.54}])
+        self.assertEqual(result["unknown"], [])
+
+    def test_002_no_attached_models_is_reported_unknown_not_defaulted(self):
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{"reference": "REF**", "models": []}],
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["known"], [])
+        self.assertEqual(result["unknown"], ["REF**"])
+
+    def test_003_a_non_step_model_is_reported_unknown_never_guessed(self):
+        """SPEC-311 §2's own named, deliberate scope limit: a .wrl
+        model's real coordinate-unit convention is unverified, so it is
+        never silently treated as already-mm."""
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{
+                "reference": "U1",
+                "models": [{
+                    "filename": "${KICAD10_3DMODEL_DIR}/x.wrl",
+                    "resolved_path": "/real/x.wrl",
+                    "visible": True,
+                }],
+            }],
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["unknown"], ["U1"])
+
+    def test_004_an_unresolved_path_is_reported_unknown(self):
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{
+                "reference": "U2",
+                "models": [{
+                    "filename": "${KICAD10_3DMODEL_DIR}/x.step",
+                    "resolved_path": None,
+                    "visible": True,
+                }],
+            }],
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["unknown"], ["U2"])
+
+    def test_005_a_freecadcmd_read_failure_degrades_to_unknown_not_a_route_error(self):
+        """A single bad/corrupt STEP model shouldn't fail the whole
+        route -- every other component's real height is still worth
+        reporting."""
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{
+                "reference": "U3",
+                "models": [{
+                    "filename": "${KICAD10_3DMODEL_DIR}/x.step",
+                    "resolved_path": "/real/x.step",
+                    "visible": True,
+                }],
+            }],
+        ), patch(
+            'daemon.freecad_bridge.get_step_bounding_box_mm',
+            side_effect=RuntimeError("freecadcmd exploded"),
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["unknown"], ["U3"])
+
+    def test_006_an_invisible_model_is_not_used_even_if_it_is_a_real_step_file(self):
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{
+                "reference": "U4",
+                "models": [{
+                    "filename": "${KICAD10_3DMODEL_DIR}/x.step",
+                    "resolved_path": "/real/x.step",
+                    "visible": False,
+                }],
+            }],
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["unknown"], ["U4"])
+
+    def test_007_kicad_bridge_import_failure_raises_a_clean_error(self):
+        original = daemon.kicad_bridge
+        daemon.kicad_bridge = None
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                daemon.kicad_get_component_heights()
+            self.assertIn("kicad_bridge", str(ctx.exception))
+        finally:
+            daemon.kicad_bridge = original
+
+    def test_008_freecad_bridge_import_failure_raises_a_clean_error(self):
+        original = daemon.freecad_bridge
+        daemon.freecad_bridge = None
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                daemon.kicad_get_component_heights()
+            self.assertIn("freecad_bridge", str(ctx.exception))
+        finally:
+            daemon.freecad_bridge = original
+
+
+class TestKicadExportBoardGlbRoute(unittest.TestCase):
+
+    @patch('daemon.kicad_cli.export_board_glb', return_value='/real/board.glb')
+    def test_001_delegates_and_wraps_the_real_path(self, mock_export):
+        result = daemon.kicad_export_board_glb('/real/board.kicad_pcb')
+
+        mock_export.assert_called_once_with('/real/board.kicad_pcb')
+        self.assertEqual(result, {"glb_path": "/real/board.glb"})
+
+    def test_002_kicad_cli_import_failure_raises_a_clean_error(self):
+        original = daemon.kicad_cli
+        daemon.kicad_cli = None
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                daemon.kicad_export_board_glb('/real/board.kicad_pcb')
+            self.assertIn("kicad_cli", str(ctx.exception))
+        finally:
+            daemon.kicad_cli = original
+
+
+class TestSpec311RouteRegistration(unittest.TestCase):
+    """CTX-311.1: the two new routes are only registered when their real
+    dependency imported, and both run async -- the same SPEC-107 §2 /
+    ASYNC_ROUTES pattern every other real kicad.*/freecad.* route uses."""
+
+    def test_001_get_component_heights_registered_only_with_both_bridges(self):
+        original_kicad, original_freecad = daemon.kicad_bridge, daemon.freecad_bridge
+        try:
+            daemon.kicad_bridge = MagicMock()
+            daemon.freecad_bridge = None
+            self.assertNotIn("kicad.get_component_heights", daemon._build_routes())
+
+            daemon.kicad_bridge = None
+            daemon.freecad_bridge = MagicMock()
+            self.assertNotIn("kicad.get_component_heights", daemon._build_routes())
+
+            daemon.kicad_bridge = MagicMock()
+            daemon.freecad_bridge = MagicMock()
+            self.assertIn("kicad.get_component_heights", daemon._build_routes())
+        finally:
+            daemon.kicad_bridge, daemon.freecad_bridge = original_kicad, original_freecad
+
+    def test_002_export_board_glb_registered_only_with_kicad_cli(self):
+        original = daemon.kicad_cli
+        try:
+            daemon.kicad_cli = None
+            self.assertNotIn("kicad.export_board_glb", daemon._build_routes())
+
+            daemon.kicad_cli = MagicMock()
+            self.assertIn("kicad.export_board_glb", daemon._build_routes())
+        finally:
+            daemon.kicad_cli = original
+
+    def test_003_both_new_routes_are_registered_as_async(self):
+        self.assertIn("kicad.get_component_heights", daemon.ASYNC_ROUTES)
+        self.assertIn("kicad.export_board_glb", daemon.ASYNC_ROUTES)
 
 
 if __name__ == '__main__':

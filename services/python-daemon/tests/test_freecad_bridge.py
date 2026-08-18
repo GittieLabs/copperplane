@@ -15,6 +15,7 @@ from freecad_bridge import (
     FreeCADUnavailableError,
     find_freecadcmd,
     generate_enclosure,
+    get_step_bounding_box_mm,
 )
 
 
@@ -223,6 +224,40 @@ class TestFreeCADBridge(unittest.TestCase):
         a silently-guessed zero-size enclosure."""
         with self.assertRaises(ValueError):
             generate_enclosure(height=20)
+
+    def test_011_get_step_bounding_box_mm_real_round_trip(self):
+        """CTX-311.1: `get_step_bounding_box_mm` against a real,
+        `generate_enclosure`-produced `.step` file -- reuses this
+        module's own real output as a real input, the same real
+        50x30x20mm box `TEST-004` already verifies via `.glb`, this
+        time reading the `.step` side directly. Skips itself cleanly
+        when no freecadcmd is found, same convention as every other
+        real test in this module."""
+        try:
+            find_freecadcmd()
+        except FreeCADUnavailableError:
+            self.skipTest(
+                "No local freecadcmd found. Install FreeCAD 0.20+ to run this "
+                "test for real."
+            )
+
+        result = generate_enclosure(width=50, depth=30, height=20)
+        glb_path, step_path = result["glb_path"], result["step_path"]
+        try:
+            bbox = get_step_bounding_box_mm(step_path)
+            self.assertAlmostEqual(bbox["x_mm"], 50, delta=0.01)
+            self.assertAlmostEqual(bbox["y_mm"], 30, delta=0.01)
+            self.assertAlmostEqual(bbox["z_mm"], 20, delta=0.01)
+        finally:
+            if os.path.exists(glb_path):
+                os.remove(glb_path)
+            if os.path.exists(step_path):
+                os.remove(step_path)
+
+    def test_012_a_missing_model_file_raises_a_clean_error(self):
+        with self.assertRaises(FreeCADBuildError) as ctx:
+            get_step_bounding_box_mm('/nonexistent/model.step')
+        self.assertIn("does not exist", str(ctx.exception))
 
 
 _TEST_BOARD_OUTLINE = {"x_mm": 0.0, "y_mm": 0.0, "width_mm": 20.0, "height_mm": 15.0}
