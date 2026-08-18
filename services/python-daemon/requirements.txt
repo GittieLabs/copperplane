@@ -4,3 +4,17 @@ trimesh==5.0.0
 pyyaml==6.0.3
 certifi==2026.4.22
 gittielabs-agentflow[anthropic,openai,google]==0.9.0
+
+# Pinned explicitly (CTX-402.6): a transitive dependency (of anthropic/
+# openai/google SDKs pulled in above) that would otherwise float to
+# whatever's newest. Real, direct-to-PyPI checking found cryptography
+# dropped macOS x86_64 wheels entirely as of 49.0.0 (only macosx_11_0_arm64
+# ships from there on) -- 48.0.0 is the newest release that still ships a
+# real macosx_10_9_universal2 wheel (both Apple Silicon and Intel in one
+# file) alongside win_amd64/manylinux wheels for every other platform this
+# repo's release pipeline builds for. Confirmed via a real, failed CI run
+# (v0.1.3's first x86_64 macOS leg): PyInstaller's own arch check caught
+# the resulting build-from-source .so as arm64-only when a x86_64 freeze
+# needed it, since Rust's build backend doesn't respect the parent
+# process's `arch -x86_64` the way a prebuilt wheel install does.
+cryptography==48.0.0
