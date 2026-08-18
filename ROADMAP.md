@@ -201,6 +201,29 @@ bridges talk to each other, and it's where the product stops being two disconnec
 Scope: board outline extraction, hole positions, wall thickness/tolerance/standoff parameters,
 fillets, and STEP export alongside `.glb` so the result is usable in real mechanical CAD.
 
+#### SPEC-111 — Enclosure Lid & Component-Height Clearance
+*Module:* `services/python-daemon` · *Depends on:* SPEC-109, SPEC-202
+
+Real user feedback exercising the shipped enclosure generator: `SPEC-109` only ever builds an
+open-top tray (its own §1 Non-Goals rule out lid/fastener hardware) sized from a board's *bounding
+box*, not its real outline — both the live IPC path (`kicad_bridge.get_board_outline`) and the
+file-based path (`kicad_pcb_import.extract_board_outline`) reduce the real Edge.Cuts polygon down
+to a rectangle before it ever reaches FreeCAD. Two real, related gaps worth addressing eventually,
+neither attempted here:
+
+1.  **A real lid, not just a bottom shell.** Needs the enclosure's own interior height to clear
+    every placed component's real body height, not just the board's flat 2D outline — today's
+    pipeline has no per-component Z-height data at all (`SPEC-202`'s extraction doesn't currently
+    capture component body height; `library_store`'s own Part schema would need it).
+2.  **A true polygon-traced shell, not a rectangular bounding box**, for a genuinely
+    non-rectangular board — real OpenCASCADE work (extrude an arbitrary closed wire, offset it
+    inward by wall thickness for the shell, handle concave sections at each corner), not a small
+    tweak to the existing `Part.makeBox` boolean-cut script.
+
+Neither is a quick fix — both need real design work (what "component height" means for a part with
+no 3D model at all; how a non-rectangular offset behaves at a concave corner) before
+implementation, which is exactly why this is a backlog entry, not a context.
+
 ### 3.2 `2xx` — Intelligence layer
 
 **Decision (2026-08-08): the AI runtime for this layer is [AgentFlow](https://github.com/GittieLabs/agentflow)
