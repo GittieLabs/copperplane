@@ -55,6 +55,13 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
   const [dims, setDims] = useState({ width: 50, depth: 30, height: 20 })
   const [boardParams, setBoardParams] = useState(_DEFAULT_BOARD_PARAMS)
 
+  // SPEC-311/CTX-311.2: lid is board-driven-mode-only on the daemon
+  // side -- kept as its own toggle rather than a boardParams field so
+  // switching to Manual mode doesn't need to silently drop it.
+  const [lid, setLid] = useState(false)
+  const [lidThicknessMm, setLidThicknessMm] = useState<number | ''>('')
+  const [lidVisible, setLidVisible] = useState(true)
+
   const [job, setJob] = useState<JobHandle<EnclosureResult> | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [result, setResult] = useState<EnclosureResult | null>(null)
@@ -130,13 +137,20 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
     const params: EnclosureParams =
       mode === 'manual'
         ? { height: dims.height, width: dims.width, depth: dims.depth, project_name: projectName }
-        : { ...boardParams, pcb_path: pcbPath ?? undefined, project_name: projectName }
+        : {
+            ...boardParams,
+            pcb_path: pcbPath ?? undefined,
+            project_name: projectName,
+            lid,
+            lid_thickness_mm: lid && lidThicknessMm !== '' ? lidThicknessMm : undefined,
+          }
 
     try {
       const handle = await generateEnclosure(params)
       setJob(handle)
       handle.onUpdate((update) => setStatus(update.status))
 
+      setLidVisible(true)
       setResult(await handle.result)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -150,145 +164,202 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
   }
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-2">
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className={`rounded px-3 py-1 text-sm ${
-            mode === 'board' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
-          }`}
-          onClick={() => setMode('board')}
-          disabled={running}
-        >
-          Board
-        </button>
-        <button
-          type="button"
-          className={`rounded px-3 py-1 text-sm ${
-            mode === 'manual' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
-          }`}
-          onClick={() => setMode('manual')}
-          disabled={running}
-        >
-          Manual (no PCB)
-        </button>
-      </div>
-
-      {mode === 'board' && (
-        <BoardPickerSection
-          loadingList={loadingList}
-          listResult={listResult}
-          listError={listError}
-          onRefreshList={() => void refreshList()}
-          onOpenKicad={() => void handleOpenKicad()}
-          openingKicad={openingKicad}
-          openKicadError={openKicadError}
-          selectedBoard={selectedBoard}
-          manualPcbPath={manualPcbPath}
-          onSelectBoard={handleSelectBoard}
-          onPickManually={() => void handlePickPcbFile()}
-          running={running}
-        />
-      )}
-
-      {mode === 'board' && (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs text-neutral-500">
-            Enclosures are generated as a rectangular box sized to your board's bounding box --
-            non-rectangular board outlines aren't traced precisely yet.
-          </p>
-          {(
-            [
-              ['height', 'Height (mm)', 'How tall the enclosure is inside, above the board.', true],
-              ['wall_thickness_mm', 'Wall thickness (mm)', 'How thick the outer walls are.', false],
-              ['clearance_mm', 'Clearance (mm)', "Extra gap between the board's edge and the inside wall.", false],
-              ['fillet_radius_mm', 'Fillet radius (mm)', "Rounds the enclosure's outer corners -- 0 for sharp corners.", false],
-              ['standoff_height_mm', 'Standoff height (mm)', 'How tall the mounting posts are that hold the board above the enclosure floor.', false],
-            ] as const
-          ).map(([field, label, hint, required]) => (
-            <label key={field} className="flex flex-col gap-1 text-xs">
-              <span className="text-neutral-300">
-                {label} {required ? <span className="text-neutral-500">(required)</span> : <span className="text-neutral-500">(optional)</span>}
-              </span>
-              <input
-                type="number"
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
-                value={boardParams[field]}
-                onChange={(e) => setBoardParams((prev) => ({ ...prev, [field]: Number(e.target.value) }))}
-                disabled={running}
-              />
-              <span className="text-neutral-500">{hint}</span>
-            </label>
-          ))}
-        </div>
-      )}
-
-      {mode === 'manual' && (
-        <div className="flex flex-col gap-2">
-          <p className="text-xs text-neutral-500">
-            A plain rectangular box, not based on any real board -- use Board above when you have a
-            .kicad_pcb file available.
-          </p>
-          {(
-            [
-              ['width', 'Width (mm)'],
-              ['depth', 'Depth (mm)'],
-              ['height', 'Height (mm)'],
-            ] as const
-          ).map(([dim, label]) => (
-            <label key={dim} className="flex flex-col gap-1 text-xs">
-              <span className="text-neutral-300">{label} <span className="text-neutral-500">(required)</span></span>
-              <input
-                type="number"
-                className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
-                value={dims[dim]}
-                onChange={(e) => setDims((prev) => ({ ...prev, [dim]: Number(e.target.value) }))}
-                disabled={running}
-              />
-            </label>
-          ))}
-        </div>
-      )}
-
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className="flex-1 rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
-          onClick={() => void handleGenerate()}
-          disabled={running || (mode === 'board' && !pcbPath)}
-        >
-          {running ? 'Generating…' : 'Generate Enclosure'}
-        </button>
-        {running && (
+    // SPEC-311 §2: the Enclosure area specifically gets a wider layout
+    // (a large 3D preview is a real, direct benefit of the extra room) --
+    // every other tab keeps its existing max-w-md column unchanged; a
+    // repo-wide shell/layout redesign is a deliberate, separate follow-up
+    // (SPEC-311 §1's own Non-Goals), not silently expanded into here.
+    <div className="flex w-full max-w-6xl flex-col gap-4 lg:flex-row lg:items-start">
+      <div className="flex w-full flex-col gap-2 lg:w-96 lg:flex-none">
+        <div className="flex gap-2">
           <button
             type="button"
-            className="rounded border border-neutral-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
-            onClick={() => void handleCancel()}
+            className={`rounded px-3 py-1 text-sm ${
+              mode === 'board' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
+            }`}
+            onClick={() => setMode('board')}
+            disabled={running}
           >
-            Cancel
+            Board
           </button>
+          <button
+            type="button"
+            className={`rounded px-3 py-1 text-sm ${
+              mode === 'manual' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
+            }`}
+            onClick={() => setMode('manual')}
+            disabled={running}
+          >
+            Manual (no PCB)
+          </button>
+        </div>
+
+        {mode === 'board' && (
+          <BoardPickerSection
+            loadingList={loadingList}
+            listResult={listResult}
+            listError={listError}
+            onRefreshList={() => void refreshList()}
+            onOpenKicad={() => void handleOpenKicad()}
+            openingKicad={openingKicad}
+            openKicadError={openKicadError}
+            selectedBoard={selectedBoard}
+            manualPcbPath={manualPcbPath}
+            onSelectBoard={handleSelectBoard}
+            onPickManually={() => void handlePickPcbFile()}
+            running={running}
+          />
+        )}
+
+        {mode === 'board' && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-neutral-500">
+              Enclosures are generated as a rectangular box sized to your board's bounding box --
+              non-rectangular board outlines aren't traced precisely yet.
+            </p>
+            {(
+              [
+                ['height', 'Height (mm)', 'How tall the enclosure is inside, above the board.', true],
+                ['wall_thickness_mm', 'Wall thickness (mm)', 'How thick the outer walls are.', false],
+                ['clearance_mm', 'Clearance (mm)', "Extra gap between the board's edge and the inside wall.", false],
+                ['fillet_radius_mm', 'Fillet radius (mm)', "Rounds the enclosure's outer corners -- 0 for sharp corners.", false],
+                ['standoff_height_mm', 'Standoff height (mm)', 'How tall the mounting posts are that hold the board above the enclosure floor.', false],
+              ] as const
+            ).map(([field, label, hint, required]) => (
+              <label key={field} className="flex flex-col gap-1 text-xs">
+                <span className="text-neutral-300">
+                  {label} {required ? <span className="text-neutral-500">(required)</span> : <span className="text-neutral-500">(optional)</span>}
+                </span>
+                <input
+                  type="number"
+                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                  value={boardParams[field]}
+                  onChange={(e) => setBoardParams((prev) => ({ ...prev, [field]: Number(e.target.value) }))}
+                  disabled={running}
+                />
+                <span className="text-neutral-500">{hint}</span>
+              </label>
+            ))}
+
+            <label className="flex items-center gap-2 text-xs text-neutral-300">
+              <input
+                type="checkbox"
+                checked={lid}
+                onChange={(e) => setLid(e.target.checked)}
+                disabled={running}
+              />
+              Add a lid
+            </label>
+            {lid && (
+              <label className="flex flex-col gap-1 text-xs">
+                <span className="text-neutral-300">
+                  Lid thickness (mm) <span className="text-neutral-500">(optional -- defaults to wall thickness)</span>
+                </span>
+                <input
+                  type="number"
+                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                  value={lidThicknessMm}
+                  onChange={(e) => setLidThicknessMm(e.target.value === '' ? '' : Number(e.target.value))}
+                  disabled={running}
+                />
+              </label>
+            )}
+          </div>
+        )}
+
+        {mode === 'manual' && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-neutral-500">
+              A plain rectangular box, not based on any real board -- use Board above when you have a
+              .kicad_pcb file available.
+            </p>
+            {(
+              [
+                ['width', 'Width (mm)'],
+                ['depth', 'Depth (mm)'],
+                ['height', 'Height (mm)'],
+              ] as const
+            ).map(([dim, label]) => (
+              <label key={dim} className="flex flex-col gap-1 text-xs">
+                <span className="text-neutral-300">{label} <span className="text-neutral-500">(required)</span></span>
+                <input
+                  type="number"
+                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                  value={dims[dim]}
+                  onChange={(e) => setDims((prev) => ({ ...prev, [dim]: Number(e.target.value) }))}
+                  disabled={running}
+                />
+              </label>
+            ))}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="flex-1 rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
+            onClick={() => void handleGenerate()}
+            disabled={running || (mode === 'board' && !pcbPath)}
+          >
+            {running ? 'Generating…' : 'Generate Enclosure'}
+          </button>
+          {running && (
+            <button
+              type="button"
+              className="rounded border border-neutral-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
+              onClick={() => void handleCancel()}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+        {error && <p className="text-sm text-red-400">{error}</p>}
+      </div>
+
+      <div className="flex w-full flex-1 flex-col gap-2">
+        {result && result.unrecognized_holes.length > 0 && (
+          <p className="text-sm text-amber-400">
+            {result.unrecognized_holes.length} hole(s) on this board weren't recognized as mounting
+            holes and were skipped -- no standoff was drilled for them.
+          </p>
+        )}
+        {result?.no_mounting_holes_found && (
+          <p className="text-sm text-amber-400">
+            No mounting holes were found on this board -- the enclosure has no standoffs. If this
+            board really does have mounting holes, confirm they're real NPTH pads in KiCad.
+          </p>
+        )}
+        {result && (
+          <>
+            <p className="text-sm text-neutral-400">Generated: {result.glb_path}</p>
+            <EnclosureViewer glbPath={result.glb_path} lidGlbPath={result.lid_glb_path ?? null} lidVisible={lidVisible} />
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
+                onClick={() => open(result.step_path)}
+              >
+                Open .step
+              </button>
+              {result.lid_glb_path && (
+                <label className="flex items-center gap-2 text-xs text-neutral-300">
+                  <input type="checkbox" checked={lidVisible} onChange={(e) => setLidVisible(e.target.checked)} />
+                  Show lid
+                </label>
+              )}
+              {result.lid_step_path && (
+                <button
+                  type="button"
+                  className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
+                  onClick={() => open(result.lid_step_path!)}
+                >
+                  Open lid .step
+                </button>
+              )}
+            </div>
+          </>
         )}
       </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      {result && result.unrecognized_holes.length > 0 && (
-        <p className="text-sm text-amber-400">
-          {result.unrecognized_holes.length} hole(s) on this board weren't recognized as mounting
-          holes and were skipped -- no standoff was drilled for them.
-        </p>
-      )}
-      {result && (
-        <>
-          <p className="text-sm text-neutral-400">Generated: {result.glb_path}</p>
-          <EnclosureViewer glbPath={result.glb_path} />
-          <button
-            type="button"
-            className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
-            onClick={() => open(result.step_path)}
-          >
-            Open .step
-          </button>
-        </>
-      )}
     </div>
   )
 }

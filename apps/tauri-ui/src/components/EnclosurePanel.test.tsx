@@ -21,8 +21,12 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
   open: (...args: unknown[]) => shellOpenMock(...args),
 }))
 
+const enclosureViewerSpy = vi.fn()
 vi.mock('./EnclosureViewer', () => ({
-  EnclosureViewer: () => null,
+  EnclosureViewer: (props: unknown) => {
+    enclosureViewerSpy(props)
+    return null
+  },
 }))
 
 const { EnclosurePanel } = await import('./EnclosurePanel')
@@ -56,6 +60,7 @@ beforeEach(() => {
   listOpenBoardsMock.mockReset().mockResolvedValue({ status: 'no_board_open' })
   openKicadMock.mockReset().mockResolvedValue(undefined)
   shellOpenMock.mockReset()
+  enclosureViewerSpy.mockReset()
 })
 
 describe('EnclosurePanel: mode selection', () => {
@@ -290,5 +295,113 @@ describe('EnclosurePanel: results (unchanged behavior)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open .step' }))
 
     expect(shellOpenMock).toHaveBeenCalledWith('/tmp/enclosure.step')
+  })
+
+  it('CTX-311.1: a no_mounting_holes_found result renders its own real warning', async () => {
+    generateEnclosureMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ ...fakeResult, no_mounting_holes_found: true })),
+    )
+
+    render(<EnclosurePanel projectName="test-project" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Manual (no PCB)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => screen.getByText(/No mounting holes were found on this board/))
+  })
+})
+
+describe('EnclosurePanel: lid (CTX-311.2/CTX-311.3)', () => {
+  it('the lid checkbox only appears in Board mode -- lid requires board-driven mode on the daemon side', async () => {
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('No board is currently open in KiCad.'))
+    screen.getByLabelText('Add a lid')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Manual (no PCB)' }))
+    expect(screen.queryByLabelText('Add a lid')).toBeNull()
+  })
+
+  it('checking the lid box reveals an optional thickness field', async () => {
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('No board is currently open in KiCad.'))
+
+    expect(screen.queryByText(/Lid thickness/)).toBeNull()
+    fireEvent.click(screen.getByLabelText('Add a lid'))
+    screen.getByText(/Lid thickness \(mm\)/)
+  })
+
+  it('submitting with the lid box checked sends lid: true and the given thickness', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByLabelText('Add a lid'))
+    fireEvent.change(screen.getByLabelText(/Lid thickness/), { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
+    const params = generateEnclosureMock.mock.calls[0][0]
+    expect(params.lid).toBe(true)
+    expect(params.lid_thickness_mm).toBe(3)
+  })
+
+  it('submitting with the lid box checked but no thickness given omits lid_thickness_mm -- the daemon defaults it', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByLabelText('Add a lid'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
+    const params = generateEnclosureMock.mock.calls[0][0]
+    expect(params.lid).toBe(true)
+    expect(params.lid_thickness_mm).toBeUndefined()
+  })
+
+  it('submitting with the lid box unchecked sends lid: false', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
+    expect(generateEnclosureMock.mock.calls[0][0].lid).toBe(false)
+  })
+
+  it('a result with a real lid_glb_path passes it through to the viewer and shows a Show lid toggle', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(
+      fakeJobHandle(
+        Promise.resolve({ ...fakeResult, lid_glb_path: '/tmp/lid.glb', lid_step_path: '/tmp/lid.step' }),
+      ),
+    )
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByLabelText('Add a lid'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => screen.getByLabelText('Show lid'))
+    expect(enclosureViewerSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ glbPath: '/tmp/enclosure.glb', lidGlbPath: '/tmp/lid.glb', lidVisible: true }),
+    )
+
+    fireEvent.click(screen.getByLabelText('Show lid'))
+    expect(enclosureViewerSpy).toHaveBeenLastCalledWith(expect.objectContaining({ lidVisible: false }))
+  })
+
+  it('a result with no lid_glb_path never shows a Show lid toggle', async () => {
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Manual (no PCB)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(enclosureViewerSpy).toHaveBeenCalled())
+    expect(screen.queryByLabelText('Show lid')).toBeNull()
   })
 })
