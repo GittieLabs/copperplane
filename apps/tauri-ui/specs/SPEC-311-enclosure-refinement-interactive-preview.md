@@ -48,20 +48,33 @@ user_facing: true
 
 ## 2. System Architecture & Design Choices
 
-*   **Component height data already exists for parts built through this app's own pipeline —
-    confirmed, not assumed.** `CTX-308.5` already persists `package_dimensions.height_mm` on every
-    saved `Part` (from datasheet extraction). What does **not** exist yet, confirmed by reading
-    `kicad_bridge.py`/`kicad_pcb_import.py`: any stored link from a specific *placed footprint on a
-    real board* back to the `Part` record it came from. `SPEC-108`'s own inject-component write
-    path places a footprint but doesn't persist which `part_id` it came from onto the board itself;
-    a real board someone hand-edited in KiCad may have components on it that were never placed
-    through this app's own library at all. **Open question, not decided here:** does "derive
-    height from components" mean (a) only trusting components this app itself placed and knows the
-    `part_id` for, falling back honestly to "unknown, please confirm a height" otherwise, or (b)
-    attempting to match a placed footprint's real KiCad footprint name against saved Parts by
-    convention, which is real but fuzzy. Whichever this spec's own context picks, the UI must be
-    honest about which components' heights are real data versus a fallback, never presenting a
-    guess as fact.
+*   **Component height is derivable from KiCad's own real 3D models — confirmed live, end to end,
+    not assumed.** Every real `FootprintInstance` exposes `.definition.models` (kipy's
+    `Footprint.models`, a real property since kipy 0.3.0), each a real `Footprint3DModel` with a
+    `filename` plus its own `scale`/`rotation`/`offset` transform. Verified against this dev
+    machine's real board: a `PinHeader_1x04` footprint's real model resolved to
+    `${KICAD10_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x04_P2.54mm_Vertical.step`,
+    a real file confirmed to exist on disk (KiCad's own bundled-library path,
+    `<KiCad install>/SharedSupport/3dmodels` on macOS — the same per-OS-install-path pattern
+    `find_freecadcmd`/`find_kicad_cli` already use elsewhere in this codebase), and `freecadcmd`
+    loaded that exact real STEP file and computed a real bounding box (2.54 × 10.16 × **11.54mm**
+    — the Z dimension is the real component height) directly, with no invented data. This is a
+    **better, more universal** height source than `Part.package_dimensions.height_mm`
+    (`CTX-308.5`) — it works for *any* board with real KiCad footprints, including one never
+    touched by this app's own Part library, not only components this app itself placed.
+    **Real, not-yet-solved work this still requires:** resolving KiCad's own env-var path
+    convention robustly (varies by KiCad version/OS — `KICAD10_3DMODEL_DIR` today, will drift with
+    future major versions the same way `find_kicad_cli`'s own version-numbered paths already
+    do); applying each model's own real `scale`/`rotation`/`offset` transform before computing its
+    bounding box (a raw, untransformed bounding box would be wrong for a rotated or scaled model);
+    and handling models that don't exist as `.step` (some libraries ship `.wrl`/VRML instead --
+    `trimesh`, already a dependency for `.glb` export, reads that format, so a per-format branch is
+    real but not yet written). **Confirmed gap, not solved by this either:** some real footprints
+    have zero attached models at all (4 of 9 on the same test board) -- height for those components
+    genuinely can't be derived from anything in the pipeline today. The user's own proposed
+    fallback -- report which components' heights are known versus unknown, and ask for an overall
+    height (including the lid) when coverage is incomplete -- is the right posture for this real
+    gap, not something to paper over with a guessed default.
 *   **The real board outline is available as raw geometry today; only the reduction step throws
     it away.** `kicad_bridge.get_board_outline()` already reads every real `BoardShape` on
     `Edge.Cuts` via a real `kipy` call before reducing them to a bounding box; the file-based path
@@ -95,6 +108,18 @@ user_facing: true
     underlying file could have moved or been deleted since the app was last open; a real,
     successful generate is the actual validation that the remembered path is still real, not an
     assumption.
+*   **Mounting-hole detection already exists and is more solid than first assumed — confirmed by
+    reading `kicad_bridge.get_mounting_holes()` directly, not assumed missing.** It already reads
+    every real footprint's real NPTH pads (position + real drill diameter, not a guess), and
+    already tags each as `recognized` (KiCad's own `MountingHole` library, or the `H<digits>`
+    reference convention) or not -- both position, diameter, and a recognized/unrecognized split
+    already ship today (`SPEC-109`). **The real, confirmed gap is narrower than "mounting holes are
+    overlooked":** the existing UI only warns about *unrecognized* holes (`result.unrecognized_
+    holes.length > 0`); a board with **zero** holes of any kind -- recognized or not -- triggers no
+    warning at all today, silently producing a standoff-free enclosure with no way for the user to
+    tell "this board really has no mounting holes" apart from "the detection missed them." This
+    spec's own context should add that explicit, honest "no mounting holes found on this board" flag
+    when generating, distinct from the existing unrecognized-holes warning.
 *   **Camera presets are a real, bounded addition to the existing `OrbitControls` setup.** Top,
     bottom, and left/right rotation-by-increment buttons around the existing free-orbit behavior
     (`CTX-301.2`), not a replacement for it — `@react-three/drei`'s `OrbitControls` already exposes
@@ -163,4 +188,7 @@ user_facing: true
     component heights, shown in a real, now-larger interactive 3D preview with camera presets
     (top/bottom/rotate) alongside free orbit, and a lid shown or hidden as its own toggle. Adjusting
     a refine parameter and regenerating updates the same preview against the same board, not a
-    blank form.
+    blank form. If some components' real heights couldn't be derived (no attached 3D model, or an
+    unresolvable one), or the board has no mounting holes at all, the user sees that stated plainly
+    before/alongside the result — never a confident-looking enclosure quietly built on an unstated
+    gap.
