@@ -52,7 +52,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
   it('scans for open boards as soon as the screen mounts, with no click required', async () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
 
     await waitFor(() => expect(listOpenBoardsMock).toHaveBeenCalledTimes(1))
     screen.getByText('Board open in KiCad:')
@@ -61,7 +61,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
   it('a single open board is still shown as a real, explicit item to click -- never auto-checked', async () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
 
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     expect(checkBoardMock).not.toHaveBeenCalled()
@@ -71,7 +71,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     checkBoardMock.mockResolvedValueOnce(VIOLATION_RESULT)
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByText('board.kicad_pcb'))
 
     fireEvent.click(screen.getByText('board.kicad_pcb'))
@@ -86,7 +86,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     checkBoardMock.mockResolvedValueOnce(CLEAN_RESULT)
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     fireEvent.click(screen.getByText('board.kicad_pcb'))
 
@@ -97,7 +97,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     checkBoardMock.mockImplementation(() => new Promise(() => {}))
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     fireEvent.click(screen.getByText('board.kicad_pcb'))
 
@@ -108,7 +108,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     checkBoardMock.mockResolvedValueOnce(CLEAN_RESULT)
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     fireEvent.click(screen.getByText('board.kicad_pcb'))
 
@@ -123,7 +123,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     checkBoardMock.mockRejectedValueOnce(new Error('Lost connection to KiCad mid-request. It may have been closed.'))
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     fireEvent.click(screen.getByText('board.kicad_pcb'))
 
@@ -139,7 +139,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
       ],
     })
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
 
     await waitFor(() => screen.getByText('Boards open in KiCad — pick one to check:'))
     screen.getByText('board_a.kicad_pcb')
@@ -149,7 +149,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
   it('offers a real way to open a different board without leaving the app: Switch to KiCad', async () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByText(/Don't see the board you want/))
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch to KiCad' }))
@@ -167,7 +167,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     })
     checkBoardMock.mockResolvedValueOnce(CLEAN_RESULT)
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByText('board_b.kicad_pcb'))
     fireEvent.click(screen.getByText('board_b.kicad_pcb'))
 
@@ -176,7 +176,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
   })
 
   it('no board open shows a real, concrete walkthrough plus Open KiCad and Refresh actions', async () => {
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
 
     await waitFor(() => screen.getByText('No board is currently open in KiCad.'))
     screen.getByText(/PCB Editor/)
@@ -186,7 +186,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
   })
 
   it('Open KiCad calls the real open_kicad command', async () => {
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByRole('button', { name: 'Open KiCad' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Open KiCad' }))
@@ -197,7 +197,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
   it('a failed Open KiCad shows the real error, not a silent no-op', async () => {
     openKicadMock.mockRejectedValueOnce(new Error('Could not launch KiCad: No such file or directory'))
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByRole('button', { name: 'Open KiCad' }))
     fireEvent.click(screen.getByRole('button', { name: 'Open KiCad' }))
 
@@ -208,7 +208,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     listOpenBoardsMock.mockResolvedValueOnce({ status: 'no_board_open' })
     listOpenBoardsMock.mockResolvedValueOnce(ONE_BOARD_OPEN)
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByRole('button', { name: 'Refresh' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
@@ -222,7 +222,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
       new Error('Could not connect to KiCad. Ensure KiCad 9 or later is running with the IPC API enabled (Preferences > Plugins).'),
     )
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
 
     await waitFor(() => screen.getByText("KiCad doesn't appear to be running yet."))
     expect(screen.queryByText(/Could not connect to KiCad/)).toBeNull()
@@ -233,7 +233,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
   it('Open KiCad works from the connection-failure state too, not just no_board_open', async () => {
     listOpenBoardsMock.mockReset().mockRejectedValue(new Error('Could not connect to KiCad.'))
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByRole('button', { name: 'Open KiCad' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Open KiCad' }))
@@ -245,20 +245,58 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     checkBoardMock.mockResolvedValueOnce({ ...VIOLATION_RESULT, truncated_count: 5 })
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     fireEvent.click(screen.getByText('board.kicad_pcb'))
 
     await waitFor(() => screen.getByText(/\+5 more violation\(s\) not shown\./))
   })
+
+  it('a completed check survives being re-rendered with the same projectName -- App.tsx keeps this component mounted across tab switches, this just confirms the state isn\'t reset along the way', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValueOnce(CLEAN_RESULT)
+
+    const { rerender } = render(<BoardAdvisor projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByText('board.kicad_pcb'))
+    await waitFor(() => screen.getByText('No violations found.'))
+
+    // simulates App.tsx re-rendering this same, still-mounted instance
+    // while a *different* area tab happens to be selected -- no new
+    // scan, no lost result.
+    rerender(<BoardAdvisor projectName="test-project" />)
+
+    screen.getByText('No violations found.')
+    expect(listOpenBoardsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('switching to a real, different project resets the previous project\'s board selection and result', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValueOnce(CLEAN_RESULT)
+
+    const { rerender } = render(<BoardAdvisor projectName="project-a" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByText('board.kicad_pcb'))
+    await waitFor(() => screen.getByText('No violations found.'))
+
+    rerender(<BoardAdvisor projectName="project-b" />)
+
+    expect(screen.queryByText('No violations found.')).toBeNull()
+  })
 })
 
 describe('BoardAdvisor: Schematic (ERC)', () => {
+  it('explains why this is a manual file picker, unlike the live board list, instead of leaving the difference unexplained', async () => {
+    render(<BoardAdvisor projectName="test-project" />)
+
+    screen.getByText(/KiCad's live connection has no way to list open schematics/)
+  })
+
   it('Check Schematic picks a file first, then calls checkSchematic with the real picked path', async () => {
     pickSchematicFileMock.mockResolvedValueOnce('/real/board.kicad_sch')
     checkSchematicMock.mockResolvedValueOnce({ ...CLEAN_RESULT, source_path: '/real/board.kicad_sch' })
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     fireEvent.click(screen.getByRole('button', { name: 'Check Schematic…' }))
 
     await waitFor(() => expect(checkSchematicMock).toHaveBeenCalledWith('/real/board.kicad_sch'))
@@ -267,7 +305,7 @@ describe('BoardAdvisor: Schematic (ERC)', () => {
   it('closing the file picker (null) is a silent no-op, not an error', async () => {
     pickSchematicFileMock.mockResolvedValueOnce(null)
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     fireEvent.click(screen.getByRole('button', { name: 'Check Schematic…' }))
 
     await waitFor(() => expect(pickSchematicFileMock).toHaveBeenCalled())
@@ -286,7 +324,7 @@ describe('BoardAdvisor: Schematic (ERC)', () => {
       source_path: '/real/board.kicad_sch',
     })
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     fireEvent.click(screen.getByRole('button', { name: 'Check Schematic…' }))
 
     await waitFor(() => screen.getByText(/Pin not connected/))
@@ -300,7 +338,7 @@ describe('BoardAdvisor: Schematic (ERC)', () => {
     pickSchematicFileMock.mockResolvedValueOnce('/real/board.kicad_sch')
     checkSchematicMock.mockResolvedValueOnce(VIOLATION_RESULT)
 
-    render(<BoardAdvisor />)
+    render(<BoardAdvisor projectName="test-project" />)
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     fireEvent.click(screen.getByText('board.kicad_pcb'))
     await waitFor(() => screen.getByText('No violations found.'))

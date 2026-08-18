@@ -150,7 +150,17 @@ function App() {
                 description="Schematic-level advice for the parts in this project."
               />
             )}
-            {view.area === 'pcb' && <BoardAdvisor />}
+            {/* BoardAdvisor stays mounted across every area, not just while
+             * 'pcb' is selected -- real user feedback found that switching
+             * tabs away and back threw away a check that had just finished,
+             * with no reason to. Hidden via CSS instead of unmounted, so
+             * its own state (which board was picked, the result) survives
+             * the round trip; BoardAdvisor itself resets that state when
+             * `projectName` changes, so switching *projects* still starts
+             * fresh. */}
+            <div className={view.area === 'pcb' ? undefined : 'hidden'}>
+              <BoardAdvisor projectName={view.name} />
+            </div>
           </>
         )}
       </main>

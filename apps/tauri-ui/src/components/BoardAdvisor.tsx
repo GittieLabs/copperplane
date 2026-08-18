@@ -31,8 +31,15 @@ import {
  * before they'd had any reason to open KiCad yet; picking a board from a
  * multi-board list gave no way to open a *different* one without leaving
  * the app; and a long file path overflowed its own box instead of
- * wrapping. */
-export function BoardAdvisor() {
+ * wrapping.
+ *
+ * This component stays mounted across every area tab, not just while
+ * "PCB" is selected (App.tsx hides it with CSS instead of unmounting
+ * it) -- real feedback found switching tabs away and back threw out a
+ * check that had just finished, with no reason to. `projectName` is
+ * only used to know when to actually reset that state: a genuine
+ * project switch, not a tab switch. */
+export function BoardAdvisor({ projectName }: { projectName: string }) {
   const [loadingBoardList, setLoadingBoardList] = useState(false)
   const [boardListResult, setBoardListResult] = useState<ListOpenBoardsResult | null>(null)
   const [boardListError, setBoardListError] = useState<string | null>(null)
@@ -47,6 +54,19 @@ export function BoardAdvisor() {
   const [checkingSchematic, setCheckingSchematic] = useState(false)
   const [schematicResult, setSchematicResult] = useState<CheckResult | null>(null)
   const [schematicError, setSchematicError] = useState<string | null>(null)
+
+  // A genuine project switch starts fresh -- unlike a tab switch (this
+  // component stays mounted for those), the previously-checked board
+  // belongs to whichever project it was checked under, not this new
+  // one. The board list itself is left alone: which boards KiCad has
+  // open is real desktop state, not scoped to this app's own project.
+  useEffect(() => {
+    setSelectedBoard(null)
+    setBoardCheckResult(null)
+    setBoardCheckError(null)
+    setSchematicResult(null)
+    setSchematicError(null)
+  }, [projectName])
 
   const refreshBoardList = useCallback(async () => {
     setLoadingBoardList(true)
@@ -134,6 +154,7 @@ export function BoardAdvisor() {
       <CheckSection
         title="Schematic (ERC)"
         checkLabel="Check Schematic…"
+        helpText="Unlike the board list above, KiCad's live connection has no way to list open schematics -- confirmed directly against a running KiCad instance (SPEC-309 §2), not an oversight here. Pick the .kicad_sch file directly; this also works even if KiCad itself isn't running."
         checking={checkingSchematic}
         onCheck={handleCheckSchematic}
         result={schematicResult}
@@ -301,6 +322,7 @@ function BoardCheckSection({
 function CheckSection({
   title,
   checkLabel,
+  helpText,
   checking,
   onCheck,
   result,
@@ -308,6 +330,7 @@ function CheckSection({
 }: {
   title: string
   checkLabel: string
+  helpText?: string
   checking: boolean
   onCheck: () => void
   result: CheckResult | null
@@ -316,6 +339,7 @@ function CheckSection({
   return (
     <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
       <p className="text-xs font-medium uppercase text-neutral-500">{title}</p>
+      {helpText && <p className="text-xs text-neutral-500">{helpText}</p>}
       <button
         type="button"
         className="self-start rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
