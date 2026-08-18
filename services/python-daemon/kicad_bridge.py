@@ -164,9 +164,9 @@ def list_open_boards() -> list:
     Deliberately PCB-only: the identical call for `DOCTYPE_SCHEMATIC`
     raises the same real `no handler available` `ApiError` unconditionally
     (there's no schematic-document capability to fall back to) -- confirmed
-    the same way, not assumed -- so this function doesn't attempt it; the
-    schematic side of SPEC-309 always needs an explicit user-supplied
-    path."""
+    the same way, not assumed. `list_project_schematics` below derives a
+    schematic path from this same real IPC data instead of needing that
+    capability at all."""
     client = get_client()
     try:
         docs = list(client.get_open_documents(DocumentType.DOCTYPE_PCB))
@@ -179,6 +179,53 @@ def list_open_boards() -> list:
         ) from e
 
     return [os.path.join(doc.project.path, doc.board_filename) for doc in docs]
+
+
+def list_project_schematics() -> list:
+    """Real user feedback: why can't Schematic checking work like Board
+    checking, with a live list instead of a blind file dialog? Answer,
+    confirmed live against a real running KiCad instance with a real
+    project open (not assumed): `get_open_documents(DOCTYPE_SCHEMATIC)`
+    raises the same `"no handler available"` `ApiError` unconditionally,
+    even with a board open and its project loaded -- unlike the PCB
+    case, KiCad's IPC server has never implemented a schematic-listing
+    handler at all. `run_action` could in principle drive KiCad's UI
+    remotely, but kipy's own docstring marks it explicitly unstable and
+    "not intended for use other than by API developers" -- not something
+    to build real functionality on.
+
+    Instead, this derives each currently open board's own root schematic
+    path from `get_open_documents(DOCTYPE_PCB)`'s own real `project.name`/
+    `project.path` fields: KiCad's own project convention names the root
+    schematic after the *project*, not the individual board file -- true
+    even for a multi-board project whose `.kicad_pcb` files don't share
+    the project's own name. Verified against a real project on this
+    machine (`NFC_Reader_ESP32.kicad_pcb` open, project name
+    `NFC_Reader_ESP32`, real `NFC_Reader_ESP32.kicad_sch` present at the
+    project root). Never returns a derived path that doesn't actually
+    exist -- a wrong guess presented as fact would be worse than the
+    manual file-picker this replaces for the common case."""
+    client = get_client()
+    try:
+        docs = list(client.get_open_documents(DocumentType.DOCTYPE_PCB))
+    except (KiCadConnectionError, ApiError) as e:
+        if isinstance(e, ApiError) and _NO_HANDLER_MARKER in str(e):
+            return []
+        reset_connection()
+        raise KiCadUnavailableError(
+            "Lost connection to KiCad mid-request. It may have been closed."
+        ) from e
+
+    seen = set()
+    candidates = []
+    for doc in docs:
+        sch_path = os.path.join(doc.project.path, doc.project.name + ".kicad_sch")
+        if sch_path in seen:
+            continue
+        seen.add(sch_path)
+        if os.path.exists(sch_path):
+            candidates.append(sch_path)
+    return candidates
 
 
 def get_board_outline() -> dict:

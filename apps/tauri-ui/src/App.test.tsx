@@ -17,6 +17,7 @@ const checkBoardMock = vi.fn()
 const openKicadMock = vi.fn()
 const checkSchematicMock = vi.fn()
 const pickSchematicFileMock = vi.fn()
+const listProjectSchematicsMock = vi.fn()
 
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
@@ -54,6 +55,7 @@ vi.mock('./lib/boardAdvisor', () => ({
   openKicad: (...args: unknown[]) => openKicadMock(...args),
   checkSchematic: (...args: unknown[]) => checkSchematicMock(...args),
   pickSchematicFile: (...args: unknown[]) => pickSchematicFileMock(...args),
+  listProjectSchematics: (...args: unknown[]) => listProjectSchematicsMock(...args),
 }))
 
 const { default: App } = await import('./App')
@@ -490,6 +492,66 @@ describe('App: PCB tab persists across area switches, resets on project switch',
 
     fireEvent.click(screen.getByRole('button', { name: 'project-b' }))
     fireEvent.click(screen.getByRole('button', { name: 'PCB' }))
+
+    expect(screen.queryByText('No violations found.')).toBeNull()
+  })
+})
+
+/** Real user feedback: the ERC check briefly lived under the "PCB" tab
+ * alongside DRC, which SPEC-300's own original stage-machine design
+ * never intended (ERC belongs to the "Schematic Advisor" stage). Moved
+ * to its own Schematic tab -- same mount-persistence/project-reset
+ * behavior as the PCB tab, for the same real reason. */
+describe('App: Schematic tab persists across area switches, resets on project switch', () => {
+  const ONE_SCHEMATIC_FOUND = {
+    status: 'schematics_found' as const,
+    candidates: [{ path: '/real/board.kicad_sch', label: 'board.kicad_sch' }],
+  }
+  const CLEAN_RESULT = { violations: [], summary: '', truncated_count: 0, source_path: '/real/board.kicad_sch' }
+
+  beforeEach(() => {
+    listProjectsMock.mockReset().mockResolvedValue(['test-project'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    loadConversationMock.mockReset().mockResolvedValue([])
+    listProjectSchematicsMock.mockReset().mockResolvedValue(ONE_SCHEMATIC_FOUND)
+    checkSchematicMock.mockReset().mockResolvedValue(CLEAN_RESULT)
+    openKicadMock.mockReset()
+  })
+
+  async function renderAppOnSchematic() {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    fireEvent.click(screen.getByRole('button', { name: 'Schematic' }))
+    await waitFor(() => screen.getByText('board.kicad_sch'))
+  }
+
+  it('the Schematic tab renders the real SchematicAdvisor, not a not-built placeholder', async () => {
+    await renderAppOnSchematic()
+
+    expect(screen.queryByText(/not built yet/)).toBeNull()
+  })
+
+  it('a finished check is still shown after switching to another area and back to Schematic', async () => {
+    await renderAppOnSchematic()
+    fireEvent.click(screen.getByText('board.kicad_sch'))
+    await waitFor(() => screen.getByText('No violations found.'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Components' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Schematic' }))
+
+    screen.getByText('No violations found.')
+    expect(listProjectSchematicsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('switching to a different real project resets the previous project\'s check result', async () => {
+    listProjectsMock.mockReset().mockResolvedValue(['project-a', 'project-b'])
+
+    await renderAppOnSchematic()
+    fireEvent.click(screen.getByText('board.kicad_sch'))
+    await waitFor(() => screen.getByText('No violations found.'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'project-b' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Schematic' }))
 
     expect(screen.queryByText('No violations found.')).toBeNull()
   })

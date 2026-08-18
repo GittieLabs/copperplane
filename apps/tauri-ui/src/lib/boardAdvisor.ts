@@ -76,13 +76,41 @@ export async function checkBoard(pcbPath: string): Promise<CheckResult> {
   return handle.result
 }
 
-/** SPEC-309 §2's own confirmed, real finding: live IPC has no
- * schematic-document resolution capability at all -- unlike
- * checkBoard, this always needs an explicit path, so the UI must ask
- * for one via a real native file picker (mirrors settings.ts's own
- * folder-picker pattern for storage_root_override) rather than ever
- * attempting auto-resolution. Returns null on cancel, not an error --
- * the user closing the dialog is a normal, expected outcome. */
+export interface SchematicCandidate {
+  path: string
+  label: string
+}
+export interface NoSchematicFound {
+  status: 'no_schematic_found'
+}
+export interface SchematicsFound {
+  status: 'schematics_found'
+  candidates: SchematicCandidate[]
+}
+export type ListProjectSchematicsResult = NoSchematicFound | SchematicsFound
+
+/** kicad.list_project_schematics: real user feedback asked why
+ * Schematic checking couldn't work like Board checking, with a live
+ * list instead of a blind file dialog. KiCad's IPC server has no
+ * handler for listing open schematics at all -- confirmed live,
+ * unconditionally, unlike the PCB case -- so this derives each
+ * currently open board's own project's root schematic path instead,
+ * filtered to ones that actually exist on disk (never a guessed path
+ * presented as real). Sync, like listOpenBoards, for the same reason. */
+export async function listProjectSchematics(): Promise<ListProjectSchematicsResult> {
+  const response = await dispatch('kicad.list_project_schematics', {})
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+  return response.result as ListProjectSchematicsResult
+}
+
+/** A manual fallback for when no schematic could be derived from an
+ * open board (nothing open, or a genuinely standalone schematic not
+ * tied to any board currently open in KiCad) -- mirrors settings.ts's
+ * own folder-picker pattern for storage_root_override. Returns null on
+ * cancel, not an error -- the user closing the dialog is a normal,
+ * expected outcome. */
 export async function pickSchematicFile(): Promise<string | null> {
   const selected = await openDialog({
     filters: [{ name: 'KiCad Schematic', extensions: ['kicad_sch'] }],

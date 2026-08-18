@@ -2,15 +2,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const checkBoardMock = vi.fn()
-const checkSchematicMock = vi.fn()
-const pickSchematicFileMock = vi.fn()
 const listOpenBoardsMock = vi.fn()
 const openKicadMock = vi.fn()
 
 vi.mock('../lib/boardAdvisor', () => ({
   checkBoard: (...args: unknown[]) => checkBoardMock(...args),
-  checkSchematic: (...args: unknown[]) => checkSchematicMock(...args),
-  pickSchematicFile: (...args: unknown[]) => pickSchematicFileMock(...args),
   listOpenBoards: (...args: unknown[]) => listOpenBoardsMock(...args),
   openKicad: (...args: unknown[]) => openKicadMock(...args),
 }))
@@ -42,8 +38,6 @@ const ONE_BOARD_OPEN = {
 
 beforeEach(() => {
   checkBoardMock.mockReset()
-  checkSchematicMock.mockReset()
-  pickSchematicFileMock.mockReset()
   listOpenBoardsMock.mockReset().mockResolvedValue({ status: 'no_board_open' })
   openKicadMock.mockReset().mockResolvedValue(undefined)
 })
@@ -282,70 +276,5 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     rerender(<BoardAdvisor projectName="project-b" />)
 
     expect(screen.queryByText('No violations found.')).toBeNull()
-  })
-})
-
-describe('BoardAdvisor: Schematic (ERC)', () => {
-  it('explains why this is a manual file picker, unlike the live board list, instead of leaving the difference unexplained', async () => {
-    render(<BoardAdvisor projectName="test-project" />)
-
-    screen.getByText(/KiCad's live connection has no way to list open schematics/)
-  })
-
-  it('Check Schematic picks a file first, then calls checkSchematic with the real picked path', async () => {
-    pickSchematicFileMock.mockResolvedValueOnce('/real/board.kicad_sch')
-    checkSchematicMock.mockResolvedValueOnce({ ...CLEAN_RESULT, source_path: '/real/board.kicad_sch' })
-
-    render(<BoardAdvisor projectName="test-project" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Check Schematic…' }))
-
-    await waitFor(() => expect(checkSchematicMock).toHaveBeenCalledWith('/real/board.kicad_sch'))
-  })
-
-  it('closing the file picker (null) is a silent no-op, not an error', async () => {
-    pickSchematicFileMock.mockResolvedValueOnce(null)
-
-    render(<BoardAdvisor projectName="test-project" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Check Schematic…' }))
-
-    await waitFor(() => expect(pickSchematicFileMock).toHaveBeenCalled())
-    expect(checkSchematicMock).not.toHaveBeenCalled()
-  })
-
-  it('a violation tagged with a real sheet_path shows it', async () => {
-    pickSchematicFileMock.mockResolvedValueOnce('/real/board.kicad_sch')
-    checkSchematicMock.mockResolvedValueOnce({
-      violations: [{
-        description: 'Pin not connected', severity: 'warning', type: 'pin_not_connected', items: [],
-        sheet_path: '/sub', explanation: 'A pin has no real connection.', suggested_fix: 'Wire the pin or mark it no-connect.',
-      }],
-      summary: 'One warning found.',
-      truncated_count: 0,
-      source_path: '/real/board.kicad_sch',
-    })
-
-    render(<BoardAdvisor projectName="test-project" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Check Schematic…' }))
-
-    await waitFor(() => screen.getByText(/Pin not connected/))
-    screen.getByText('(/sub)', { exact: false })
-    screen.getByText('WARNING')
-  })
-
-  it('Board and Schematic results are independent -- checking one does not clear the other', async () => {
-    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
-    checkBoardMock.mockResolvedValueOnce(CLEAN_RESULT)
-    pickSchematicFileMock.mockResolvedValueOnce('/real/board.kicad_sch')
-    checkSchematicMock.mockResolvedValueOnce(VIOLATION_RESULT)
-
-    render(<BoardAdvisor projectName="test-project" />)
-    await waitFor(() => screen.getByText('board.kicad_pcb'))
-    fireEvent.click(screen.getByText('board.kicad_pcb'))
-    await waitFor(() => screen.getByText('No violations found.'))
-
-    fireEvent.click(screen.getByRole('button', { name: 'Check Schematic…' }))
-    await waitFor(() => screen.getByText(/Board has malformed outline/))
-
-    screen.getByText('No violations found.')
   })
 })

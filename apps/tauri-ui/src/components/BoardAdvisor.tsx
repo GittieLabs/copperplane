@@ -1,37 +1,36 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   checkBoard,
-  checkSchematic,
   listOpenBoards,
   openKicad,
-  pickSchematicFile,
   type BoardCandidate,
   type CheckResult,
   type ListOpenBoardsResult,
-  type Violation,
 } from '../lib/boardAdvisor'
+import { ViolationsList } from './ViolationsList'
 
-/** SPEC-309: real ERC/DRC via kicad-cli (CTX-309.1), explained in plain
- * language. Lives in the PCB area -- already reserved for SPEC-309 by
- * App.tsx's own prior NotBuiltPlaceholder -- and offers both checks
- * from here rather than splitting DRC into PCB and ERC into Schematic,
- * since the Schematic area is SPEC-308's own reserved home instead.
+/** SPEC-309: real DRC via kicad-cli (CTX-309.1), explained in plain
+ * language. Lives in the PCB area (App.tsx) -- the Schematic (ERC)
+ * side of SPEC-309 moved to its own SchematicAdvisor component, in the
+ * Schematic area, per SPEC-300's own original stage-machine design
+ * (real user feedback flagged the PCB/Schematic split as wrong when
+ * both checks briefly lived here together).
  *
- * CTX-309.4: the Board (DRC) side scans for open boards as soon as this
- * screen mounts and always shows them as a real, clickable list -- even
- * a single one -- rather than a blind "Check Board" button that
- * silently auto-resolved whichever board happened to be open (CTX-309.3).
- * Real user feedback exercising the actual running app found that still
- * too opaque for someone new to KiCad: it never showed *which* board was
- * about to be checked, and offered no way to actually open KiCad from
- * here. Zero boards open now offers a real "Open KiCad" action plus a
- * concrete walkthrough, not just prose. A second real click-through
- * found three more gaps this fixes too: "couldn't reach KiCad" rendered
- * as an alarming red error on someone's very first visit to this tab,
- * before they'd had any reason to open KiCad yet; picking a board from a
- * multi-board list gave no way to open a *different* one without leaving
- * the app; and a long file path overflowed its own box instead of
- * wrapping.
+ * CTX-309.4: scans for open boards as soon as this screen mounts and
+ * always shows them as a real, clickable list -- even a single one --
+ * rather than a blind "Check Board" button that silently auto-resolved
+ * whichever board happened to be open (CTX-309.3). Real user feedback
+ * exercising the actual running app found that still too opaque for
+ * someone new to KiCad: it never showed *which* board was about to be
+ * checked, and offered no way to actually open KiCad from here. Zero
+ * boards open now offers a real "Open KiCad" action plus a concrete
+ * walkthrough, not just prose. A second real click-through found three
+ * more gaps this fixes too: "couldn't reach KiCad" rendered as an
+ * alarming red error on someone's very first visit to this tab, before
+ * they'd had any reason to open KiCad yet; picking a board from a
+ * multi-board list gave no way to open a *different* one without
+ * leaving the app; and a long file path overflowed its own box instead
+ * of wrapping.
  *
  * This component stays mounted across every area tab, not just while
  * "PCB" is selected (App.tsx hides it with CSS instead of unmounting
@@ -51,10 +50,6 @@ export function BoardAdvisor({ projectName }: { projectName: string }) {
   const [boardCheckResult, setBoardCheckResult] = useState<CheckResult | null>(null)
   const [boardCheckError, setBoardCheckError] = useState<string | null>(null)
 
-  const [checkingSchematic, setCheckingSchematic] = useState(false)
-  const [schematicResult, setSchematicResult] = useState<CheckResult | null>(null)
-  const [schematicError, setSchematicError] = useState<string | null>(null)
-
   // A genuine project switch starts fresh -- unlike a tab switch (this
   // component stays mounted for those), the previously-checked board
   // belongs to whichever project it was checked under, not this new
@@ -64,8 +59,6 @@ export function BoardAdvisor({ projectName }: { projectName: string }) {
     setSelectedBoard(null)
     setBoardCheckResult(null)
     setBoardCheckError(null)
-    setSchematicResult(null)
-    setSchematicError(null)
   }, [projectName])
 
   const refreshBoardList = useCallback(async () => {
@@ -118,23 +111,6 @@ export function BoardAdvisor({ projectName }: { projectName: string }) {
     }
   }
 
-  async function handleCheckSchematic() {
-    // pickSchematicFile returning null (the user closed the dialog) is
-    // a normal, silent no-op -- not an error state.
-    const path = await pickSchematicFile()
-    if (!path) return
-
-    setCheckingSchematic(true)
-    setSchematicError(null)
-    try {
-      setSchematicResult(await checkSchematic(path))
-    } catch (err) {
-      setSchematicError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setCheckingSchematic(false)
-    }
-  }
-
   return (
     <div className="flex w-full max-w-md flex-col gap-6">
       <BoardCheckSection
@@ -151,29 +127,11 @@ export function BoardAdvisor({ projectName }: { projectName: string }) {
         checkError={boardCheckError}
         onCheckBoard={(candidate) => void handleCheckBoard(candidate)}
       />
-      <CheckSection
-        title="Schematic (ERC)"
-        checkLabel="Check Schematic…"
-        helpText="Unlike the board list above, KiCad's live connection has no way to list open schematics -- confirmed directly against a running KiCad instance (SPEC-309 §2), not an oversight here. Pick the .kicad_sch file directly; this also works even if KiCad itself isn't running."
-        checking={checkingSchematic}
-        onCheck={handleCheckSchematic}
-        result={schematicResult}
-        error={schematicError}
-      />
     </div>
   )
 }
 
-const _SEVERITY_COLOR: Record<string, string> = {
-  error: 'text-red-400',
-  warning: 'text-amber-400',
-  exclusion: 'text-neutral-500',
-}
-
-/** CTX-309.4: the Board (DRC) section, kept separate from the generic
- * CheckSection below since schematic checks always need an explicit,
- * user-picked file path (no live board-listing capability exists for
- * schematics, per SPEC-309 §2's own confirmed IPC limitation). */
+/** CTX-309.4: the Board (DRC) section. */
 function BoardCheckSection({
   loadingList,
   listResult,
@@ -316,92 +274,5 @@ function BoardCheckSection({
       {checkError && <p className="text-sm text-red-400">{checkError}</p>}
       {checkResult && <ViolationsList result={checkResult} hideSourcePath />}
     </div>
-  )
-}
-
-function CheckSection({
-  title,
-  checkLabel,
-  helpText,
-  checking,
-  onCheck,
-  result,
-  error,
-}: {
-  title: string
-  checkLabel: string
-  helpText?: string
-  checking: boolean
-  onCheck: () => void
-  result: CheckResult | null
-  error: string | null
-}) {
-  return (
-    <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
-      <p className="text-xs font-medium uppercase text-neutral-500">{title}</p>
-      {helpText && <p className="text-xs text-neutral-500">{helpText}</p>}
-      <button
-        type="button"
-        className="self-start rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
-        onClick={onCheck}
-        disabled={checking}
-      >
-        {checking ? 'Checking…' : checkLabel}
-      </button>
-
-      {error && <p className="text-sm text-red-400">{error}</p>}
-
-      {result && <ViolationsList result={result} />}
-    </div>
-  )
-}
-
-function ViolationsList({
-  result,
-  hideSourcePath = false,
-}: {
-  result: CheckResult
-  hideSourcePath?: boolean
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      {/* CTX-309.4 second revision: the Board (DRC) section already shows
-       * this exact path highlighted in the picker above -- repeating it
-       * here just duplicated it under the picked file's own name. */}
-      {!hideSourcePath && <p className="text-xs text-neutral-500">{result.source_path}</p>}
-      {result.violations.length === 0 ? (
-        <p className="text-sm text-emerald-400">No violations found.</p>
-      ) : (
-        <>
-          <p className="text-sm text-neutral-300">{result.summary}</p>
-          <ul className="flex flex-col gap-2">
-            {result.violations.map((violation, index) => (
-              <ViolationCard key={index} violation={violation} />
-            ))}
-          </ul>
-          {result.truncated_count > 0 && (
-            <p className="text-xs text-neutral-500">
-              +{result.truncated_count} more violation(s) not shown.
-            </p>
-          )}
-        </>
-      )}
-    </div>
-  )
-}
-
-function ViolationCard({ violation }: { violation: Violation }) {
-  return (
-    <li className="rounded border border-neutral-800 p-2 text-xs">
-      <p className="font-medium text-neutral-100">
-        <span className={_SEVERITY_COLOR[violation.severity] ?? 'text-neutral-400'}>
-          {violation.severity.toUpperCase()}
-        </span>{' '}
-        {violation.description}
-        {violation.sheet_path && <span className="text-neutral-500"> ({violation.sheet_path})</span>}
-      </p>
-      <p className="mt-1 text-neutral-300">{violation.explanation}</p>
-      <p className="mt-1 text-neutral-400">Suggested fix: {violation.suggested_fix}</p>
-    </li>
   )
 }

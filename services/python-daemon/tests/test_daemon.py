@@ -1110,6 +1110,55 @@ class TestKicadListOpenBoardsRoute(unittest.TestCase):
         self.assertNotIn("kicad.list_open_boards", daemon.ASYNC_ROUTES)
 
 
+class TestKicadListProjectSchematicsRoute(unittest.TestCase):
+    """Real user feedback: why can't Schematic checking list candidates
+    the way Board checking does? KiCad's IPC has no handler for listing
+    open schematics at all -- this route derives each open board's own
+    project's root schematic path instead, mirroring
+    kicad_list_open_boards's own two-state shape."""
+
+    def test_001_nothing_derivable_returns_a_structured_state_not_a_raise(self):
+        with patch('daemon.kicad_bridge.list_project_schematics', return_value=[]):
+            result = daemon.kicad_list_project_schematics()
+
+        self.assertEqual(result, {"status": "no_schematic_found"})
+
+    def test_002_a_single_derived_schematic_is_still_a_real_list(self):
+        with patch('daemon.kicad_bridge.list_project_schematics', return_value=['/real/project/board.kicad_sch']):
+            result = daemon.kicad_list_project_schematics()
+
+        self.assertEqual(result, {
+            "status": "schematics_found",
+            "candidates": [{"path": "/real/project/board.kicad_sch", "label": "board.kicad_sch"}],
+        })
+
+    def test_003_multiple_derived_schematics_returns_every_real_candidate(self):
+        with patch(
+            'daemon.kicad_bridge.list_project_schematics',
+            return_value=['/projects/a/a.kicad_sch', '/projects/b/b.kicad_sch'],
+        ):
+            result = daemon.kicad_list_project_schematics()
+
+        self.assertEqual(result["status"], "schematics_found")
+        self.assertEqual(result["candidates"], [
+            {"path": "/projects/a/a.kicad_sch", "label": "a.kicad_sch"},
+            {"path": "/projects/b/b.kicad_sch", "label": "b.kicad_sch"},
+        ])
+
+    def test_004_build_routes_omits_it_when_kicad_bridge_import_failed(self):
+        original = daemon.kicad_bridge
+        daemon.kicad_bridge = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.list_project_schematics", routes)
+        finally:
+            daemon.kicad_bridge = original
+
+    def test_005_registered_as_a_sync_route_not_async(self):
+        self.assertIn("kicad.list_project_schematics", daemon.ROUTES)
+        self.assertNotIn("kicad.list_project_schematics", daemon.ASYNC_ROUTES)
+
+
 class TestKicadCheckBoardRoute(unittest.TestCase):
     """CTX-309.1/CTX-309.4: SPEC-309's DRC route. CTX-309.4 made pcb_path
     required -- kicad.list_open_boards (above) now owns resolving which

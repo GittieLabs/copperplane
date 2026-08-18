@@ -344,6 +344,117 @@ class TestListOpenBoards(unittest.TestCase):
             self.assertTrue(path.endswith(".kicad_pcb"))
 
 
+class TestListProjectSchematics(unittest.TestCase):
+    """Real user feedback: why can't Schematic checking list candidates
+    the way Board checking does? KiCad's IPC has no handler for listing
+    open schematics at all, confirmed live -- so this derives each open
+    board's own project's root schematic path instead, keeping only
+    ones that actually exist on disk."""
+
+    def setUp(self):
+        kicad_bridge._client = None
+
+    def tearDown(self):
+        kicad_bridge._client = None
+
+    @patch('kicad_bridge.os.path.exists')
+    @patch('kicad_bridge.KiCad')
+    def test_001_derives_the_schematic_path_from_the_open_boards_own_project_name(self, mock_kicad_cls, mock_exists):
+        mock_client = MagicMock()
+        mock_doc = MagicMock()
+        mock_doc.board_filename = "weirdly_renamed_board.kicad_pcb"
+        mock_doc.project.path = "/Users/dev/boards/arduino"
+        mock_doc.project.name = "Arduino_Pro_Mini"
+        mock_client.get_open_documents.return_value = [mock_doc]
+        mock_kicad_cls.return_value = mock_client
+        mock_exists.return_value = True
+
+        paths = kicad_bridge.list_project_schematics()
+
+        self.assertEqual(paths, [os.path.join("/Users/dev/boards/arduino", "Arduino_Pro_Mini.kicad_sch")])
+
+    @patch('kicad_bridge.os.path.exists')
+    @patch('kicad_bridge.KiCad')
+    def test_002_a_derived_path_that_does_not_exist_on_disk_is_never_returned(self, mock_kicad_cls, mock_exists):
+        mock_client = MagicMock()
+        mock_doc = MagicMock()
+        mock_doc.board_filename = "board.kicad_pcb"
+        mock_doc.project.path = "/Users/dev/boards/orphan"
+        mock_doc.project.name = "orphan"
+        mock_client.get_open_documents.return_value = [mock_doc]
+        mock_kicad_cls.return_value = mock_client
+        mock_exists.return_value = False
+
+        self.assertEqual(kicad_bridge.list_project_schematics(), [])
+
+    @patch('kicad_bridge.os.path.exists')
+    @patch('kicad_bridge.KiCad')
+    def test_003_two_open_boards_from_the_same_project_dedupe_to_one_schematic(self, mock_kicad_cls, mock_exists):
+        mock_client = MagicMock()
+        mock_doc_a = MagicMock()
+        mock_doc_a.board_filename = "top.kicad_pcb"
+        mock_doc_a.project.path = "/Users/dev/boards/multi"
+        mock_doc_a.project.name = "multi"
+        mock_doc_b = MagicMock()
+        mock_doc_b.board_filename = "bottom.kicad_pcb"
+        mock_doc_b.project.path = "/Users/dev/boards/multi"
+        mock_doc_b.project.name = "multi"
+        mock_client.get_open_documents.return_value = [mock_doc_a, mock_doc_b]
+        mock_kicad_cls.return_value = mock_client
+        mock_exists.return_value = True
+
+        self.assertEqual(kicad_bridge.list_project_schematics(), [os.path.join("/Users/dev/boards/multi", "multi.kicad_sch")])
+
+    @patch('kicad_bridge.KiCad')
+    def test_004_nothing_open_returns_an_empty_list_not_an_error(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_client.get_open_documents.return_value = []
+        mock_kicad_cls.return_value = mock_client
+
+        self.assertEqual(kicad_bridge.list_project_schematics(), [])
+
+    @patch('kicad_bridge.KiCad')
+    def test_005_no_handler_available_api_error_is_treated_as_nothing_derivable(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_client.get_open_documents.side_effect = ApiError(
+            "KiCad returned error: no handler available for request of type "
+            "kiapi.common.commands.GetOpenDocuments"
+        )
+        mock_kicad_cls.return_value = mock_client
+        kicad_bridge._client = mock_client
+
+        self.assertEqual(kicad_bridge.list_project_schematics(), [])
+        self.assertIs(kicad_bridge._client, mock_client, "a real 'nothing open' state must not reset the connection")
+
+    @patch('kicad_bridge.KiCad')
+    def test_006_a_broken_connection_mid_call_resets_and_raises_clean(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_client.get_open_documents.side_effect = KiCadConnectionError("gone")
+        mock_kicad_cls.return_value = mock_client
+        kicad_bridge._client = mock_client
+
+        with self.assertRaises(KiCadUnavailableError):
+            kicad_bridge.list_project_schematics()
+
+        self.assertIsNone(kicad_bridge._client)
+
+    def test_007_real_round_trip_against_a_live_kicad_instance(self):
+        """Skips itself cleanly when no live KiCad is running, same
+        convention as list_open_boards's own real round trip."""
+        socket_path = '/tmp/kicad/api.sock'
+        if not os.path.exists(socket_path):
+            self.skipTest(
+                f"No live KiCad IPC socket at {socket_path}. Enable the IPC API "
+                "(Preferences > Plugins) and launch KiCad to run this test for real."
+            )
+
+        paths = kicad_bridge.list_project_schematics()
+
+        for path in paths:
+            self.assertTrue(path.endswith(".kicad_sch"))
+            self.assertTrue(os.path.exists(path), "must never return a derived path that doesn't actually exist")
+
+
 class TestGetBoardOutline(unittest.TestCase):
 
     def setUp(self):
