@@ -14,6 +14,27 @@ fn get_app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// CTX-309.4: real user feedback exercising the actual running app --
+/// someone new to KiCad had no way to tell that "not reachable" meant
+/// "KiCad isn't even open," and the app never offered to open it. macOS
+/// uses the standard `open -a KiCad` Launch Services lookup by app name
+/// -- confirmed working directly on this dev machine (KiCad's own real
+/// process appeared within ~2s of running it). Windows/Linux fall back
+/// to invoking `kicad` directly, relying on PATH the same way
+/// `find_kicad_cli`'s own lookup already does elsewhere in this app --
+/// **not verified on those platforms**, named honestly here rather than
+/// silently assumed to work the same way.
+#[tauri::command]
+fn open_kicad() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").args(["-a", "KiCad"]).spawn();
+
+    #[cfg(not(target_os = "macos"))]
+    let result = std::process::Command::new("kicad").spawn();
+
+    result.map(|_| ()).map_err(|e| format!("Could not launch KiCad: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -50,6 +71,7 @@ pub fn run() {
             config::get_config,
             config::save_config_cmd,
             get_app_version,
+            open_kicad,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

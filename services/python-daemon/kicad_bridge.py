@@ -74,10 +74,29 @@ def configure(socket_path=None, timeout_ms=None):
 
 def get_client() -> KiCad:
     """Returns the held-open KiCad client, connecting on first use with
-    any configured `socket_path`/`timeout_ms` override (SPEC-106)."""
+    any configured `socket_path`/`timeout_ms` override (SPEC-106).
+
+    Real, live-discovered bug: the held-open connection can go stale
+    without ever raising on its own -- `SPEC-103` §3's own documented
+    state-desync risk (closing/reopening things in KiCad while this
+    daemon holds a connection open). Confirmed live: after enough
+    opening/closing of KiCad and files in one dev session, real routes
+    that had worked moments earlier (a fresh connection found
+    everything correctly) started silently returning nothing through
+    the daemon's own long-held connection, and only a full daemon
+    restart recovered it -- the cached `_client` was never actually
+    validated before being reused. Every call now pings the cached
+    client first (a real, cheap round trip, not just checking a local
+    "am I connected" flag) and transparently reconnects if that fails,
+    instead of trusting a connection that's been open for a while."""
     global _client
     if _client is not None:
-        return _client
+        try:
+            _client.ping()
+            return _client
+        except (KiCadConnectionError, ApiError):
+            logger.warning("Cached KiCad connection failed a health-check ping; reconnecting.")
+            _client = None
 
     kwargs = {}
     if _socket_path_override:
@@ -139,34 +158,93 @@ def get_kicad_version() -> dict:
     }
 
 
-def get_open_board_path() -> str | None:
-    """SPEC-309: resolves the real, full filesystem path of whatever
-    board is currently open in KiCad -- `project.path` + `board_filename`
-    from `get_open_documents(DOCTYPE_PCB)`, confirmed live against a real
-    running KiCad 10.0.3 instance during SPEC-309's own research. Returns
-    `None` if nothing is open, rather than raising -- "no board open" is
-    a normal, expected state for the board-advisor route to handle
-    (report it plainly and ask for an explicit path), not an error.
+_NO_HANDLER_MARKER = "no handler available"
+
+
+def list_open_boards() -> list:
+    """SPEC-309/CTX-309.3: resolves every real, currently-open PCB
+    editor's full filesystem path via `get_open_documents(DOCTYPE_PCB)`
+    -- a real list, never silently narrowed to just the first one, so a
+    caller can tell "nothing open" apart from "more than one open" and
+    handle each honestly instead of guessing which board the user meant.
+
+    A real, live-confirmed finding (CTX-309.3, against this machine's
+    own actually-running KiCad instance): `get_open_documents` itself
+    raises a real `ApiError` containing "no handler available" whenever
+    no PCB Editor window is open at all -- the handler isn't registered
+    until one is (the same real constraint CTX-108.1's own Deviation 2
+    already documented for the write path). This is a normal, expected
+    "nothing open" state, treated the same as an empty list -- not
+    passed through `reset_connection()`/`KiCadUnavailableError` the way
+    a genuine dropped connection is. `SPEC-309`'s own original research
+    assumed an empty list here without live-testing the zero-open case;
+    this was a real, live-discovered correction, not a hypothetical one.
 
     Deliberately PCB-only: the identical call for `DOCTYPE_SCHEMATIC`
-    raises a real `no handler available` `ApiError` -- confirmed the
-    same way, not assumed -- so this function doesn't attempt it; the
-    schematic side of SPEC-309 always needs an explicit user-supplied
-    path."""
+    raises the same real `no handler available` `ApiError` unconditionally
+    (there's no schematic-document capability to fall back to) -- confirmed
+    the same way, not assumed. `list_project_schematics` below derives a
+    schematic path from this same real IPC data instead of needing that
+    capability at all."""
     client = get_client()
     try:
         docs = list(client.get_open_documents(DocumentType.DOCTYPE_PCB))
     except (KiCadConnectionError, ApiError) as e:
+        if isinstance(e, ApiError) and _NO_HANDLER_MARKER in str(e):
+            return []
         reset_connection()
         raise KiCadUnavailableError(
             "Lost connection to KiCad mid-request. It may have been closed."
         ) from e
 
-    if not docs:
-        return None
+    return [os.path.join(doc.project.path, doc.board_filename) for doc in docs]
 
-    doc = docs[0]
-    return os.path.join(doc.project.path, doc.board_filename)
+
+def list_project_schematics() -> list:
+    """Real user feedback: why can't Schematic checking work like Board
+    checking, with a live list instead of a blind file dialog? Answer,
+    confirmed live against a real running KiCad instance with a real
+    project open (not assumed): `get_open_documents(DOCTYPE_SCHEMATIC)`
+    raises the same `"no handler available"` `ApiError` unconditionally,
+    even with a board open and its project loaded -- unlike the PCB
+    case, KiCad's IPC server has never implemented a schematic-listing
+    handler at all. `run_action` could in principle drive KiCad's UI
+    remotely, but kipy's own docstring marks it explicitly unstable and
+    "not intended for use other than by API developers" -- not something
+    to build real functionality on.
+
+    Instead, this derives each currently open board's own root schematic
+    path from `get_open_documents(DOCTYPE_PCB)`'s own real `project.name`/
+    `project.path` fields: KiCad's own project convention names the root
+    schematic after the *project*, not the individual board file -- true
+    even for a multi-board project whose `.kicad_pcb` files don't share
+    the project's own name. Verified against a real project on this
+    machine (`NFC_Reader_ESP32.kicad_pcb` open, project name
+    `NFC_Reader_ESP32`, real `NFC_Reader_ESP32.kicad_sch` present at the
+    project root). Never returns a derived path that doesn't actually
+    exist -- a wrong guess presented as fact would be worse than the
+    manual file-picker this replaces for the common case."""
+    client = get_client()
+    try:
+        docs = list(client.get_open_documents(DocumentType.DOCTYPE_PCB))
+    except (KiCadConnectionError, ApiError) as e:
+        if isinstance(e, ApiError) and _NO_HANDLER_MARKER in str(e):
+            return []
+        reset_connection()
+        raise KiCadUnavailableError(
+            "Lost connection to KiCad mid-request. It may have been closed."
+        ) from e
+
+    seen = set()
+    candidates = []
+    for doc in docs:
+        sch_path = os.path.join(doc.project.path, doc.project.name + ".kicad_sch")
+        if sch_path in seen:
+            continue
+        seen.add(sch_path)
+        if os.path.exists(sch_path):
+            candidates.append(sch_path)
+    return candidates
 
 
 def get_board_outline() -> dict:

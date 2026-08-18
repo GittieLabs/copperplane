@@ -15,8 +15,8 @@ import { getCapabilities } from './lib/settings'
 import { BoardAdvisor } from './components/BoardAdvisor'
 import { ComponentDiscovery } from './components/ComponentDiscovery'
 import { EnclosureViewer } from './components/EnclosureViewer'
-import { NotBuiltPlaceholder } from './components/NotBuiltPlaceholder'
 import { Rail } from './components/Rail'
+import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
 
 // SPEC-108's own Cross-Module Impacts section names a fixed placement
@@ -143,14 +143,25 @@ function App() {
             {view.area === 'overview' && <Overview projectName={view.name} />}
             {view.area === 'enclosure' && <EnclosurePanel projectName={view.name} />}
             {view.area === 'components' && <ComponentDiscovery />}
-            {view.area === 'schematic' && (
-              <NotBuiltPlaceholder
-                specId="SPEC-308"
-                title="Schematic"
-                description="Schematic-level advice for the parts in this project."
-              />
-            )}
-            {view.area === 'pcb' && <BoardAdvisor />}
+            {/* BoardAdvisor/SchematicAdvisor stay mounted across every area,
+             * not just while their own tab is selected -- real user feedback
+             * found that switching tabs away and back threw away a check
+             * that had just finished, with no reason to. Hidden via CSS
+             * instead of unmounted, so their own state (which board/
+             * schematic was picked, the result) survives the round trip;
+             * each resets that state itself when `projectName` changes, so
+             * switching *projects* still starts fresh. Per SPEC-300's
+             * original stage-machine design, ERC (Schematic) and DRC (PCB)
+             * are two separate stages -- real user feedback flagged the
+             * earlier both-checks-under-PCB layout as a mismatch, not
+             * SPEC-308's own still-unbuilt footprint/connection-guidance
+             * work, which will eventually join SchematicAdvisor here. */}
+            <div className={view.area === 'schematic' ? undefined : 'hidden'}>
+              <SchematicAdvisor projectName={view.name} />
+            </div>
+            <div className={view.area === 'pcb' ? undefined : 'hidden'}>
+              <BoardAdvisor projectName={view.name} />
+            </div>
           </>
         )}
       </main>

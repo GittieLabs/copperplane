@@ -60,6 +60,12 @@ user_facing: true
     *   `kc.get_open_documents(DocumentType.DOCTYPE_PCB)` returns a real, resolvable full path
         (`project.path` + `board_filename`) for whatever board is currently open. DRC can target
         "the board you have open right now" with no manual file-picking for the common case.
+        **Correction (`CTX-309.3`, found by real, live testing on this exact machine):** when *no*
+        PCB Editor window is open at all, this call doesn't return an empty list -- it raises a real
+        `ApiError` containing `"no handler available"`, because the handler isn't registered until a
+        PCB Editor window is. Treated as equivalent to "nothing open," not a connection failure.
+        Also: when *more than one* PCB Editor window is open, this returns every one of them, not
+        just one -- the original research here only ever exercised the single-board case.
     *   The identical call for `DocumentType.DOCTYPE_SCHEMATIC` raises
         `kipy.errors.ApiError: KiCad returned error: no handler available for request of type
         kiapi.common.commands.GetOpenDocuments` -- a real, current API gap, confirmed by the actual
@@ -143,5 +149,9 @@ user_facing: true
     project shell; a real violation list, each with KiCad's own real description plus a plain-
     language explanation and suggested fix; a schematic check additionally needs the user to pick
     the `.kicad_sch` file first (no live auto-resolution possible, per §2's own confirmed finding).
-    Exact layout/interaction details are this spec's own implementation context's job to fill in
-    against the real shell `SPEC-305` already built, not invented here.
+    `CTX-309.3` (found exercising the real, running app) added two more real, guided states for
+    "Check Board" specifically: a concrete numbered walkthrough when no board is open in KiCad at
+    all, and a clickable picker when more than one is -- neither state is a raw error, since both are
+    normal, expected outcomes of how KiCad's own live-document state actually behaves. Exact
+    layout/interaction details are this spec's own implementation context's job to fill in against
+    the real shell `SPEC-305` already built, not invented here.

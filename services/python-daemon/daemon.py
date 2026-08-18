@@ -709,22 +709,48 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
     )
 
 
-def kicad_check_board(pcb_path: str = None) -> dict:
-    """The kicad.check_board route (SPEC-309): a real DRC via kicad-cli
-    against `pcb_path`, or -- when not given -- whatever board is
-    currently open in KiCad (kicad_bridge.get_open_board_path(),
-    confirmed live during SPEC-309's own research). Explains the real
-    violations via a real LLM call. Async: a real subprocess plus a real
-    LLM call, both genuinely multi-second, like every other real
-    kicad.*/component.* route in ASYNC_ROUTES below."""
-    if not pcb_path:
-        pcb_path = kicad_bridge.get_open_board_path()
-        if not pcb_path:
-            raise kicad_cli.KicadCliError(
-                "No board is currently open in KiCad, and no pcb_path was given. "
-                "Open a board in KiCad, or pass an explicit path."
-            )
+def kicad_list_open_boards() -> dict:
+    """The kicad.list_open_boards route (CTX-309.4): a real, cheap,
+    read-only lookup of every board currently open in KiCad, decoupled
+    from actually running a check. Feeds the Board (DRC) picker UI's
+    real, always-shown "here's what's open, pick one" flow -- real user
+    feedback exercising the actual running app found the old
+    auto-resolve-silently-when-exactly-one-is-open behavior (CTX-309.3)
+    still too opaque for someone new to KiCad: it never showed *which*
+    board was about to be checked, and the flat "no board open" state
+    never offered to open KiCad itself. Sync, not async -- this is a fast
+    IPC lookup, no subprocess or LLM call, unlike kicad_check_board below.
 
+    *   Zero boards open: {"status": "no_board_open"}.
+    *   One or more open: {"status": "boards_found", "candidates":
+        [{"path", "label"}, ...]} -- always a real list, even a single
+        entry, so the user always sees and picks the exact board before
+        any check ever runs, never a silent auto-resolution."""
+    candidates = kicad_bridge.list_open_boards()
+    if not candidates:
+        return {"status": "no_board_open"}
+    return {
+        "status": "boards_found",
+        "candidates": [
+            {"path": path, "label": os.path.basename(path)}
+            for path in candidates
+        ],
+    }
+
+
+def kicad_check_board(pcb_path: str) -> dict:
+    """The kicad.check_board route (SPEC-309): a real DRC via kicad-cli
+    against an explicit `pcb_path`. Explains the real violations via a
+    real LLM call. Async: a real subprocess plus a real LLM call, both
+    genuinely multi-second, like every other real kicad.*/component.*
+    route in ASYNC_ROUTES below.
+
+    CTX-309.4 removed the old default-`None`/auto-resolve-when-omitted
+    behavior (CTX-309.3) in favor of `kicad.list_open_boards` feeding a
+    real picker UI first -- the user always explicitly picks which board
+    before this route ever runs, the same explicit-path contract
+    `kicad_check_schematic` already used. `pcb_path` is required now, not
+    optional."""
     report = kicad_cli.run_drc(pcb_path)
     result = component_pipeline.explain_violations(
         report["violations"], "drc",
@@ -733,16 +759,45 @@ def kicad_check_board(pcb_path: str = None) -> dict:
         model=CONFIG.get("llm_model"),
     )
     result["source_path"] = pcb_path
+    result["status"] = "ok"
     return result
+
+
+def kicad_list_project_schematics() -> dict:
+    """The kicad.list_project_schematics route: real user feedback asked
+    why Schematic checking couldn't work like Board checking, with a
+    live list instead of a blind file dialog. KiCad's IPC server has no
+    handler for listing open schematics at all (confirmed live,
+    unconditionally, unlike PCB's transient "nothing open yet" case --
+    see `kicad_bridge.list_project_schematics`'s own docstring), so this
+    derives each currently open board's project's own root schematic
+    path instead, and only returns ones that actually exist on disk.
+
+    *   Nothing derivable: {"status": "no_schematic_found"}.
+    *   One or more real, existing schematic files: {"status":
+        "schematics_found", "candidates": [{"path", "label"}, ...]} --
+        mirrors kicad_list_open_boards's own shape so the frontend can
+        reuse the same picker pattern. Sync, not async, like that route,
+        for the same reason: a fast IPC lookup plus filesystem checks,
+        no subprocess or LLM call."""
+    candidates = kicad_bridge.list_project_schematics()
+    if not candidates:
+        return {"status": "no_schematic_found"}
+    return {
+        "status": "schematics_found",
+        "candidates": [
+            {"path": path, "label": os.path.basename(path)}
+            for path in candidates
+        ],
+    }
 
 
 def kicad_check_schematic(sch_path: str) -> dict:
     """The kicad.check_schematic route (SPEC-309): a real ERC via
-    kicad-cli against `sch_path` -- always an explicit, user-supplied
-    path. Unlike kicad_check_board, there is no auto-resolution: live
-    IPC has no schematic-document capability at all (a real
-    `no handler available` ApiError, confirmed live -- see SPEC-309 §2),
-    consistent with SPEC-103's own deferred-schematic-access decision.
+    kicad-cli against `sch_path` -- always an explicit path, whether
+    picked from `kicad.list_project_schematics`'s derived candidates or
+    a manually-chosen file (the picker's own fallback for a schematic
+    that isn't alongside any currently open board).
 
     ERC's real JSON nests violations per schematic sheet
     (kicad_cli.run_erc's own docstring); flattened here into one list,
@@ -815,6 +870,9 @@ def _build_routes() -> dict:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
     if component_pipeline is not None and library_store is not None:
         routes["kicad.generate_connection_guidance"] = kicad_generate_connection_guidance
+    if kicad_bridge is not None:
+        routes["kicad.list_open_boards"] = kicad_list_open_boards
+        routes["kicad.list_project_schematics"] = kicad_list_project_schematics
     if kicad_cli is not None and component_pipeline is not None:
         if kicad_bridge is not None:
             routes["kicad.check_board"] = kicad_check_board
