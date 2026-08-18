@@ -201,7 +201,8 @@ bridges talk to each other, and it's where the product stops being two disconnec
 Scope: board outline extraction, hole positions, wall thickness/tolerance/standoff parameters,
 fillets, and STEP export alongside `.glb` so the result is usable in real mechanical CAD.
 
-#### SPEC-111 — Enclosure Lid & Component-Height Clearance
+#### SPEC-111 — Enclosure Lid & Component-Height Clearance — superseded in scope by SPEC-311
+
 *Module:* `services/python-daemon` · *Depends on:* SPEC-109, SPEC-202
 
 Real user feedback exercising the shipped enclosure generator: `SPEC-109` only ever builds an
@@ -212,17 +213,20 @@ to a rectangle before it ever reaches FreeCAD. Two real, related gaps worth addr
 neither attempted here:
 
 1.  **A real lid, not just a bottom shell.** Needs the enclosure's own interior height to clear
-    every placed component's real body height, not just the board's flat 2D outline — today's
-    pipeline has no per-component Z-height data at all (`SPEC-202`'s extraction doesn't currently
-    capture component body height; `library_store`'s own Part schema would need it).
+    every placed component's real body height, not just the board's flat 2D outline.
+    **Correction, found while scoping `SPEC-311`:** `SPEC-202`'s extraction already persists
+    `package_dimensions.height_mm` on every saved `Part` (`CTX-308.5`) — the real gap is that no
+    stored link exists from a specific *placed footprint on a real board* back to the `Part`
+    record it came from, not a missing height field.
 2.  **A true polygon-traced shell, not a rectangular bounding box**, for a genuinely
     non-rectangular board — real OpenCASCADE work (extrude an arbitrary closed wire, offset it
     inward by wall thickness for the shell, handle concave sections at each corner), not a small
     tweak to the existing `Part.makeBox` boolean-cut script.
 
-Neither is a quick fix — both need real design work (what "component height" means for a part with
-no 3D model at all; how a non-rectangular offset behaves at a concave corner) before
-implementation, which is exactly why this is a backlog entry, not a context.
+Left here as the historical record of when this gap was first named (this repo's own "Plan Drift is
+not embarrassing" norm) — **[SPEC-311](apps/tauri-ui/specs/SPEC-311-enclosure-refinement-interactive-preview.md)**
+is the real spec that now owns this scope, expanded well beyond just lid/outline once actually
+written up.
 
 ### 3.2 `2xx` — Intelligence layer
 

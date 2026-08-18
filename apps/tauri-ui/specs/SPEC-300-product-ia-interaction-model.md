@@ -16,6 +16,7 @@ child_specs:
   - "SPEC-308-footprints-schematic-advisor.md"
   - "SPEC-309-board-advisor.md"
   - "SPEC-310-enclosure-from-board-profile.md"
+  - "SPEC-311-enclosure-refinement-interactive-preview.md"
 user_facing: true
 ---
 

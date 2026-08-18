@@ -264,6 +264,22 @@ coordinates -- left uncorrected, it would have silently mirrored standoff placem
 whose mounting holes aren't symmetric top-to-bottom. Auto-layout and assisted routing stay
 explicitly out of scope; nothing beyond SPEC-310 is currently planned against this milestone.
 
+### M6 — Enclosure refinement & interactive preview
+
+SPEC-311: real click-through of the shipped M5 enclosure feature (`CTX-310.3`'s own Plan Drift,
+Deviation 3) surfaced that every mode -- not just Manual -- produces a rectangular box from a
+bounding box with no lid, confirmed as `SPEC-109`'s own deliberate scope at the time, not a bug.
+Scope: derive real shape/height from the board's actual outline and its placed components' real
+heights (`package_dimensions.height_mm` already exists per-Part via `CTX-308.5` -- the real gap is
+linking a placed board footprint back to its `Part` record, not missing data); a real, optional,
+independently-toggleable lid; an iterative refine-and-regenerate loop against the same selected
+board instead of a one-shot form; camera presets (top/bottom/rotate) alongside the existing free
+orbit; a wider Enclosure-area layout for the 3D preview; matching the PCB/Schematic tabs' own
+last-open-board list-on-load pattern (generation still requires an explicit click even when
+auto-selected, since a remembered path could have moved or been deleted). Persistence of the
+generated design across refine iterations is a real, named open question, not decided in the spec
+itself -- the implementing context must pick a model and say why.
+
 ---
 
 ## 7. What happens to the shipped UI
