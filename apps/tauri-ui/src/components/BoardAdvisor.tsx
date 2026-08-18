@@ -168,13 +168,27 @@ function BoardCheckSection({
       {!loadingList && listError && (
         <div className="flex flex-col gap-2">
           <p className="text-sm text-red-400">{listError}</p>
-          <button
-            type="button"
-            className="self-start rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
-            onClick={onRefreshList}
-          >
-            Retry
-          </button>
+          {/* CTX-309.4 revision: "could not connect" almost always means
+           * KiCad simply isn't running yet -- the real, most common novice
+           * case -- so this offers the same Open KiCad action as the
+           * empty-list state, not just a bare Retry. */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+              onClick={onOpenKicad}
+              disabled={openingKicad}
+            >
+              {openingKicad ? 'Opening…' : 'Open KiCad'}
+            </button>
+            <button
+              type="button"
+              className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+              onClick={onRefreshList}
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
 

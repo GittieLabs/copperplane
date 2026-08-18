@@ -180,7 +180,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     expect(listOpenBoardsMock).toHaveBeenCalledTimes(2)
   })
 
-  it('a genuine connection failure scanning for open boards shows the real error with a Retry action', async () => {
+  it('a genuine connection failure scanning for open boards shows the real error with Open KiCad and Retry actions', async () => {
     listOpenBoardsMock.mockReset().mockRejectedValue(
       new Error('Could not connect to KiCad. Ensure KiCad 9 or later is running with the IPC API enabled (Preferences > Plugins).'),
     )
@@ -188,7 +188,19 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     render(<BoardAdvisor />)
 
     await waitFor(() => screen.getByText(/Could not connect to KiCad/))
+    screen.getByRole('button', { name: 'Open KiCad' })
     screen.getByRole('button', { name: 'Retry' })
+  })
+
+  it('Open KiCad works from the connection-failure state too, not just no_board_open', async () => {
+    listOpenBoardsMock.mockReset().mockRejectedValue(new Error('Could not connect to KiCad.'))
+
+    render(<BoardAdvisor />)
+    await waitFor(() => screen.getByRole('button', { name: 'Open KiCad' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open KiCad' }))
+
+    await waitFor(() => expect(openKicadMock).toHaveBeenCalledTimes(1))
   })
 
   it('a truncated_count > 0 tells the user violations were left out, not silently dropped', async () => {
