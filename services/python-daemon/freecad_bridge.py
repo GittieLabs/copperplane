@@ -61,6 +61,8 @@ _path_override = None
 _output_dir_override = None
 _last_glb_path = None
 _last_step_path = None
+_last_lid_glb_path = None
+_last_lid_step_path = None
 
 
 def configure(path_override=None, output_dir=None):
@@ -161,12 +163,41 @@ obj.Shape = result
 doc.recompute()
 obj.Shape.exportStl({stl_path!r})
 obj.Shape.exportStep({step_path!r})
-"""
+{lid_lines}"""
 
 _STANDOFF_CYLINDER_TEMPLATE = (
     "cyl = Part.makeCylinder({radius}, {height}, FreeCAD.Vector({x}, {y}, 0))\n"
     "result = result.fuse(cyl)\n"
 )
+
+# SPEC-311 §2: a real, deliberately simple second body -- a flat,
+# filleted plate matching the shell's own outer footprint, closing the
+# open top the board-driven shell always has. Built in the *same*
+# freecadcmd document/subprocess call as the shell above (a second
+# Part::Feature, not a second script) -- SPEC-311 §3 already flags
+# freecadcmd's own cold-boot cost compounding per refine-and-regenerate
+# click; a second subprocess purely to add a lid would double that cost
+# for no real benefit. Deliberately not a snap-fit/lip design (real,
+# unproven geometry work, and SPEC-109 §1's own "not fastener hardware"
+# non-goal) -- v1 is an honest flat cover, nothing more.
+_LID_BODY_LINES_TEMPLATE = """
+lid_result = Part.makeBox({outer_w}, {outer_d}, {lid_thickness})
+lid_vertical_edges = []
+for e in lid_result.Edges:
+    verts = e.Vertexes
+    if len(verts) == 2:
+        v0, v1 = verts[0].Point, verts[1].Point
+        dx, dy, dz = abs(v0.x - v1.x), abs(v0.y - v1.y), abs(v0.z - v1.z)
+        if dx < 1e-6 and dy < 1e-6 and dz > 1e-6:
+            lid_vertical_edges.append(e)
+if lid_vertical_edges and {fillet_radius} > 0:
+    lid_result = lid_result.makeFillet({fillet_radius}, lid_vertical_edges)
+lid_obj = doc.addObject("Part::Feature", "Lid")
+lid_obj.Shape = lid_result
+doc.recompute()
+lid_obj.Shape.exportStl({lid_stl_path!r})
+lid_obj.Shape.exportStep({lid_step_path!r})
+"""
 
 
 def _wait_with_cancellation(proc: subprocess.Popen, timeout_s: float, cancel_event) -> tuple:
@@ -200,6 +231,8 @@ def generate_enclosure(
     clearance_mm: float = 0.5,
     standoffs: list = None,
     fillet_radius_mm: float = 1.0,
+    lid: bool = False,
+    lid_thickness_mm: float = None,
     timeout_s: float = 30.0,
     cancel_event=None,
 ) -> dict:
@@ -224,6 +257,21 @@ def generate_enclosure(
       always required in both modes -- a board outline is 2D and has no Z
       dimension to derive it from.
 
+    `lid` (SPEC-311, board-driven mode only -- a `ValueError` in manual
+    mode, which has no open top to close) adds a second real body: a
+    flat, filleted plate matching the shell's own outer footprint,
+    `lid_thickness_mm` thick (defaults to `wall_thickness_mm` when not
+    given). A deliberately simple flat cover, not a snap-fit/lipped
+    design -- real, unproven geometry work and outside SPEC-109 §1's own
+    "not fastener hardware" non-goal. Built in the same `freecadcmd`
+    subprocess call as the shell (not a second script, avoiding a second
+    real cold-boot cost per SPEC-311 §3's own named risk), and returned
+    as its own separate `lid_glb_path`/`lid_step_path` pair -- the same
+    "two separately-loaded scenes" approach SPEC-311 §2 named as the
+    real option that needs no `EnclosureViewer.tsx` scene-graph rework
+    to show/hide independently, since it currently loads exactly one
+    `.glb` per instance.
+
     FreeCAD's own scripting API has no direct glTF/`.glb` exporter (see
     CTX-104.1 Plan Drift), so the subprocess exports `.stl` — which is
     well-supported — and this function converts that to `.glb` itself via
@@ -243,12 +291,17 @@ def generate_enclosure(
     only the persistent outputs a frontend or another CAD tool might load
     need to live somewhere `assetProtocol.scope` can be narrowed to.
     """
-    global _last_glb_path, _last_step_path
+    global _last_glb_path, _last_step_path, _last_lid_glb_path, _last_lid_step_path
 
     if board_outline is None and (width is None or depth is None):
         raise ValueError(
             "generate_enclosure requires either board_outline, or width and depth "
             "for the no-board-data fallback."
+        )
+    if lid and board_outline is None:
+        raise ValueError(
+            "lid requires board-driven mode -- manual dims mode's box has no open top "
+            "for a lid to close."
         )
 
     freecadcmd = find_freecadcmd()
@@ -257,11 +310,14 @@ def generate_enclosure(
     tmp_dir = tempfile.gettempdir()
     script_path = os.path.join(tmp_dir, f"temp_build_{build_id}.py")
     stl_path = os.path.join(tmp_dir, f"enclosure_{build_id}.stl")
+    lid_stl_path = os.path.join(tmp_dir, f"lid_{build_id}.stl")
 
     output_dir = _output_dir_override or tmp_dir
     os.makedirs(output_dir, exist_ok=True)
     glb_path = os.path.join(output_dir, f"enclosure_{build_id}.glb")
     step_path = os.path.join(output_dir, f"enclosure_{build_id}.step")
+    lid_glb_path = os.path.join(output_dir, f"lid_{build_id}.glb")
+    lid_step_path = os.path.join(output_dir, f"lid_{build_id}.step")
 
     if board_outline is None:
         script = _BUILD_SCRIPT_TEMPLATE.format(
@@ -285,6 +341,17 @@ def generate_enclosure(
             )
             for s in (standoffs or [])
         )
+        lid_lines = (
+            _LID_BODY_LINES_TEMPLATE.format(
+                outer_w=outer_w,
+                outer_d=outer_d,
+                lid_thickness=lid_thickness_mm if lid_thickness_mm is not None else wall_thickness_mm,
+                fillet_radius=fillet_radius_mm,
+                lid_stl_path=lid_stl_path,
+                lid_step_path=lid_step_path,
+            )
+            if lid else ""
+        )
         script = _HOLLOW_SHELL_SCRIPT_TEMPLATE.format(
             outer_w=outer_w,
             outer_d=outer_d,
@@ -296,6 +363,7 @@ def generate_enclosure(
             fillet_radius=fillet_radius_mm,
             stl_path=stl_path,
             step_path=step_path,
+            lid_lines=lid_lines,
         )
 
     with open(script_path, "w") as f:
@@ -326,6 +394,16 @@ def generate_enclosure(
         if not os.path.exists(step_path):
             raise FreeCADBuildError(
                 f"freecadcmd exited cleanly but did not produce the expected STEP "
+                f"file: {stderr_data.strip()}"
+            )
+        if lid and not os.path.exists(lid_stl_path):
+            raise FreeCADBuildError(
+                f"freecadcmd exited cleanly but did not produce the expected lid STL "
+                f"file: {stderr_data.strip()}"
+            )
+        if lid and not os.path.exists(lid_step_path):
+            raise FreeCADBuildError(
+                f"freecadcmd exited cleanly but did not produce the expected lid STEP "
                 f"file: {stderr_data.strip()}"
             )
 
@@ -366,12 +444,39 @@ def generate_enclosure(
             os.remove(_last_step_path)
         _last_step_path = step_path
 
-        return {"glb_path": glb_path, "step_path": step_path}
+        result = {"glb_path": glb_path, "step_path": step_path}
+
+        if lid:
+            # Same real unit-scale fix as the base shell above -- this
+            # lid's own STL carries the identical no-unit-metadata gap.
+            lid_mesh = trimesh.load(lid_stl_path)
+            lid_mesh.apply_scale(0.001)
+            lid_mesh.export(lid_glb_path)
+
+            if (
+                _last_lid_glb_path and _last_lid_glb_path != lid_glb_path
+                and os.path.exists(_last_lid_glb_path)
+            ):
+                os.remove(_last_lid_glb_path)
+            _last_lid_glb_path = lid_glb_path
+            if (
+                _last_lid_step_path and _last_lid_step_path != lid_step_path
+                and os.path.exists(_last_lid_step_path)
+            ):
+                os.remove(_last_lid_step_path)
+            _last_lid_step_path = lid_step_path
+
+            result["lid_glb_path"] = lid_glb_path
+            result["lid_step_path"] = lid_step_path
+
+        return result
     finally:
         if os.path.exists(script_path):
             os.remove(script_path)
         if os.path.exists(stl_path):
             os.remove(stl_path)
+        if os.path.exists(lid_stl_path):
+            os.remove(lid_stl_path)
 
 
 def get_step_bounding_box_mm(step_path: str, timeout_s: float = 15.0, cancel_event=None) -> dict:

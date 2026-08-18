@@ -29,12 +29,16 @@ class TestFreeCADBridge(unittest.TestCase):
         freecad_bridge._output_dir_override = None
         freecad_bridge._last_glb_path = None
         freecad_bridge._last_step_path = None
+        freecad_bridge._last_lid_glb_path = None
+        freecad_bridge._last_lid_step_path = None
 
     def tearDown(self):
         freecad_bridge._path_override = None
         freecad_bridge._output_dir_override = None
         freecad_bridge._last_glb_path = None
         freecad_bridge._last_step_path = None
+        freecad_bridge._last_lid_glb_path = None
+        freecad_bridge._last_lid_step_path = None
 
     @patch('freecad_bridge.glob.glob', return_value=[])
     @patch('freecad_bridge.shutil.which', return_value=None)
@@ -259,6 +263,13 @@ class TestFreeCADBridge(unittest.TestCase):
             get_step_bounding_box_mm('/nonexistent/model.step')
         self.assertIn("does not exist", str(ctx.exception))
 
+    def test_013_lid_requires_board_driven_mode(self):
+        """CTX-311.2: manual mode's box has no open top for a lid to
+        close -- a caller bug, not a silently-ignored parameter."""
+        with self.assertRaises(ValueError) as ctx:
+            generate_enclosure(height=20, width=50, depth=30, lid=True)
+        self.assertIn("board-driven mode", str(ctx.exception))
+
 
 _TEST_BOARD_OUTLINE = {"x_mm": 0.0, "y_mm": 0.0, "width_mm": 20.0, "height_mm": 15.0}
 
@@ -275,12 +286,16 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
         freecad_bridge._output_dir_override = None
         freecad_bridge._last_glb_path = None
         freecad_bridge._last_step_path = None
+        freecad_bridge._last_lid_glb_path = None
+        freecad_bridge._last_lid_step_path = None
 
     def tearDown(self):
         freecad_bridge._path_override = None
         freecad_bridge._output_dir_override = None
         freecad_bridge._last_glb_path = None
         freecad_bridge._last_step_path = None
+        freecad_bridge._last_lid_glb_path = None
+        freecad_bridge._last_lid_step_path = None
 
     def _skip_unless_freecad_available(self):
         try:
@@ -382,6 +397,98 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
             for path in (result["glb_path"], result["step_path"]):
                 if os.path.exists(path):
                     os.remove(path)
+
+    def test_004_a_real_lid_matches_the_shells_own_outer_footprint(self):
+        """CTX-311.2: the lid's own real bounding box matches the
+        shell's outer footprint (board width/height plus clearance and
+        wall margin on every side) in X/Y, and its own configured
+        thickness in Z -- verified against a real freecadcmd, not just
+        that a file was produced."""
+        self._skip_unless_freecad_available()
+        import trimesh
+
+        result = generate_enclosure(
+            height=10,
+            board_outline=_TEST_BOARD_OUTLINE,
+            wall_thickness_mm=2.0,
+            clearance_mm=0.5,
+            standoffs=[],
+            fillet_radius_mm=0,
+            lid=True,
+            lid_thickness_mm=3.0,
+        )
+        try:
+            self.assertIn("lid_glb_path", result)
+            self.assertIn("lid_step_path", result)
+            self.assertTrue(os.path.exists(result["lid_glb_path"]))
+            self.assertTrue(os.path.exists(result["lid_step_path"]))
+
+            margin = 0.5 + 2.0
+            expected_w = _TEST_BOARD_OUTLINE["width_mm"] + 2 * margin
+            expected_d = _TEST_BOARD_OUTLINE["height_mm"] + 2 * margin
+
+            mesh = trimesh.load(result["lid_glb_path"])
+            extents_mm = mesh.extents * 1000
+            for actual, expected in zip(
+                sorted(extents_mm), sorted([expected_w, expected_d, 3.0]),
+            ):
+                self.assertAlmostEqual(actual, expected, delta=0.01)
+        finally:
+            for key in ("glb_path", "step_path", "lid_glb_path", "lid_step_path"):
+                if os.path.exists(result[key]):
+                    os.remove(result[key])
+
+    def test_005_lid_thickness_defaults_to_wall_thickness_when_not_given(self):
+        self._skip_unless_freecad_available()
+        import trimesh
+
+        result = generate_enclosure(
+            height=10,
+            board_outline=_TEST_BOARD_OUTLINE,
+            wall_thickness_mm=2.5,
+            clearance_mm=0.5,
+            standoffs=[],
+            fillet_radius_mm=0,
+            lid=True,
+        )
+        try:
+            mesh = trimesh.load(result["lid_glb_path"])
+            extents_mm = mesh.extents * 1000
+            self.assertAlmostEqual(min(extents_mm), 2.5, delta=0.01)
+        finally:
+            for key in ("glb_path", "step_path", "lid_glb_path", "lid_step_path"):
+                if os.path.exists(result[key]):
+                    os.remove(result[key])
+
+    def test_006_previous_lid_files_are_deleted_on_next_successful_generation(self):
+        """Mirrors TestFreeCADBridge's own TEST-009 for the base shell --
+        the same leak-bounded-to-one cleanup applies to the lid's own
+        persistent output_dir files."""
+        self._skip_unless_freecad_available()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            freecad_bridge.configure(output_dir=tmp_dir)
+            result_1 = generate_enclosure(
+                height=10, board_outline=_TEST_BOARD_OUTLINE, standoffs=[],
+                fillet_radius_mm=0, lid=True,
+            )
+            first_lid_glb, first_lid_step = result_1["lid_glb_path"], result_1["lid_step_path"]
+            self.assertTrue(os.path.exists(first_lid_glb))
+            self.assertTrue(os.path.exists(first_lid_step))
+
+            result_2 = generate_enclosure(
+                height=12, board_outline=_TEST_BOARD_OUTLINE, standoffs=[],
+                fillet_radius_mm=0, lid=True,
+            )
+            try:
+                self.assertFalse(os.path.exists(first_lid_glb))
+                self.assertFalse(os.path.exists(first_lid_step))
+                self.assertTrue(os.path.exists(result_2["lid_glb_path"]))
+                self.assertTrue(os.path.exists(result_2["lid_step_path"]))
+            finally:
+                for key in ("glb_path", "step_path", "lid_glb_path", "lid_step_path"):
+                    if os.path.exists(result_2[key]):
+                        os.remove(result_2[key])
 
 
 if __name__ == '__main__':

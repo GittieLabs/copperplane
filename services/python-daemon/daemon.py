@@ -262,6 +262,8 @@ def freecad_generate_enclosure(
     clearance_mm: float = 0.5,
     fillet_radius_mm: float = 1.0,
     standoff_height_mm: float = 5.0,
+    lid: bool = False,
+    lid_thickness_mm: float = None,
     project_name: str = None,
     timeout_s: float = 30.0,
     cancel_event=None,
@@ -299,7 +301,14 @@ def freecad_generate_enclosure(
     `board_revision`) only runs when the caller supplies `project_name`
     (optional, default None) -- keeping today's frontend contract
     (`App.tsx`'s `dims` object, no `project_name`) working unmodified
-    until the UI-wiring child context SPEC-109 already names lands."""
+    until the UI-wiring child context SPEC-109 already names lands.
+
+    `lid` (SPEC-311) passes straight through to `generate_enclosure`,
+    which raises a clean `ValueError` in manual mode -- no board-driven
+    outline means no open top for a lid to close. When present, the
+    result's real `lid_glb_path`/`lid_step_path` are also persisted onto
+    a saved Artifact, so a saved enclosure's lid isn't silently
+    forgotten on reload."""
     if width is not None and depth is not None:
         outline = None
         recognized_holes = []
@@ -345,6 +354,8 @@ def freecad_generate_enclosure(
             for h in recognized_holes
         ],
         fillet_radius_mm=fillet_radius_mm,
+        lid=lid,
+        lid_thickness_mm=lid_thickness_mm,
         timeout_s=timeout_s,
         cancel_event=cancel_event,
     )
@@ -366,13 +377,17 @@ def freecad_generate_enclosure(
                 "Saving an enclosure Artifact requires library_store, which failed to import."
             )
         artifact_id = uuid.uuid4().hex
-        library_store.save_artifact(project_name, {
+        artifact = {
             "artifact_id": artifact_id,
             "kind": "enclosure",
             "board_revision": board_revision,
             "glb_path": result["glb_path"],
             "step_path": result["step_path"],
-        })
+        }
+        if lid:
+            artifact["lid_glb_path"] = result["lid_glb_path"]
+            artifact["lid_step_path"] = result["lid_step_path"]
+        library_store.save_artifact(project_name, artifact)
         result["artifact_id"] = artifact_id
 
     return result
