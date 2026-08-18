@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { convertFileSrc } from '@tauri-apps/api/core'
 
 export type ViewerStatus = 'loading' | 'ready' | 'error'
@@ -126,15 +127,7 @@ export function sphericalToCartesian(radius: number, polar: number, azimuth: num
   return [x, y, z]
 }
 
-/** The minimal shape this component needs from drei's `OrbitControls`
- * ref -- avoids importing `three-stdlib`'s own type just for this. */
-interface OrbitControlsHandle {
-  object: THREE.Camera
-  target: THREE.Vector3
-  update(): void
-}
-
-function CameraPresetControls({ controlsRef }: { controlsRef: RefObject<OrbitControlsHandle | null> }) {
+function CameraPresetControls({ controlsRef }: { controlsRef: RefObject<OrbitControlsImpl | null> }) {
   const cameraState = useRef({
     radius: DEFAULT_CAMERA_RADIUS,
     polar: DEFAULT_CAMERA_POLAR,
@@ -202,7 +195,7 @@ export function EnclosureViewer({
 }) {
   const base = useGlbScene(glbPath)
   const lid = useGlbScene(lidGlbPath)
-  const controlsRef = useRef<OrbitControlsHandle | null>(null)
+  const controlsRef = useRef<OrbitControlsImpl | null>(null)
 
   if (base.status === 'loading') {
     return <p className="text-sm text-neutral-400">Loading mesh…</p>
