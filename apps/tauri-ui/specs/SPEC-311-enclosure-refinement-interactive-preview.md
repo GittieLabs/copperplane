@@ -75,6 +75,37 @@ user_facing: true
     fallback -- report which components' heights are known versus unknown, and ask for an overall
     height (including the lid) when coverage is incomplete -- is the right posture for this real
     gap, not something to paper over with a guessed default.
+*   **`kicad-cli pcb export glb` gives a simpler, more robust path to both real height *and* a real
+    visual fit check — confirmed live, superseding part of the per-footprint approach above.**
+    `kicad-cli` (already this pipeline's own tool, used for `sch erc`/`pcb drc`/DXF/drill export)
+    has a real `pcb export glb` subcommand: one subprocess call against the real `.kicad_pcb` file
+    exports the *entire assembled board* — substrate plus every real component's real 3D model,
+    already correctly positioned and transformed by KiCad itself — as one real `.glb`. Verified
+    live against the real, currently-open board: a real 634KB file, 1159 real meshes, a real
+    bounding box of **49.50 × 11.54 × 106.50mm** — the same 11.54mm tallest-component height the
+    per-footprint approach above found independently, this time for the *whole populated board* in
+    one call, with no manual per-footprint model resolution, path resolution, or transform math
+    needed. This directly enables the user's own follow-up idea: load this real board `.glb`
+    *inside* the generated enclosure's own `.glb` in one scene — a real, visual "does this fit"
+    check (does the board clear the walls in X/Y, does its tallest point clear the lid in Z) instead
+    of trusting a number. The per-footprint `.definition.models` check above is still the right,
+    complementary mechanism for the honesty requirement: `kicad-cli`'s own export silently omits any
+    component with no 3D model, so its bounding box could *understate* the real required clearance
+    if the tallest real component happens to be one with no model — the per-footprint check is what
+    catches that and surfaces it, not the whole-board export alone.
+*   **Real, confirmed, independent bug found while investigating the above: the enclosure's own
+    `.glb` output is scaled 1000x too large relative to the real-meter convention `kicad-cli`'s own
+    export correctly uses.** `freecad_bridge.py`'s build script sets `box.Height = {height}` etc.
+    directly in millimeters with no unit conversion before `exportStl()`; `trimesh` then converts
+    that unitless STL to `.glb` with no scale correction either, so a real 20mm-tall box's `.glb`
+    reports a bounding box of 20 *meters*, not 20mm. Purely cosmetic on its own — `EnclosureViewer`'s
+    camera was evidently tuned empirically around this same wrong scale, so today's single-model
+    viewer still looks right — but a real, hard blocker for compositing the enclosure with any
+    correctly-scaled model (like `kicad-cli`'s own board export) in the same scene, and worth fixing
+    on its own merits regardless of whether the board-overlay feature ships (`.step` export, the
+    format this spec's own "real mechanical CAD" value proposition depends on, is presumably
+    correctly scaled already since STEP embeds real units — only the derived `.glb`/viewer path is
+    suspected to carry this bug; confirm before assuming symmetric).
 *   **The real board outline is available as raw geometry today; only the reduction step throws
     it away.** `kicad_bridge.get_board_outline()` already reads every real `BoardShape` on
     `Edge.Cuts` via a real `kipy` call before reducing them to a bounding box; the file-based path
@@ -125,13 +156,18 @@ user_facing: true
     (`CTX-301.2`), not a replacement for it — `@react-three/drei`'s `OrbitControls` already exposes
     a controllable camera object; presets just animate/snap it to known positions.
 *   **Cross-Module Impacts:**
-    *   `services/python-daemon`: `kicad_bridge`/`kicad_pcb_import` gain real per-component
-        placement + height derivation (scope per the open question above); `freecad_bridge`'s build
-        script gains a real second (lid) body and, if pursued, real polygon-outline extrusion
-        instead of `Part.makeBox`; `daemon.py`'s route gains whatever persistence model is chosen.
+    *   `services/python-daemon`: `kicad_cli.py` gains a real `export_board_glb`-style wrapper
+        (mirroring its own existing `run_drc`/`run_erc` subprocess pattern) around `kicad-cli pcb
+        export glb`; `kicad_bridge`/`kicad_pcb_import` gain the per-footprint "does this component
+        have a real 3D model" check (for the honesty flag, decoupled from height derivation now
+        that the whole-board export owns that); `freecad_bridge`'s build script gains a real second
+        (lid) body, a real `.glb` unit-scale fix (§2/§3), and, if pursued, real polygon-outline
+        extrusion instead of `Part.makeBox`; `daemon.py`'s route gains whatever persistence model is
+        chosen.
     *   `apps/tauri-ui`: `EnclosurePanel.tsx` gains a refine-and-regenerate loop against the same
-        selected board, the last-open-board list-on-load pattern, and a wider layout; `EnclosureViewer.tsx`
-        gains lid show/hide and camera presets.
+        selected board, the last-open-board list-on-load pattern, and a wider layout;
+        `EnclosureViewer.tsx` gains lid show/hide, camera presets, and loading a second (real board)
+        `.glb` composited into the same scene as the enclosure.
 
 ## 3. Known Constraints & Risks
 
@@ -191,4 +227,6 @@ user_facing: true
     blank form. If some components' real heights couldn't be derived (no attached 3D model, or an
     unresolvable one), or the board has no mounting holes at all, the user sees that stated plainly
     before/alongside the result — never a confident-looking enclosure quietly built on an unstated
-    gap.
+    gap. The preview can show the real, assembled board *inside* the generated enclosure (not just
+    the empty shell) — a genuine visual fit check, letting the user actually see a component
+    crowding a wall or a lid sitting too close to the tallest part, not just trust a number.
