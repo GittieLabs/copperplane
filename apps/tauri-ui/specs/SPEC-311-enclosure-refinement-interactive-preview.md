@@ -92,7 +92,13 @@ user_facing: true
     complementary mechanism for the honesty requirement: `kicad-cli`'s own export silently omits any
     component with no 3D model, so its bounding box could *understate* the real required clearance
     if the tallest real component happens to be one with no model — the per-footprint check is what
-    catches that and surfaces it, not the whole-board export alone.
+    catches that and surfaces it, not the whole-board export alone. **Decided posture for the visual
+    preview specifically (distinct from the height-derivation fallback above):** a component with no
+    attached 3D model is simply absent from the rendered board — `kicad-cli`'s own export already
+    skips it, and this spec does not attempt to synthesize a placeholder box or guess its shape. The
+    UI states this plainly (naming the affected reference designators where known) and directs the
+    user to add or fix that footprint's 3D model assignment in KiCad and regenerate — never a silent
+    gap and never an invented stand-in shape.
 *   **Real, confirmed, independent bug found while investigating the above: the enclosure's own
     `.glb` output is scaled 1000x too large relative to the real-meter convention `kicad-cli`'s own
     export correctly uses.** `freecad_bridge.py`'s build script sets `box.Height = {height}` etc.
@@ -229,4 +235,8 @@ user_facing: true
     before/alongside the result — never a confident-looking enclosure quietly built on an unstated
     gap. The preview can show the real, assembled board *inside* the generated enclosure (not just
     the empty shell) — a genuine visual fit check, letting the user actually see a component
-    crowding a wall or a lid sitting too close to the tallest part, not just trust a number.
+    crowding a wall or a lid sitting too close to the tallest part, not just trust a number. A
+    component missing its 3D model simply doesn't appear in that board-inside-enclosure view — the
+    app never guesses its shape — and the user is told plainly to fix that footprint's 3D model
+    assignment in KiCad and regenerate to see it reflected, rather than the app attempting to work
+    around a gap it can't honestly fill.
