@@ -5,6 +5,7 @@ import {
   listOpenBoards,
   openKicad,
   pickSchematicFile,
+  type BoardCandidate,
   type CheckResult,
   type ListOpenBoardsResult,
   type Violation,
@@ -24,14 +25,22 @@ import {
  * too opaque for someone new to KiCad: it never showed *which* board was
  * about to be checked, and offered no way to actually open KiCad from
  * here. Zero boards open now offers a real "Open KiCad" action plus a
- * concrete walkthrough, not just prose. */
+ * concrete walkthrough, not just prose. A second real click-through
+ * found three more gaps this fixes too: "couldn't reach KiCad" rendered
+ * as an alarming red error on someone's very first visit to this tab,
+ * before they'd had any reason to open KiCad yet; picking a board from a
+ * multi-board list gave no way to open a *different* one without leaving
+ * the app; and a long file path overflowed its own box instead of
+ * wrapping. */
 export function BoardAdvisor() {
   const [loadingBoardList, setLoadingBoardList] = useState(false)
   const [boardListResult, setBoardListResult] = useState<ListOpenBoardsResult | null>(null)
   const [boardListError, setBoardListError] = useState<string | null>(null)
   const [openingKicad, setOpeningKicad] = useState(false)
+  const [openKicadError, setOpenKicadError] = useState<string | null>(null)
 
   const [checkingBoard, setCheckingBoard] = useState(false)
+  const [selectedBoard, setSelectedBoard] = useState<BoardCandidate | null>(null)
   const [boardCheckResult, setBoardCheckResult] = useState<CheckResult | null>(null)
   const [boardCheckError, setBoardCheckError] = useState<string | null>(null)
 
@@ -60,22 +69,28 @@ export function BoardAdvisor() {
 
   async function handleOpenKicad() {
     setOpeningKicad(true)
-    setBoardListError(null)
+    setOpenKicadError(null)
     try {
       await openKicad()
     } catch (err) {
-      setBoardListError(err instanceof Error ? err.message : String(err))
+      // Deliberately its own state, not folded into boardListError: a
+      // failed *launch* (e.g. KiCad isn't installed where expected) is a
+      // real, different, actionable problem from "KiCad just isn't
+      // running yet" -- it must stay visible, not get swallowed into the
+      // calm not-running-yet copy below.
+      setOpenKicadError(err instanceof Error ? err.message : String(err))
     } finally {
       setOpeningKicad(false)
     }
   }
 
-  async function handleCheckBoard(pcbPath: string) {
+  async function handleCheckBoard(candidate: BoardCandidate) {
+    setSelectedBoard(candidate)
     setCheckingBoard(true)
     setBoardCheckError(null)
     setBoardCheckResult(null)
     try {
-      setBoardCheckResult(await checkBoard(pcbPath))
+      setBoardCheckResult(await checkBoard(candidate.path))
     } catch (err) {
       setBoardCheckError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -109,10 +124,12 @@ export function BoardAdvisor() {
         onRefreshList={() => void refreshBoardList()}
         onOpenKicad={() => void handleOpenKicad()}
         openingKicad={openingKicad}
+        openKicadError={openKicadError}
+        selectedBoard={selectedBoard}
         checkingBoard={checkingBoard}
         checkResult={boardCheckResult}
         checkError={boardCheckError}
-        onCheckBoard={(path) => void handleCheckBoard(path)}
+        onCheckBoard={(candidate) => void handleCheckBoard(candidate)}
       />
       <CheckSection
         title="Schematic (ERC)"
@@ -143,6 +160,8 @@ function BoardCheckSection({
   onRefreshList,
   onOpenKicad,
   openingKicad,
+  openKicadError,
+  selectedBoard,
   checkingBoard,
   checkResult,
   checkError,
@@ -154,47 +173,33 @@ function BoardCheckSection({
   onRefreshList: () => void
   onOpenKicad: () => void
   openingKicad: boolean
+  openKicadError: string | null
+  selectedBoard: BoardCandidate | null
   checkingBoard: boolean
   checkResult: CheckResult | null
   checkError: string | null
-  onCheckBoard: (pcbPath: string) => void
+  onCheckBoard: (candidate: BoardCandidate) => void
 }) {
+  // CTX-309.4 second revision: real clicking-through found the first cut
+  // still showing "could not connect" in alarming red on the very first
+  // visit to this tab -- before the user had any reason to have opened
+  // KiCad yet. From here, "couldn't reach KiCad" and "reached KiCad but
+  // nothing's open" are the same actionable state for the user (go open
+  // a board), so both render through this one calm, neutral guidance
+  // card rather than one of them looking like a failure.
+  const showGuidance = !loadingList && (listError !== null || listResult?.status === 'no_board_open')
+
   return (
     <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
       <p className="text-xs font-medium uppercase text-neutral-500">Board (DRC)</p>
 
       {loadingList && <p className="text-sm text-neutral-400">Scanning for boards open in KiCad…</p>}
 
-      {!loadingList && listError && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-red-400">{listError}</p>
-          {/* CTX-309.4 revision: "could not connect" almost always means
-           * KiCad simply isn't running yet -- the real, most common novice
-           * case -- so this offers the same Open KiCad action as the
-           * empty-list state, not just a bare Retry. */}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
-              onClick={onOpenKicad}
-              disabled={openingKicad}
-            >
-              {openingKicad ? 'Opening…' : 'Open KiCad'}
-            </button>
-            <button
-              type="button"
-              className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
-              onClick={onRefreshList}
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
-
-      {!loadingList && !listError && listResult?.status === 'no_board_open' && (
+      {showGuidance && (
         <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-3 text-sm">
-          <p className="text-neutral-200">No board is currently open in KiCad.</p>
+          <p className="text-neutral-200">
+            {listError ? "KiCad doesn't appear to be running yet." : 'No board is currently open in KiCad.'}
+          </p>
           <ol className="list-decimal space-y-1 pl-4 text-xs text-neutral-400">
             <li>Click <strong className="text-neutral-300">Open KiCad</strong> below (or open it yourself).</li>
             <li>
@@ -204,8 +209,10 @@ function BoardCheckSection({
             <li>
               Confirm the IPC API is enabled: <strong className="text-neutral-300">Preferences → Plugins</strong>.
             </li>
-            <li>Click <strong className="text-neutral-300">Refresh</strong> below.</li>
+            <li>Click <strong className="text-neutral-300">Refresh</strong> below -- this app doesn't know when
+              KiCad opens or closes a board on its own.</li>
           </ol>
+          {openKicadError && <p className="text-xs text-red-400">{openKicadError}</p>}
           <div className="flex gap-2">
             <button
               type="button"
@@ -226,7 +233,7 @@ function BoardCheckSection({
         </div>
       )}
 
-      {!loadingList && !listError && listResult?.status === 'boards_found' && (
+      {!loadingList && !showGuidance && listResult?.status === 'boards_found' && (
         <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-3 text-sm">
           <p className="text-neutral-200">
             {listResult.candidates.length === 1
@@ -234,33 +241,59 @@ function BoardCheckSection({
               : 'Boards open in KiCad — pick one to check:'}
           </p>
           <ul className="flex flex-col gap-1">
-            {listResult.candidates.map((candidate) => (
-              <li key={candidate.path}>
-                <button
-                  type="button"
-                  className="w-full rounded border border-neutral-700 px-3 py-2 text-left text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
-                  onClick={() => onCheckBoard(candidate.path)}
-                  disabled={checkingBoard}
-                >
-                  <span className="block font-medium">{candidate.label}</span>
-                  <span className="block text-neutral-500">{candidate.path}</span>
-                </button>
-              </li>
-            ))}
+            {listResult.candidates.map((candidate) => {
+              const isSelected = selectedBoard?.path === candidate.path
+              return (
+                <li key={candidate.path}>
+                  <button
+                    type="button"
+                    aria-pressed={isSelected}
+                    className={`w-full rounded border px-3 py-2 text-left text-xs disabled:opacity-50 ${
+                      isSelected
+                        ? 'border-neutral-100 bg-neutral-800 text-neutral-100'
+                        : 'border-neutral-700 text-neutral-200 hover:bg-neutral-800'
+                    }`}
+                    onClick={() => onCheckBoard(candidate)}
+                    disabled={checkingBoard}
+                  >
+                    <span className="block font-medium">{candidate.label}</span>
+                    <span className="block break-all text-neutral-500">{candidate.path}</span>
+                  </button>
+                </li>
+              )
+            })}
           </ul>
-          <button
-            type="button"
-            className="self-start rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
-            onClick={onRefreshList}
-          >
-            Refresh
-          </button>
+          <p className="text-xs text-neutral-500">
+            Don't see the board you want? Switch to KiCad and open it there, then click Refresh.
+          </p>
+          {openKicadError && <p className="text-xs text-red-400">{openKicadError}</p>}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+              onClick={onOpenKicad}
+              disabled={openingKicad}
+            >
+              {openingKicad ? 'Switching…' : 'Switch to KiCad'}
+            </button>
+            <button
+              type="button"
+              className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+              onClick={onRefreshList}
+            >
+              Refresh
+            </button>
+          </div>
         </div>
       )}
 
-      {checkingBoard && <p className="text-sm text-neutral-400">Checking…</p>}
+      {checkingBoard && (
+        <p className="text-sm text-neutral-400">
+          Running DRC checks on {selectedBoard?.label ?? 'the selected board'}… this can take a few seconds.
+        </p>
+      )}
       {checkError && <p className="text-sm text-red-400">{checkError}</p>}
-      {checkResult && <ViolationsList result={checkResult} />}
+      {checkResult && <ViolationsList result={checkResult} hideSourcePath />}
     </div>
   )
 }
@@ -299,10 +332,19 @@ function CheckSection({
   )
 }
 
-function ViolationsList({ result }: { result: CheckResult }) {
+function ViolationsList({
+  result,
+  hideSourcePath = false,
+}: {
+  result: CheckResult
+  hideSourcePath?: boolean
+}) {
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs text-neutral-500">{result.source_path}</p>
+      {/* CTX-309.4 second revision: the Board (DRC) section already shows
+       * this exact path highlighted in the picker above -- repeating it
+       * here just duplicated it under the picked file's own name. */}
+      {!hideSourcePath && <p className="text-xs text-neutral-500">{result.source_path}</p>}
       {result.violations.length === 0 ? (
         <p className="text-sm text-emerald-400">No violations found.</p>
       ) : (

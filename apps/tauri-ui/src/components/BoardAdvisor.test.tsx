@@ -93,6 +93,32 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     await waitFor(() => screen.getByText('No violations found.'))
   })
 
+  it('while checking, shows real feedback naming the board being checked, not a bare "Checking…"', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockImplementation(() => new Promise(() => {}))
+
+    render(<BoardAdvisor />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByText('board.kicad_pcb'))
+
+    await waitFor(() => screen.getByText(/Running DRC checks on board\.kicad_pcb/))
+  })
+
+  it('the clicked board stays visibly selected (aria-pressed) once a result comes back, instead of showing its path a second time', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValueOnce(CLEAN_RESULT)
+
+    render(<BoardAdvisor />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByText('board.kicad_pcb'))
+
+    await waitFor(() => screen.getByText('No violations found.'))
+    expect(screen.getByRole('button', { name: /board\.kicad_pcb/ }).getAttribute('aria-pressed')).toBe('true')
+    // the picked board's own real path is already shown once, highlighted, in the
+    // list item above -- it must not be repeated a second time under the result.
+    expect(screen.getAllByText('/real/board.kicad_pcb')).toHaveLength(1)
+  })
+
   it('a genuine DRC failure after picking a board shows the real error, not a crash', async () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     checkBoardMock.mockRejectedValueOnce(new Error('Lost connection to KiCad mid-request. It may have been closed.'))
@@ -118,6 +144,17 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     await waitFor(() => screen.getByText('Boards open in KiCad — pick one to check:'))
     screen.getByText('board_a.kicad_pcb')
     screen.getByText('board_b.kicad_pcb')
+  })
+
+  it('offers a real way to open a different board without leaving the app: Switch to KiCad', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+
+    render(<BoardAdvisor />)
+    await waitFor(() => screen.getByText(/Don't see the board you want/))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to KiCad' }))
+
+    await waitFor(() => expect(openKicadMock).toHaveBeenCalledTimes(1))
   })
 
   it('clicking one of several candidates checks only that real board', async () => {
@@ -180,16 +217,17 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     expect(listOpenBoardsMock).toHaveBeenCalledTimes(2)
   })
 
-  it('a genuine connection failure scanning for open boards shows the real error with Open KiCad and Retry actions', async () => {
+  it('a genuine connection failure scanning for open boards shows the same calm guidance as no_board_open, not a red server error', async () => {
     listOpenBoardsMock.mockReset().mockRejectedValue(
       new Error('Could not connect to KiCad. Ensure KiCad 9 or later is running with the IPC API enabled (Preferences > Plugins).'),
     )
 
     render(<BoardAdvisor />)
 
-    await waitFor(() => screen.getByText(/Could not connect to KiCad/))
+    await waitFor(() => screen.getByText("KiCad doesn't appear to be running yet."))
+    expect(screen.queryByText(/Could not connect to KiCad/)).toBeNull()
     screen.getByRole('button', { name: 'Open KiCad' })
-    screen.getByRole('button', { name: 'Retry' })
+    screen.getByRole('button', { name: 'Refresh' })
   })
 
   it('Open KiCad works from the connection-failure state too, not just no_board_open', async () => {
