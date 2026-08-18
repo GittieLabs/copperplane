@@ -6,7 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (path: string) => `asset://localhost/${path}`,
 }))
 
-const { useGlbScene, disposeScene, sphericalToCartesian, DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH } =
+const { useGlbScene, disposeScene, sphericalToCartesian, computeFrame, DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH } =
   await import('./EnclosureViewer')
 
 /** A `GLTFLoaderLike` fake, so tests control load timing/outcome directly
@@ -156,5 +156,56 @@ describe('sphericalToCartesian (CTX-311.3 camera presets)', () => {
     expect(z1).toBeCloseTo(0, 6)
     expect(x2).toBeCloseTo(0, 6)
     expect(z2).toBeCloseTo(100, 6)
+  })
+})
+
+describe('computeFrame (CTX-311.4: the real fix for the camera-pointed-at-nothing bug)', () => {
+  it('CTX-311.4: a real, small, correctly-scaled mesh (post-CTX-109.4, in real meters) gets a real, small camera radius -- not the old hardcoded ~138-unit distance', () => {
+    // A real 0.02 x 0.02 x 0.02m (20mm) box, exactly the shape CTX-109.4's
+    // own fix now produces -- the pre-fix bug's own mesh (and this
+    // viewer's old hardcoded camera) both used raw-mm-as-meters values
+    // roughly 1000x this size.
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.02, 0.02))
+    const frame = computeFrame([mesh])
+
+    expect(frame).not.toBeNull()
+    expect(frame!.radius).toBeLessThan(1)
+    expect(frame!.radius).toBeGreaterThan(0)
+    expect(frame!.center.x).toBeCloseTo(0, 6)
+  })
+
+  it('a real, large mesh gets a proportionally real, large camera radius -- the frame scales with whatever actually loaded, not a fixed distance', () => {
+    const small = computeFrame([new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1))])
+    const large = computeFrame([new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10))])
+
+    expect(large!.radius).toBeGreaterThan(small!.radius * 5)
+  })
+
+  it('the real center is the object\'s own bounding-box center, not the origin, for an off-origin mesh', () => {
+    const geometry = new THREE.BoxGeometry(2, 2, 2)
+    geometry.translate(50, 5, 30)
+    const mesh = new THREE.Mesh(geometry)
+
+    const frame = computeFrame([mesh])
+
+    expect(frame!.center.x).toBeCloseTo(50, 3)
+    expect(frame!.center.y).toBeCloseTo(5, 3)
+    expect(frame!.center.z).toBeCloseTo(30, 3)
+  })
+
+  it('a real base plus a real lid frames both together -- the union, not just the base alone', () => {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(10, 10, 10))
+    const lidGeometry = new THREE.BoxGeometry(10, 1, 10)
+    lidGeometry.translate(0, 20, 0) // sits well above the base
+    const lid = new THREE.Mesh(lidGeometry)
+
+    const baseOnly = computeFrame([base])
+    const both = computeFrame([base, lid])
+
+    expect(both!.radius).toBeGreaterThan(baseOnly!.radius)
+  })
+
+  it('returns null (never a guessed frame) when nothing real was passed', () => {
+    expect(computeFrame([])).toBeNull()
   })
 })
