@@ -392,15 +392,20 @@ class TestRealInjectComponentJob(unittest.TestCase):
         reachable, matching CTX-103.1/104.1 precedent."""
         from unittest.mock import patch
 
-        socket_path = "/tmp/kicad/api.sock"
-        if not os.path.exists(socket_path):
-            self.skipTest(
-                f"No live KiCad IPC socket at {socket_path}. Enable the IPC API "
-                "(Preferences > Plugins), launch KiCad, and open a board in the "
-                "PCB Editor to run this test for real."
-            )
-
+        # A real connection attempt, not a socket-file existence check:
+        # macOS doesn't reliably unlink the socket file when KiCad exits,
+        # so a stale leftover file would make this test fail for real
+        # instead of skipping cleanly.
         import kicad_bridge
+
+        try:
+            kicad_bridge.get_client()
+        except kicad_bridge.KiCadUnavailableError as e:
+            self.skipTest(
+                f"No live KiCad IPC connection reachable: {e} Enable the IPC "
+                "API (Preferences > Plugins), launch KiCad, and open a board "
+                "in the PCB Editor to run this test for real."
+            )
         try:
             kicad_bridge.get_client().get_board()
         except Exception as e:
