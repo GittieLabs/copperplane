@@ -46,11 +46,18 @@ class TestKiCadBridge(unittest.TestCase):
         end-to-end against a live, locally running KiCad instance.
         Skips itself (rather than failing) when no KiCad is running —
         e.g. in CI, where KiCad isn't installed at all."""
-        socket_path = '/tmp/kicad/api.sock'
-        if not os.path.exists(socket_path):
+        try:
+            kicad_bridge.get_client()
+        except KiCadUnavailableError as e:
+            # A live connection attempt, not a socket-file existence check:
+            # macOS doesn't reliably unlink the socket file when KiCad
+            # exits, so os.path.exists() can report a stale file as if
+            # KiCad were still reachable and fail this test for real
+            # instead of skipping it.
             self.skipTest(
-                f"No live KiCad IPC socket at {socket_path}. Enable the IPC API "
-                "(Preferences > Plugins) and launch KiCad to run this test for real."
+                f"No live KiCad IPC connection reachable: {e} Enable the IPC "
+                "API (Preferences > Plugins) and launch KiCad to run this "
+                "test for real."
             )
 
         result = get_kicad_version()
@@ -360,11 +367,16 @@ class TestListOpenBoards(unittest.TestCase):
     def test_007_real_round_trip_against_a_live_kicad_instance(self):
         """Skips itself cleanly when no live KiCad is running, same
         convention as test_002_real_kicad_version_round_trip above."""
-        socket_path = '/tmp/kicad/api.sock'
-        if not os.path.exists(socket_path):
+        try:
+            kicad_bridge.get_client()
+        except KiCadUnavailableError as e:
+            # Same real-connection-attempt reasoning as
+            # test_002_real_kicad_version_round_trip above: a stale
+            # leftover socket file must not be mistaken for a live KiCad.
             self.skipTest(
-                f"No live KiCad IPC socket at {socket_path}. Enable the IPC API "
-                "(Preferences > Plugins) and launch KiCad to run this test for real."
+                f"No live KiCad IPC connection reachable: {e} Enable the IPC "
+                "API (Preferences > Plugins) and launch KiCad to run this "
+                "test for real."
             )
 
         paths = kicad_bridge.list_open_boards()
