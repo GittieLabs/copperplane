@@ -103,6 +103,21 @@ class TestFreeCADBridge(unittest.TestCase):
             with open(glb_path, 'rb') as f:
                 header = f.read(4)
             self.assertEqual(header, b'glTF', "output should be a real glTF binary, not just a renamed STL")
+
+            # CTX-109.4: real, confirmed unit-scale bug -- this exact real
+            # 50x30x20mm box's own .glb used to report a bounding box of
+            # 50x30x20 *meters* (1000x too large relative to glTF's own
+            # real-meter convention), confirmed live while investigating
+            # whether a real board's own .glb (kicad-cli's, correctly
+            # scaled) could ever be shown alongside this one. Real,
+            # direct regression coverage: load the real output and check
+            # its real bounding box against the real mm input, not just
+            # that a glTF header exists.
+            import trimesh
+            mesh = trimesh.load(glb_path)
+            extents_mm = mesh.extents * 1000
+            for actual, expected in zip(sorted(extents_mm), sorted([50, 30, 20])):
+                self.assertAlmostEqual(actual, expected, delta=0.5)
         finally:
             if os.path.exists(glb_path):
                 os.remove(glb_path)
@@ -266,8 +281,15 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
             # the *full* height starting at z=0, producing an open-both-ends
             # tube with no floor at all -- this expected volume is exact
             # only under the fixed geometry.
-            expected_volume = (25 * 20 * 10) - (21 * 16 * 8)
-            self.assertAlmostEqual(mesh.volume, expected_volume, delta=expected_volume * 0.01)
+            expected_volume_mm3 = (25 * 20 * 10) - (21 * 16 * 8)
+            # CTX-109.4: the real .glb is now correctly scaled to glTF's own
+            # meter convention (`apply_scale(0.001)`, a real, live-confirmed
+            # unit-scale bug fix -- see freecad_bridge.py's own comment) --
+            # mesh.volume is therefore in real m^3, not the "mm numbers
+            # embedded as bare floats" this test's own expected_volume_mm3
+            # is computed in. Convert back to mm^3 to compare like with like.
+            actual_volume_mm3 = mesh.volume * 1e9
+            self.assertAlmostEqual(actual_volume_mm3, expected_volume_mm3, delta=expected_volume_mm3 * 0.01)
         finally:
             for path in (result["glb_path"], result["step_path"]):
                 if os.path.exists(path):
@@ -295,8 +317,12 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
             r = standoff["diameter_mm"] / 2
             import math
             standoff_volume = math.pi * (r ** 2) * standoff["height_mm"]
+            expected_volume_mm3 = shell_volume + standoff_volume
+            # CTX-109.4: mesh.volume is now real m^3 (see test_001's own
+            # comment on the real unit-scale fix) -- convert back to mm^3.
+            actual_volume_mm3 = mesh.volume * 1e9
             self.assertAlmostEqual(
-                mesh.volume, shell_volume + standoff_volume, delta=(shell_volume + standoff_volume) * 0.02,
+                actual_volume_mm3, expected_volume_mm3, delta=expected_volume_mm3 * 0.02,
             )
         finally:
             for path in (result["glb_path"], result["step_path"]):

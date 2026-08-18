@@ -329,6 +329,25 @@ def generate_enclosure(
             )
 
         mesh = trimesh.load(stl_path)
+        # Real, confirmed bug (found while investigating SPEC-311's own
+        # board-inside-enclosure preview idea): the FreeCAD build scripts
+        # above write real millimeter values (`box.Height = {height}` etc.)
+        # straight into the STL with no unit conversion, and STL itself
+        # carries no unit metadata -- so trimesh reads those numbers as
+        # bare floats. glTF's own spec fixes its base unit at meters, so
+        # exporting without correction embeds a 20mm-tall box as if it
+        # were 20 *meters* tall: every `.glb` this function has ever
+        # produced has been 1000x too large relative to that spec's real
+        # scale. Invisible on its own -- `EnclosureViewer`'s camera was
+        # tuned empirically around this same wrong scale -- but a real,
+        # confirmed blocker to ever loading this alongside any other,
+        # correctly-scaled real-world model (e.g. `kicad-cli`'s own board
+        # export) in the same scene. `.step` is unaffected: it's exported
+        # directly by FreeCAD from the same mm-native document, and STEP
+        # embeds its own real unit, so any real STEP reader already
+        # interprets it correctly -- only this derived `.glb` path needed
+        # the fix.
+        mesh.apply_scale(0.001)
         mesh.export(glb_path)
 
         # SPEC-301 §3's flagged known debt: nothing previously deleted a
