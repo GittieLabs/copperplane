@@ -100,6 +100,40 @@ class TestKiCadBridge(unittest.TestCase):
         kicad_bridge.get_client()
         mock_kicad_cls.assert_called_with(socket_path='/custom/kicad.sock', timeout_ms=9000)
 
+    @patch('kicad_bridge.KiCad')
+    def test_005_a_cached_client_that_fails_its_health_check_ping_is_transparently_replaced(self, mock_kicad_cls):
+        """Real, live-discovered bug: the held-open connection can go
+        silently stale (SPEC-103 §3's own documented state-desync risk)
+        without ever raising on its own -- confirmed live in an actual
+        dev session, where only a full daemon restart recovered it.
+        get_client() must now validate a cached client with a real ping
+        before reusing it, and transparently reconnect if that fails,
+        rather than handing back a connection nothing has verified is
+        still alive."""
+        stale_client = MagicMock()
+        stale_client.ping.side_effect = KiCadConnectionError("stale, no longer responds")
+        kicad_bridge._client = stale_client
+
+        fresh_client = MagicMock()
+        mock_kicad_cls.return_value = fresh_client
+
+        result = kicad_bridge.get_client()
+
+        stale_client.ping.assert_called_once()
+        self.assertIs(result, fresh_client, "a failed ping must trigger a real reconnect, not reuse the dead client")
+        self.assertIs(kicad_bridge._client, fresh_client)
+
+    @patch('kicad_bridge.KiCad')
+    def test_006_a_cached_client_that_passes_its_health_check_ping_is_reused_not_reconnected(self, mock_kicad_cls):
+        healthy_client = MagicMock()
+        kicad_bridge._client = healthy_client
+
+        result = kicad_bridge.get_client()
+
+        healthy_client.ping.assert_called_once()
+        self.assertIs(result, healthy_client)
+        mock_kicad_cls.assert_not_called()
+
 
 _SOIC8_SCHEMA = {
     "part_number": "ATTINY85",

@@ -74,10 +74,29 @@ def configure(socket_path=None, timeout_ms=None):
 
 def get_client() -> KiCad:
     """Returns the held-open KiCad client, connecting on first use with
-    any configured `socket_path`/`timeout_ms` override (SPEC-106)."""
+    any configured `socket_path`/`timeout_ms` override (SPEC-106).
+
+    Real, live-discovered bug: the held-open connection can go stale
+    without ever raising on its own -- `SPEC-103` §3's own documented
+    state-desync risk (closing/reopening things in KiCad while this
+    daemon holds a connection open). Confirmed live: after enough
+    opening/closing of KiCad and files in one dev session, real routes
+    that had worked moments earlier (a fresh connection found
+    everything correctly) started silently returning nothing through
+    the daemon's own long-held connection, and only a full daemon
+    restart recovered it -- the cached `_client` was never actually
+    validated before being reused. Every call now pings the cached
+    client first (a real, cheap round trip, not just checking a local
+    "am I connected" flag) and transparently reconnects if that fails,
+    instead of trusting a connection that's been open for a while."""
     global _client
     if _client is not None:
-        return _client
+        try:
+            _client.ping()
+            return _client
+        except (KiCadConnectionError, ApiError):
+            logger.warning("Cached KiCad connection failed a health-check ping; reconnecting.")
+            _client = None
 
     kwargs = {}
     if _socket_path_override:
