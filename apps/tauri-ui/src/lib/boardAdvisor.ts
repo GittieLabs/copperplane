@@ -22,6 +22,27 @@ export interface CheckResult {
   source_path: string
 }
 
+/** kicad.check_board's real, structured three-way envelope (CTX-309.3)
+ * when no explicit pcbPath is given -- replaces the old always-a-
+ * CheckResult-or-throws contract, since "nothing open" and "more than
+ * one open" are both real, normal, expected states worth their own
+ * guided UI, not an exception to catch and stringify. */
+export interface CheckBoardOk extends CheckResult {
+  status: 'ok'
+}
+export interface NoBoardOpen {
+  status: 'no_board_open'
+}
+export interface BoardCandidate {
+  path: string
+  label: string
+}
+export interface NeedsBoardSelection {
+  status: 'needs_selection'
+  candidates: BoardCandidate[]
+}
+export type CheckBoardResult = CheckBoardOk | NoBoardOpen | NeedsBoardSelection
+
 /** kicad.check_board (CTX-309.1) auto-resolves the currently open board
  * when pcbPath is omitted -- a real live IPC call, only reachable this
  * way since there's no direct "give me the open board's path" UI
@@ -29,8 +50,8 @@ export interface CheckResult {
  * subprocess plus a real LLM call, both genuinely multi-second, so
  * submitJob -- matching every other real async kicad and component
  * route's own precedent. */
-export async function checkBoard(pcbPath?: string): Promise<CheckResult> {
-  const handle = await submitJob<CheckResult>(
+export async function checkBoard(pcbPath?: string): Promise<CheckBoardResult> {
+  const handle = await submitJob<CheckBoardResult>(
     'kicad.check_board',
     pcbPath ? { pcb_path: pcbPath } : {},
   )

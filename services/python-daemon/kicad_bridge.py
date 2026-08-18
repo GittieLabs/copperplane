@@ -139,34 +139,46 @@ def get_kicad_version() -> dict:
     }
 
 
-def get_open_board_path() -> str | None:
-    """SPEC-309: resolves the real, full filesystem path of whatever
-    board is currently open in KiCad -- `project.path` + `board_filename`
-    from `get_open_documents(DOCTYPE_PCB)`, confirmed live against a real
-    running KiCad 10.0.3 instance during SPEC-309's own research. Returns
-    `None` if nothing is open, rather than raising -- "no board open" is
-    a normal, expected state for the board-advisor route to handle
-    (report it plainly and ask for an explicit path), not an error.
+_NO_HANDLER_MARKER = "no handler available"
+
+
+def list_open_boards() -> list:
+    """SPEC-309/CTX-309.3: resolves every real, currently-open PCB
+    editor's full filesystem path via `get_open_documents(DOCTYPE_PCB)`
+    -- a real list, never silently narrowed to just the first one, so a
+    caller can tell "nothing open" apart from "more than one open" and
+    handle each honestly instead of guessing which board the user meant.
+
+    A real, live-confirmed finding (CTX-309.3, against this machine's
+    own actually-running KiCad instance): `get_open_documents` itself
+    raises a real `ApiError` containing "no handler available" whenever
+    no PCB Editor window is open at all -- the handler isn't registered
+    until one is (the same real constraint CTX-108.1's own Deviation 2
+    already documented for the write path). This is a normal, expected
+    "nothing open" state, treated the same as an empty list -- not
+    passed through `reset_connection()`/`KiCadUnavailableError` the way
+    a genuine dropped connection is. `SPEC-309`'s own original research
+    assumed an empty list here without live-testing the zero-open case;
+    this was a real, live-discovered correction, not a hypothetical one.
 
     Deliberately PCB-only: the identical call for `DOCTYPE_SCHEMATIC`
-    raises a real `no handler available` `ApiError` -- confirmed the
-    same way, not assumed -- so this function doesn't attempt it; the
+    raises the same real `no handler available` `ApiError` unconditionally
+    (there's no schematic-document capability to fall back to) -- confirmed
+    the same way, not assumed -- so this function doesn't attempt it; the
     schematic side of SPEC-309 always needs an explicit user-supplied
     path."""
     client = get_client()
     try:
         docs = list(client.get_open_documents(DocumentType.DOCTYPE_PCB))
     except (KiCadConnectionError, ApiError) as e:
+        if isinstance(e, ApiError) and _NO_HANDLER_MARKER in str(e):
+            return []
         reset_connection()
         raise KiCadUnavailableError(
             "Lost connection to KiCad mid-request. It may have been closed."
         ) from e
 
-    if not docs:
-        return None
-
-    doc = docs[0]
-    return os.path.join(doc.project.path, doc.board_filename)
+    return [os.path.join(doc.project.path, doc.board_filename) for doc in docs]
 
 
 def get_board_outline() -> dict:

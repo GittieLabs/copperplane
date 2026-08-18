@@ -712,18 +712,34 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
 def kicad_check_board(pcb_path: str = None) -> dict:
     """The kicad.check_board route (SPEC-309): a real DRC via kicad-cli
     against `pcb_path`, or -- when not given -- whatever board is
-    currently open in KiCad (kicad_bridge.get_open_board_path(),
-    confirmed live during SPEC-309's own research). Explains the real
-    violations via a real LLM call. Async: a real subprocess plus a real
-    LLM call, both genuinely multi-second, like every other real
-    kicad.*/component.* route in ASYNC_ROUTES below."""
+    currently open in KiCad (kicad_bridge.list_open_boards(), CTX-309.3).
+    Explains the real violations via a real LLM call. Async: a real
+    subprocess plus a real LLM call, both genuinely multi-second, like
+    every other real kicad.*/component.* route in ASYNC_ROUTES below.
+
+    Real, structured three-way envelope (CTX-309.3) when no explicit path
+    is given -- never raises for "nothing open" or "more than one open",
+    both real, normal states the frontend renders real guidance for
+    rather than a flat error:
+    *   Zero boards open: {"status": "no_board_open"}.
+    *   More than one open: {"status": "needs_selection", "candidates":
+        [{"path", "label"}, ...]} -- the frontend owns picking one, then
+        re-calls this route with an explicit pcb_path.
+    *   Exactly one open, or an explicit pcb_path given: runs DRC as
+        before, now also tagged {"status": "ok"}."""
     if not pcb_path:
-        pcb_path = kicad_bridge.get_open_board_path()
-        if not pcb_path:
-            raise kicad_cli.KicadCliError(
-                "No board is currently open in KiCad, and no pcb_path was given. "
-                "Open a board in KiCad, or pass an explicit path."
-            )
+        candidates = kicad_bridge.list_open_boards()
+        if not candidates:
+            return {"status": "no_board_open"}
+        if len(candidates) > 1:
+            return {
+                "status": "needs_selection",
+                "candidates": [
+                    {"path": path, "label": os.path.basename(path)}
+                    for path in candidates
+                ],
+            }
+        pcb_path = candidates[0]
 
     report = kicad_cli.run_drc(pcb_path)
     result = component_pipeline.explain_violations(
@@ -733,6 +749,7 @@ def kicad_check_board(pcb_path: str = None) -> dict:
         model=CONFIG.get("llm_model"),
     )
     result["source_path"] = pcb_path
+    result["status"] = "ok"
     return result
 
 
