@@ -1487,6 +1487,65 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
 
         self.assertNotIn("no_mounting_holes_found", result)
 
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_010_lid_passes_through_to_generate_enclosure(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        """CTX-311.2: lid/lid_thickness_mm reach freecad_bridge.
+        generate_enclosure unchanged -- the real ValueError for manual
+        mode plus lid is generate_enclosure's own job, verified for
+        real in test_freecad_bridge.py, not re-verified here."""
+        mock_generate.return_value = {
+            "glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step",
+            "lid_glb_path": "/tmp/lid.glb", "lid_step_path": "/tmp/lid.step",
+        }
+
+        daemon.freecad_generate_enclosure(height=20, lid=True, lid_thickness_mm=3.0)
+
+        _, kwargs = mock_generate.call_args
+        self.assertTrue(kwargs["lid"])
+        self.assertEqual(kwargs["lid_thickness_mm"], 3.0)
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_011_a_saved_lid_artifact_persists_its_own_real_paths(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        """A saved enclosure's lid must not be silently forgotten on
+        reload -- its real glb/step paths are part of the saved
+        Artifact, not just the base shell's."""
+        mock_generate.return_value = {
+            "glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step",
+            "lid_glb_path": "/tmp/lid.glb", "lid_step_path": "/tmp/lid.step",
+        }
+        daemon.library_store.save_project({"name": "weather-pcb"})
+
+        result = daemon.freecad_generate_enclosure(
+            height=20, lid=True, project_name="weather-pcb",
+        )
+
+        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
+        self.assertEqual(loaded["lid_glb_path"], "/tmp/lid.glb")
+        self.assertEqual(loaded["lid_step_path"], "/tmp/lid.step")
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_012_no_lid_never_adds_lid_paths_to_a_saved_artifact(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+        daemon.library_store.save_project({"name": "weather-pcb"})
+
+        result = daemon.freecad_generate_enclosure(height=20, project_name="weather-pcb")
+
+        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
+        self.assertNotIn("lid_glb_path", loaded)
+        self.assertNotIn("lid_step_path", loaded)
+
 
 class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
     """CTX-310.1: the file-based mode SPEC-310 adds -- composes
