@@ -1,5 +1,6 @@
+import { invoke } from '@tauri-apps/api/core'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
-import { submitJob } from './ipc'
+import { dispatch, submitJob } from './ipc'
 
 /** Mirrors component_pipeline.py's explain_violations output shape
  * (CTX-309.1) -- each real KiCad violation enriched with a real
@@ -22,39 +23,56 @@ export interface CheckResult {
   source_path: string
 }
 
-/** kicad.check_board's real, structured three-way envelope (CTX-309.3)
- * when no explicit pcbPath is given -- replaces the old always-a-
- * CheckResult-or-throws contract, since "nothing open" and "more than
- * one open" are both real, normal, expected states worth their own
- * guided UI, not an exception to catch and stringify. */
-export interface CheckBoardOk extends CheckResult {
-  status: 'ok'
-}
-export interface NoBoardOpen {
-  status: 'no_board_open'
-}
 export interface BoardCandidate {
   path: string
   label: string
 }
-export interface NeedsBoardSelection {
-  status: 'needs_selection'
+export interface NoBoardOpen {
+  status: 'no_board_open'
+}
+export interface BoardsFound {
+  status: 'boards_found'
   candidates: BoardCandidate[]
 }
-export type CheckBoardResult = CheckBoardOk | NoBoardOpen | NeedsBoardSelection
+export type ListOpenBoardsResult = NoBoardOpen | BoardsFound
 
-/** kicad.check_board (CTX-309.1) auto-resolves the currently open board
- * when pcbPath is omitted -- a real live IPC call, only reachable this
- * way since there's no direct "give me the open board's path" UI
- * action; the daemon route does that resolution itself. A real
- * subprocess plus a real LLM call, both genuinely multi-second, so
- * submitJob -- matching every other real async kicad and component
- * route's own precedent. */
-export async function checkBoard(pcbPath?: string): Promise<CheckBoardResult> {
-  const handle = await submitJob<CheckBoardResult>(
-    'kicad.check_board',
-    pcbPath ? { pcb_path: pcbPath } : {},
-  )
+/** kicad.list_open_boards (CTX-309.4): a real, cheap, read-only lookup of
+ * every board currently open in KiCad -- feeds a real "here's what's
+ * open, pick one" picker, always shown before any check runs (even for a
+ * single open board), rather than the old CTX-309.3 behavior of silently
+ * auto-resolving whichever one board happened to be open. Real user
+ * feedback exercising the actual running app found that opaque -- a
+ * novice never saw *which* board was about to be checked. A fast IPC
+ * lookup with no subprocess/LLM call, so plain `dispatch`, not
+ * `submitJob` (matching settings.ts's own `kicad.get_version` precedent
+ * for a sync route). */
+export async function listOpenBoards(): Promise<ListOpenBoardsResult> {
+  const response = await dispatch('kicad.list_open_boards', {})
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+  return response.result as ListOpenBoardsResult
+}
+
+/** CTX-309.4: launches the real KiCad desktop app (core/tauri-rust's
+ * `open_kicad` command) -- real user feedback found the old "no board
+ * open" guidance still left a novice stuck not knowing where to find
+ * KiCad at all. Verified working on macOS directly on this dev machine;
+ * not verified on Windows/Linux (see the Rust command's own doc
+ * comment) -- if it fails there, the caller's existing walkthrough text
+ * is still the real fallback. */
+export async function openKicad(): Promise<void> {
+  await invoke('open_kicad')
+}
+
+/** kicad.check_board (SPEC-309/CTX-309.4) always takes an explicit,
+ * user-picked path now -- kicad.list_open_boards above owns showing the
+ * real picker; this route no longer auto-resolves or returns a
+ * "pick one" state itself. A real subprocess plus a real LLM call, both
+ * genuinely multi-second, so submitJob -- matching every other real
+ * async kicad and component route's own precedent. */
+export async function checkBoard(pcbPath: string): Promise<CheckResult> {
+  const handle = await submitJob<CheckResult>('kicad.check_board', { pcb_path: pcbPath })
   return handle.result
 }
 

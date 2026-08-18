@@ -709,38 +709,48 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
     )
 
 
-def kicad_check_board(pcb_path: str = None) -> dict:
-    """The kicad.check_board route (SPEC-309): a real DRC via kicad-cli
-    against `pcb_path`, or -- when not given -- whatever board is
-    currently open in KiCad (kicad_bridge.list_open_boards(), CTX-309.3).
-    Explains the real violations via a real LLM call. Async: a real
-    subprocess plus a real LLM call, both genuinely multi-second, like
-    every other real kicad.*/component.* route in ASYNC_ROUTES below.
+def kicad_list_open_boards() -> dict:
+    """The kicad.list_open_boards route (CTX-309.4): a real, cheap,
+    read-only lookup of every board currently open in KiCad, decoupled
+    from actually running a check. Feeds the Board (DRC) picker UI's
+    real, always-shown "here's what's open, pick one" flow -- real user
+    feedback exercising the actual running app found the old
+    auto-resolve-silently-when-exactly-one-is-open behavior (CTX-309.3)
+    still too opaque for someone new to KiCad: it never showed *which*
+    board was about to be checked, and the flat "no board open" state
+    never offered to open KiCad itself. Sync, not async -- this is a fast
+    IPC lookup, no subprocess or LLM call, unlike kicad_check_board below.
 
-    Real, structured three-way envelope (CTX-309.3) when no explicit path
-    is given -- never raises for "nothing open" or "more than one open",
-    both real, normal states the frontend renders real guidance for
-    rather than a flat error:
     *   Zero boards open: {"status": "no_board_open"}.
-    *   More than one open: {"status": "needs_selection", "candidates":
-        [{"path", "label"}, ...]} -- the frontend owns picking one, then
-        re-calls this route with an explicit pcb_path.
-    *   Exactly one open, or an explicit pcb_path given: runs DRC as
-        before, now also tagged {"status": "ok"}."""
-    if not pcb_path:
-        candidates = kicad_bridge.list_open_boards()
-        if not candidates:
-            return {"status": "no_board_open"}
-        if len(candidates) > 1:
-            return {
-                "status": "needs_selection",
-                "candidates": [
-                    {"path": path, "label": os.path.basename(path)}
-                    for path in candidates
-                ],
-            }
-        pcb_path = candidates[0]
+    *   One or more open: {"status": "boards_found", "candidates":
+        [{"path", "label"}, ...]} -- always a real list, even a single
+        entry, so the user always sees and picks the exact board before
+        any check ever runs, never a silent auto-resolution."""
+    candidates = kicad_bridge.list_open_boards()
+    if not candidates:
+        return {"status": "no_board_open"}
+    return {
+        "status": "boards_found",
+        "candidates": [
+            {"path": path, "label": os.path.basename(path)}
+            for path in candidates
+        ],
+    }
 
+
+def kicad_check_board(pcb_path: str) -> dict:
+    """The kicad.check_board route (SPEC-309): a real DRC via kicad-cli
+    against an explicit `pcb_path`. Explains the real violations via a
+    real LLM call. Async: a real subprocess plus a real LLM call, both
+    genuinely multi-second, like every other real kicad.*/component.*
+    route in ASYNC_ROUTES below.
+
+    CTX-309.4 removed the old default-`None`/auto-resolve-when-omitted
+    behavior (CTX-309.3) in favor of `kicad.list_open_boards` feeding a
+    real picker UI first -- the user always explicitly picks which board
+    before this route ever runs, the same explicit-path contract
+    `kicad_check_schematic` already used. `pcb_path` is required now, not
+    optional."""
     report = kicad_cli.run_drc(pcb_path)
     result = component_pipeline.explain_violations(
         report["violations"], "drc",
@@ -832,6 +842,8 @@ def _build_routes() -> dict:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
     if component_pipeline is not None and library_store is not None:
         routes["kicad.generate_connection_guidance"] = kicad_generate_connection_guidance
+    if kicad_bridge is not None:
+        routes["kicad.list_open_boards"] = kicad_list_open_boards
     if kicad_cli is not None and component_pipeline is not None:
         if kicad_bridge is not None:
             routes["kicad.check_board"] = kicad_check_board

@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   checkBoard,
   checkSchematic,
+  listOpenBoards,
+  openKicad,
   pickSchematicFile,
-  type CheckBoardResult,
   type CheckResult,
+  type ListOpenBoardsResult,
   type Violation,
 } from '../lib/boardAdvisor'
 
@@ -14,28 +16,68 @@ import {
  * from here rather than splitting DRC into PCB and ERC into Schematic,
  * since the Schematic area is SPEC-308's own reserved home instead.
  *
- * CTX-309.3: the Board (DRC) side renders three real, distinct states
- * instead of flattening every failure into red error text -- a real
- * user hit exactly that flat-error gap exercising the actual running
- * app (a stale "no board open" state showed as a raw exception with no
- * guidance). "No board open" and "more than one open" are both normal,
- * expected states worth their own guided UI, not exceptions. */
+ * CTX-309.4: the Board (DRC) side scans for open boards as soon as this
+ * screen mounts and always shows them as a real, clickable list -- even
+ * a single one -- rather than a blind "Check Board" button that
+ * silently auto-resolved whichever board happened to be open (CTX-309.3).
+ * Real user feedback exercising the actual running app found that still
+ * too opaque for someone new to KiCad: it never showed *which* board was
+ * about to be checked, and offered no way to actually open KiCad from
+ * here. Zero boards open now offers a real "Open KiCad" action plus a
+ * concrete walkthrough, not just prose. */
 export function BoardAdvisor() {
+  const [loadingBoardList, setLoadingBoardList] = useState(false)
+  const [boardListResult, setBoardListResult] = useState<ListOpenBoardsResult | null>(null)
+  const [boardListError, setBoardListError] = useState<string | null>(null)
+  const [openingKicad, setOpeningKicad] = useState(false)
+
   const [checkingBoard, setCheckingBoard] = useState(false)
-  const [boardResult, setBoardResult] = useState<CheckBoardResult | null>(null)
-  const [boardError, setBoardError] = useState<string | null>(null)
+  const [boardCheckResult, setBoardCheckResult] = useState<CheckResult | null>(null)
+  const [boardCheckError, setBoardCheckError] = useState<string | null>(null)
 
   const [checkingSchematic, setCheckingSchematic] = useState(false)
   const [schematicResult, setSchematicResult] = useState<CheckResult | null>(null)
   const [schematicError, setSchematicError] = useState<string | null>(null)
 
-  async function handleCheckBoard(pcbPath?: string) {
-    setCheckingBoard(true)
-    setBoardError(null)
+  const refreshBoardList = useCallback(async () => {
+    setLoadingBoardList(true)
+    setBoardListError(null)
     try {
-      setBoardResult(await checkBoard(pcbPath))
+      setBoardListResult(await listOpenBoards())
     } catch (err) {
-      setBoardError(err instanceof Error ? err.message : String(err))
+      setBoardListError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoadingBoardList(false)
+    }
+  }, [])
+
+  // Scan for open boards as soon as this screen is shown, instead of
+  // waiting for a blind first click -- the user sees real state
+  // immediately.
+  useEffect(() => {
+    void refreshBoardList()
+  }, [refreshBoardList])
+
+  async function handleOpenKicad() {
+    setOpeningKicad(true)
+    setBoardListError(null)
+    try {
+      await openKicad()
+    } catch (err) {
+      setBoardListError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setOpeningKicad(false)
+    }
+  }
+
+  async function handleCheckBoard(pcbPath: string) {
+    setCheckingBoard(true)
+    setBoardCheckError(null)
+    setBoardCheckResult(null)
+    try {
+      setBoardCheckResult(await checkBoard(pcbPath))
+    } catch (err) {
+      setBoardCheckError(err instanceof Error ? err.message : String(err))
     } finally {
       setCheckingBoard(false)
     }
@@ -61,10 +103,16 @@ export function BoardAdvisor() {
   return (
     <div className="flex w-full max-w-md flex-col gap-6">
       <BoardCheckSection
-        checking={checkingBoard}
-        onCheck={handleCheckBoard}
-        result={boardResult}
-        error={boardError}
+        loadingList={loadingBoardList}
+        listResult={boardListResult}
+        listError={boardListError}
+        onRefreshList={() => void refreshBoardList()}
+        onOpenKicad={() => void handleOpenKicad()}
+        openingKicad={openingKicad}
+        checkingBoard={checkingBoard}
+        checkResult={boardCheckResult}
+        checkError={boardCheckError}
+        onCheckBoard={(path) => void handleCheckBoard(path)}
       />
       <CheckSection
         title="Schematic (ERC)"
@@ -84,40 +132,57 @@ const _SEVERITY_COLOR: Record<string, string> = {
   exclusion: 'text-neutral-500',
 }
 
-/** CTX-309.3: the Board (DRC) section, with its own three-state
- * rendering -- kept separate from the generic CheckSection below since
- * schematic checks never produce the no_board_open/needs_selection
- * states (ERC always needs an explicit, user-picked path). */
+/** CTX-309.4: the Board (DRC) section, kept separate from the generic
+ * CheckSection below since schematic checks always need an explicit,
+ * user-picked file path (no live board-listing capability exists for
+ * schematics, per SPEC-309 §2's own confirmed IPC limitation). */
 function BoardCheckSection({
-  checking,
-  onCheck,
-  result,
-  error,
+  loadingList,
+  listResult,
+  listError,
+  onRefreshList,
+  onOpenKicad,
+  openingKicad,
+  checkingBoard,
+  checkResult,
+  checkError,
+  onCheckBoard,
 }: {
-  checking: boolean
-  onCheck: (pcbPath?: string) => void
-  result: CheckBoardResult | null
-  error: string | null
+  loadingList: boolean
+  listResult: ListOpenBoardsResult | null
+  listError: string | null
+  onRefreshList: () => void
+  onOpenKicad: () => void
+  openingKicad: boolean
+  checkingBoard: boolean
+  checkResult: CheckResult | null
+  checkError: string | null
+  onCheckBoard: (pcbPath: string) => void
 }) {
   return (
     <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
       <p className="text-xs font-medium uppercase text-neutral-500">Board (DRC)</p>
-      <button
-        type="button"
-        className="self-start rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
-        onClick={() => onCheck()}
-        disabled={checking}
-      >
-        {checking ? 'Checking…' : 'Check Board'}
-      </button>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {loadingList && <p className="text-sm text-neutral-400">Scanning for boards open in KiCad…</p>}
 
-      {result?.status === 'no_board_open' && (
+      {!loadingList && listError && (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-red-400">{listError}</p>
+          <button
+            type="button"
+            className="self-start rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+            onClick={onRefreshList}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!loadingList && !listError && listResult?.status === 'no_board_open' && (
         <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-3 text-sm">
           <p className="text-neutral-200">No board is currently open in KiCad.</p>
           <ol className="list-decimal space-y-1 pl-4 text-xs text-neutral-400">
-            <li>Open KiCad.</li>
+            <li>Click <strong className="text-neutral-300">Open KiCad</strong> below (or open it yourself).</li>
             <li>
               Open your project, then open its <strong className="text-neutral-300">PCB Editor</strong> window
               (not just the project manager).
@@ -125,29 +190,43 @@ function BoardCheckSection({
             <li>
               Confirm the IPC API is enabled: <strong className="text-neutral-300">Preferences → Plugins</strong>.
             </li>
+            <li>Click <strong className="text-neutral-300">Refresh</strong> below.</li>
           </ol>
-          <button
-            type="button"
-            className="self-start rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200 disabled:opacity-50"
-            onClick={() => onCheck()}
-            disabled={checking}
-          >
-            Try Again
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+              onClick={onOpenKicad}
+              disabled={openingKicad}
+            >
+              {openingKicad ? 'Opening…' : 'Open KiCad'}
+            </button>
+            <button
+              type="button"
+              className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+              onClick={onRefreshList}
+            >
+              Refresh
+            </button>
+          </div>
         </div>
       )}
 
-      {result?.status === 'needs_selection' && (
+      {!loadingList && !listError && listResult?.status === 'boards_found' && (
         <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-3 text-sm">
-          <p className="text-neutral-200">More than one board is open in KiCad. Pick one to check:</p>
+          <p className="text-neutral-200">
+            {listResult.candidates.length === 1
+              ? 'Board open in KiCad:'
+              : 'Boards open in KiCad — pick one to check:'}
+          </p>
           <ul className="flex flex-col gap-1">
-            {result.candidates.map((candidate) => (
+            {listResult.candidates.map((candidate) => (
               <li key={candidate.path}>
                 <button
                   type="button"
                   className="w-full rounded border border-neutral-700 px-3 py-2 text-left text-xs text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
-                  onClick={() => onCheck(candidate.path)}
-                  disabled={checking}
+                  onClick={() => onCheckBoard(candidate.path)}
+                  disabled={checkingBoard}
                 >
                   <span className="block font-medium">{candidate.label}</span>
                   <span className="block text-neutral-500">{candidate.path}</span>
@@ -155,10 +234,19 @@ function BoardCheckSection({
               </li>
             ))}
           </ul>
+          <button
+            type="button"
+            className="self-start rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+            onClick={onRefreshList}
+          >
+            Refresh
+          </button>
         </div>
       )}
 
-      {result?.status === 'ok' && <ViolationsList result={result} />}
+      {checkingBoard && <p className="text-sm text-neutral-400">Checking…</p>}
+      {checkError && <p className="text-sm text-red-400">{checkError}</p>}
+      {checkResult && <ViolationsList result={checkResult} />}
     </div>
   )
 }

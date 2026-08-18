@@ -1060,32 +1060,73 @@ _EMPTY_BOARD_FIXTURE = os.path.join(_FIXTURES_DIR, 'empty_board.kicad_pcb')
 _EMPTY_SCHEMATIC_FIXTURE = os.path.join(_FIXTURES_DIR, 'empty_schematic.kicad_sch')
 
 
-class TestKicadCheckBoardRoute(unittest.TestCase):
-    """CTX-309.1/CTX-309.3: SPEC-309's DRC route. CTX-309.3 replaced the
-    prior raise-on-"nothing open" behavior with a real, structured
-    three-way envelope -- see TestKicadCheckBoardRouteOpenStates below
-    for the no_board_open/needs_selection cases."""
+class TestKicadListOpenBoardsRoute(unittest.TestCase):
+    """CTX-309.4: a real, cheap, read-only lookup feeding the Board (DRC)
+    picker UI -- decoupled from actually running a check, so the user
+    always sees exactly what's open before picking one, even when
+    there's only one candidate."""
 
-    def test_002_no_path_given_auto_resolves_the_currently_open_board(self):
+    def test_001_no_boards_open_returns_a_structured_state_not_a_raise(self):
+        with patch('daemon.kicad_bridge.list_open_boards', return_value=[]):
+            result = daemon.kicad_list_open_boards()
+
+        self.assertEqual(result, {"status": "no_board_open"})
+
+    def test_002_a_single_open_board_is_still_a_real_list_not_auto_resolved(self):
+        with patch('daemon.kicad_bridge.list_open_boards', return_value=['/real/open/board.kicad_pcb']):
+            result = daemon.kicad_list_open_boards()
+
+        self.assertEqual(result, {
+            "status": "boards_found",
+            "candidates": [{"path": "/real/open/board.kicad_pcb", "label": "board.kicad_pcb"}],
+        })
+
+    def test_003_multiple_boards_open_returns_every_real_candidate(self):
+        with patch(
+            'daemon.kicad_bridge.list_open_boards',
+            return_value=['/boards/a/board_a.kicad_pcb', '/boards/b/board_b.kicad_pcb'],
+        ):
+            result = daemon.kicad_list_open_boards()
+
+        self.assertEqual(result["status"], "boards_found")
+        self.assertEqual(result["candidates"], [
+            {"path": "/boards/a/board_a.kicad_pcb", "label": "board_a.kicad_pcb"},
+            {"path": "/boards/b/board_b.kicad_pcb", "label": "board_b.kicad_pcb"},
+        ])
+
+    def test_004_build_routes_omits_it_when_kicad_bridge_import_failed(self):
+        original = daemon.kicad_bridge
+        daemon.kicad_bridge = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.list_open_boards", routes)
+        finally:
+            daemon.kicad_bridge = original
+
+    def test_005_registered_as_a_sync_route_not_async(self):
+        """Unlike kicad.check_board, this is a fast IPC lookup with no
+        subprocess or LLM call -- it must not be in ASYNC_ROUTES."""
+        self.assertIn("kicad.list_open_boards", daemon.ROUTES)
+        self.assertNotIn("kicad.list_open_boards", daemon.ASYNC_ROUTES)
+
+
+class TestKicadCheckBoardRoute(unittest.TestCase):
+    """CTX-309.1/CTX-309.4: SPEC-309's DRC route. CTX-309.4 made pcb_path
+    required -- kicad.list_open_boards (above) now owns resolving which
+    board to check, feeding a real picker UI, rather than this route
+    ever auto-resolving or returning a "nothing open"/"pick one" state
+    itself."""
+
+    def test_001_runs_drc_against_the_given_explicit_path(self):
         """Routing only -- kicad_cli.run_drc/component_pipeline.
         explain_violations are both mocked here; TestRealKicadCheckBoardRoute
         below is the real, non-mocked end-to-end version."""
-        with patch('daemon.kicad_bridge.list_open_boards', return_value=['/real/open/board.kicad_pcb']), \
-             patch('daemon.kicad_cli.run_drc', return_value={"violations": []}) as mock_run_drc, \
+        with patch('daemon.kicad_cli.run_drc', return_value={"violations": []}) as mock_run_drc, \
              patch('daemon.component_pipeline.explain_violations', return_value={"violations": [], "summary": "clean", "truncated_count": 0}):
-            result = daemon.kicad_check_board()
+            result = daemon.kicad_check_board('/explicit/path.kicad_pcb')
 
-        mock_run_drc.assert_called_once_with('/real/open/board.kicad_pcb')
-        self.assertEqual(result["source_path"], '/real/open/board.kicad_pcb')
-        self.assertEqual(result["status"], "ok")
-
-    def test_003_an_explicit_path_skips_auto_resolution_entirely(self):
-        with patch('daemon.kicad_bridge.list_open_boards') as mock_list_open, \
-             patch('daemon.kicad_cli.run_drc', return_value={"violations": []}), \
-             patch('daemon.component_pipeline.explain_violations', return_value={"violations": [], "summary": "clean", "truncated_count": 0}):
-            result = daemon.kicad_check_board(pcb_path='/explicit/path.kicad_pcb')
-
-        mock_list_open.assert_not_called()
+        mock_run_drc.assert_called_once_with('/explicit/path.kicad_pcb')
+        self.assertEqual(result["source_path"], '/explicit/path.kicad_pcb')
         self.assertEqual(result["status"], "ok")
 
     def test_004_build_routes_omits_it_when_kicad_bridge_import_failed(self):
@@ -1094,7 +1135,7 @@ class TestKicadCheckBoardRoute(unittest.TestCase):
         try:
             routes = daemon._build_routes()
             self.assertNotIn("kicad.check_board", routes)
-            self.assertIn("kicad.check_schematic", routes, "no auto-resolution dependency on kicad_bridge")
+            self.assertIn("kicad.check_schematic", routes, "no dependency on kicad_bridge")
         finally:
             daemon.kicad_bridge = original
 
@@ -1111,32 +1152,6 @@ class TestKicadCheckBoardRoute(unittest.TestCase):
     def test_006_both_registered_as_async_routes(self):
         self.assertIn("kicad.check_board", daemon.ASYNC_ROUTES)
         self.assertIn("kicad.check_schematic", daemon.ASYNC_ROUTES)
-
-
-class TestKicadCheckBoardRouteOpenStates(unittest.TestCase):
-    """CTX-309.3: the real, structured three-way envelope for when no
-    explicit pcb_path is given -- replaces the prior raise-on-empty
-    behavior with real, distinguishable states the frontend renders
-    actual guidance for."""
-
-    def test_001_no_boards_open_returns_a_structured_state_not_a_raise(self):
-        with patch('daemon.kicad_bridge.list_open_boards', return_value=[]):
-            result = daemon.kicad_check_board()
-
-        self.assertEqual(result, {"status": "no_board_open"})
-
-    def test_002_multiple_boards_open_returns_every_real_candidate(self):
-        with patch(
-            'daemon.kicad_bridge.list_open_boards',
-            return_value=['/boards/a/board_a.kicad_pcb', '/boards/b/board_b.kicad_pcb'],
-        ):
-            result = daemon.kicad_check_board()
-
-        self.assertEqual(result["status"], "needs_selection")
-        self.assertEqual(result["candidates"], [
-            {"path": "/boards/a/board_a.kicad_pcb", "label": "board_a.kicad_pcb"},
-            {"path": "/boards/b/board_b.kicad_pcb", "label": "board_b.kicad_pcb"},
-        ])
 
 
 class TestKicadCheckSchematicRoute(unittest.TestCase):
