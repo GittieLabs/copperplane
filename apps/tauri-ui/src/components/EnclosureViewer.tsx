@@ -106,19 +106,22 @@ export function useGlbScene(
 
 // SPEC-311: camera presets are real, bounded additions to the existing
 // free-orbit `OrbitControls` (CTX-301.2) -- not a replacement for it.
-// Spherical coordinates around the origin (the enclosure's own build
-// origin, matching `OrbitControls`' existing `target` default), Y-up to
-// match glTF's own convention (confirmed live during SPEC-311's own
-// research: `kicad-cli pcb export glb`'s Y axis is height). The default
-// radius/polar below reproduce the exact corner view this viewer's
-// camera has always opened with ([80, 80, 80]) -- a preset click is a
-// jump to a new canonical view, not a replacement for free dragging;
-// the user can keep orbiting from wherever a preset lands them.
+// Spherical coordinates around a real target center (computed from the
+// loaded mesh's own bounding box -- see `computeFrame` below, CTX-311.4),
+// Y-up to match glTF's own convention (confirmed live during SPEC-311's
+// own research: `kicad-cli pcb export glb`'s Y axis is height). These
+// constants are only the *fallback* used when no real mesh has loaded
+// yet to frame against -- they reproduce the viewer's own original
+// [80, 80, 80] corner view, kept only so `sphericalToCartesian` always
+// has a sane default and the camera math stays independently testable.
 export const DEFAULT_CAMERA_RADIUS = 80 * Math.sqrt(3)
 export const DEFAULT_CAMERA_POLAR = Math.acos(1 / Math.sqrt(3))
 export const DEFAULT_CAMERA_AZIMUTH = Math.PI / 4
 const _ROTATE_STEP = Math.PI / 4
 const _POLE_EPSILON = 0.001
+// A real object's own bounding-sphere radius alone puts it right at the
+// viewport's edge -- this multiplier leaves real headroom so it doesn't.
+const _FRAME_MULTIPLIER = 1.6
 
 export function sphericalToCartesian(radius: number, polar: number, azimuth: number): [number, number, number] {
   const x = radius * Math.sin(polar) * Math.cos(azimuth)
@@ -127,21 +130,58 @@ export function sphericalToCartesian(radius: number, polar: number, azimuth: num
   return [x, y, z]
 }
 
-function CameraPresetControls({ controlsRef }: { controlsRef: RefObject<OrbitControlsImpl | null> }) {
-  const cameraState = useRef({
-    radius: DEFAULT_CAMERA_RADIUS,
-    polar: DEFAULT_CAMERA_POLAR,
-    azimuth: DEFAULT_CAMERA_AZIMUTH,
-  })
+interface CameraState {
+  radius: number
+  polar: number
+  azimuth: number
+  center: THREE.Vector3
+}
 
+function applyCameraState(controls: OrbitControlsImpl, state: CameraState) {
+  const [dx, dy, dz] = sphericalToCartesian(state.radius, state.polar, state.azimuth)
+  controls.object.position.set(state.center.x + dx, state.center.y + dy, state.center.z + dz)
+  controls.target.copy(state.center)
+  controls.update()
+}
+
+/** Real, live user testing (CTX-311.3, the very context that added
+ * these presets) found the viewer's own long-fixed `[80, 80, 80]`
+ * camera position -- "empirically tuned" (`CTX-109.4`'s own docstring)
+ * around the *pre-fix* 1000x-too-large `.glb` scale -- pointed at
+ * nothing once `CTX-109.4`'s real unit-scale fix shipped: a correctly-
+ * scaled enclosure is now only centimeters across, not "meters," so a
+ * camera ~138 units away sees an imperceptible speck against the
+ * background color, indistinguishable from "nothing rendered." Framing
+ * the camera from the real loaded mesh's own bounding box, computed
+ * fresh every time, is correct at any real enclosure size -- not just
+ * whichever one the camera was last hand-tuned against (CTX-311.4).
+ * Returns `null` (never a guessed frame) for an empty/degenerate box. */
+export function computeFrame(objects: THREE.Object3D[]): { radius: number; center: THREE.Vector3 } | null {
+  const box = new THREE.Box3()
+  let hasAny = false
+  for (const object of objects) {
+    box.expandByObject(object)
+    hasAny = true
+  }
+  if (!hasAny || box.isEmpty()) return null
+
+  const center = box.getCenter(new THREE.Vector3())
+  const size = box.getSize(new THREE.Vector3())
+  const radius = Math.max(size.length() * _FRAME_MULTIPLIER, 0.001)
+  return { radius, center }
+}
+
+function CameraPresetControls({
+  controlsRef,
+  cameraState,
+}: {
+  controlsRef: RefObject<OrbitControlsImpl | null>
+  cameraState: RefObject<CameraState>
+}) {
   function apply() {
     const controls = controlsRef.current
     if (!controls) return
-    const { radius, polar, azimuth } = cameraState.current
-    const [x, y, z] = sphericalToCartesian(radius, polar, azimuth)
-    controls.object.position.set(x, y, z)
-    controls.target.set(0, 0, 0)
-    controls.update()
+    applyCameraState(controls, cameraState.current)
   }
 
   function handleTop() {
@@ -196,6 +236,40 @@ export function EnclosureViewer({
   const base = useGlbScene(glbPath)
   const lid = useGlbScene(lidGlbPath)
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
+  const cameraState = useRef<CameraState>({
+    radius: DEFAULT_CAMERA_RADIUS,
+    polar: DEFAULT_CAMERA_POLAR,
+    azimuth: DEFAULT_CAMERA_AZIMUTH,
+    center: new THREE.Vector3(0, 0, 0),
+  })
+
+  // Computed synchronously during render (not an effect) so the
+  // Canvas's own initial `camera` prop is correct on the very first
+  // frame the mesh is available -- no flash of a wrongly-framed camera
+  // snapping into place a tick later. `cameraState.current` is updated
+  // here too so a later free-orbit or preset click starts from this
+  // same real frame, not the hardcoded fallback.
+  if (base.scene) {
+    const frame = computeFrame([base.scene, lid.scene].filter((s): s is THREE.Group => s !== null))
+    if (frame) {
+      cameraState.current.radius = frame.radius
+      cameraState.current.center = frame.center
+    }
+  }
+
+  // Handles regeneration: the Canvas/OrbitControls stay mounted across
+  // a new `glbPath` (no `key` change), so the synchronous render-time
+  // computation above only ever sets the *initial* camera prop once,
+  // on first mount -- an already-mounted OrbitControls needs its own
+  // imperative re-frame when the loaded mesh changes size.
+  useEffect(() => {
+    const frame = computeFrame([base.scene, lid.scene].filter((s): s is THREE.Group => s !== null))
+    if (!frame || !controlsRef.current) return
+    cameraState.current.radius = frame.radius
+    cameraState.current.center = frame.center
+    applyCameraState(controlsRef.current, cameraState.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base.scene, lid.scene])
 
   if (base.status === 'loading') {
     return <p className="text-sm text-neutral-400">Loading mesh…</p>
@@ -204,20 +278,33 @@ export function EnclosureViewer({
     return <p className="text-sm text-red-400">Failed to load mesh: {base.error}</p>
   }
 
+  const [initialX, initialY, initialZ] = sphericalToCartesian(
+    cameraState.current.radius, cameraState.current.polar, cameraState.current.azimuth,
+  )
+
   return (
     <div className="flex flex-col gap-2">
       <div className="h-96 w-full overflow-hidden rounded border border-neutral-800">
-        <Canvas camera={{ position: [80, 80, 80], fov: 50 }}>
+        <Canvas
+          camera={{
+            position: [
+              cameraState.current.center.x + initialX,
+              cameraState.current.center.y + initialY,
+              cameraState.current.center.z + initialZ,
+            ],
+            fov: 50,
+          }}
+        >
           <color attach="background" args={['#3f3f46']} />
           <ambientLight intensity={0.6} />
           <directionalLight position={[100, 100, 100]} intensity={0.8} />
           {base.scene && <primitive object={base.scene} />}
           {lid.scene && lidVisible && <primitive object={lid.scene} />}
-          <OrbitControls ref={controlsRef} makeDefault enableDamping />
+          <OrbitControls ref={controlsRef} makeDefault enableDamping target={cameraState.current.center} />
         </Canvas>
       </div>
       <div className="flex items-center justify-between">
-        <CameraPresetControls controlsRef={controlsRef} />
+        <CameraPresetControls controlsRef={controlsRef} cameraState={cameraState} />
         {lidGlbPath && lid.status === 'error' && (
           <p className="text-xs text-red-400">Failed to load lid: {lid.error}</p>
         )}
