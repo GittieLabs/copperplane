@@ -1,0 +1,166 @@
+---
+id: SPEC-311
+title: "Enclosure Refinement & Interactive Preview"
+status: Draft
+type: Feature
+created: 2026-08-18
+last_updated: 2026-08-18
+target_version: v0.2.0
+location: "apps/tauri-ui/specs/SPEC-311-enclosure-refinement-interactive-preview.md"
+parent_spec: "../../../apps/tauri-ui/specs/SPEC-300-product-ia-interaction-model.md"
+child_specs: []
+user_facing: true
+---
+
+# SPEC-311: Enclosure Refinement & Interactive Preview
+
+## 1. Executive Summary & Goals
+
+*   **High-Level Goal:** Turn enclosure generation from a one-shot, blind form submission into a
+    real iterative workflow: derive the enclosure's shape and required interior height directly
+    from the real board (its real outline and its real placed components' heights, not sane
+    defaults), generate, show an interactive 3D preview the user can actually navigate, let them
+    adjust parameters and regenerate against the same board without starting over, and decide
+    whether/how a lid gets built and shown alongside the base.
+*   **Business / Technical Value:** `SPEC-109`/`SPEC-310` (both shipped, `CTX-310.3` just fixed
+    their picker UX) produce a fixed-shape open-top box from a *bounding box* with hard-coded
+    default wall/clearance/fillet/standoff numbers — real, deliberate scope decisions at the time
+    (`SPEC-109` §1's own Non-Goals), but real use of the shipped feature (`CTX-310.3`'s own Plan
+    Drift, Deviation 3) confirmed they now block real usefulness: no lid, no shape beyond a
+    rectangle, and no way to know if the numbers you typed are even close to right for the
+    components actually on the board. This spec is the next real increment, not a rewrite of what
+    shipped.
+*   **Non-Goals:**
+    *   **Not a general-purpose parametric CAD editor.** Refine means adjusting this spec's own
+        named parameters (wall thickness, clearance, fillet, standoff height, lid on/off) and
+        regenerating — not free-form geometry editing, custom cutouts, or connector/cable routing.
+    *   **Not fastener hardware selection.** Unchanged from `SPEC-109`'s own Non-Goal — a lid
+        existing at all is new scope here; screws, latches, and hinges are not.
+    *   **Not a repo-wide shell/layout redesign.** The real "every tab is a fixed, narrow column"
+        observation applies to the whole app, not just Enclosure — this spec widens the Enclosure
+        area specifically (it has the clearest case: a 3D viewer genuinely needs the room), and
+        names the broader layout question as a real, separate follow-up rather than silently
+        expanding this spec to redesign `App.tsx`'s shell.
+    *   **Not solving component-height data for every part unconditionally.** See §2's own named
+        open question — this spec uses real height data where it already exists and degrades
+        honestly (not silently) where it doesn't; backfilling every existing Part's height data is
+        out of scope.
+
+## 2. System Architecture & Design Choices
+
+*   **Component height data already exists for parts built through this app's own pipeline —
+    confirmed, not assumed.** `CTX-308.5` already persists `package_dimensions.height_mm` on every
+    saved `Part` (from datasheet extraction). What does **not** exist yet, confirmed by reading
+    `kicad_bridge.py`/`kicad_pcb_import.py`: any stored link from a specific *placed footprint on a
+    real board* back to the `Part` record it came from. `SPEC-108`'s own inject-component write
+    path places a footprint but doesn't persist which `part_id` it came from onto the board itself;
+    a real board someone hand-edited in KiCad may have components on it that were never placed
+    through this app's own library at all. **Open question, not decided here:** does "derive
+    height from components" mean (a) only trusting components this app itself placed and knows the
+    `part_id` for, falling back honestly to "unknown, please confirm a height" otherwise, or (b)
+    attempting to match a placed footprint's real KiCad footprint name against saved Parts by
+    convention, which is real but fuzzy. Whichever this spec's own context picks, the UI must be
+    honest about which components' heights are real data versus a fallback, never presenting a
+    guess as fact.
+*   **The real board outline is available as raw geometry today; only the reduction step throws
+    it away.** `kicad_bridge.get_board_outline()` already reads every real `BoardShape` on
+    `Edge.Cuts` via a real `kipy` call before reducing them to a bounding box; the file-based path
+    (`kicad_pcb_import.extract_board_outline`) does the equivalent via a DXF export. Tracing the
+    real closed outline (rather than its bounding box) means assembling those raw line/arc segments
+    into a closed polygon/wire and extruding *that* in FreeCAD instead of `Part.makeBox` — real,
+    non-trivial geometry work (segment-chaining, concave-corner handling for the inward wall-
+    thickness offset), not a parameter tweak. Confirmed accessible; not confirmed easy.
+*   **A lid means two real FreeCAD bodies, not one.** The existing build script produces a single
+    `Part::Feature` shape exported to one `.glb`/`.step`. A lid needs its own real shape (sized to
+    fit the same outline, closing the open top the base already has) either as a second object in
+    the same document/export or a fully separate `.step`/`.glb` pair. `EnclosureViewer.tsx`
+    (confirmed by reading it) currently loads exactly one `.glb` into one `THREE.Group` via
+    `useGlbScene` — showing/hiding a lid independently needs either two named, independently-
+    toggleable nodes in one scene graph, or two separately-loaded scenes composited in the same
+    `Canvas`. Real, bounded frontend work; not yet decided which of the two.
+*   **Persistence of the generated design is a genuinely open product question, not a technical
+    one — named honestly, not resolved here.** Every regenerate-after-refine produces a new real
+    `.glb`/`.step` pair; without a decision, old ones either leak (SPEC-301 §3's already-named risk)
+    or get silently overwritten. Three real options exist (auto-save every generation as the
+    project's current enclosure Artifact; only persist on an explicit user "Save" action, discarding
+    interim iterations; keep every version, `SPEC-304`-style) — each has real, different trade-offs
+    for disk usage and "did I lose my last good design" risk. This spec's own implementation
+    context must pick one and say why, not default to whichever is easiest to code.
+*   **The Enclosure tab must match the PCB/Schematic tabs' own "last-open-board" pattern, with one
+    deliberate difference.** `BoardAdvisor`/`SchematicAdvisor` show their last-scanned board list
+    immediately on load; `EnclosurePanel` (post-`CTX-310.3`) currently only shows a board once the
+    user has explicitly scanned or picked a file this session. This spec makes Enclosure consistent
+    with that pattern for the *list* — but generation itself still requires an explicit "Generate"
+    click even when a board was auto-selected from a remembered previous session, since the
+    underlying file could have moved or been deleted since the app was last open; a real,
+    successful generate is the actual validation that the remembered path is still real, not an
+    assumption.
+*   **Camera presets are a real, bounded addition to the existing `OrbitControls` setup.** Top,
+    bottom, and left/right rotation-by-increment buttons around the existing free-orbit behavior
+    (`CTX-301.2`), not a replacement for it — `@react-three/drei`'s `OrbitControls` already exposes
+    a controllable camera object; presets just animate/snap it to known positions.
+*   **Cross-Module Impacts:**
+    *   `services/python-daemon`: `kicad_bridge`/`kicad_pcb_import` gain real per-component
+        placement + height derivation (scope per the open question above); `freecad_bridge`'s build
+        script gains a real second (lid) body and, if pursued, real polygon-outline extrusion
+        instead of `Part.makeBox`; `daemon.py`'s route gains whatever persistence model is chosen.
+    *   `apps/tauri-ui`: `EnclosurePanel.tsx` gains a refine-and-regenerate loop against the same
+        selected board, the last-open-board list-on-load pattern, and a wider layout; `EnclosureViewer.tsx`
+        gains lid show/hide and camera presets.
+
+## 3. Known Constraints & Risks
+
+*   **A "safe" default clearance height above the tallest known component is still a real product
+    risk, not just a UX nicety.** If component-height data is missing or only partially known for a
+    board (see §2), whatever this spec's context ships must make that gap visible to the user
+    rather than silently sizing the enclosure only for what it happened to know about — a
+    confidently-wrong enclosure that doesn't clear a real component is worse than an honest "I
+    don't know, please confirm" prompt.
+*   **`freecadcmd` cold-boot + real geometry cost compounds with every refine-and-regenerate
+    click.** `SPEC-109` §3 already flagged this for one shape; a real iterative workflow means this
+    cost is paid repeatedly per session, not once — worth watching for whether the existing async
+    job path (`SPEC-105`) still feels responsive enough for a "tweak a number, see the result"
+    loop, or whether a real debounce/explicit-regenerate-only (not live-as-you-type) posture is
+    needed.
+*   **Polygon-outline extrusion is real, unproven OpenCASCADE work in this repo.** Every enclosure
+    shape shipped so far has been `Part.makeBox`; there is no precedent here yet for extruding an
+    arbitrary closed wire or offsetting it inward at a concave corner. Should be prototyped for
+    real against `freecadcmd` before being assumed feasible on the timeline this spec's context
+    picks, the same "prototype the real tool before wiring it in" norm `CTX-109.1`'s own Plan Drift
+    already used for edge-selection logic.
+
+## 4. Module Map & Reference Links
+
+```text
+[SPEC-300](SPEC-300-product-ia-interaction-model.md)
+   └── [This Spec](SPEC-311-enclosure-refinement-interactive-preview.md)
+          ├── (context files land under apps/tauri-ui/context/ and services/python-daemon/context/
+          │    once implementation begins)
+```
+
+*   [SPEC-109](../../../services/python-daemon/specs/SPEC-109-parametric-enclosure-generator.md) —
+    the original enclosure geometry this spec refines, not replaces.
+*   [SPEC-310](SPEC-310-enclosure-from-board-profile.md) — the board-driven/file-import modes this
+    spec's refine loop builds on.
+*   [SPEC-202](../../../services/python-daemon/specs/SPEC-202-component-intelligence-pipeline.md) —
+    owns `package_dimensions.height_mm`, the real data source §2 names for component height.
+*   `ROADMAP.md` §3.1's `SPEC-111` backlog entry — the earlier, narrower capture of the lid/outline
+    gap; superseded in scope by this spec once this spec exists (leave `SPEC-111` as historical
+    record of when the gap was first named, per this repo's own "Plan Drift is not embarrassing"
+    norm — don't delete it).
+
+## 5. User & Interaction
+
+*   **Product Stage:** Enclosure (the fifth and last stage in `SPEC-300`'s own stage machine),
+    entered once a real board exists — either checked already on the PCB tab, or loaded fresh here.
+*   **What the user is trying to accomplish:** Get a real, board-fitting enclosure — sized to
+    actually clear the components on the board, with or without a lid — without hand-typing
+    dimensions they'd have to guess, and without starting over from scratch every time they want to
+    try a different wall thickness or see the lid on versus off.
+*   **What the user sees and does:** Arriving at the Enclosure tab, they see the same board (or
+    board list) they last had open, exactly like the PCB/Schematic tabs already show — picking one
+    and clicking Generate produces a real enclosure sized from that board's own real outline and
+    component heights, shown in a real, now-larger interactive 3D preview with camera presets
+    (top/bottom/rotate) alongside free orbit, and a lid shown or hidden as its own toggle. Adjusting
+    a refine parameter and regenerating updates the same preview against the same board, not a
+    blank form.
