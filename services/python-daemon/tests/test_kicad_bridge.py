@@ -746,16 +746,21 @@ class TestResolve3DModelPath(unittest.TestCase):
         self.assertEqual(resolved, "/env/3dmodels/foo.3dshapes/bar.step")
 
     def test_002_falls_back_to_a_real_per_os_install_location_when_env_var_unset(self):
+        base = '/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels'
         with patch.dict('os.environ', {}, clear=True):
             with patch('kicad_bridge.platform.system', return_value='Darwin'):
-                with patch('kicad_bridge.glob.glob', return_value=['/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels']):
+                with patch('kicad_bridge.glob.glob', return_value=[base]):
                     with patch('kicad_bridge.os.path.exists', return_value=True):
                         resolved = kicad_bridge._resolve_3d_model_path(
                             "${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step"
                         )
+        # os.path.join uses the real, current OS's own separator
+        # (confirmed live, the hard way: this test failed on Windows CI
+        # for asserting a hardcoded forward-slash path against a real
+        # backslash-joined one) -- build the expected value the same
+        # way _resolve_3d_model_path itself does, not a literal string.
         self.assertEqual(
-            resolved,
-            "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels/foo.3dshapes/bar.step",
+            resolved, os.path.join(base, 'foo.3dshapes/bar.step'),
         )
 
     def test_003_returns_none_when_nothing_real_is_found_rather_than_guessing(self):
