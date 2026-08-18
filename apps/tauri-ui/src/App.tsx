@@ -138,26 +138,30 @@ function App() {
             </div>
 
             {view.area === 'overview' && <Overview projectName={view.name} />}
-            {view.area === 'enclosure' && <EnclosurePanel projectName={view.name} />}
             {view.area === 'components' && <ComponentDiscovery />}
-            {/* BoardAdvisor/SchematicAdvisor stay mounted across every area,
-             * not just while their own tab is selected -- real user feedback
-             * found that switching tabs away and back threw away a check
-             * that had just finished, with no reason to. Hidden via CSS
-             * instead of unmounted, so their own state (which board/
-             * schematic was picked, the result) survives the round trip;
-             * each resets that state itself when `projectName` changes, so
-             * switching *projects* still starts fresh. Per SPEC-300's
-             * original stage-machine design, ERC (Schematic) and DRC (PCB)
-             * are two separate stages -- real user feedback flagged the
-             * earlier both-checks-under-PCB layout as a mismatch, not
-             * SPEC-308's own still-unbuilt footprint/connection-guidance
-             * work, which will eventually join SchematicAdvisor here. */}
-            <div className={view.area === 'schematic' ? undefined : 'hidden'}>
+            {/* BoardAdvisor/SchematicAdvisor/EnclosurePanel stay mounted
+             * across every area, not just while their own tab is selected --
+             * real user feedback found that switching tabs away and back
+             * threw away a check (or, for Enclosure, a just-generated real
+             * enclosure) that had just finished, with no reason to. Hidden
+             * via CSS instead of unmounted, so their own state (which
+             * board/schematic was picked, the result) survives the round
+             * trip; each resets that state itself when `projectName`
+             * changes, so switching *projects* still starts fresh. Per
+             * SPEC-300's original stage-machine design, ERC (Schematic) and
+             * DRC (PCB) are two separate stages -- real user feedback
+             * flagged the earlier both-checks-under-PCB layout as a
+             * mismatch, not SPEC-308's own still-unbuilt footprint/
+             * connection-guidance work, which will eventually join
+             * SchematicAdvisor here. */}
+            <div data-testid="schematic-area" className={view.area === 'schematic' ? undefined : 'hidden'}>
               <SchematicAdvisor projectName={view.name} />
             </div>
-            <div className={view.area === 'pcb' ? undefined : 'hidden'}>
+            <div data-testid="pcb-area" className={view.area === 'pcb' ? undefined : 'hidden'}>
               <BoardAdvisor projectName={view.name} />
+            </div>
+            <div data-testid="enclosure-area" className={view.area === 'enclosure' ? undefined : 'hidden'}>
+              <EnclosurePanel projectName={view.name} />
             </div>
           </>
         )}

@@ -490,6 +490,70 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
                     if os.path.exists(result_2[key]):
                         os.remove(result_2[key])
 
+    def test_007_a_real_lid_sits_on_top_of_the_shell_not_overlapping_its_floor(self):
+        """CTX-311.5: real, confirmed bug found by live user testing --
+        the lid's own Part.makeBox had no position vector, so it built
+        at the origin, the exact same z-range as the shell's own solid
+        floor, instead of atop the shell's real open top. This is a
+        real, axis-aware position check (not just sorted extents, which
+        test_004 already covers and which this exact bug passed) -- the
+        real Y axis is height post-CTX-311.5's own axis fix (test_008
+        below verifies that fix directly); this test checks the real
+        gap between where the base's height ends and where the lid
+        begins is ~0, not ~-height (fully overlapping from the bottom)."""
+        self._skip_unless_freecad_available()
+        import trimesh
+
+        result = generate_enclosure(
+            height=20, board_outline=_TEST_BOARD_OUTLINE, standoffs=[],
+            fillet_radius_mm=0, lid=True, lid_thickness_mm=2.0,
+        )
+        try:
+            base = trimesh.load(result["glb_path"])
+            lid = trimesh.load(result["lid_glb_path"])
+
+            base_top_y = base.bounds[1][1]
+            lid_bottom_y = lid.bounds[0][1]
+            self.assertAlmostEqual(lid_bottom_y - base_top_y, 0.0, delta=0.0005)
+
+            lid_top_y = lid.bounds[1][1]
+            self.assertAlmostEqual((lid_top_y - lid_bottom_y) * 1000, 2.0, delta=0.01)
+        finally:
+            for key in ("glb_path", "step_path", "lid_glb_path", "lid_step_path"):
+                if os.path.exists(result[key]):
+                    os.remove(result[key])
+
+    def test_008_real_height_lands_on_the_y_axis_matching_gltfs_own_up_convention(self):
+        """CTX-311.5: real, confirmed bug found by live user testing --
+        `trimesh.load(stl_path); mesh.export(glb_path)` performs no axis
+        remapping, so FreeCAD's own Z-up convention (`box.Height` is
+        always the Z extent throughout this module's build scripts)
+        stayed Z-up in the exported glTF, even though glTF's own spec
+        convention -- and `EnclosureViewer.tsx`'s own camera math -- is
+        Y-up. A real, axis-aware check: with a board deliberately much
+        wider/deeper than tall, the real Y extent (not just any axis)
+        must match the real height param."""
+        self._skip_unless_freecad_available()
+        import trimesh
+
+        result = generate_enclosure(
+            height=7, board_outline=_TEST_BOARD_OUTLINE, standoffs=[], fillet_radius_mm=0,
+        )
+        try:
+            mesh = trimesh.load(result["glb_path"])
+            y_extent_mm = mesh.extents[1] * 1000
+            self.assertAlmostEqual(y_extent_mm, 7, delta=0.01)
+            # The board outline (20x15mm) plus the default 2.5mm margin
+            # on every side makes both X and Z visibly larger than the
+            # real 7mm height -- a real, meaningful discriminator, not
+            # a coincidence of similarly-sized dimensions.
+            self.assertGreater(mesh.extents[0] * 1000, 7)
+            self.assertGreater(mesh.extents[2] * 1000, 7)
+        finally:
+            for key in ("glb_path", "step_path"):
+                if os.path.exists(result[key]):
+                    os.remove(result[key])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -7,6 +7,7 @@ script and exits.
 """
 import glob
 import json
+import math
 import os
 import platform
 import shutil
@@ -181,7 +182,9 @@ _STANDOFF_CYLINDER_TEMPLATE = (
 # unproven geometry work, and SPEC-109 §1's own "not fastener hardware"
 # non-goal) -- v1 is an honest flat cover, nothing more.
 _LID_BODY_LINES_TEMPLATE = """
-lid_result = Part.makeBox({outer_w}, {outer_d}, {lid_thickness})
+lid_result = Part.makeBox(
+    {outer_w}, {outer_d}, {lid_thickness}, FreeCAD.Vector(0, 0, {height}),
+)
 lid_vertical_edges = []
 for e in lid_result.Edges:
     verts = e.Vertexes
@@ -220,6 +223,45 @@ def _wait_with_cancellation(proc: subprocess.Popen, timeout_s: float, cancel_eve
                 proc.kill()
                 proc.communicate()
                 raise FreeCADBuildError(f"freecadcmd did not finish within {timeout_s}s")
+
+
+# A quarter-turn about X maps FreeCAD's own Z-up convention (`box.Height`
+# is always the Z extent, throughout this module's own build scripts) to
+# glTF's Y-up convention -- verified directly: `trimesh.transformations.
+# rotation_matrix(-pi/2, [1,0,0])` applied to a real 1x2x3 test box moved
+# its "3" extent from Z onto Y. Without this, `EnclosureViewer.tsx`'s own
+# camera math (which assumes Y-up, matching `kicad-cli`'s own board .glb
+# export -- a different code path that already produces Y-up data) opens
+# looking at the enclosure lying on its side, and its "Top"/"Bottom"
+# camera presets orbit around the wrong axis entirely. Real, confirmed
+# bug found by live user testing (CTX-311.5), not this module's own
+# tests -- those only ever checked bounding-box *extents*, which are
+# identical regardless of which axis they're labeled on.
+_Y_UP_ROTATION = trimesh.transformations.rotation_matrix(-math.pi / 2, [1, 0, 0])
+
+
+def _export_glb(stl_path: str, glb_path: str) -> None:
+    """Converts a real FreeCAD-exported `.stl` to a real, correctly
+    scaled and correctly oriented `.glb` -- the one real conversion path
+    every enclosure/lid mesh in this module goes through, so both share
+    the exact same fix rather than risking the two drifting apart."""
+    mesh = trimesh.load(stl_path)
+    mesh.apply_transform(_Y_UP_ROTATION)
+    # Real, confirmed bug (found while investigating SPEC-311's own
+    # board-inside-enclosure preview idea): the FreeCAD build scripts
+    # above write real millimeter values (`box.Height = {height}` etc.)
+    # straight into the STL with no unit conversion, and STL itself
+    # carries no unit metadata -- so trimesh reads those numbers as bare
+    # floats. glTF's own spec fixes its base unit at meters, so exporting
+    # without correction embeds a 20mm-tall box as if it were 20 *meters*
+    # tall: every `.glb` this function has ever produced before CTX-109.4
+    # was 1000x too large relative to that spec's real scale. `.step` is
+    # unaffected: it's exported directly by FreeCAD from the same
+    # mm-native document, and STEP embeds its own real unit, so any real
+    # STEP reader already interprets it correctly -- only this derived
+    # `.glb` path needed either fix.
+    mesh.apply_scale(0.001)
+    mesh.export(glb_path)
 
 
 def generate_enclosure(
@@ -347,6 +389,15 @@ def generate_enclosure(
                 outer_d=outer_d,
                 lid_thickness=lid_thickness_mm if lid_thickness_mm is not None else wall_thickness_mm,
                 fillet_radius=fillet_radius_mm,
+                # CTX-311.5: a real, confirmed bug -- Part.makeBox with no
+                # position vector builds at the origin, the exact same
+                # z-range as the shell's own solid floor (z=[0,
+                # wall_thickness]), so the lid rendered fused into/inside
+                # the floor rather than as a visible cap on the open top.
+                # Verified live: a real height=20 enclosure's own lid
+                # measured z=[0, 2] (its thickness), identical to the
+                # shell's own floor thickness, before this fix.
+                height=height,
                 lid_stl_path=lid_stl_path,
                 lid_step_path=lid_step_path,
             )
@@ -407,27 +458,7 @@ def generate_enclosure(
                 f"file: {stderr_data.strip()}"
             )
 
-        mesh = trimesh.load(stl_path)
-        # Real, confirmed bug (found while investigating SPEC-311's own
-        # board-inside-enclosure preview idea): the FreeCAD build scripts
-        # above write real millimeter values (`box.Height = {height}` etc.)
-        # straight into the STL with no unit conversion, and STL itself
-        # carries no unit metadata -- so trimesh reads those numbers as
-        # bare floats. glTF's own spec fixes its base unit at meters, so
-        # exporting without correction embeds a 20mm-tall box as if it
-        # were 20 *meters* tall: every `.glb` this function has ever
-        # produced has been 1000x too large relative to that spec's real
-        # scale. Invisible on its own -- `EnclosureViewer`'s camera was
-        # tuned empirically around this same wrong scale -- but a real,
-        # confirmed blocker to ever loading this alongside any other,
-        # correctly-scaled real-world model (e.g. `kicad-cli`'s own board
-        # export) in the same scene. `.step` is unaffected: it's exported
-        # directly by FreeCAD from the same mm-native document, and STEP
-        # embeds its own real unit, so any real STEP reader already
-        # interprets it correctly -- only this derived `.glb` path needed
-        # the fix.
-        mesh.apply_scale(0.001)
-        mesh.export(glb_path)
+        _export_glb(stl_path, glb_path)
 
         # SPEC-301 §3's flagged known debt: nothing previously deleted a
         # generated .glb (harmless in a self-cleaning OS temp dir, a real
@@ -447,11 +478,7 @@ def generate_enclosure(
         result = {"glb_path": glb_path, "step_path": step_path}
 
         if lid:
-            # Same real unit-scale fix as the base shell above -- this
-            # lid's own STL carries the identical no-unit-metadata gap.
-            lid_mesh = trimesh.load(lid_stl_path)
-            lid_mesh.apply_scale(0.001)
-            lid_mesh.export(lid_glb_path)
+            _export_glb(lid_stl_path, lid_glb_path)
 
             if (
                 _last_lid_glb_path and _last_lid_glb_path != lid_glb_path
