@@ -655,5 +655,126 @@ class TestGetMountingHoles(unittest.TestCase):
         self.assertEqual(holes, [])
 
 
+class _FakeModel:
+    def __init__(self, filename, visible=True):
+        self.filename = filename
+        self.visible = visible
+
+
+class _FakeFootprintInstanceWithModels:
+    """CTX-311.1: mirrors just the real attribute chain
+    list_footprint_models reads -- a FootprintInstance's own
+    .reference_field and .definition.models (kipy's real
+    Footprint.models, confirmed live against an installed kipy during
+    SPEC-311's own research)."""
+
+    def __init__(self, reference, models):
+        self.definition = MagicMock()
+        self.definition.models = models
+        self.reference_field = MagicMock()
+        self.reference_field.text.value = reference
+
+
+class TestListFootprintModels(unittest.TestCase):
+
+    def setUp(self):
+        kicad_bridge._client = None
+
+    def tearDown(self):
+        kicad_bridge._client = None
+
+    @patch('kicad_bridge._resolve_3d_model_path')
+    @patch('kicad_bridge.KiCad')
+    def test_001_reports_every_real_attached_model_with_its_resolved_path(
+        self, mock_kicad_cls, mock_resolve,
+    ):
+        """CTX-311.1: a real footprint's real model list is reported
+        verbatim -- filename, resolved_path (delegated to
+        _resolve_3d_model_path, tested separately below), and visible."""
+        mock_client = MagicMock()
+        mock_client.check_version.return_value = True
+        mock_board = MagicMock()
+        mock_client.get_board.return_value = mock_board
+        mock_kicad_cls.return_value = mock_client
+        mock_resolve.return_value = "/resolved/real/path.step"
+
+        mock_board.get_footprints.return_value = [
+            _FakeFootprintInstanceWithModels(
+                "J3", [_FakeModel("${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step")],
+            ),
+        ]
+
+        result = kicad_bridge.list_footprint_models()
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["reference"], "J3")
+        self.assertEqual(len(result[0]["models"]), 1)
+        self.assertEqual(
+            result[0]["models"][0]["filename"], "${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step",
+        )
+        self.assertEqual(result[0]["models"][0]["resolved_path"], "/resolved/real/path.step")
+        self.assertTrue(result[0]["models"][0]["visible"])
+
+    @patch('kicad_bridge.KiCad')
+    def test_002_a_footprint_with_zero_attached_models_reports_an_empty_list(self, mock_kicad_cls):
+        """CTX-311.1: the confirmed-live gap SPEC-311 §2 names -- some
+        real footprints have zero attached models at all. Reported as
+        an empty list, never fabricated."""
+        mock_client = MagicMock()
+        mock_client.check_version.return_value = True
+        mock_board = MagicMock()
+        mock_client.get_board.return_value = mock_board
+        mock_kicad_cls.return_value = mock_client
+
+        mock_board.get_footprints.return_value = [
+            _FakeFootprintInstanceWithModels("REF**", []),
+        ]
+
+        result = kicad_bridge.list_footprint_models()
+
+        self.assertEqual(result, [{"reference": "REF**", "models": []}])
+
+
+class TestResolve3DModelPath(unittest.TestCase):
+
+    def test_001_a_set_real_env_var_resolves_first(self):
+        with patch.dict('os.environ', {'KICAD10_3DMODEL_DIR': '/env/3dmodels'}):
+            with patch('kicad_bridge.os.path.exists', return_value=True):
+                resolved = kicad_bridge._resolve_3d_model_path(
+                    "${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step"
+                )
+        self.assertEqual(resolved, "/env/3dmodels/foo.3dshapes/bar.step")
+
+    def test_002_falls_back_to_a_real_per_os_install_location_when_env_var_unset(self):
+        base = '/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels'
+        with patch.dict('os.environ', {}, clear=True):
+            with patch('kicad_bridge.platform.system', return_value='Darwin'):
+                with patch('kicad_bridge.glob.glob', return_value=[base]):
+                    with patch('kicad_bridge.os.path.exists', return_value=True):
+                        resolved = kicad_bridge._resolve_3d_model_path(
+                            "${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step"
+                        )
+        # os.path.join uses the real, current OS's own separator
+        # (confirmed live, the hard way: this test failed on Windows CI
+        # for asserting a hardcoded forward-slash path against a real
+        # backslash-joined one) -- build the expected value the same
+        # way _resolve_3d_model_path itself does, not a literal string.
+        self.assertEqual(
+            resolved, os.path.join(base, 'foo.3dshapes/bar.step'),
+        )
+
+    def test_003_returns_none_when_nothing_real_is_found_rather_than_guessing(self):
+        with patch.dict('os.environ', {}, clear=True):
+            with patch('kicad_bridge.platform.system', return_value='Darwin'):
+                with patch('kicad_bridge.glob.glob', return_value=[]):
+                    resolved = kicad_bridge._resolve_3d_model_path(
+                        "${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step"
+                    )
+        self.assertIsNone(resolved)
+
+    def test_004_an_empty_filename_returns_none(self):
+        self.assertIsNone(kicad_bridge._resolve_3d_model_path(""))
+
+
 if __name__ == '__main__':
     unittest.main()

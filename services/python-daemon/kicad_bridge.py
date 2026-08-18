@@ -4,8 +4,10 @@ Connection lifecycle to a running KiCad instance via the IPC API
 for the rest of the daemon's life, to avoid paying a handshake on every
 call.
 """
+import glob
 import logging
 import os
+import platform
 import re
 
 from kipy import KiCad
@@ -30,6 +32,62 @@ _NM_PER_MM = 1_000_000
 # default H<digits> reference-designator convention -- not a one-off
 # heuristic invented here.
 _MOUNTING_HOLE_REF_PATTERN = re.compile(r"^H\d+$")
+
+# SPEC-311: a real kipy Footprint3DModel.filename uses KiCad's own
+# "${VAR}/relative/path" convention (e.g.
+# "${KICAD10_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/...step").
+# The var name is version-numbered and will drift with future KiCad
+# major versions the same way find_kicad_cli's/find_freecadcmd's own
+# version-numbered install paths already do -- matched by pattern here,
+# never a hardcoded name.
+_ENV_VAR_PATH_PATTERN = re.compile(r"^\$\{([A-Z0-9_]+)\}(/.*)$")
+
+# Real, confirmed-existing per-OS KiCad 3D model library install
+# locations, used only when the real env var above isn't set in this
+# daemon's own process environment -- confirmed true during SPEC-311's
+# own research: KiCad resolves the var internally, but this daemon's
+# subprocess never inherits it. The macOS path is the one actually
+# verified on a real dev machine; Linux/Windows are KiCad's own
+# documented install conventions, not yet confirmed against a real
+# install of either -- the same disclosed-but-unverified status
+# kicad_cli.py's own _CANDIDATE_GLOBS already carries for those OSes.
+_3DMODEL_DIR_CANDIDATES = {
+    "Darwin": ["/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels"],
+    "Linux": ["/usr/share/kicad/3dmodels", "/usr/local/share/kicad/3dmodels"],
+    "Windows": [r"C:\Program Files\KiCad\*\share\kicad\3dmodels"],
+}
+
+
+def _resolve_3d_model_path(filename: str) -> str:
+    """Resolves a real KiCad footprint 3D model's own `${VAR}/...`
+    filename to a real, existing path on disk, or `None` -- never a
+    guessed path. Tries the real environment variable first (however
+    it's actually named); if unset, falls back to real, confirmed
+    per-OS KiCad install locations, the same fallback pattern
+    `kicad_cli.py`'s own `_CANDIDATE_GLOBS` uses for the `kicad-cli`
+    binary itself. A filename that isn't the `${VAR}/...` convention at
+    all is tried as a literal path."""
+    if not filename:
+        return None
+
+    match = _ENV_VAR_PATH_PATTERN.match(filename)
+    if not match:
+        return filename if os.path.exists(filename) else None
+
+    env_var, rel_path = match.groups()
+    env_value = os.environ.get(env_var)
+    if env_value:
+        candidate = env_value + rel_path
+        if os.path.exists(candidate):
+            return candidate
+
+    for base_pattern in _3DMODEL_DIR_CANDIDATES.get(platform.system(), []):
+        for base in glob.glob(base_pattern):
+            candidate = os.path.join(base, rel_path.lstrip("/"))
+            if os.path.exists(candidate):
+                return candidate
+
+    return None
 
 
 class KiCadUnavailableError(Exception):
@@ -323,6 +381,48 @@ def get_mounting_holes() -> list:
             })
 
     return holes
+
+
+def list_footprint_models() -> list:
+    """SPEC-311: every real footprint's own attached 3D model(s) --
+    kipy's real `Footprint.models` (`Footprint3DModel`, a real property
+    since kipy 0.3.0, confirmed against this environment's installed
+    kipy). Read-only, no `freecad_bridge` dependency -- this module
+    stays independently importable per SPEC-107 §2 even when
+    `freecad_bridge`'s own dependencies (e.g. `trimesh`) aren't
+    installed; `daemon.py`'s own composition route is what turns a
+    resolved STEP path into a real height, mirroring how
+    `freecad_generate_enclosure` already composes this module's board
+    outline/mounting-hole data with `freecad_bridge.generate_enclosure`.
+
+    Real per-footprint list: [{"reference", "models": [{"filename",
+    "resolved_path" (real path on disk, or None), "visible"}, ...]},
+    ...]. Every attached model is reported, not only ones this function
+    judges usable -- the caller decides format/visibility handling."""
+    client = get_client()
+    try:
+        board = client.get_board()
+        footprints = board.get_footprints()
+    except (KiCadConnectionError, ApiError) as e:
+        reset_connection()
+        raise KiCadUnavailableError(
+            "Lost connection to KiCad mid-request. It may have been closed."
+        ) from e
+
+    result = []
+    for fp in footprints:
+        reference = fp.reference_field.text.value if fp.reference_field else "?"
+        models = [
+            {
+                "filename": m.filename,
+                "resolved_path": _resolve_3d_model_path(m.filename),
+                "visible": bool(m.visible),
+            }
+            for m in (fp.definition.models or [])
+        ]
+        result.append({"reference": reference, "models": models})
+
+    return result
 
 
 def inject_component(schema: dict, position_mm: tuple) -> dict:

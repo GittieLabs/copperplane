@@ -6,6 +6,7 @@ spawns a fresh, short-lived `freecadcmd` subprocess that runs a generated
 script and exits.
 """
 import glob
+import json
 import os
 import platform
 import shutil
@@ -371,3 +372,67 @@ def generate_enclosure(
             os.remove(script_path)
         if os.path.exists(stl_path):
             os.remove(stl_path)
+
+
+def get_step_bounding_box_mm(step_path: str, timeout_s: float = 15.0, cancel_event=None) -> dict:
+    """Real bounding box (mm) of a single real STEP/IGES 3D model file,
+    via a headless `freecadcmd` subprocess and `Part.Shape().read()` --
+    the same approach verified live during SPEC-311's own research
+    against a real KiCad footprint's bundled STEP model (a
+    `PinHeader_1x04`'s real model resolved to a real 2.54 x 10.16 x
+    11.54mm box, matching a 2.54mm pin header's real datasheet height).
+
+    Used for real, honest per-component height derivation (SPEC-311)
+    from `daemon.py`'s own composition route -- this function never
+    guesses a height, it only ever reports one it actually computed
+    from a real file on disk, or raises. Reuses `generate_enclosure`'s
+    own subprocess/cancellation/temp-file plumbing; differs only in
+    that it reads an existing shape rather than building a new one.
+
+    Does not apply the model's own `scale`/`rotation`/`offset`
+    transform (a real KiCad `Footprint3DModel` carries one) before
+    computing the box -- a rotated or scaled model's real installed
+    height may differ from this raw bounding box's Z extent. Named
+    explicitly here and in SPEC-311 §2 as real, remaining work, not
+    silently assumed correct."""
+    if not os.path.exists(step_path):
+        raise FreeCADBuildError(f"Model file does not exist: {step_path}")
+
+    freecadcmd = find_freecadcmd()
+    script_id = uuid.uuid4().hex
+    script_path = os.path.join(tempfile.gettempdir(), f"temp_bbox_{script_id}.py")
+    script = (
+        "import Part\n"
+        "import json\n"
+        "shape = Part.Shape()\n"
+        f"shape.read({step_path!r})\n"
+        "bbox = shape.BoundBox\n"
+        "print('BBOX_JSON:' + json.dumps("
+        "{'x_mm': bbox.XLength, 'y_mm': bbox.YLength, 'z_mm': bbox.ZLength}))\n"
+    )
+    with open(script_path, "w") as f:
+        f.write(script)
+
+    try:
+        proc = subprocess.Popen(
+            [freecadcmd, script_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout_data, stderr_data, returncode = _wait_with_cancellation(proc, timeout_s, cancel_event)
+
+        if returncode != 0:
+            raise FreeCADBuildError(
+                f"freecadcmd exited with code {returncode}: {stderr_data.strip()}"
+            )
+        for line in stdout_data.splitlines():
+            if line.startswith("BBOX_JSON:"):
+                return json.loads(line[len("BBOX_JSON:"):])
+        raise FreeCADBuildError(
+            f"freecadcmd exited cleanly but did not report a bounding box: {stderr_data.strip()}"
+        )
+    finally:
+        if os.path.exists(script_path):
+            os.remove(script_path)

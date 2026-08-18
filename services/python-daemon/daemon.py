@@ -173,6 +173,13 @@ def _apply_env_config() -> None:
             socket_path=env_config.get("kicad_socket_path"),
             timeout_ms=env_config.get("kicad_timeout_ms"),
         )
+    if kicad_cli is not None:
+        # SPEC-311: kicad_cli.configure existed since SPEC-309 but was
+        # never actually called here -- kicad.export_board_glb is this
+        # module's first real, persistent-file-producing route, so it's
+        # the first to need the same real output_dir (SPEC-301 §2)
+        # freecad_bridge.configure already receives above.
+        kicad_cli.configure(output_dir=env_config.get("output_dir"))
     if library_store is not None:
         library_store.configure(storage_root=env_config.get("storage_root"))
 
@@ -342,6 +349,16 @@ def freecad_generate_enclosure(
         cancel_event=cancel_event,
     )
     result = {**result, "unrecognized_holes": unrecognized_holes}
+    if outline is not None:
+        # SPEC-311 §2: the pre-existing unrecognized_holes warning above
+        # only ever fires for a board that has *some* NPTH pads, just
+        # not ones this app recognizes as mounting holes. A board with
+        # *zero* holes of any kind -- recognized or not -- previously
+        # triggered no warning at all, indistinguishable from "the
+        # detection missed them." Only meaningful in file/live mode
+        # (outline is not None); manual mode has no board data to have
+        # found holes on in the first place.
+        result["no_mounting_holes_found"] = not recognized_holes and not unrecognized_holes
 
     if project_name:
         if library_store is None:
@@ -820,6 +837,91 @@ def kicad_check_schematic(sch_path: str) -> dict:
     return result
 
 
+def kicad_get_component_heights() -> dict:
+    """The kicad.get_component_heights route (SPEC-311): real, honest
+    per-component height derivation, composing `kicad_bridge`'s real
+    per-footprint model list with `freecad_bridge`'s real STEP
+    bounding-box reader -- the same composition pattern
+    `freecad_generate_enclosure` already uses for board outline plus
+    mounting holes. Async: a real `freecadcmd` subprocess runs per
+    component with an attached STEP model, like every other real
+    kicad.*/freecad.* route in ASYNC_ROUTES below.
+
+    Never guesses: a footprint with no visible model, only a non-STEP
+    model, an unresolved path, or a real `freecadcmd` read failure is
+    reported unknown, not defaulted to a fallback number.
+
+    Scope, decided honestly rather than silently (SPEC-311 §2's own
+    named gap): only `.step`/`.stp` models are read. KiCad's own
+    `.wrl`/VRML fallback format is not -- its real coordinate-unit
+    convention is unverified as of this context, so it is not silently
+    assumed to already be millimeters. A model's own `scale`/
+    `rotation`/`offset` transform is also not yet applied to the
+    computed bounding box (also named there) -- a rotated component's
+    reported height may not be its true installed height.
+
+    Returns {"known": [{"reference", "height_mm"}, ...], "unknown":
+    ["<reference>", ...]} -- both real, reference-designator-keyed
+    lists, so a caller can report exactly which components it does and
+    doesn't have real data for, never a single opaque number."""
+    if kicad_bridge is None:
+        raise RuntimeError(
+            "Component height derivation requires kicad_bridge, which failed to import."
+        )
+    if freecad_bridge is None:
+        raise RuntimeError(
+            "Component height derivation requires freecad_bridge, which failed to import."
+        )
+
+    footprints = kicad_bridge.list_footprint_models()
+    known = []
+    unknown = []
+    for fp in footprints:
+        step_model = next(
+            (
+                m for m in fp["models"]
+                if m["visible"] and m["resolved_path"]
+                and os.path.splitext(m["resolved_path"])[1].lower() in (".step", ".stp")
+            ),
+            None,
+        )
+        if step_model is None:
+            unknown.append(fp["reference"])
+            continue
+        try:
+            bbox = freecad_bridge.get_step_bounding_box_mm(step_model["resolved_path"])
+        except Exception:
+            logger.exception(
+                "get_step_bounding_box_mm failed for %s (%s)",
+                fp["reference"], step_model["resolved_path"],
+            )
+            unknown.append(fp["reference"])
+            continue
+        known.append({"reference": fp["reference"], "height_mm": bbox["z_mm"]})
+
+    return {"known": known, "unknown": unknown}
+
+
+def kicad_export_board_glb(pcb_path: str) -> dict:
+    """The kicad.export_board_glb route (SPEC-311): a real, assembled-
+    board `.glb` via `kicad_cli.export_board_glb` -- the real visual
+    source for the board-inside-enclosure preview a later SPEC-311
+    context wires into `EnclosureViewer.tsx`. Async: a real `kicad-cli`
+    subprocess, like every other real kicad.*/freecad.* route in
+    ASYNC_ROUTES below.
+
+    `kicad-cli`'s own export silently omits any component with no 3D
+    model at all -- this route is the visual, not the source of truth
+    for "is every component's height accounted for"; that honesty
+    requirement is `kicad.get_component_heights`'s job, not this one."""
+    if kicad_cli is None:
+        raise RuntimeError(
+            "Board .glb export requires kicad_cli, which failed to import."
+        )
+    glb_path = kicad_cli.export_board_glb(pcb_path)
+    return {"glb_path": glb_path}
+
+
 def _build_routes() -> dict:
     """kicad.*/freecad.* are only registered if their bridge module
     actually imported (SPEC-107 §2) -- a broken kipy install shouldn't
@@ -877,6 +979,10 @@ def _build_routes() -> dict:
         if kicad_bridge is not None:
             routes["kicad.check_board"] = kicad_check_board
         routes["kicad.check_schematic"] = kicad_check_schematic
+    if kicad_bridge is not None and freecad_bridge is not None:
+        routes["kicad.get_component_heights"] = kicad_get_component_heights
+    if kicad_cli is not None:
+        routes["kicad.export_board_glb"] = kicad_export_board_glb
     return routes
 
 
@@ -890,6 +996,7 @@ ASYNC_ROUTES = {
     "freecad.generate_enclosure", "llm.chat", "kicad.generate_component", "kicad.inject_component",
     "component.search", "component.cache_datasheet", "kicad.generate_connection_guidance",
     "kicad.check_board", "kicad.check_schematic",
+    "kicad.get_component_heights", "kicad.export_board_glb",
 } & ROUTES.keys()
 
 # job_id -> {"cancel_event": threading.Event()} for every job currently
