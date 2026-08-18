@@ -19,17 +19,29 @@ export interface EnclosureParams {
   clearance_mm?: number
   fillet_radius_mm?: number
   standoff_height_mm?: number
+  /** CTX-311.2: board-driven mode only -- the daemon route raises a
+   * clean error if combined with `width`/`depth` (manual mode has no
+   * open top for a lid to close). */
+  lid?: boolean
+  /** Defaults to `wall_thickness_mm` on the daemon side when omitted. */
+  lid_thickness_mm?: number
   project_name?: string
 }
 
 /** Mirrors `freecad_generate_enclosure`'s real return shape.
  * `unrecognized_holes` is always present (possibly empty); `artifact_id`
  * only appears when `project_name` was supplied and a real Artifact was
- * saved. */
+ * saved. `lid_glb_path`/`lid_step_path` (CTX-311.2) only appear when
+ * `lid: true` was requested. `no_mounting_holes_found` (CTX-311.1) only
+ * appears in file/live mode -- manual mode has no board data to have
+ * found holes on. */
 export interface EnclosureResult {
   glb_path: string
   step_path: string
   unrecognized_holes: { x_mm: number; y_mm: number; diameter_mm: number; recognized: false }[]
+  no_mounting_holes_found?: boolean
+  lid_glb_path?: string
+  lid_step_path?: string
   artifact_id?: string
 }
 

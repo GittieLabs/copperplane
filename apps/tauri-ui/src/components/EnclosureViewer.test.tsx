@@ -6,7 +6,8 @@ vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (path: string) => `asset://localhost/${path}`,
 }))
 
-const { useGlbScene, disposeScene } = await import('./EnclosureViewer')
+const { useGlbScene, disposeScene, sphericalToCartesian, DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH } =
+  await import('./EnclosureViewer')
 
 /** A `GLTFLoaderLike` fake, so tests control load timing/outcome directly
  * instead of mocking the `three` module's GLTFLoader itself. */
@@ -55,6 +56,14 @@ describe('useGlbScene', () => {
     await waitFor(() => expect(result.current.status).toBe('error'))
     expect(result.current.error).toBe('corrupt glb')
     expect(result.current.scene).toBeNull()
+  })
+
+  it('CTX-311.3: a null glbPath (no lid generated) stays loading, never an error', () => {
+    const { result } = renderHook(() => useGlbScene(null))
+
+    expect(result.current.status).toBe('loading')
+    expect(result.current.scene).toBeNull()
+    expect(result.current.error).toBeNull()
   })
 
   it('TEST-004: disposes the previous scene when glbPath changes to a new one', async () => {
@@ -112,5 +121,40 @@ describe('disposeScene', () => {
     disposeScene(scene)
 
     expect(textureDisposeSpy).toHaveBeenCalledOnce()
+  })
+})
+
+describe('sphericalToCartesian (CTX-311.3 camera presets)', () => {
+  it('the default radius/polar/azimuth reproduce the viewer\'s own original [80, 80, 80] corner view', () => {
+    const [x, y, z] = sphericalToCartesian(DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH)
+
+    expect(x).toBeCloseTo(80, 6)
+    expect(y).toBeCloseTo(80, 6)
+    expect(z).toBeCloseTo(80, 6)
+  })
+
+  it('a near-zero polar angle is a real top-down view -- Y equals the radius, X/Z collapse to zero', () => {
+    const [x, y, z] = sphericalToCartesian(100, 0, 0)
+
+    expect(y).toBeCloseTo(100, 6)
+    expect(x).toBeCloseTo(0, 6)
+    expect(z).toBeCloseTo(0, 6)
+  })
+
+  it('a near-pi polar angle is a real bottom-up view -- Y equals the negative radius', () => {
+    const [, y] = sphericalToCartesian(100, Math.PI, 0)
+
+    expect(y).toBeCloseTo(-100, 6)
+  })
+
+  it('rotating azimuth by a quarter turn swaps X and Z at a fixed elevation', () => {
+    const polar = Math.PI / 2
+    const [x1, , z1] = sphericalToCartesian(100, polar, 0)
+    const [x2, , z2] = sphericalToCartesian(100, polar, Math.PI / 2)
+
+    expect(x1).toBeCloseTo(100, 6)
+    expect(z1).toBeCloseTo(0, 6)
+    expect(x2).toBeCloseTo(0, 6)
+    expect(z2).toBeCloseTo(100, 6)
   })
 })
