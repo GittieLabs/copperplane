@@ -452,6 +452,9 @@ describe('App: Enclosure tab persists across area switches', () => {
       ),
     )
     await waitFor(() => screen.getByRole('button', { name: 'Linked: /real/PCBs/test-project' }))
+    // CTX-312.2: real user feedback -- a successful link/save previously
+    // gave no visible confirmation at all, reading as "nothing happened."
+    screen.getByText('Linked to /real/PCBs/test-project')
   })
 
   it('CTX-312.1: cancelling the folder picker never calls saveProject', async () => {
@@ -479,6 +482,9 @@ describe('App: Enclosure tab persists across area switches', () => {
     await waitFor(() =>
       expect(saveProjectMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'test-project' })),
     )
+    // CTX-312.2: real user feedback -- a successful save previously gave
+    // no visible confirmation at all, reading as "nothing happened."
+    await waitFor(() => screen.getByText('Project saved.'))
   })
 })
 

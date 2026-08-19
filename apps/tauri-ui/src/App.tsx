@@ -69,6 +69,12 @@ function App() {
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
   const [savingProject, setSavingProject] = useState(false)
   const [projectActionError, setProjectActionError] = useState<string | null>(null)
+  // CTX-312.2: real user feedback -- clicking "Save Project" (or "Link to
+  // folder…") gave no visible confirmation at all, so a real successful
+  // save looked identical to nothing happening. A real, named message per
+  // action, matching CTX-311.13's own "Exported to <path>" precedent --
+  // persists until the next real action, not on an auto-dismiss timer.
+  const [projectActionMessage, setProjectActionMessage] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -104,6 +110,7 @@ function App() {
     let cancelled = false
     setCurrentProject(null)
     setProjectActionError(null)
+    setProjectActionMessage(null)
     loadProject(view.name)
       .then((project) => {
         if (!cancelled) setCurrentProject(project)
@@ -137,11 +144,13 @@ function App() {
   async function handleLinkDirectory() {
     if (!currentProject) return
     setProjectActionError(null)
+    setProjectActionMessage(null)
     try {
       const directory = await pickProjectDirectory()
       if (!directory) return
       const saved = await saveProject({ ...currentProject, directory })
       setCurrentProject(saved)
+      setProjectActionMessage(`Linked to ${directory}`)
     } catch (err) {
       setProjectActionError(err instanceof Error ? err.message : String(err))
     }
@@ -151,9 +160,11 @@ function App() {
     if (!currentProject) return
     setSavingProject(true)
     setProjectActionError(null)
+    setProjectActionMessage(null)
     try {
       const saved = await saveProject(currentProject)
       setCurrentProject(saved)
+      setProjectActionMessage('Project saved.')
     } catch (err) {
       setProjectActionError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -242,6 +253,9 @@ function App() {
             </div>
             {projectActionError && (
               <p className="w-full max-w-md text-xs text-red-400">{projectActionError}</p>
+            )}
+            {!projectActionError && projectActionMessage && (
+              <p className="w-full max-w-md truncate text-xs text-green-400">{projectActionMessage}</p>
             )}
 
             <div className="flex w-full max-w-md gap-1 border-b border-neutral-800 pb-2">
