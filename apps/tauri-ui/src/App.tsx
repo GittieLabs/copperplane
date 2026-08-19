@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { submitJob, dispatchTool } from './lib/ipc'
+import { listen } from '@tauri-apps/api/event'
+import { submitJob, dispatchTool, MENU_SAVE_PROJECT_EVENT, MENU_OPEN_PROJECT_EVENT } from './lib/ipc'
 import { parseCommand } from './lib/commands'
 import {
   appendConversationTurn,
@@ -7,6 +8,7 @@ import {
   listProjects,
   loadConversation,
   loadProject,
+  openProjectFromDirectory,
   pickProjectDirectory,
   saveProject,
   type ConversationTurn,
@@ -171,6 +173,59 @@ function App() {
       setSavingProject(false)
     }
   }
+
+  // CTX-312.3: the real backend for the native menu's "Open Project…" --
+  // restores a project from a real, already-linked folder (e.g. copied
+  // from another machine), the actual payoff of CTX-312.1's own
+  // portability work. Deliberately not gated on `currentProject` --
+  // unlike Link/Save (real actions on whichever project is already
+  // selected), opening one doesn't depend on one being selected yet,
+  // matching `handleCreateProject`'s own shape and its own `loadError`.
+  async function handleOpenProject() {
+    try {
+      const directory = await pickProjectDirectory()
+      if (!directory) return
+      const opened = await openProjectFromDirectory(directory)
+      setProjects((prev) => (prev.includes(opened.name) ? prev : [...prev, opened.name]))
+      setView({ kind: 'project', name: opened.name, area: 'overview' })
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  // CTX-312.3: the real native menu's own File > Save Project / Open
+  // Project… items (`core/tauri-rust/src/menu.rs`) only ever emit a
+  // real event -- these listeners are what actually runs the same real
+  // handlers the on-screen buttons already call. Re-subscribed whenever
+  // `currentProject` changes so `handleSaveProject`'s own closure never
+  // sees a stale value (`handleOpenProject` captures no project state at
+  // all, so it's always fresh regardless).
+  useEffect(() => {
+    let cancelled = false
+    let unlistenSave: (() => void) | undefined
+    let unlistenOpen: (() => void) | undefined
+
+    listen(MENU_SAVE_PROJECT_EVENT, () => void handleSaveProject()).then((fn) => {
+      if (cancelled) {
+        fn()
+        return
+      }
+      unlistenSave = fn
+    })
+    listen(MENU_OPEN_PROJECT_EVENT, () => void handleOpenProject()).then((fn) => {
+      if (cancelled) {
+        fn()
+        return
+      }
+      unlistenOpen = fn
+    })
+
+    return () => {
+      cancelled = true
+      unlistenSave?.()
+      unlistenOpen?.()
+    }
+  }, [currentProject])
 
   // CTX-312.1: a real export (CTX-311.13's own "keep this" action) is
   // persisted to the current project's real, permanent export_history

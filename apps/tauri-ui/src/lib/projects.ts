@@ -57,6 +57,17 @@ export async function loadProject(name: string): Promise<Project> {
   return unwrap(await dispatch('project.load', { name }))
 }
 
+/** CTX-312.3: the real reverse of `pickProjectDirectory` + `saveProject`
+ * with a `directory` -- restores a project from a real, already-linked
+ * folder (e.g. copied from another machine), the actual payoff of
+ * `CTX-312.1`'s own portability work. Thin `dispatch` wrapper, mirroring
+ * `loadProject`'s own shape; throws the real, clean
+ * `ProjectNotLinkedError` message when the folder has no real state
+ * file, never silently creating a new project from its basename. */
+export async function openProjectFromDirectory(directory: string): Promise<Project> {
+  return unwrap(await dispatch('project.open_from_directory', { directory }))
+}
+
 /** CTX-312.1: a real native "choose a folder" dialog -- `openDialog`
  * already supports `directory: true` (confirmed against the installed
  * `@tauri-apps/plugin-dialog` types before writing this; no new Rust
