@@ -268,7 +268,7 @@ export function Settings() {
   const configuredProviders = new Set(capabilities?.llm_providers ?? [])
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-4 text-neutral-100">
+    <div className="flex w-full max-w-4xl flex-col gap-4 text-neutral-100">
       <h2 className="text-lg font-medium">Settings</h2>
       {error && <p className="text-sm text-red-400">{error}</p>}
 

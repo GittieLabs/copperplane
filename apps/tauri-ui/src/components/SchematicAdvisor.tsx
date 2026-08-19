@@ -108,7 +108,7 @@ export function SchematicAdvisor({ projectName }: { projectName: string }) {
     listResult.candidates.some((c) => c.path === selected.path)
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-6">
+    <div className="flex w-full max-w-4xl flex-col gap-6">
       <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
         <p className="text-xs font-medium uppercase text-neutral-500">Schematic (ERC)</p>
 

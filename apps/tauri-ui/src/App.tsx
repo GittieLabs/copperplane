@@ -272,7 +272,7 @@ function App() {
         onSelectSettings={() => setView({ kind: 'settings' })}
       />
       <main className="flex flex-1 flex-col items-center gap-6 overflow-auto p-8">
-        {loadError && <p className="w-full max-w-md text-sm text-red-400">{loadError}</p>}
+        {loadError && <p className="w-full max-w-4xl text-sm text-red-400">{loadError}</p>}
 
         {view === null && (
           <p className="text-sm text-neutral-500">Create a project on the left to get started.</p>
@@ -288,7 +288,7 @@ function App() {
              * (dashboard vs. cross-project landing page) undecided, so
              * these real, already-scoped actions don't get entangled
              * with a surface whose future shape isn't settled yet. */}
-            <div className="flex w-full max-w-md items-center justify-between gap-2 text-xs">
+            <div className="flex w-full max-w-4xl items-center justify-between gap-2 text-xs">
               <button
                 type="button"
                 className="truncate text-left text-neutral-400 hover:text-neutral-200"
@@ -308,13 +308,13 @@ function App() {
               </button>
             </div>
             {projectActionError && (
-              <p className="w-full max-w-md text-xs text-red-400">{projectActionError}</p>
+              <p className="w-full max-w-4xl text-xs text-red-400">{projectActionError}</p>
             )}
             {!projectActionError && projectActionMessage && (
-              <p className="w-full max-w-md truncate text-xs text-green-400">{projectActionMessage}</p>
+              <p className="w-full max-w-4xl truncate text-xs text-green-400">{projectActionMessage}</p>
             )}
 
-            <div className="flex w-full max-w-md gap-1 border-b border-neutral-800 pb-2">
+            <div className="flex w-full max-w-4xl gap-1 border-b border-neutral-800 pb-2">
               {AREAS.map(({ key, label }) => (
                 <button
                   key={key}
@@ -560,7 +560,7 @@ function Overview({ projectName, project }: { projectName: string; project: Proj
   }
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-3">
+    <div className="flex w-full max-w-4xl flex-col gap-3">
       {loadError && <p className="text-sm text-red-400">{loadError}</p>}
       <OverviewDashboard project={project} chatHistory={chatHistory} />
       <div className="flex flex-col gap-2">
