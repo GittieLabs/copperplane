@@ -141,7 +141,10 @@ describe('getAppVersion', () => {
 describe('copyDiagnostics', () => {
   const BASE_CAPABILITIES: DaemonCapabilities = {
     kicad_available: false,
+    kicad_socket_path_checked: '/tmp/kicad/api.sock',
     freecad_available: false,
+    freecad_path_checked: null,
+    freecad_error: 'Could not find the freecadcmd executable. Install FreeCAD 0.20+, or ensure it\'s on PATH.',
     llm_providers: [] as string[],
     log_path: '/var/log/daemon.log',
     python_version: '3.12.0',

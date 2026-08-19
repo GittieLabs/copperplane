@@ -15,6 +15,7 @@ import platform
 import shutil
 import subprocess
 import tempfile
+import uuid
 
 
 class KicadCliUnavailableError(Exception):
@@ -50,15 +51,22 @@ _CANDIDATE_GLOBS = {
 
 
 _path_override = None
+_output_dir_override = None
 
 
-def configure(path_override=None):
-    """A configured override (future SPEC-106-style setting), when set,
-    takes priority over the PATH/glob search find_kicad_cli otherwise
-    falls back to -- same precedence freecad_bridge.configure already
-    established for freecadcmd."""
-    global _path_override
+def configure(path_override=None, output_dir=None):
+    """A configured path override, when set, takes priority over the
+    PATH/glob search `find_kicad_cli` otherwise falls back to -- same
+    precedence `freecad_bridge.configure` already established for
+    `freecadcmd`. `output_dir` (SPEC-301 §2, the same Rust-computed,
+    already-wired config value `freecad_bridge.configure` consumes) is
+    where `export_board_glb` (SPEC-311) writes its real `.glb` output --
+    this module's real executable-discovery config existed since
+    SPEC-309 but was never actually wired into `daemon.py`'s own
+    `_apply_env_config` until SPEC-311 needed a real output path too."""
+    global _path_override, _output_dir_override
     _path_override = path_override
+    _output_dir_override = output_dir
 
 
 def find_kicad_cli() -> str:
@@ -133,3 +141,60 @@ def run_drc(pcb_path: str) -> dict:
     violations: [{description, items, severity, type}]} -- flat, since a
     board is one PCB, not several sheets."""
     return _run_report(["pcb", "drc"], pcb_path)
+
+
+def export_board_glb(pcb_path: str, origin_x_mm: float = None, origin_y_mm: float = None) -> str:
+    """Real `kicad-cli pcb export glb` wrapper (SPEC-311): exports the
+    *entire assembled board* -- substrate plus every real component's
+    real 3D model, already correctly positioned and transformed by
+    KiCad itself -- as one real `.glb` file. Verified live during
+    SPEC-311's own research: a real 634KB file, 1159 real meshes, a real
+    49.50 x 11.54 x 106.50mm bounding box against a real, currently-open
+    board. `--subst-models` substitutes STEP/IGS models in place of VRML
+    ones where both exist, for a higher-fidelity export.
+
+    A component with genuinely no 3D model at all is still silently
+    omitted by `kicad-cli` itself -- this export is the real *visual*,
+    not the source of truth for "is every component's height
+    accounted for"; that honesty requirement is `kicad.
+    get_component_heights`'s job (SPEC-311 §2), not this one.
+
+    `origin_x_mm`/`origin_y_mm` (CTX-311.15, both required together or
+    both omitted): passed as `--user-origin {x}x{y}mm`, real-verified
+    live against `kicad-cli` before being wired in here -- its own
+    *default* output (no origin flag) already lands in the same real,
+    absolute board-layout coordinate frame `kicad_bridge.get_board_
+    outline`/`kicad_pcb_import.extract_board_outline` report `x_mm`/
+    `y_mm` in, and passing those same real values here re-origins the
+    export to the board's own bounding-box corner -- confirmed live: the
+    resulting glb's own bounds shift to start at exactly local `(0, *,
+    0)`. This is what lets `EnclosureViewer.tsx` composite the real
+    board glb inside the real enclosure glb with a simple, already-known
+    constant translation, not a guessed offset.
+
+    Unlike `_run_report`, this subcommand writes a real binary `.glb`
+    directly to `--output`, not a JSON report read back from a temp
+    dir -- the returned path is the same real, persistent path the
+    caller supplied, mirroring `freecad_bridge.generate_enclosure`'s own
+    `output_dir`-relative output convention."""
+    cli = find_kicad_cli()
+    if not os.path.exists(pcb_path):
+        raise KicadCliError(f"Input file does not exist: {pcb_path}")
+
+    output_dir = _output_dir_override or tempfile.gettempdir()
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, f"board_{uuid.uuid4().hex}.glb")
+
+    command = [cli, "pcb", "export", "glb", "--force", "--subst-models",
+               "--output", output_path]
+    if origin_x_mm is not None and origin_y_mm is not None:
+        command += ["--user-origin", f"{origin_x_mm}x{origin_y_mm}mm"]
+    command.append(pcb_path)
+
+    result = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    if not os.path.exists(output_path):
+        raise KicadCliError(
+            f"kicad-cli did not produce a .glb (exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    return output_path

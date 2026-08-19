@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const dispatchMock = vi.fn()
+const openDialogMock = vi.fn()
 
 vi.mock('./ipc', () => ({ dispatch: dispatchMock }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: openDialogMock }))
 
 const {
   listProjects,
   saveProject,
   loadProject,
+  pickProjectDirectory,
+  openProjectFromDirectory,
   listLibraryParts,
   loadConversation,
   appendConversationTurn,
@@ -15,6 +19,7 @@ const {
 
 beforeEach(() => {
   dispatchMock.mockReset()
+  openDialogMock.mockReset()
 })
 
 function ok(result: unknown) {
@@ -53,6 +58,40 @@ describe('saveProject / loadProject', () => {
 
     await loadProject('weather-pcb')
     expect(dispatchMock).toHaveBeenCalledWith('project.load', { name: 'weather-pcb' })
+  })
+
+  it('openProjectFromDirectory dispatches project.open_from_directory with the real directory', async () => {
+    dispatchMock.mockResolvedValueOnce(ok({ name: 'weather-pcb', directory: '/real/PCBs/weather-pcb' }))
+
+    const result = await openProjectFromDirectory('/real/PCBs/weather-pcb')
+
+    expect(result).toEqual({ name: 'weather-pcb', directory: '/real/PCBs/weather-pcb' })
+    expect(dispatchMock).toHaveBeenCalledWith('project.open_from_directory', {
+      directory: '/real/PCBs/weather-pcb',
+    })
+  })
+
+  it('openProjectFromDirectory throws the real ProjectNotLinkedError message, not a silent failure', async () => {
+    dispatchMock.mockResolvedValueOnce(fail("'/real/empty' isn't linked to a hardware-agent-studio project yet"))
+
+    await expect(openProjectFromDirectory('/real/empty')).rejects.toThrow(
+      "isn't linked to a hardware-agent-studio project yet",
+    )
+  })
+})
+
+describe('pickProjectDirectory', () => {
+  it('opens a real directory-mode dialog and returns the picked folder', async () => {
+    openDialogMock.mockResolvedValueOnce('/real/PCBs/weather-pcb')
+
+    await expect(pickProjectDirectory()).resolves.toBe('/real/PCBs/weather-pcb')
+    expect(openDialogMock).toHaveBeenCalledWith({ directory: true })
+  })
+
+  it('returns null, not an error, when the dialog is cancelled', async () => {
+    openDialogMock.mockResolvedValueOnce(null)
+
+    await expect(pickProjectDirectory()).resolves.toBeNull()
   })
 })
 

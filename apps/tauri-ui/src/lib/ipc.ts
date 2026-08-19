@@ -4,6 +4,12 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 /** Must match `daemon::DAEMON_RESPONSE_EVENT` in core/tauri-rust/src/daemon.rs. */
 export const DAEMON_RESPONSE_EVENT = 'daemon://response'
 
+/** CTX-312.3: real native menu clicks -- must match `menu::
+ * MENU_SAVE_PROJECT_EVENT`/`MENU_OPEN_PROJECT_EVENT` in
+ * `core/tauri-rust/src/menu.rs`. */
+export const MENU_SAVE_PROJECT_EVENT = 'menu://save-project'
+export const MENU_OPEN_PROJECT_EVENT = 'menu://open-project'
+
 export interface JsonRpcError {
   code: number
   message: string

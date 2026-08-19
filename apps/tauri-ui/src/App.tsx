@@ -1,22 +1,24 @@
 import { useEffect, useState } from 'react'
-import { open } from '@tauri-apps/plugin-shell'
-import { submitJob, dispatchTool, type JobHandle } from './lib/ipc'
+import { listen } from '@tauri-apps/api/event'
+import { submitJob, dispatchTool, MENU_SAVE_PROJECT_EVENT, MENU_OPEN_PROJECT_EVENT } from './lib/ipc'
 import { parseCommand } from './lib/commands'
-import { generateEnclosure, pickPcbFile, type EnclosureParams, type EnclosureResult } from './lib/enclosure'
 import {
   appendConversationTurn,
   listLibraryParts,
   listProjects,
   loadConversation,
+  loadProject,
+  openProjectFromDirectory,
+  pickProjectDirectory,
   saveProject,
   type ConversationTurn,
+  type Project,
 } from './lib/projects'
-import { getCapabilities } from './lib/settings'
 import { BoardAdvisor } from './components/BoardAdvisor'
 import { ComponentDiscovery } from './components/ComponentDiscovery'
-import { EnclosureViewer } from './components/EnclosureViewer'
-import { NotBuiltPlaceholder } from './components/NotBuiltPlaceholder'
+import { EnclosurePanel, type EnclosureExportSuccessEvent } from './components/EnclosurePanel'
 import { Rail } from './components/Rail'
+import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
 
 // SPEC-108's own Cross-Module Impacts section names a fixed placement
@@ -61,6 +63,21 @@ function App() {
   const [view, setView] = useState<View>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  // CTX-312.1: the current project's own real record -- SPEC-304 §2.1's
+  // long-described "link to a KiCad project directory on disk," plus
+  // the real Save Project manifest fields (`last_results`,
+  // `export_history`). Reloaded whenever the selected project changes;
+  // `null` while loading or when no project is selected at all.
+  const [currentProject, setCurrentProject] = useState<Project | null>(null)
+  const [savingProject, setSavingProject] = useState(false)
+  const [projectActionError, setProjectActionError] = useState<string | null>(null)
+  // CTX-312.2: real user feedback -- clicking "Save Project" (or "Link to
+  // folder…") gave no visible confirmation at all, so a real successful
+  // save looked identical to nothing happening. A real, named message per
+  // action, matching CTX-311.13's own "Exported to <path>" precedent --
+  // persists until the next real action, not on an auto-dismiss timer.
+  const [projectActionMessage, setProjectActionMessage] = useState<string | null>(null)
+
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -83,6 +100,31 @@ function App() {
     }
   }, [])
 
+  // CTX-312.1: loads the selected project's own real record (directory
+  // link, last results, export history) -- reset to null immediately on
+  // every project switch so a stale previous project's state can never
+  // flash or leak into the next one while the real load is in flight.
+  useEffect(() => {
+    if (view?.kind !== 'project') {
+      setCurrentProject(null)
+      return
+    }
+    let cancelled = false
+    setCurrentProject(null)
+    setProjectActionError(null)
+    setProjectActionMessage(null)
+    loadProject(view.name)
+      .then((project) => {
+        if (!cancelled) setCurrentProject(project)
+      })
+      .catch((err) => {
+        if (!cancelled) setProjectActionError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [view?.kind === 'project' ? view.name : null])
+
   async function handleCreateProject(name: string) {
     try {
       await saveProject({ name })
@@ -99,6 +141,122 @@ function App() {
 
   function handleSelectArea(area: Area) {
     setView((prev) => (prev?.kind === 'project' ? { ...prev, area } : prev))
+  }
+
+  async function handleLinkDirectory() {
+    if (!currentProject) return
+    setProjectActionError(null)
+    setProjectActionMessage(null)
+    try {
+      const directory = await pickProjectDirectory()
+      if (!directory) return
+      const saved = await saveProject({ ...currentProject, directory })
+      setCurrentProject(saved)
+      setProjectActionMessage(`Linked to ${directory}`)
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleSaveProject() {
+    if (!currentProject) return
+    setSavingProject(true)
+    setProjectActionError(null)
+    setProjectActionMessage(null)
+    try {
+      const saved = await saveProject(currentProject)
+      setCurrentProject(saved)
+      setProjectActionMessage('Project saved.')
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingProject(false)
+    }
+  }
+
+  // CTX-312.3: the real backend for the native menu's "Open Project…" --
+  // restores a project from a real, already-linked folder (e.g. copied
+  // from another machine), the actual payoff of CTX-312.1's own
+  // portability work. Deliberately not gated on `currentProject` --
+  // unlike Link/Save (real actions on whichever project is already
+  // selected), opening one doesn't depend on one being selected yet,
+  // matching `handleCreateProject`'s own shape and its own `loadError`.
+  async function handleOpenProject() {
+    try {
+      const directory = await pickProjectDirectory()
+      if (!directory) return
+      const opened = await openProjectFromDirectory(directory)
+      setProjects((prev) => (prev.includes(opened.name) ? prev : [...prev, opened.name]))
+      setView({ kind: 'project', name: opened.name, area: 'overview' })
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  // CTX-312.3: the real native menu's own File > Save Project / Open
+  // Project… items (`core/tauri-rust/src/menu.rs`) only ever emit a
+  // real event -- these listeners are what actually runs the same real
+  // handlers the on-screen buttons already call. Re-subscribed whenever
+  // `currentProject` changes so `handleSaveProject`'s own closure never
+  // sees a stale value (`handleOpenProject` captures no project state at
+  // all, so it's always fresh regardless).
+  useEffect(() => {
+    let cancelled = false
+    let unlistenSave: (() => void) | undefined
+    let unlistenOpen: (() => void) | undefined
+
+    listen(MENU_SAVE_PROJECT_EVENT, () => void handleSaveProject()).then((fn) => {
+      if (cancelled) {
+        fn()
+        return
+      }
+      unlistenSave = fn
+    })
+    listen(MENU_OPEN_PROJECT_EVENT, () => void handleOpenProject()).then((fn) => {
+      if (cancelled) {
+        fn()
+        return
+      }
+      unlistenOpen = fn
+    })
+
+    return () => {
+      cancelled = true
+      unlistenSave?.()
+      unlistenOpen?.()
+    }
+  }, [currentProject])
+
+  // CTX-312.1: a real export (CTX-311.13's own "keep this" action) is
+  // persisted to the current project's real, permanent export_history
+  // immediately, not deferred to a separate "Save Project" click a user
+  // could forget -- the real file was already kept on disk; the record
+  // of that shouldn't depend on a second, easy-to-skip step.
+  async function handleExportSuccess(event: EnclosureExportSuccessEvent) {
+    if (!currentProject) return
+    const updated: Project = {
+      ...currentProject,
+      last_results: {
+        ...currentProject.last_results,
+        enclosure: {
+          glb_path: event.glbPath,
+          step_path: event.stepPath,
+          wall_thickness_mm: event.wallThicknessMm,
+          clearance_mm: event.clearanceMm,
+          standoff_height_mm: event.standoffHeightMm,
+        },
+      },
+      export_history: [
+        ...(currentProject.export_history ?? []),
+        { area: 'enclosure', dest_path: event.destPath, exported_at: new Date().toISOString() },
+      ],
+    }
+    try {
+      const saved = await saveProject(updated)
+      setCurrentProject(saved)
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   return (
@@ -123,6 +281,38 @@ function App() {
 
         {view?.kind === 'project' && (
           <>
+            {/* CTX-312.1: project-scoped chrome, shown above every area
+             * tab rather than folded into Overview -- SPEC-312's own
+             * Non-Goals deliberately leave Overview's eventual purpose
+             * (dashboard vs. cross-project landing page) undecided, so
+             * these real, already-scoped actions don't get entangled
+             * with a surface whose future shape isn't settled yet. */}
+            <div className="flex w-full max-w-md items-center justify-between gap-2 text-xs">
+              <button
+                type="button"
+                className="truncate text-left text-neutral-400 hover:text-neutral-200"
+                onClick={() => void handleLinkDirectory()}
+                disabled={!currentProject}
+                title={currentProject?.directory ?? undefined}
+              >
+                {currentProject?.directory ? `Linked: ${currentProject.directory}` : 'Link to folder…'}
+              </button>
+              <button
+                type="button"
+                className="shrink-0 rounded border border-neutral-700 px-2 py-1 font-medium text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
+                onClick={() => void handleSaveProject()}
+                disabled={!currentProject || savingProject}
+              >
+                {savingProject ? 'Saving…' : 'Save Project'}
+              </button>
+            </div>
+            {projectActionError && (
+              <p className="w-full max-w-md text-xs text-red-400">{projectActionError}</p>
+            )}
+            {!projectActionError && projectActionMessage && (
+              <p className="w-full max-w-md truncate text-xs text-green-400">{projectActionMessage}</p>
+            )}
+
             <div className="flex w-full max-w-md gap-1 border-b border-neutral-800 pb-2">
               {AREAS.map(({ key, label }) => (
                 <button
@@ -141,16 +331,31 @@ function App() {
             </div>
 
             {view.area === 'overview' && <Overview projectName={view.name} />}
-            {view.area === 'enclosure' && <EnclosurePanel projectName={view.name} />}
             {view.area === 'components' && <ComponentDiscovery />}
-            {view.area === 'schematic' && (
-              <NotBuiltPlaceholder
-                specId="SPEC-308"
-                title="Schematic"
-                description="Schematic-level advice for the parts in this project."
-              />
-            )}
-            {view.area === 'pcb' && <BoardAdvisor />}
+            {/* BoardAdvisor/SchematicAdvisor/EnclosurePanel stay mounted
+             * across every area, not just while their own tab is selected --
+             * real user feedback found that switching tabs away and back
+             * threw away a check (or, for Enclosure, a just-generated real
+             * enclosure) that had just finished, with no reason to. Hidden
+             * via CSS instead of unmounted, so their own state (which
+             * board/schematic was picked, the result) survives the round
+             * trip; each resets that state itself when `projectName`
+             * changes, so switching *projects* still starts fresh. Per
+             * SPEC-300's original stage-machine design, ERC (Schematic) and
+             * DRC (PCB) are two separate stages -- real user feedback
+             * flagged the earlier both-checks-under-PCB layout as a
+             * mismatch, not SPEC-308's own still-unbuilt footprint/
+             * connection-guidance work, which will eventually join
+             * SchematicAdvisor here. */}
+            <div data-testid="schematic-area" className={view.area === 'schematic' ? undefined : 'hidden'}>
+              <SchematicAdvisor projectName={view.name} />
+            </div>
+            <div data-testid="pcb-area" className={view.area === 'pcb' ? undefined : 'hidden'}>
+              <BoardAdvisor projectName={view.name} />
+            </div>
+            <div data-testid="enclosure-area" className={view.area === 'enclosure' ? undefined : 'hidden'}>
+              <EnclosurePanel projectName={view.name} onExportSuccess={handleExportSuccess} />
+            </div>
           </>
         )}
       </main>
@@ -463,229 +668,6 @@ function ChatMessageView({
   if (message.status === 'pending') return <p className="text-sm text-neutral-400">Thinking…</p>
   if (message.status === 'error') return <p className="text-sm text-red-400">{message.error}</p>
   return <p className="text-sm text-neutral-200">{message.text}</p>
-}
-
-/** Proves out CTX-105.2's job client against the one real async route
- * CTX-105.1 wired up (freecad.generate_enclosure). Re-housed into the
- * Enclosure area tab unchanged (SPEC-305 §2) -- enclosure generation
- * isn't part of Overview's "type to generate a footprint" promise.
- *
- * CTX-109.2 adds the real board-driven mode CTX-109.1 built on the
- * daemon side: "From board" only appears once `daemon.get_capabilities`
- * reports `kicad_available`, and manual dimensions stay the always-
- * available fallback, unchanged from the original three fields.
- * `projectName` (the real, already-selected project -- SPEC-305's
- * shell) is threaded through as `project_name`, so a generated
- * enclosure is actually saved as a real Artifact instead of the daemon
- * route silently skipping persistence the way it does with no
- * project_name at all.
- *
- * CTX-310.2 adds a third mode, "Import board file…", reusing the same
- * geometry fields "From board" already collects (the outline/hole
- * *source* differs -- a picked `.kicad_pcb` file vs. a live connection
- * -- but `freecad_generate_enclosure`'s geometry params are identical
- * either way). Unlike "From board", this is always offered, live KiCad
- * connection or not -- SPEC-310's whole point is not needing one. */
-function EnclosurePanel({ projectName }: { projectName: string }) {
-  const [kicadAvailable, setKicadAvailable] = useState(false)
-  const [mode, setMode] = useState<'manual' | 'board' | 'file'>('manual')
-  const [dims, setDims] = useState({ width: 50, depth: 30, height: 20 })
-  const [boardParams, setBoardParams] = useState({
-    height: 20,
-    wall_thickness_mm: 2.0,
-    clearance_mm: 0.5,
-    fillet_radius_mm: 1.0,
-    standoff_height_mm: 5.0,
-  })
-  const [pcbPath, setPcbPath] = useState<string | null>(null)
-  const [job, setJob] = useState<JobHandle<EnclosureResult> | null>(null)
-  const [status, setStatus] = useState<string | null>(null)
-  const [result, setResult] = useState<EnclosureResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  const running = status === 'running'
-
-  useEffect(() => {
-    let cancelled = false
-    getCapabilities()
-      .then((caps) => {
-        if (!cancelled) setKicadAvailable(caps.kicad_available)
-      })
-      .catch(() => {
-        // A capabilities failure just leaves "From board" unoffered --
-        // manual dimensions remain fully usable either way.
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  async function handlePickPcbFile() {
-    // pickPcbFile returning null (the user closed the dialog) is a
-    // normal, silent no-op -- not an error state, matching
-    // BoardAdvisor's own pickSchematicFile handling.
-    const path = await pickPcbFile()
-    if (path) setPcbPath(path)
-  }
-
-  async function handleGenerate() {
-    setError(null)
-    setResult(null)
-    setStatus('running')
-
-    const params: EnclosureParams =
-      mode === 'manual'
-        ? { height: dims.height, width: dims.width, depth: dims.depth, project_name: projectName }
-        : mode === 'file'
-          ? { ...boardParams, pcb_path: pcbPath ?? undefined, project_name: projectName }
-          : { ...boardParams, project_name: projectName }
-
-    try {
-      const handle = await generateEnclosure(params)
-      setJob(handle)
-      handle.onUpdate((update) => setStatus(update.status))
-
-      setResult(await handle.result)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setJob(null)
-    }
-  }
-
-  async function handleCancel() {
-    await job?.cancel()
-  }
-
-  return (
-    <div className="flex w-full max-w-md flex-col gap-2">
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className={`rounded px-3 py-1 text-sm ${
-            mode === 'manual' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
-          }`}
-          onClick={() => setMode('manual')}
-          disabled={running}
-        >
-          Manual dimensions
-        </button>
-        {kicadAvailable && (
-          <button
-            type="button"
-            className={`rounded px-3 py-1 text-sm ${
-              mode === 'board' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
-            }`}
-            onClick={() => setMode('board')}
-            disabled={running}
-          >
-            From board
-          </button>
-        )}
-        <button
-          type="button"
-          className={`rounded px-3 py-1 text-sm ${
-            mode === 'file' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
-          }`}
-          onClick={() => setMode('file')}
-          disabled={running}
-        >
-          Import board file…
-        </button>
-      </div>
-
-      {mode === 'manual' ? (
-        <div className="flex gap-2">
-          {(['width', 'depth', 'height'] as const).map((dim) => (
-            <input
-              key={dim}
-              type="number"
-              className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
-              placeholder={dim}
-              value={dims[dim]}
-              onChange={(e) => setDims((prev) => ({ ...prev, [dim]: Number(e.target.value) }))}
-              disabled={running}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {mode === 'file' && (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="rounded border border-neutral-700 px-3 py-2 text-sm disabled:opacity-50"
-                onClick={handlePickPcbFile}
-                disabled={running}
-              >
-                Choose .kicad_pcb file…
-              </button>
-              <p className="truncate text-xs text-neutral-500">{pcbPath ?? 'No file selected.'}</p>
-            </div>
-          )}
-          {(
-            [
-              ['height', 'height (mm)'],
-              ['wall_thickness_mm', 'wall thickness (mm)'],
-              ['clearance_mm', 'clearance (mm)'],
-              ['fillet_radius_mm', 'fillet radius (mm)'],
-              ['standoff_height_mm', 'standoff height (mm)'],
-            ] as const
-          ).map(([field, placeholder]) => (
-            <input
-              key={field}
-              type="number"
-              className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
-              placeholder={placeholder}
-              value={boardParams[field]}
-              onChange={(e) => setBoardParams((prev) => ({ ...prev, [field]: Number(e.target.value) }))}
-              disabled={running}
-            />
-          ))}
-        </div>
-      )}
-
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className="flex-1 rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
-          onClick={handleGenerate}
-          disabled={running || (mode === 'file' && !pcbPath)}
-        >
-          {running ? 'Generating…' : 'Generate Enclosure'}
-        </button>
-        {running && (
-          <button
-            type="button"
-            className="rounded border border-neutral-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
-            onClick={handleCancel}
-          >
-            Cancel
-          </button>
-        )}
-      </div>
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      {result && result.unrecognized_holes.length > 0 && (
-        <p className="text-sm text-amber-400">
-          {result.unrecognized_holes.length} hole(s) on this board weren't recognized as mounting
-          holes and were skipped -- no standoff was drilled for them.
-        </p>
-      )}
-      {result && (
-        <>
-          <p className="text-sm text-neutral-400">Generated: {result.glb_path}</p>
-          <EnclosureViewer glbPath={result.glb_path} />
-          <button
-            type="button"
-            className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
-            onClick={() => open(result.step_path)}
-          >
-            Open .step
-          </button>
-        </>
-      )}
-    </div>
-  )
 }
 
 export default App

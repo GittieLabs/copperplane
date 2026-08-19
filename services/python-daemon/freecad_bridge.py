@@ -6,6 +6,8 @@ spawns a fresh, short-lived `freecadcmd` subprocess that runs a generated
 script and exits.
 """
 import glob
+import json
+import math
 import os
 import platform
 import shutil
@@ -14,6 +16,7 @@ import tempfile
 import time
 import uuid
 
+import numpy as np
 import trimesh
 
 
@@ -60,6 +63,8 @@ _path_override = None
 _output_dir_override = None
 _last_glb_path = None
 _last_step_path = None
+_last_lid_glb_path = None
+_last_lid_step_path = None
 
 
 def configure(path_override=None, output_dir=None):
@@ -160,12 +165,43 @@ obj.Shape = result
 doc.recompute()
 obj.Shape.exportStl({stl_path!r})
 obj.Shape.exportStep({step_path!r})
-"""
+{lid_lines}"""
 
 _STANDOFF_CYLINDER_TEMPLATE = (
     "cyl = Part.makeCylinder({radius}, {height}, FreeCAD.Vector({x}, {y}, 0))\n"
     "result = result.fuse(cyl)\n"
 )
+
+# SPEC-311 §2: a real, deliberately simple second body -- a flat,
+# filleted plate matching the shell's own outer footprint, closing the
+# open top the board-driven shell always has. Built in the *same*
+# freecadcmd document/subprocess call as the shell above (a second
+# Part::Feature, not a second script) -- SPEC-311 §3 already flags
+# freecadcmd's own cold-boot cost compounding per refine-and-regenerate
+# click; a second subprocess purely to add a lid would double that cost
+# for no real benefit. Deliberately not a snap-fit/lip design (real,
+# unproven geometry work, and SPEC-109 §1's own "not fastener hardware"
+# non-goal) -- v1 is an honest flat cover, nothing more.
+_LID_BODY_LINES_TEMPLATE = """
+lid_result = Part.makeBox(
+    {outer_w}, {outer_d}, {lid_thickness}, FreeCAD.Vector(0, 0, {height}),
+)
+lid_vertical_edges = []
+for e in lid_result.Edges:
+    verts = e.Vertexes
+    if len(verts) == 2:
+        v0, v1 = verts[0].Point, verts[1].Point
+        dx, dy, dz = abs(v0.x - v1.x), abs(v0.y - v1.y), abs(v0.z - v1.z)
+        if dx < 1e-6 and dy < 1e-6 and dz > 1e-6:
+            lid_vertical_edges.append(e)
+if lid_vertical_edges and {fillet_radius} > 0:
+    lid_result = lid_result.makeFillet({fillet_radius}, lid_vertical_edges)
+lid_obj = doc.addObject("Part::Feature", "Lid")
+lid_obj.Shape = lid_result
+doc.recompute()
+lid_obj.Shape.exportStl({lid_stl_path!r})
+lid_obj.Shape.exportStep({lid_step_path!r})
+"""
 
 
 def _wait_with_cancellation(proc: subprocess.Popen, timeout_s: float, cancel_event) -> tuple:
@@ -190,6 +226,151 @@ def _wait_with_cancellation(proc: subprocess.Popen, timeout_s: float, cancel_eve
                 raise FreeCADBuildError(f"freecadcmd did not finish within {timeout_s}s")
 
 
+# A quarter-turn about X maps FreeCAD's own Z-up convention (`box.Height`
+# is always the Z extent, throughout this module's own build scripts) to
+# glTF's Y-up convention -- verified directly: `trimesh.transformations.
+# rotation_matrix(-pi/2, [1,0,0])` applied to a real 1x2x3 test box moved
+# its "3" extent from Z onto Y. Without this, `EnclosureViewer.tsx`'s own
+# camera math (which assumes Y-up, matching `kicad-cli`'s own board .glb
+# export -- a different code path that already produces Y-up data) opens
+# looking at the enclosure lying on its side, and its "Top"/"Bottom"
+# camera presets orbit around the wrong axis entirely. Real, confirmed
+# bug found by live user testing (CTX-311.5), not this module's own
+# tests -- those only ever checked bounding-box *extents*, which are
+# identical regardless of which axis they're labeled on.
+_Y_UP_ROTATION = trimesh.transformations.rotation_matrix(-math.pi / 2, [1, 0, 0])
+
+
+_BODY_COLOR_RGB = (148, 163, 184)  # slate-400 -- the enclosure shell's outer surfaces
+_BODY_INNER_COLOR_RGB = (241, 245, 249)  # slate-50 -- the cavity's own inner walls/floor
+_LID_COLOR_RGB = (249, 115, 22)  # orange-500 -- a real, high-contrast accent for the lid
+
+
+def _split_inner_outer_faces(mesh: trimesh.Trimesh) -> tuple:
+    """Classifies every triangle of a real hollow-shell mesh as facing the
+    cavity (inner) or facing away from the enclosure entirely (outer), by
+    comparing each face's own normal to the direction from the mesh's real
+    bounding-box center out to that face's own centroid.
+
+    Works because the shell is genuinely concave (SPEC-109's own hollow
+    box, cut from an outer box minus an inset inner one): a real closed,
+    manifold mesh's face normals always point away from the solid material
+    they bound. On an *outer* wall, floor bottom, etc., that means pointing
+    away from the box's own center (a positive dot product with the
+    center-to-face vector); on a *cavity* wall or the cavity's own floor,
+    the solid material is on the far side from the cavity, so the normal
+    points back in, toward the center (a negative dot product) -- verified
+    by hand for a real box: outer left wall (x=0, normal -x) and inner
+    cavity's own left wall (x=wall_thickness, normal +x) land on opposite
+    sides of zero; the cavity floor's own top face (normal +z, sitting
+    below the box's mid-height) does too.
+
+    A real, known limitation: this is a global, whole-box heuristic, not a
+    watertight flood-fill from the cavity -- a standoff post's own side
+    facing *away* from the box's overall center can misclassify as
+    "outer" even though the whole post sits inside the cavity. Left as-is
+    rather than building real connected-component analysis for a cosmetic
+    detail on a small interior feature; not the surfaces this fix targets
+    (CTX-311.12's own Plan Drift)."""
+    center = mesh.bounding_box.centroid
+    to_face = mesh.triangles_center - center
+    facing = np.einsum("ij,ij->i", mesh.face_normals, to_face)
+    outer_faces = np.where(facing >= 0)[0]
+    inner_faces = np.where(facing < 0)[0]
+    return outer_faces, inner_faces
+
+
+def _export_glb(
+    stl_path: str, glb_path: str, base_color_rgb: tuple, inner_color_rgb: tuple = None,
+) -> None:
+    """Converts a real FreeCAD-exported `.stl` to a real, correctly
+    scaled, correctly oriented, and correctly colored `.glb` -- the one
+    real conversion path every enclosure/lid mesh in this module goes
+    through, so all three fixes share one place rather than risking
+    drift between the base shell's and the lid's own copies.
+
+    Real, confirmed bug (found by live user testing, CTX-311.7): `Part.
+    Shape.exportStl` writes plain, colorless geometry -- there is no
+    STL material concept at all -- so the plain `trimesh.load(...);
+    mesh.export(glb_path)` this function used before never attached a
+    real material either. A mesh with literally no material in its own
+    glTF file isn't blank or default-gray in any real glTF viewer: the
+    glTF 2.0 spec's own default material (used whenever a primitive
+    omits one) is `metallicFactor: 1, roughnessFactor: 1` -- full
+    metal. A fully metallic surface's visible color comes almost
+    entirely from specular reflection of its surrounding environment,
+    not simple light-times-albedo diffuse shading, and this app's own
+    `<Canvas>` has no environment/IBL map for a metal to reflect --
+    so every enclosure/lid this function has ever produced rendered as
+    an almost-black silhouette, regardless of how the scene's own
+    lights were tuned (`CTX-311.6`'s own lighting rebalance, real and
+    correct on its own terms, could never have fixed this). Verified
+    directly: the real `.glb` this function produced before this fix
+    had no `"materials"` key in its own glTF JSON at all.
+
+    Fixed by assigning a real, explicit, matte PBR material
+    (`metallicFactor=0`, a moderate `roughnessFactor` -- the look of
+    real 3D-printed plastic, not bare metal) before export, real and
+    portable to any glTF viewer, not just this app's own. `base_color_
+    rgb` also gives the base shell and the lid their own distinct real
+    colors directly in the exported file, replacing the frontend-side
+    `EnclosureViewer.tsx` material override `CTX-311.6` added -- a
+    single, real source of truth instead of two.
+
+    `inner_color_rgb` (CTX-311.12, real user feedback across multiple
+    click-through rounds: "can't see the inside corners," "hard to see
+    where the edges of the floor meet the floor") gives the cavity's own
+    inner walls/floor a real, distinct, brighter material from the
+    exterior's, via `_split_inner_outer_faces` -- a genuine, separate
+    fix from the camera/lighting/clipping work `CTX-311.4` through
+    `CTX-311.11` did; those made the correct geometry actually visible,
+    this makes the cavity legible once it is. `None` (the default, and
+    always used for the lid, which is a flat slab with no true cavity of
+    its own to split) keeps the single-material path unchanged."""
+    mesh = trimesh.load(stl_path)
+    mesh.apply_transform(_Y_UP_ROTATION)
+    # Real, confirmed bug (found while investigating SPEC-311's own
+    # board-inside-enclosure preview idea): the FreeCAD build scripts
+    # above write real millimeter values (`box.Height = {height}` etc.)
+    # straight into the STL with no unit conversion, and STL itself
+    # carries no unit metadata -- so trimesh reads those numbers as bare
+    # floats. glTF's own spec fixes its base unit at meters, so exporting
+    # without correction embeds a 20mm-tall box as if it were 20 *meters*
+    # tall: every `.glb` this function has ever produced before CTX-109.4
+    # was 1000x too large relative to that spec's real scale. `.step` is
+    # unaffected: it's exported directly by FreeCAD from the same
+    # mm-native document, and STEP embeds its own real unit, so any real
+    # STEP reader already interprets it correctly -- only this derived
+    # `.glb` path needed either fix.
+    mesh.apply_scale(0.001)
+
+    def _matte_material(rgb: tuple) -> trimesh.visual.material.PBRMaterial:
+        r, g, b = rgb
+        return trimesh.visual.material.PBRMaterial(
+            baseColorFactor=[r, g, b, 255], metallicFactor=0.0, roughnessFactor=0.6,
+        )
+
+    outer_faces, inner_faces = (
+        _split_inner_outer_faces(mesh) if inner_color_rgb is not None else (None, None)
+    )
+    # Real, confirmed edge case: `generate_enclosure`'s manual-dims mode
+    # (no `board_outline`) builds a plain solid `Part::Box` -- convex,
+    # with no real cavity at all -- so every one of its faces classifies
+    # as "outer" and `inner_faces` comes back empty. `mesh.submesh` can't
+    # produce two real groups from that, so fall back to the single-
+    # material path rather than split nothing from nothing; there is no
+    # real interior surface to give a distinct color to on a solid box.
+    if inner_color_rgb is None or len(inner_faces) == 0 or len(outer_faces) == 0:
+        mesh.visual = trimesh.visual.TextureVisuals(material=_matte_material(base_color_rgb))
+        mesh.export(glb_path)
+        return
+
+    outer_mesh, inner_mesh = mesh.submesh([outer_faces, inner_faces], append=False)
+    outer_mesh.visual = trimesh.visual.TextureVisuals(material=_matte_material(base_color_rgb))
+    inner_mesh.visual = trimesh.visual.TextureVisuals(material=_matte_material(inner_color_rgb))
+    trimesh.Scene([outer_mesh, inner_mesh]).export(glb_path)
+
+
 def generate_enclosure(
     height: float,
     width: float = None,
@@ -199,6 +380,8 @@ def generate_enclosure(
     clearance_mm: float = 0.5,
     standoffs: list = None,
     fillet_radius_mm: float = 1.0,
+    lid: bool = False,
+    lid_thickness_mm: float = None,
     timeout_s: float = 30.0,
     cancel_event=None,
 ) -> dict:
@@ -223,6 +406,21 @@ def generate_enclosure(
       always required in both modes -- a board outline is 2D and has no Z
       dimension to derive it from.
 
+    `lid` (SPEC-311, board-driven mode only -- a `ValueError` in manual
+    mode, which has no open top to close) adds a second real body: a
+    flat, filleted plate matching the shell's own outer footprint,
+    `lid_thickness_mm` thick (defaults to `wall_thickness_mm` when not
+    given). A deliberately simple flat cover, not a snap-fit/lipped
+    design -- real, unproven geometry work and outside SPEC-109 §1's own
+    "not fastener hardware" non-goal. Built in the same `freecadcmd`
+    subprocess call as the shell (not a second script, avoiding a second
+    real cold-boot cost per SPEC-311 §3's own named risk), and returned
+    as its own separate `lid_glb_path`/`lid_step_path` pair -- the same
+    "two separately-loaded scenes" approach SPEC-311 §2 named as the
+    real option that needs no `EnclosureViewer.tsx` scene-graph rework
+    to show/hide independently, since it currently loads exactly one
+    `.glb` per instance.
+
     FreeCAD's own scripting API has no direct glTF/`.glb` exporter (see
     CTX-104.1 Plan Drift), so the subprocess exports `.stl` — which is
     well-supported — and this function converts that to `.glb` itself via
@@ -242,12 +440,17 @@ def generate_enclosure(
     only the persistent outputs a frontend or another CAD tool might load
     need to live somewhere `assetProtocol.scope` can be narrowed to.
     """
-    global _last_glb_path, _last_step_path
+    global _last_glb_path, _last_step_path, _last_lid_glb_path, _last_lid_step_path
 
     if board_outline is None and (width is None or depth is None):
         raise ValueError(
             "generate_enclosure requires either board_outline, or width and depth "
             "for the no-board-data fallback."
+        )
+    if lid and board_outline is None:
+        raise ValueError(
+            "lid requires board-driven mode -- manual dims mode's box has no open top "
+            "for a lid to close."
         )
 
     freecadcmd = find_freecadcmd()
@@ -256,11 +459,14 @@ def generate_enclosure(
     tmp_dir = tempfile.gettempdir()
     script_path = os.path.join(tmp_dir, f"temp_build_{build_id}.py")
     stl_path = os.path.join(tmp_dir, f"enclosure_{build_id}.stl")
+    lid_stl_path = os.path.join(tmp_dir, f"lid_{build_id}.stl")
 
     output_dir = _output_dir_override or tmp_dir
     os.makedirs(output_dir, exist_ok=True)
     glb_path = os.path.join(output_dir, f"enclosure_{build_id}.glb")
     step_path = os.path.join(output_dir, f"enclosure_{build_id}.step")
+    lid_glb_path = os.path.join(output_dir, f"lid_{build_id}.glb")
+    lid_step_path = os.path.join(output_dir, f"lid_{build_id}.step")
 
     if board_outline is None:
         script = _BUILD_SCRIPT_TEMPLATE.format(
@@ -284,6 +490,26 @@ def generate_enclosure(
             )
             for s in (standoffs or [])
         )
+        lid_lines = (
+            _LID_BODY_LINES_TEMPLATE.format(
+                outer_w=outer_w,
+                outer_d=outer_d,
+                lid_thickness=lid_thickness_mm if lid_thickness_mm is not None else wall_thickness_mm,
+                fillet_radius=fillet_radius_mm,
+                # CTX-311.5: a real, confirmed bug -- Part.makeBox with no
+                # position vector builds at the origin, the exact same
+                # z-range as the shell's own solid floor (z=[0,
+                # wall_thickness]), so the lid rendered fused into/inside
+                # the floor rather than as a visible cap on the open top.
+                # Verified live: a real height=20 enclosure's own lid
+                # measured z=[0, 2] (its thickness), identical to the
+                # shell's own floor thickness, before this fix.
+                height=height,
+                lid_stl_path=lid_stl_path,
+                lid_step_path=lid_step_path,
+            )
+            if lid else ""
+        )
         script = _HOLLOW_SHELL_SCRIPT_TEMPLATE.format(
             outer_w=outer_w,
             outer_d=outer_d,
@@ -295,6 +521,7 @@ def generate_enclosure(
             fillet_radius=fillet_radius_mm,
             stl_path=stl_path,
             step_path=step_path,
+            lid_lines=lid_lines,
         )
 
     with open(script_path, "w") as f:
@@ -327,9 +554,18 @@ def generate_enclosure(
                 f"freecadcmd exited cleanly but did not produce the expected STEP "
                 f"file: {stderr_data.strip()}"
             )
+        if lid and not os.path.exists(lid_stl_path):
+            raise FreeCADBuildError(
+                f"freecadcmd exited cleanly but did not produce the expected lid STL "
+                f"file: {stderr_data.strip()}"
+            )
+        if lid and not os.path.exists(lid_step_path):
+            raise FreeCADBuildError(
+                f"freecadcmd exited cleanly but did not produce the expected lid STEP "
+                f"file: {stderr_data.strip()}"
+            )
 
-        mesh = trimesh.load(stl_path)
-        mesh.export(glb_path)
+        _export_glb(stl_path, glb_path, _BODY_COLOR_RGB, inner_color_rgb=_BODY_INNER_COLOR_RGB)
 
         # SPEC-301 §3's flagged known debt: nothing previously deleted a
         # generated .glb (harmless in a self-cleaning OS temp dir, a real
@@ -346,9 +582,280 @@ def generate_enclosure(
             os.remove(_last_step_path)
         _last_step_path = step_path
 
-        return {"glb_path": glb_path, "step_path": step_path}
+        result = {"glb_path": glb_path, "step_path": step_path}
+
+        if lid:
+            _export_glb(lid_stl_path, lid_glb_path, _LID_COLOR_RGB)
+
+            if (
+                _last_lid_glb_path and _last_lid_glb_path != lid_glb_path
+                and os.path.exists(_last_lid_glb_path)
+            ):
+                os.remove(_last_lid_glb_path)
+            _last_lid_glb_path = lid_glb_path
+            if (
+                _last_lid_step_path and _last_lid_step_path != lid_step_path
+                and os.path.exists(_last_lid_step_path)
+            ):
+                os.remove(_last_lid_step_path)
+            _last_lid_step_path = lid_step_path
+
+            result["lid_glb_path"] = lid_glb_path
+            result["lid_step_path"] = lid_step_path
+
+        return result
     finally:
         if os.path.exists(script_path):
             os.remove(script_path)
         if os.path.exists(stl_path):
             os.remove(stl_path)
+        if os.path.exists(lid_stl_path):
+            os.remove(lid_stl_path)
+
+
+def get_step_bounding_box_mm(step_path: str, timeout_s: float = 15.0, cancel_event=None) -> dict:
+    """Real bounding box (mm) of a single real STEP/IGES 3D model file,
+    via a headless `freecadcmd` subprocess and `Part.Shape().read()` --
+    the same approach verified live during SPEC-311's own research
+    against a real KiCad footprint's bundled STEP model (a
+    `PinHeader_1x04`'s real model resolved to a real 2.54 x 10.16 x
+    11.54mm box, matching a 2.54mm pin header's real datasheet height).
+
+    Used for real, honest per-component height derivation (SPEC-311)
+    from `daemon.py`'s own composition route -- this function never
+    guesses a height, it only ever reports one it actually computed
+    from a real file on disk, or raises. Reuses `generate_enclosure`'s
+    own subprocess/cancellation/temp-file plumbing; differs only in
+    that it reads an existing shape rather than building a new one.
+
+    Does not apply the model's own `scale`/`rotation`/`offset`
+    transform (a real KiCad `Footprint3DModel` carries one) before
+    computing the box -- a rotated or scaled model's real installed
+    height may differ from this raw bounding box's Z extent. Named
+    explicitly here and in SPEC-311 §2 as real, remaining work, not
+    silently assumed correct."""
+    if not os.path.exists(step_path):
+        raise FreeCADBuildError(f"Model file does not exist: {step_path}")
+
+    freecadcmd = find_freecadcmd()
+    script_id = uuid.uuid4().hex
+    script_path = os.path.join(tempfile.gettempdir(), f"temp_bbox_{script_id}.py")
+    script = (
+        "import Part\n"
+        "import json\n"
+        "shape = Part.Shape()\n"
+        f"shape.read({step_path!r})\n"
+        "bbox = shape.BoundBox\n"
+        "print('BBOX_JSON:' + json.dumps("
+        "{'x_mm': bbox.XLength, 'y_mm': bbox.YLength, 'z_mm': bbox.ZLength}))\n"
+    )
+    with open(script_path, "w") as f:
+        f.write(script)
+
+    try:
+        proc = subprocess.Popen(
+            [freecadcmd, script_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        stdout_data, stderr_data, returncode = _wait_with_cancellation(proc, timeout_s, cancel_event)
+
+        if returncode != 0:
+            raise FreeCADBuildError(
+                f"freecadcmd exited with code {returncode}: {stderr_data.strip()}"
+            )
+        for line in stdout_data.splitlines():
+            if line.startswith("BBOX_JSON:"):
+                return json.loads(line[len("BBOX_JSON:"):])
+        raise FreeCADBuildError(
+            f"freecadcmd exited cleanly but did not report a bounding box: {stderr_data.strip()}"
+        )
+    finally:
+        if os.path.exists(script_path):
+            os.remove(script_path)
+
+
+# CTX-311.13: the real explicit "Save" action SPEC-311 §2 always named as
+# an open question, decided (CTX-311.2) as explicit-save-only. Every
+# format here reads from an already-generated real file -- this function
+# never calls generate_enclosure itself, only reuses the .step/.glb pair
+# a prior real generation already produced.
+def _run_export_script(freecadcmd: str, script: str, dest_path: str, timeout_s: float, cancel_event) -> None:
+    """Shared subprocess/cleanup plumbing for every `export_enclosure`
+    format that needs a real `freecadcmd` call (STEP/STL compound export,
+    FCStd) -- deliberately separate from `generate_enclosure`'s own
+    subprocess handling (which also produces the initial .stl/.step and
+    manages leak-bounding cleanup, real, different concerns) and from
+    `get_step_bounding_box_mm`'s (which reads a value back, not a file)."""
+    script_id = uuid.uuid4().hex
+    script_path = os.path.join(tempfile.gettempdir(), f"temp_export_{script_id}.py")
+    with open(script_path, "w") as f:
+        f.write(script)
+    try:
+        proc = subprocess.Popen(
+            [freecadcmd, script_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        _stdout_data, stderr_data, returncode = _wait_with_cancellation(proc, timeout_s, cancel_event)
+        if returncode != 0:
+            raise FreeCADBuildError(f"freecadcmd exited with code {returncode}: {stderr_data.strip()}")
+        if not os.path.exists(dest_path):
+            raise FreeCADBuildError(
+                f"freecadcmd exited cleanly but did not produce the expected export file: "
+                f"{stderr_data.strip()}"
+            )
+    finally:
+        if os.path.exists(script_path):
+            os.remove(script_path)
+
+
+_EXPORT_COMPOUND_SCRIPT_TEMPLATE = """\
+import Part
+
+shapes = []
+{shape_reads}
+result = shapes[0] if len(shapes) == 1 else Part.makeCompound(shapes)
+result.{export_call}
+"""
+
+
+def _export_compound(
+    step_paths: list, fmt: str, dest_path: str, timeout_s: float, cancel_event,
+) -> None:
+    """STEP/STL export for one or more already-generated real STEP files
+    (the base shell's and/or the lid's own). More than one real shape is
+    combined via `Part.makeCompound` -- a real, standard FreeCAD grouping
+    mechanism (no boolean fuse, just packages multiple shapes for one
+    export call) -- confirmed live against real freecadcmd 1.1.1 before
+    writing this: a real two-box compound round-tripped through both
+    `exportStep`/`exportStl` and back with both solids intact. One shape
+    skips the compound wrapping entirely, the same real object either
+    way."""
+    freecadcmd = find_freecadcmd()
+    shape_reads = "".join(
+        f"_s = Part.Shape()\n_s.read({p!r})\nshapes.append(_s)\n" for p in step_paths
+    )
+    export_call = f"exportStep({dest_path!r})" if fmt == "step" else f"exportStl({dest_path!r})"
+    script = _EXPORT_COMPOUND_SCRIPT_TEMPLATE.format(shape_reads=shape_reads, export_call=export_call)
+    _run_export_script(freecadcmd, script, dest_path, timeout_s, cancel_event)
+
+
+_EXPORT_FCSTD_SCRIPT_TEMPLATE = """\
+import FreeCAD, Part
+
+doc = FreeCAD.newDocument("export")
+{object_adds}
+doc.recompute()
+doc.saveAs({dest_path!r})
+"""
+
+
+def _export_fcstd(named_paths: list, dest_path: str, timeout_s: float, cancel_event) -> None:
+    """Native FreeCAD (`.FCStd`) export -- always the whole design given
+    to it (one real `Part::Feature` object per `(name, step_path)` pair),
+    never gated by `parts`: a per-part `.FCStd` was a real option
+    (`CTX-311.13`'s own Plan Drift), decided against in favor of always
+    the whole document, since re-opening the full design (both bodies
+    together, ready to keep editing) is more useful than a document with
+    just one box. `doc.saveAs()` had never been used anywhere in this
+    codebase before this -- confirmed live against real freecadcmd 1.1.1
+    first: a real two-object document saved this way reloads with both
+    real objects present, not just written-and-untested."""
+    freecadcmd = find_freecadcmd()
+    object_adds = "".join(
+        f"_s = Part.Shape()\n_s.read({p!r})\n"
+        f"_obj = doc.addObject('Part::Feature', {name!r})\n_obj.Shape = _s\n"
+        for name, p in named_paths
+    )
+    script = _EXPORT_FCSTD_SCRIPT_TEMPLATE.format(object_adds=object_adds, dest_path=dest_path)
+    _run_export_script(freecadcmd, script, dest_path, timeout_s, cancel_event)
+
+
+def export_enclosure(
+    parts: str,
+    fmt: str,
+    dest_path: str,
+    step_path: str = None,
+    lid_step_path: str = None,
+    glb_path: str = None,
+    lid_glb_path: str = None,
+    timeout_s: float = 30.0,
+    cancel_event=None,
+) -> None:
+    """The real explicit Save/Export action (`CTX-311.13`, `SPEC-311` §2).
+    Never regenerates geometry -- every format here reads from files a
+    prior real `generate_enclosure` call already produced, passed in by
+    the caller (`daemon.py`'s route already has them in the job's own
+    result, no server-side lookup needed).
+
+    `parts` (`'combined'` / `'body'` / `'lid'`) selects which already-
+    generated real source file(s) to use for STEP/STL/GLB. `'lid'`/
+    `'combined'` raise a clean `ValueError` (not a confusing downstream
+    `FileNotFoundError`) when no lid was actually generated -- `lid_step_
+    path`/`lid_glb_path` are `None` in that case, same as `generate_
+    enclosure`'s own return shape already omits them.
+
+    `fmt` (`'step'` / `'stl'` / `'glb'` / `'fcstd'`) selects the output:
+    - `'glb'`: no subprocess. A single part is a real file copy of the
+      already-correct existing `.glb` (`CTX-311.7`/`.12`'s own real
+      materials, untouched); `'combined'` merges both existing glTF
+      `Scene`s' own geometries into one real merged `Scene` via `trimesh`
+      -- both meshes' vertices are already in the same real, shared
+      coordinate space the original FreeCAD build placed them in
+      (`CTX-311.5`), so no additional per-node transform is needed.
+    - `'step'`/`'stl'`: one real `freecadcmd` subprocess via `_export_
+      compound`, reading the relevant already-generated STEP file(s).
+    - `'fcstd'`: one real `freecadcmd` subprocess via `_export_fcstd`,
+      always the whole real design (ignores `parts` -- see `_export_
+      fcstd`'s own docstring)."""
+    if parts not in ("combined", "body", "lid"):
+        raise ValueError(f"Unknown export parts: {parts!r} -- expected 'combined', 'body', or 'lid'.")
+    if fmt not in ("step", "stl", "glb", "fcstd"):
+        raise ValueError(f"Unknown export format: {fmt!r} -- expected 'step', 'stl', 'glb', or 'fcstd'.")
+
+    needs_body = parts in ("combined", "body")
+    needs_lid = parts in ("combined", "lid")
+
+    if fmt == "fcstd":
+        if not step_path:
+            raise ValueError("Exporting requires step_path -- the base shell must have been generated.")
+        named_paths = [("Body", step_path)]
+        if lid_step_path:
+            named_paths.append(("Lid", lid_step_path))
+        _export_fcstd(named_paths, dest_path, timeout_s, cancel_event)
+        return
+
+    if fmt == "glb":
+        if needs_body and not glb_path:
+            raise ValueError("Exporting the body requires glb_path.")
+        if needs_lid and not lid_glb_path:
+            raise ValueError(f"parts={parts!r} requires a lid, but no lid was generated for this enclosure.")
+        if parts == "body":
+            shutil.copy(glb_path, dest_path)
+        elif parts == "lid":
+            shutil.copy(lid_glb_path, dest_path)
+        else:
+            body_scene = trimesh.load(glb_path)
+            lid_scene = trimesh.load(lid_glb_path)
+            merged = trimesh.Scene(
+                list(body_scene.geometry.values()) + list(lid_scene.geometry.values())
+            )
+            merged.export(dest_path)
+        return
+
+    # step / stl
+    if needs_body and not step_path:
+        raise ValueError("Exporting the body requires step_path.")
+    if needs_lid and not lid_step_path:
+        raise ValueError(f"parts={parts!r} requires a lid, but no lid was generated for this enclosure.")
+    step_paths = []
+    if needs_body:
+        step_paths.append(step_path)
+    if needs_lid:
+        step_paths.append(lid_step_path)
+    _export_compound(step_paths, fmt, dest_path, timeout_s, cancel_event)

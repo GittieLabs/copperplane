@@ -191,6 +191,29 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
         caps = daemon._detect_capabilities()
         self.assertFalse(caps["freecad_available"])
 
+    @patch('daemon.freecad_bridge.find_freecadcmd')
+    def test_002g_freecad_unavailable_reports_the_real_error_message_not_just_a_bool(self, mock_find):
+        """CTX-303.4: the real, specific reason find_freecadcmd() raised is
+        surfaced, not discarded down to a bare False -- and no path is
+        reported alongside a real failure."""
+        mock_find.side_effect = daemon.freecad_bridge.FreeCADUnavailableError(
+            "Could not find the freecadcmd executable. Install FreeCAD 0.20+, or ensure it's on PATH."
+        )
+        caps = daemon._detect_capabilities()
+        self.assertEqual(
+            caps["freecad_error"],
+            "Could not find the freecadcmd executable. Install FreeCAD 0.20+, or ensure it's on PATH.",
+        )
+        self.assertIsNone(caps["freecad_path_checked"])
+
+    @patch('daemon.freecad_bridge.find_freecadcmd', return_value='/opt/freecad/bin/freecadcmd')
+    def test_002h_freecad_available_reports_the_real_found_path_with_no_error(self, mock_find):
+        """CTX-303.4: a successful resolution reports the real path
+        find_freecadcmd() actually returned, with no error alongside it."""
+        caps = daemon._detect_capabilities()
+        self.assertEqual(caps["freecad_path_checked"], '/opt/freecad/bin/freecadcmd')
+        self.assertIsNone(caps["freecad_error"])
+
     def test_002b_detect_capabilities_matches_find_kicad_cli_for_real(self):
         """CTX-309.1: same real, non-hardcoded pattern as test_001 above,
         for kicad_cli_available."""
@@ -251,6 +274,26 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
         """TEST-001: kicad_available reflects whether the IPC socket path exists."""
         caps = daemon._detect_capabilities()
         self.assertTrue(caps["kicad_available"])
+
+    def test_003b_kicad_socket_path_checked_reports_the_real_default_path(self):
+        """CTX-303.4: the real, resolved path is reported regardless of
+        whether it exists -- so the UI can say exactly where it looked."""
+        original_override = daemon.kicad_bridge._socket_path_override
+        daemon.kicad_bridge._socket_path_override = None
+        try:
+            caps = daemon._detect_capabilities()
+            self.assertEqual(caps["kicad_socket_path_checked"], "/tmp/kicad/api.sock")
+        finally:
+            daemon.kicad_bridge._socket_path_override = original_override
+
+    def test_003c_kicad_socket_path_checked_reports_a_real_configured_override(self):
+        original_override = daemon.kicad_bridge._socket_path_override
+        daemon.kicad_bridge._socket_path_override = "/custom/kicad.sock"
+        try:
+            caps = daemon._detect_capabilities()
+            self.assertEqual(caps["kicad_socket_path_checked"], "/custom/kicad.sock")
+        finally:
+            daemon.kicad_bridge._socket_path_override = original_override
 
     def test_004_main_emits_daemon_ready_before_reading_any_input(self):
         """TEST-002: main() emits daemon.ready -- reporting detected
@@ -1060,34 +1103,123 @@ _EMPTY_BOARD_FIXTURE = os.path.join(_FIXTURES_DIR, 'empty_board.kicad_pcb')
 _EMPTY_SCHEMATIC_FIXTURE = os.path.join(_FIXTURES_DIR, 'empty_schematic.kicad_sch')
 
 
+class TestKicadListOpenBoardsRoute(unittest.TestCase):
+    """CTX-309.4: a real, cheap, read-only lookup feeding the Board (DRC)
+    picker UI -- decoupled from actually running a check, so the user
+    always sees exactly what's open before picking one, even when
+    there's only one candidate."""
+
+    def test_001_no_boards_open_returns_a_structured_state_not_a_raise(self):
+        with patch('daemon.kicad_bridge.list_open_boards', return_value=[]):
+            result = daemon.kicad_list_open_boards()
+
+        self.assertEqual(result, {"status": "no_board_open"})
+
+    def test_002_a_single_open_board_is_still_a_real_list_not_auto_resolved(self):
+        with patch('daemon.kicad_bridge.list_open_boards', return_value=['/real/open/board.kicad_pcb']):
+            result = daemon.kicad_list_open_boards()
+
+        self.assertEqual(result, {
+            "status": "boards_found",
+            "candidates": [{"path": "/real/open/board.kicad_pcb", "label": "board.kicad_pcb"}],
+        })
+
+    def test_003_multiple_boards_open_returns_every_real_candidate(self):
+        with patch(
+            'daemon.kicad_bridge.list_open_boards',
+            return_value=['/boards/a/board_a.kicad_pcb', '/boards/b/board_b.kicad_pcb'],
+        ):
+            result = daemon.kicad_list_open_boards()
+
+        self.assertEqual(result["status"], "boards_found")
+        self.assertEqual(result["candidates"], [
+            {"path": "/boards/a/board_a.kicad_pcb", "label": "board_a.kicad_pcb"},
+            {"path": "/boards/b/board_b.kicad_pcb", "label": "board_b.kicad_pcb"},
+        ])
+
+    def test_004_build_routes_omits_it_when_kicad_bridge_import_failed(self):
+        original = daemon.kicad_bridge
+        daemon.kicad_bridge = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.list_open_boards", routes)
+        finally:
+            daemon.kicad_bridge = original
+
+    def test_005_registered_as_a_sync_route_not_async(self):
+        """Unlike kicad.check_board, this is a fast IPC lookup with no
+        subprocess or LLM call -- it must not be in ASYNC_ROUTES."""
+        self.assertIn("kicad.list_open_boards", daemon.ROUTES)
+        self.assertNotIn("kicad.list_open_boards", daemon.ASYNC_ROUTES)
+
+
+class TestKicadListProjectSchematicsRoute(unittest.TestCase):
+    """Real user feedback: why can't Schematic checking list candidates
+    the way Board checking does? KiCad's IPC has no handler for listing
+    open schematics at all -- this route derives each open board's own
+    project's root schematic path instead, mirroring
+    kicad_list_open_boards's own two-state shape."""
+
+    def test_001_nothing_derivable_returns_a_structured_state_not_a_raise(self):
+        with patch('daemon.kicad_bridge.list_project_schematics', return_value=[]):
+            result = daemon.kicad_list_project_schematics()
+
+        self.assertEqual(result, {"status": "no_schematic_found"})
+
+    def test_002_a_single_derived_schematic_is_still_a_real_list(self):
+        with patch('daemon.kicad_bridge.list_project_schematics', return_value=['/real/project/board.kicad_sch']):
+            result = daemon.kicad_list_project_schematics()
+
+        self.assertEqual(result, {
+            "status": "schematics_found",
+            "candidates": [{"path": "/real/project/board.kicad_sch", "label": "board.kicad_sch"}],
+        })
+
+    def test_003_multiple_derived_schematics_returns_every_real_candidate(self):
+        with patch(
+            'daemon.kicad_bridge.list_project_schematics',
+            return_value=['/projects/a/a.kicad_sch', '/projects/b/b.kicad_sch'],
+        ):
+            result = daemon.kicad_list_project_schematics()
+
+        self.assertEqual(result["status"], "schematics_found")
+        self.assertEqual(result["candidates"], [
+            {"path": "/projects/a/a.kicad_sch", "label": "a.kicad_sch"},
+            {"path": "/projects/b/b.kicad_sch", "label": "b.kicad_sch"},
+        ])
+
+    def test_004_build_routes_omits_it_when_kicad_bridge_import_failed(self):
+        original = daemon.kicad_bridge
+        daemon.kicad_bridge = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.list_project_schematics", routes)
+        finally:
+            daemon.kicad_bridge = original
+
+    def test_005_registered_as_a_sync_route_not_async(self):
+        self.assertIn("kicad.list_project_schematics", daemon.ROUTES)
+        self.assertNotIn("kicad.list_project_schematics", daemon.ASYNC_ROUTES)
+
+
 class TestKicadCheckBoardRoute(unittest.TestCase):
-    """CTX-309.1: SPEC-309's DRC route."""
+    """CTX-309.1/CTX-309.4: SPEC-309's DRC route. CTX-309.4 made pcb_path
+    required -- kicad.list_open_boards (above) now owns resolving which
+    board to check, feeding a real picker UI, rather than this route
+    ever auto-resolving or returning a "nothing open"/"pick one" state
+    itself."""
 
-    def test_001_no_path_given_and_nothing_open_raises_a_clean_error(self):
-        with patch('daemon.kicad_bridge.get_open_board_path', return_value=None):
-            with self.assertRaises(daemon.kicad_cli.KicadCliError) as ctx:
-                daemon.kicad_check_board()
-            self.assertIn("No board is currently open", str(ctx.exception))
-
-    def test_002_no_path_given_auto_resolves_the_currently_open_board(self):
+    def test_001_runs_drc_against_the_given_explicit_path(self):
         """Routing only -- kicad_cli.run_drc/component_pipeline.
         explain_violations are both mocked here; TestRealKicadCheckBoardRoute
         below is the real, non-mocked end-to-end version."""
-        with patch('daemon.kicad_bridge.get_open_board_path', return_value='/real/open/board.kicad_pcb'), \
-             patch('daemon.kicad_cli.run_drc', return_value={"violations": []}) as mock_run_drc, \
+        with patch('daemon.kicad_cli.run_drc', return_value={"violations": []}) as mock_run_drc, \
              patch('daemon.component_pipeline.explain_violations', return_value={"violations": [], "summary": "clean", "truncated_count": 0}):
-            result = daemon.kicad_check_board()
+            result = daemon.kicad_check_board('/explicit/path.kicad_pcb')
 
-        mock_run_drc.assert_called_once_with('/real/open/board.kicad_pcb')
-        self.assertEqual(result["source_path"], '/real/open/board.kicad_pcb')
-
-    def test_003_an_explicit_path_skips_auto_resolution_entirely(self):
-        with patch('daemon.kicad_bridge.get_open_board_path') as mock_get_open, \
-             patch('daemon.kicad_cli.run_drc', return_value={"violations": []}), \
-             patch('daemon.component_pipeline.explain_violations', return_value={"violations": [], "summary": "clean", "truncated_count": 0}):
-            daemon.kicad_check_board(pcb_path='/explicit/path.kicad_pcb')
-
-        mock_get_open.assert_not_called()
+        mock_run_drc.assert_called_once_with('/explicit/path.kicad_pcb')
+        self.assertEqual(result["source_path"], '/explicit/path.kicad_pcb')
+        self.assertEqual(result["status"], "ok")
 
     def test_004_build_routes_omits_it_when_kicad_bridge_import_failed(self):
         original = daemon.kicad_bridge
@@ -1095,7 +1227,7 @@ class TestKicadCheckBoardRoute(unittest.TestCase):
         try:
             routes = daemon._build_routes()
             self.assertNotIn("kicad.check_board", routes)
-            self.assertIn("kicad.check_schematic", routes, "no auto-resolution dependency on kicad_bridge")
+            self.assertIn("kicad.check_schematic", routes, "no dependency on kicad_bridge")
         finally:
             daemon.kicad_bridge = original
 
@@ -1179,6 +1311,7 @@ class TestRealKicadCheckBoardRoute(unittest.TestCase):
             daemon.CONFIG.clear()
             daemon.CONFIG.update(original_config)
 
+        self.assertEqual(result["status"], "ok")
         self.assertEqual(result["source_path"], _EMPTY_BOARD_FIXTURE)
         self.assertEqual(len(result["violations"]), 1)
         self.assertEqual(result["violations"][0]["type"], "invalid_outline")
@@ -1264,56 +1397,167 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
         self.assertEqual(result["unrecognized_holes"], [_FAKE_HOLES[1]])
 
     @patch('daemon.generate_enclosure')
-    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
     @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
-    def test_004_project_name_saves_a_real_enclosure_artifact_with_a_real_board_revision(
+    def test_004_no_longer_accepts_project_name_or_saves_anything(
         self, mock_get_outline, mock_get_holes, mock_generate,
     ):
-        """TEST-008: for the first time, an enclosure Artifact is
-        actually saved -- closing the board_revision requirement
-        library_store.py has enforced since CTX-304.1 but nothing has
-        ever called save_artifact against, for real (a real tmpdir
-        storage root, not mocked)."""
+        """CTX-311.13: the real, confirmed, live bug this route used to
+        have -- `project_name` was always supplied by the real frontend
+        (`EnclosurePanel.tsx`'s own `projectName` prop), so every single
+        Generate silently wrote an Artifact record, and the very next
+        regenerate's own leak-bounding cleanup deleted the files that
+        record pointed at. Fixed by removing the parameter and the save
+        entirely -- `freecad.export_enclosure` is now the only real save
+        action. A stray `project_name` kwarg is a real `TypeError`, not
+        silently ignored -- confirms the parameter is genuinely gone, not
+        just unused.
+
+        CTX-311.15: this test previously omitted the `kicad_bridge` mocks
+        every sibling test in this class applies (`test_002`/`test_003`
+        above), so `height=20` alone (board-driven mode -- no width/depth)
+        silently depended on a real, live KiCad connection being open on
+        whatever machine ran it. It happened to pass locally against a
+        real KiCad session and failed in CI (no KiCad there at all) --
+        pre-existing, unrelated to this context's own diff, but fixed
+        here since it blocks this PR's own required checks."""
         mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
-        daemon.library_store.save_project({"name": "weather-pcb"})
 
-        result = daemon.freecad_generate_enclosure(height=20, project_name="weather-pcb")
+        result = daemon.freecad_generate_enclosure(height=20)
+        self.assertNotIn("artifact_id", result)
 
-        self.assertIn("artifact_id", result)
-        artifacts = daemon.library_store.list_artifacts("weather-pcb")
-        self.assertEqual(artifacts, [result["artifact_id"]])
-        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
-        self.assertEqual(loaded["kind"], "enclosure")
-        self.assertTrue(loaded["board_revision"])
+        with self.assertRaises(TypeError):
+            daemon.freecad_generate_enclosure(height=20, project_name="weather-pcb")
 
     @patch('daemon.generate_enclosure')
-    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
     @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
-    def test_005_no_project_name_never_saves_an_artifact_matching_todays_frontend(
+    def test_005_zero_holes_of_any_kind_sets_the_honest_no_holes_found_flag(
         self, mock_get_outline, mock_get_holes, mock_generate,
     ):
-        """Today's App.tsx dims object never sends project_name -- this
-        must keep working exactly as before, with no artifact saved."""
+        """SPEC-311 §2: distinct from the existing unrecognized_holes
+        warning, which only ever fires when *some* NPTH pads exist but
+        aren't recognized -- a board with zero holes of any kind
+        previously triggered no warning at all."""
         mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
 
         result = daemon.freecad_generate_enclosure(height=20)
 
-        self.assertNotIn("artifact_id", result)
+        self.assertTrue(result["no_mounting_holes_found"])
 
     @patch('daemon.generate_enclosure')
-    def test_006_manual_mode_board_revision_is_a_real_honest_sentinel(self, mock_generate):
-        """The no-board-data fallback has no real board to hash -- the
-        sentinel must say so honestly, not fabricate a hash implying real
-        board data was read."""
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_006_any_real_hole_found_clears_the_no_holes_found_flag(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
         mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
-        daemon.library_store.save_project({"name": "weather-pcb"})
 
-        result = daemon.freecad_generate_enclosure(
-            height=20, width=50, depth=30, project_name="weather-pcb",
+        result = daemon.freecad_generate_enclosure(height=20)
+
+        self.assertFalse(result["no_mounting_holes_found"])
+
+    @patch('daemon.generate_enclosure')
+    def test_007_manual_mode_never_sets_the_no_holes_found_flag(self, mock_generate):
+        """Manual mode has no board data to have found holes on in the
+        first place -- the flag is meaningless there, not falsely
+        reported as True."""
+        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
+
+        result = daemon.freecad_generate_enclosure(height=20, width=50, depth=30)
+
+        self.assertNotIn("no_mounting_holes_found", result)
+
+
+class TestFreecadExportEnclosureRoute(unittest.TestCase):
+    """CTX-311.13: freecad_export_enclosure is a thin route wrapper --
+    the real geometry/subprocess/file-copy behavior is already verified
+    against real freecadcmd in TestFreecadBridgeExportEnclosure
+    (test_freecad_bridge.py). These tests cover only the route's own
+    pass-through and registration."""
+
+    @patch('daemon.export_enclosure')
+    def test_001_passes_every_param_straight_through(self, mock_export):
+        result = daemon.freecad_export_enclosure(
+            parts="combined", fmt="step", dest_path="/tmp/out.step",
+            glb_path="/tmp/e.glb", step_path="/tmp/e.step",
+            lid_glb_path="/tmp/lid.glb", lid_step_path="/tmp/lid.step",
         )
 
-        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
-        self.assertEqual(loaded["board_revision"], "manual:50x30x20")
+        mock_export.assert_called_once_with(
+            parts="combined", fmt="step", dest_path="/tmp/out.step",
+            glb_path="/tmp/e.glb", step_path="/tmp/e.step",
+            lid_glb_path="/tmp/lid.glb", lid_step_path="/tmp/lid.step",
+            timeout_s=30.0, cancel_event=None,
+        )
+        self.assertEqual(result, {"dest_path": "/tmp/out.step"})
+
+    def test_002_registered_as_a_real_route_and_async(self):
+        self.assertIs(daemon.ROUTES["freecad.export_enclosure"], daemon.freecad_export_enclosure)
+        self.assertIn("freecad.export_enclosure", daemon.ASYNC_ROUTES)
+
+
+class TestFreecadGenerateEnclosureLidMode(unittest.TestCase):
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_001_lid_passes_through_to_generate_enclosure(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        """CTX-311.2: lid/lid_thickness_mm reach freecad_bridge.
+        generate_enclosure unchanged -- the real ValueError for manual
+        mode plus lid is generate_enclosure's own job, verified for
+        real in test_freecad_bridge.py, not re-verified here."""
+        mock_generate.return_value = {
+            "glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step",
+            "lid_glb_path": "/tmp/lid.glb", "lid_step_path": "/tmp/lid.step",
+        }
+
+        daemon.freecad_generate_enclosure(height=20, lid=True, lid_thickness_mm=3.0)
+
+        _, kwargs = mock_generate.call_args
+        self.assertTrue(kwargs["lid"])
+        self.assertEqual(kwargs["lid_thickness_mm"], 3.0)
+
+    @patch('daemon.generate_enclosure')
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_002_a_generated_lid_returns_its_own_real_paths(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
+        """CTX-311.13: since Generate no longer persists anything itself
+        (see TestFreecadGenerateEnclosureRoute.test_004), a lid's real
+        paths only need to survive in the route's own return value --
+        EnclosurePanel keeps them in its own `result` state and passes
+        them straight to `freecad.export_enclosure` when the user
+        actually chooses to export."""
+        mock_generate.return_value = {
+            "glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step",
+            "lid_glb_path": "/tmp/lid.glb", "lid_step_path": "/tmp/lid.step",
+        }
+
+        result = daemon.freecad_generate_enclosure(height=20, lid=True)
+
+        self.assertEqual(result["lid_glb_path"], "/tmp/lid.glb")
+        self.assertEqual(result["lid_step_path"], "/tmp/lid.step")
+
+
+class TestProjectGetDirectoryRoute(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_returns_the_real_project_directory_path(self):
+        daemon.library_store.save_project({"name": "weather-pcb"})
+
+        result = daemon.project_get_directory("weather-pcb")
+
+        self.assertEqual(result["path"], daemon.library_store.project_directory("weather-pcb"))
+        self.assertTrue(os.path.isdir(result["path"]))
 
 
 class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
@@ -1322,14 +1566,6 @@ class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
     TestFreecadGenerateEnclosureRoute's live-mode tests already cover
     kicad_bridge; the real DXF/Excellon parsing itself is already
     verified for real in test_kicad_pcb_import.py."""
-
-    def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
-        daemon.library_store.configure(storage_root=self._tmpdir.name)
-
-    def tearDown(self):
-        daemon.library_store.configure(storage_root=None)
-        self._tmpdir.cleanup()
 
     @patch('daemon.generate_enclosure')
     @patch('daemon.kicad_pcb_import.extract_mounting_holes', return_value=_FAKE_HOLES)
@@ -1373,18 +1609,23 @@ class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
     @patch('daemon.generate_enclosure')
     @patch('daemon.kicad_pcb_import.extract_mounting_holes', return_value=_FAKE_HOLES)
     @patch('daemon.kicad_pcb_import.extract_board_outline', return_value=_FAKE_OUTLINE)
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
     def test_003_pcb_path_wins_over_a_live_connection_when_both_could_apply(
-        self, mock_extract_outline, mock_extract_holes, mock_generate,
+        self, mock_bridge_outline, mock_bridge_holes, mock_extract_outline, mock_extract_holes,
+        mock_generate,
     ):
+        """A real live connection being open at the same time a real
+        `pcb_path` is given must never flip mode selection -- the fixed
+        priority order (manual > file > live) is explicit, not
+        connection-sniffed."""
         mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
-        daemon.library_store.save_project({"name": "weather-pcb"})
 
-        result = daemon.freecad_generate_enclosure(
-            height=20, pcb_path='/real/board.kicad_pcb', project_name="weather-pcb",
-        )
+        daemon.freecad_generate_enclosure(height=20, pcb_path='/real/board.kicad_pcb')
 
-        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
-        self.assertTrue(loaded["board_revision"].startswith("file:/real/board.kicad_pcb:"))
+        mock_extract_outline.assert_called_once_with('/real/board.kicad_pcb')
+        mock_bridge_outline.assert_not_called()
+        mock_bridge_holes.assert_not_called()
 
     def test_004_kicad_pcb_import_import_failure_raises_a_clean_error(self):
         original = daemon.kicad_pcb_import
@@ -1395,6 +1636,273 @@ class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
             self.assertIn("kicad_pcb_import", str(ctx.exception))
         finally:
             daemon.kicad_pcb_import = original
+
+
+class TestKicadGetComponentHeightsRoute(unittest.TestCase):
+    """CTX-311.1: kicad_get_component_heights composes kicad_bridge's
+    real per-footprint model list with freecad_bridge's real STEP
+    bounding-box reader -- these tests cover the composition/routing
+    logic itself (which model wins, what counts as unknown), mocked at
+    both bridge boundaries; the real geometry read is already verified
+    against a real freecadcmd in test_freecad_bridge.py, and the real
+    live model-list/path-resolution round trip in test_kicad_bridge.py."""
+
+    def test_001_a_resolved_step_model_becomes_a_known_real_height(self):
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{
+                "reference": "J3",
+                "is_mounting_hole": False,
+                "models": [{
+                    "filename": "${KICAD10_3DMODEL_DIR}/x.step",
+                    "resolved_path": "/real/x.step",
+                    "visible": True,
+                }],
+            }],
+        ), patch(
+            'daemon.freecad_bridge.get_step_bounding_box_mm',
+            return_value={"x_mm": 2.54, "y_mm": 10.16, "z_mm": 11.54},
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["known"], [{"reference": "J3", "height_mm": 11.54}])
+        self.assertEqual(result["unknown"], [])
+
+    def test_002_no_attached_models_is_reported_unknown_not_defaulted(self):
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{"reference": "REF**", "is_mounting_hole": False, "models": []}],
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["known"], [])
+        self.assertEqual(result["unknown"], ["REF**"])
+
+    def test_003_a_non_step_model_is_reported_unknown_never_guessed(self):
+        """SPEC-311 §2's own named, deliberate scope limit: a .wrl
+        model's real coordinate-unit convention is unverified, so it is
+        never silently treated as already-mm."""
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{
+                "reference": "U1",
+                "is_mounting_hole": False,
+                "models": [{
+                    "filename": "${KICAD10_3DMODEL_DIR}/x.wrl",
+                    "resolved_path": "/real/x.wrl",
+                    "visible": True,
+                }],
+            }],
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["unknown"], ["U1"])
+
+    def test_004_an_unresolved_path_is_reported_unknown(self):
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{
+                "reference": "U2",
+                "is_mounting_hole": False,
+                "models": [{
+                    "filename": "${KICAD10_3DMODEL_DIR}/x.step",
+                    "resolved_path": None,
+                    "visible": True,
+                }],
+            }],
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["unknown"], ["U2"])
+
+    def test_005_a_freecadcmd_read_failure_degrades_to_unknown_not_a_route_error(self):
+        """A single bad/corrupt STEP model shouldn't fail the whole
+        route -- every other component's real height is still worth
+        reporting."""
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{
+                "reference": "U3",
+                "is_mounting_hole": False,
+                "models": [{
+                    "filename": "${KICAD10_3DMODEL_DIR}/x.step",
+                    "resolved_path": "/real/x.step",
+                    "visible": True,
+                }],
+            }],
+        ), patch(
+            'daemon.freecad_bridge.get_step_bounding_box_mm',
+            side_effect=RuntimeError("freecadcmd exploded"),
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["unknown"], ["U3"])
+
+    def test_006_an_invisible_model_is_not_used_even_if_it_is_a_real_step_file(self):
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[{
+                "reference": "U4",
+                "is_mounting_hole": False,
+                "models": [{
+                    "filename": "${KICAD10_3DMODEL_DIR}/x.step",
+                    "resolved_path": "/real/x.step",
+                    "visible": False,
+                }],
+            }],
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["unknown"], ["U4"])
+
+    def test_006b_a_mounting_hole_footprint_is_skipped_entirely_not_reported_unknown(self):
+        """CTX-311.15: a real click-through against an actual board found
+        this route flagging real, unannotated MountingHole footprints
+        (KiCad's own default "REF**" placeholder, repeated once per
+        affected footprint, indistinguishable to a caller) as missing a
+        3D model -- true but misleading, since a screw hole was never
+        expected to have one and is already represented by the
+        enclosure's own standoff geometry."""
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[
+                {"reference": "REF**", "is_mounting_hole": True, "models": []},
+                {
+                    "reference": "J3",
+                    "is_mounting_hole": False,
+                    "models": [{
+                        "filename": "${KICAD10_3DMODEL_DIR}/x.step",
+                        "resolved_path": "/real/x.step",
+                        "visible": True,
+                    }],
+                },
+            ],
+        ), patch(
+            'daemon.freecad_bridge.get_step_bounding_box_mm',
+            return_value={"x_mm": 2.54, "y_mm": 10.16, "z_mm": 11.54},
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["known"], [{"reference": "J3", "height_mm": 11.54}])
+        self.assertEqual(result["unknown"], [])
+
+    def test_007_kicad_bridge_import_failure_raises_a_clean_error(self):
+        original = daemon.kicad_bridge
+        daemon.kicad_bridge = None
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                daemon.kicad_get_component_heights()
+            self.assertIn("kicad_bridge", str(ctx.exception))
+        finally:
+            daemon.kicad_bridge = original
+
+    def test_008_freecad_bridge_import_failure_raises_a_clean_error(self):
+        original = daemon.freecad_bridge
+        daemon.freecad_bridge = None
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                daemon.kicad_get_component_heights()
+            self.assertIn("freecad_bridge", str(ctx.exception))
+        finally:
+            daemon.freecad_bridge = original
+
+
+class TestKicadExportBoardGlbRoute(unittest.TestCase):
+    """CTX-311.15: real-origins the export to the board's own bounding-
+    box corner so `EnclosureViewer.tsx` can composite it inside the
+    enclosure's own glb with a simple, known translation -- the outline
+    always comes from `kicad_pcb_import.extract_board_outline(pcb_path)`,
+    this exact file, never `kicad_bridge.get_board_outline()` (whatever
+    happens to be live in KiCad right now, not necessarily the same
+    board this route was asked to export)."""
+
+    @patch('daemon.kicad_cli.export_board_glb', return_value='/real/board.glb')
+    @patch('daemon.kicad_pcb_import.extract_board_outline', return_value=_FAKE_OUTLINE)
+    def test_001_derives_the_real_outline_from_this_exact_file_and_passes_its_origin_through(
+        self, mock_extract, mock_export,
+    ):
+        result = daemon.kicad_export_board_glb('/real/board.kicad_pcb')
+
+        mock_extract.assert_called_once_with('/real/board.kicad_pcb')
+        mock_export.assert_called_once_with(
+            '/real/board.kicad_pcb', _FAKE_OUTLINE["x_mm"], _FAKE_OUTLINE["y_mm"],
+        )
+        self.assertEqual(result, {"glb_path": "/real/board.glb"})
+
+    @patch('daemon.kicad_bridge.get_board_outline', return_value={"x_mm": 999, "y_mm": 999, "width_mm": 1, "height_mm": 1})
+    @patch('daemon.kicad_cli.export_board_glb', return_value='/real/board.glb')
+    @patch('daemon.kicad_pcb_import.extract_board_outline', return_value=_FAKE_OUTLINE)
+    def test_002_never_touches_the_live_kicad_bridge_outline_even_when_a_connection_is_available(
+        self, mock_extract, mock_export, mock_live_outline,
+    ):
+        """A real, live-open board can genuinely differ from the explicit
+        `pcb_path` this route was asked to export (e.g. a manually-picked
+        file) -- using the live outline here would silently misalign the
+        overlay against a different board's own geometry."""
+        daemon.kicad_export_board_glb('/real/board.kicad_pcb')
+
+        mock_live_outline.assert_not_called()
+        mock_export.assert_called_once_with(
+            '/real/board.kicad_pcb', _FAKE_OUTLINE["x_mm"], _FAKE_OUTLINE["y_mm"],
+        )
+
+    def test_003_kicad_cli_import_failure_raises_a_clean_error(self):
+        original = daemon.kicad_cli
+        daemon.kicad_cli = None
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                daemon.kicad_export_board_glb('/real/board.kicad_pcb')
+            self.assertIn("kicad_cli", str(ctx.exception))
+        finally:
+            daemon.kicad_cli = original
+
+    def test_004_kicad_pcb_import_import_failure_raises_a_clean_error(self):
+        original = daemon.kicad_pcb_import
+        daemon.kicad_pcb_import = None
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                daemon.kicad_export_board_glb('/real/board.kicad_pcb')
+            self.assertIn("kicad_pcb_import", str(ctx.exception))
+        finally:
+            daemon.kicad_pcb_import = original
+
+
+class TestSpec311RouteRegistration(unittest.TestCase):
+    """CTX-311.1: the two new routes are only registered when their real
+    dependency imported, and both run async -- the same SPEC-107 §2 /
+    ASYNC_ROUTES pattern every other real kicad.*/freecad.* route uses."""
+
+    def test_001_get_component_heights_registered_only_with_both_bridges(self):
+        original_kicad, original_freecad = daemon.kicad_bridge, daemon.freecad_bridge
+        try:
+            daemon.kicad_bridge = MagicMock()
+            daemon.freecad_bridge = None
+            self.assertNotIn("kicad.get_component_heights", daemon._build_routes())
+
+            daemon.kicad_bridge = None
+            daemon.freecad_bridge = MagicMock()
+            self.assertNotIn("kicad.get_component_heights", daemon._build_routes())
+
+            daemon.kicad_bridge = MagicMock()
+            daemon.freecad_bridge = MagicMock()
+            self.assertIn("kicad.get_component_heights", daemon._build_routes())
+        finally:
+            daemon.kicad_bridge, daemon.freecad_bridge = original_kicad, original_freecad
+
+    def test_002_export_board_glb_registered_only_with_kicad_cli(self):
+        original = daemon.kicad_cli
+        try:
+            daemon.kicad_cli = None
+            self.assertNotIn("kicad.export_board_glb", daemon._build_routes())
+
+            daemon.kicad_cli = MagicMock()
+            self.assertIn("kicad.export_board_glb", daemon._build_routes())
+        finally:
+            daemon.kicad_cli = original
+
+    def test_003_both_new_routes_are_registered_as_async(self):
+        self.assertIn("kicad.get_component_heights", daemon.ASYNC_ROUTES)
+        self.assertIn("kicad.export_board_glb", daemon.ASYNC_ROUTES)
 
 
 if __name__ == '__main__':

@@ -54,6 +54,28 @@ class StorageRootUnconfiguredError(Exception):
     that forgot to call `configure()` first."""
 
 
+class ProjectDirectoryMissingError(Exception):
+    """CTX-312.1: raised when a `directory`-linked project's own real
+    manifest can't be found at `<directory>/.hardware-agent-studio/
+    project.json` -- the folder was moved, renamed, or deleted outside
+    the app since it was linked. A real, specific, user-facing error
+    (matching kicad_bridge/freecad_bridge's own clean-error convention),
+    never a bare `FileNotFoundError` a caller has to guess the meaning
+    of."""
+
+
+class ProjectNotLinkedError(Exception):
+    """CTX-312.3: raised by `open_project_from_directory` when the given
+    folder has no real `.hardware-agent-studio/project.json` at all --
+    distinct from `ProjectDirectoryMissingError` above, which is about a
+    project *this app already knows about* losing its linked folder.
+    Deliberately does not fall back to silently creating a new project
+    from the folder's own basename -- that would risk a real, un-obvious
+    name collision against an existing `storage_root/projects/<name>/`,
+    and creating new projects already has its own real entry point (the
+    Rail's own "+ New…")."""
+
+
 _storage_root_override = None
 
 
@@ -463,16 +485,80 @@ def export_footprint_kicad_mod(footprint_id: str) -> str:
 
 
 # --- Project --------------------------------------------------------------
+# CTX-312.1: the real, on-disk subdirectory a `directory`-linked project's
+# own state lives in -- named to match this app's own already-established
+# real identifier (`core/tauri-rust/src/secrets.rs`'s keychain service
+# name, `hardware-agent-studio`), not a new brand invented here.
+_PROJECT_STATE_SUBDIR = ".hardware-agent-studio"
+
+
 def _project_dir(name: str) -> str:
     return _ensure_dir("projects", name)
 
 
+def _project_pointer_path(name: str) -> str:
+    """CTX-312.1: the storage-root pointer record every project has,
+    linked or not -- `list_projects()`'s own directory scan, and
+    `load_project`'s own first read (to discover a linked project's real
+    `directory` before it can go read the real manifest there), both
+    depend on this always existing regardless of link state."""
+    return os.path.join(_project_dir(name), "project.json")
+
+
+def project_directory(name: str) -> str:
+    """CTX-311.13: the one real, public source of truth for a project's
+    own real directory path on disk -- used to default the Enclosure
+    Export dialog's save location to the project's own folder, so a
+    caller outside this module never has to hand-build the same
+    `<storage_root>/projects/<name>/` convention `_project_dir` already
+    owns.
+
+    CTX-312.1: once a project is real-linked to a directory on disk,
+    that's the more correct real default for a save dialog than this
+    app's own internal storage location -- returns the linked directory
+    when set, the original storage-root path otherwise (an unlinked
+    project has nowhere else real to point at)."""
+    pointer = _read_json(_project_pointer_path(name)) if os.path.isfile(
+        _project_pointer_path(name)
+    ) else {}
+    return pointer.get("directory") or _project_dir(name)
+
+
+def _project_state_path(directory: str) -> str:
+    """Pure path computation, no filesystem side effects -- `load_project`
+    (below) calls this to check whether a linked project's own real
+    manifest exists at all. `save_project`'s own write path is
+    responsible for creating the directory when it actually writes."""
+    return os.path.join(directory, _PROJECT_STATE_SUBDIR, "project.json")
+
+
 def save_project(project: dict) -> dict:
+    """CTX-312.1: real, project-directory-aware routing. A storage-root
+    pointer record (`{name, directory, schema_version}`, never the full
+    manifest) always gets written -- `list_projects()`'s own directory
+    scan and `load_project`'s own first read both depend on it existing
+    regardless of link state. When `directory` is real and set, the full
+    manifest (every field the caller supplied) is written there instead,
+    portable with the project's own real folder; an unlinked project's
+    pointer record *is* the full manifest, matching this function's own
+    pre-CTX-312.1 behavior exactly."""
     name = project.get("name")
     if not name:
         raise SchemaValidationError("Project.name is required.")
+    directory = project.get("directory")
     record = {**project, "schema_version": 1}
-    _write_json(os.path.join(_project_dir(name), "project.json"), record)
+
+    if directory:
+        _write_json(
+            _project_pointer_path(name),
+            {"name": name, "directory": directory, "schema_version": 1},
+        )
+        state_path = _project_state_path(directory)
+        os.makedirs(os.path.dirname(state_path), exist_ok=True)
+        _write_json(state_path, record)
+    else:
+        _write_json(_project_pointer_path(name), record)
+
     return record
 
 
@@ -483,9 +569,37 @@ def load_project(name: str) -> dict:
     folder on disk (outside the app). Overriding it here with the real
     folder name this record was loaded from means every caller sees
     disk-truth identity, never a stale one, without needing its own
-    reconciliation logic."""
-    record = _read_json(os.path.join(_project_dir(name), "project.json"))
+    reconciliation logic.
+
+    CTX-312.1: the storage-root pointer is read first to discover a real
+    `directory` link; when one exists, the real, full manifest is read
+    from there instead -- a moved, renamed, or deleted linked folder
+    raises `ProjectDirectoryMissingError`, a clean, specific error,
+    rather than a bare `FileNotFoundError` whose meaning a caller would
+    have to guess at.
+
+    CTX-312.3 found a real gap in the disk-truth reasoning above: `name`
+    was overridden from the pointer, but `directory` wasn't -- a real
+    portable state file (`open_project_from_directory` below) may carry
+    a stale `directory` value from whatever machine last saved it, or
+    none at all. The pointer's own `directory` (this machine's real,
+    current answer) now always wins, the same way its `name` already
+    does."""
+    pointer = _read_json(_project_pointer_path(name))
+    directory = pointer.get("directory")
+    if not directory:
+        pointer["name"] = name
+        return pointer
+
+    state_path = _project_state_path(directory)
+    if not os.path.isfile(state_path):
+        raise ProjectDirectoryMissingError(
+            f"Project '{name}' is linked to '{directory}', but its own project file "
+            f"is missing there. The folder may have been moved, renamed, or deleted."
+        )
+    record = _read_json(state_path)
     record["name"] = name
+    record["directory"] = directory
     return record
 
 
@@ -495,6 +609,41 @@ def list_projects() -> list:
         entry for entry in os.listdir(projects_root)
         if os.path.isfile(os.path.join(projects_root, entry, "project.json"))
     )
+
+
+def open_project_from_directory(directory: str) -> dict:
+    """CTX-312.3: the real reverse of `save_project`'s own directory-link
+    routing -- given a real folder (e.g. one copied from another machine,
+    or handed over by a teammate), reads its own real
+    `.hardware-agent-studio/project.json`, re-registers this app's own
+    storage-root pointer so `list_projects()` discovers it going forward,
+    and returns the real, full record. This is the actual payoff of
+    `CTX-312.1`'s own portability work -- a project's state travelling
+    with its folder only matters if opening that folder on a different
+    installation can restore it.
+
+    Raises `ProjectNotLinkedError` if the folder has no real state file
+    at all -- deliberately never falls back to creating a new project
+    from the folder's own basename (see the exception's own docstring
+    for why)."""
+    state_path = _project_state_path(directory)
+    if not os.path.isfile(state_path):
+        raise ProjectNotLinkedError(
+            f"'{directory}' isn't linked to a hardware-agent-studio project yet -- "
+            f"no project.json found there."
+        )
+    record = _read_json(state_path)
+    name = record.get("name")
+    if not name:
+        raise ProjectNotLinkedError(
+            f"The project file at '{directory}' is missing its own required 'name' field."
+        )
+
+    _write_json(
+        _project_pointer_path(name),
+        {"name": name, "directory": directory, "schema_version": 1},
+    )
+    return load_project(name)
 
 
 # --- Artifact ---------------------------------------------------------

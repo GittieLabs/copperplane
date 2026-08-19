@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const submitJobMock = vi.fn()
@@ -6,29 +6,42 @@ const dispatchToolMock = vi.fn()
 const listProjectsMock = vi.fn()
 const listLibraryPartsMock = vi.fn()
 const saveProjectMock = vi.fn()
+const loadProjectMock = vi.fn()
+const pickProjectDirectoryMock = vi.fn()
 const loadConversationMock = vi.fn()
 const appendConversationTurnMock = vi.fn()
-const generateEnclosureMock = vi.fn()
-const pickPcbFileMock = vi.fn()
 const getCapabilitiesMock = vi.fn()
 const shellOpenMock = vi.fn()
+const listOpenBoardsMock = vi.fn()
+const checkBoardMock = vi.fn()
+const openKicadMock = vi.fn()
+const checkSchematicMock = vi.fn()
+const pickSchematicFileMock = vi.fn()
+const listProjectSchematicsMock = vi.fn()
+const saveDialogMock = vi.fn()
+const openProjectFromDirectoryMock = vi.fn()
+const listenMock = vi.fn()
 
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
   dispatchTool: (...args: unknown[]) => dispatchToolMock(...args),
+  MENU_SAVE_PROJECT_EVENT: 'menu://save-project',
+  MENU_OPEN_PROJECT_EVENT: 'menu://open-project',
+}))
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: (...args: unknown[]) => listenMock(...args),
 }))
 
 vi.mock('./lib/projects', () => ({
   listProjects: (...args: unknown[]) => listProjectsMock(...args),
   listLibraryParts: (...args: unknown[]) => listLibraryPartsMock(...args),
   saveProject: (...args: unknown[]) => saveProjectMock(...args),
+  loadProject: (...args: unknown[]) => loadProjectMock(...args),
+  pickProjectDirectory: (...args: unknown[]) => pickProjectDirectoryMock(...args),
+  openProjectFromDirectory: (...args: unknown[]) => openProjectFromDirectoryMock(...args),
   loadConversation: (...args: unknown[]) => loadConversationMock(...args),
   appendConversationTurn: (...args: unknown[]) => appendConversationTurnMock(...args),
-}))
-
-vi.mock('./lib/enclosure', () => ({
-  generateEnclosure: (...args: unknown[]) => generateEnclosureMock(...args),
-  pickPcbFile: (...args: unknown[]) => pickPcbFileMock(...args),
 }))
 
 vi.mock('./lib/settings', () => ({
@@ -39,8 +52,27 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
   open: (...args: unknown[]) => shellOpenMock(...args),
 }))
 
+// CTX-312.1: EnclosurePanel's own real `exportEnclosure`/`getProjectDirectory`
+// flow (`lib/enclosure.ts`) isn't otherwise mocked in this file (unlike
+// `EnclosurePanel.test.tsx`, which mocks `../lib/enclosure` wholesale) --
+// completing a real Export click-through here needs this plugin's real
+// `save()` mocked too, matching the same real dialog `pickExportDestination`
+// calls in the actual app.
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  save: (...args: unknown[]) => saveDialogMock(...args),
+}))
+
 vi.mock('./components/EnclosureViewer', () => ({
   EnclosureViewer: () => null,
+}))
+
+vi.mock('./lib/boardAdvisor', () => ({
+  listOpenBoards: (...args: unknown[]) => listOpenBoardsMock(...args),
+  checkBoard: (...args: unknown[]) => checkBoardMock(...args),
+  openKicad: (...args: unknown[]) => openKicadMock(...args),
+  checkSchematic: (...args: unknown[]) => checkSchematicMock(...args),
+  pickSchematicFile: (...args: unknown[]) => pickSchematicFileMock(...args),
+  listProjectSchematics: (...args: unknown[]) => listProjectSchematicsMock(...args),
 }))
 
 const { default: App } = await import('./App')
@@ -75,6 +107,10 @@ describe('App: chat & command surface', () => {
   beforeEach(() => {
     submitJobMock.mockReset()
     dispatchToolMock.mockReset()
+    loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    listenMock.mockReset().mockResolvedValue(() => {})
+    openProjectFromDirectoryMock.mockReset()
+    pickProjectDirectoryMock.mockReset()
     listProjectsMock.mockReset().mockResolvedValue(['test-project'])
     listLibraryPartsMock.mockReset().mockResolvedValue([])
     saveProjectMock.mockReset()
@@ -262,168 +298,320 @@ describe('App: chat & command surface', () => {
   })
 })
 
-/** CTX-109.2: the Enclosure tab's real board-driven mode, project_name
- * threading, and unrecognized_holes/step_path surfacing -- CTX-109.1
- * built the daemon side of all of this; nothing here was reachable from
- * the UI before this context. */
-describe('App: Enclosure tab', () => {
+/** Real user feedback: switching away from the PCB tab and back threw
+ * out a check that had just finished, with no reason to -- App.tsx now
+ * keeps BoardAdvisor mounted (hidden via CSS) across every area tab
+ * instead of unmounting it, and only resets its state on a genuine
+ * project switch. */
+describe('App: PCB tab persists across area switches, resets on project switch', () => {
+  const ONE_BOARD_OPEN = {
+    status: 'boards_found' as const,
+    candidates: [{ path: '/real/board.kicad_pcb', label: 'board.kicad_pcb' }],
+  }
+  const CLEAN_RESULT = { violations: [], summary: '', truncated_count: 0, source_path: '/real/board.kicad_pcb' }
+
   beforeEach(() => {
-    submitJobMock.mockReset()
+    loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    listenMock.mockReset().mockResolvedValue(() => {})
+    openProjectFromDirectoryMock.mockReset()
+    pickProjectDirectoryMock.mockReset()
     listProjectsMock.mockReset().mockResolvedValue(['test-project'])
     listLibraryPartsMock.mockReset().mockResolvedValue([])
-    saveProjectMock.mockReset()
     loadConversationMock.mockReset().mockResolvedValue([])
-    appendConversationTurnMock.mockReset().mockResolvedValue(undefined)
-    generateEnclosureMock.mockReset()
-    pickPcbFileMock.mockReset()
-    getCapabilitiesMock.mockReset().mockResolvedValue({ kicad_available: false })
-    shellOpenMock.mockReset()
+    listOpenBoardsMock.mockReset().mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockReset().mockResolvedValue(CLEAN_RESULT)
+    openKicadMock.mockReset()
   })
 
-  async function renderAppOnEnclosure() {
-    render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
-    fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
-    await waitFor(() => screen.getByRole('button', { name: 'Manual dimensions' }))
+  // CTX-311.5: EnclosurePanel now also stays mounted (matching BoardAdvisor/
+  // SchematicAdvisor's own always-mounted pattern) and lists the same real
+  // open boards via the same mocked listOpenBoards -- 'board.kicad_pcb'
+  // appears in both panels' own pickers now, so PCB-tab queries must be
+  // scoped to the real pcb-area container, not the whole document.
+  function pcbArea() {
+    return within(screen.getByTestId('pcb-area'))
   }
 
-  const fakeResult = {
+  async function renderAppOnPcb() {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    fireEvent.click(screen.getByRole('button', { name: 'PCB' }))
+    await waitFor(() => pcbArea().getByText('board.kicad_pcb'))
+  }
+
+  it('a finished check is still shown after switching to another area and back to PCB', async () => {
+    await renderAppOnPcb()
+    fireEvent.click(pcbArea().getByText('board.kicad_pcb'))
+    await waitFor(() => screen.getByText('No violations found.'))
+
+    // CTX-311.5: EnclosurePanel now also stays mounted from the very
+    // first render (it mirrors BoardAdvisor's own always-mounted
+    // pattern), and calls listOpenBoards on its own initial mount too --
+    // the real baseline call count here is no longer a fixed "1". What
+    // this test actually verifies is that switching *away and back*
+    // doesn't trigger a fresh scan, so it must compare against the real
+    // count already reached, not a hardcoded literal.
+    const callsBeforeSwitching = listOpenBoardsMock.mock.calls.length
+
+    fireEvent.click(screen.getByRole('button', { name: 'Components' }))
+    fireEvent.click(screen.getByRole('button', { name: 'PCB' }))
+
+    screen.getByText('No violations found.')
+    expect(listOpenBoardsMock).toHaveBeenCalledTimes(callsBeforeSwitching)
+  })
+
+  it('switching to a different real project resets the previous project\'s check result', async () => {
+    listProjectsMock.mockReset().mockResolvedValue(['project-a', 'project-b'])
+
+    await renderAppOnPcb()
+    fireEvent.click(pcbArea().getByText('board.kicad_pcb'))
+    await waitFor(() => screen.getByText('No violations found.'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'project-b' }))
+    fireEvent.click(screen.getByRole('button', { name: 'PCB' }))
+
+    expect(screen.queryByText('No violations found.')).toBeNull()
+  })
+})
+
+/** CTX-311.5: real user feedback exercising the actual running app --
+ * navigating away from the Enclosure tab and back lost a just-generated
+ * enclosure, since EnclosurePanel was the only area conditionally
+ * mounted/unmounted (`{view.area === 'enclosure' && ...}`) rather than
+ * always-mounted and hidden via CSS like BoardAdvisor/SchematicAdvisor
+ * already were. Same persistence pattern, same test shape as those. */
+describe('App: Enclosure tab persists across area switches', () => {
+  const ONE_BOARD_OPEN = {
+    status: 'boards_found' as const,
+    candidates: [{ path: '/real/board.kicad_pcb', label: 'board.kicad_pcb' }],
+  }
+  const ENCLOSURE_RESULT = {
     glb_path: '/tmp/enclosure.glb',
     step_path: '/tmp/enclosure.step',
     unrecognized_holes: [] as { x_mm: number; y_mm: number; diameter_mm: number; recognized: false }[],
   }
 
-  it('TEST-002a: "From board" is not offered when capabilities report kicad_available: false', async () => {
-    getCapabilitiesMock.mockResolvedValueOnce({ kicad_available: false })
-    await renderAppOnEnclosure()
-
-    expect(screen.queryByRole('button', { name: 'From board' })).toBeNull()
+  beforeEach(() => {
+    loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    listenMock.mockReset().mockResolvedValue(() => {})
+    openProjectFromDirectoryMock.mockReset()
+    pickProjectDirectoryMock.mockReset()
+    saveProjectMock.mockReset().mockImplementation((project: unknown) => Promise.resolve(project))
+    saveDialogMock.mockReset()
+    listProjectsMock.mockReset().mockResolvedValue(['test-project'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    loadConversationMock.mockReset().mockResolvedValue([])
+    listOpenBoardsMock.mockReset().mockResolvedValue(ONE_BOARD_OPEN)
+    submitJobMock.mockReset()
   })
 
-  it('TEST-002b: "From board" is offered once capabilities report kicad_available: true', async () => {
-    getCapabilitiesMock.mockResolvedValueOnce({ kicad_available: true })
-    await renderAppOnEnclosure()
+  function enclosureArea() {
+    return within(screen.getByTestId('enclosure-area'))
+  }
 
-    await waitFor(() => screen.getByRole('button', { name: 'From board' }))
+  it('a just-generated enclosure is still shown after switching to another area and back', async () => {
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT)))
+
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
+    await waitFor(() => enclosureArea().getByText('board.kicad_pcb'))
+    fireEvent.click(enclosureArea().getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => enclosureArea().getByRole('button', { name: 'Export…' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Components' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
+
+    enclosureArea().getByRole('button', { name: 'Export…' })
+    expect(submitJobMock).toHaveBeenCalledTimes(1)
   })
 
-  it('TEST-003: submitting from-board mode omits width/depth and includes the real project_name', async () => {
-    getCapabilitiesMock.mockResolvedValue({ kicad_available: true })
-    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+  it('CTX-312.1: a real successful Export immediately persists a real export_history entry, not deferred to a separate Save click', async () => {
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT)))
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({ dest_path: '/real/dest/combined.step' })))
+    saveDialogMock.mockResolvedValueOnce('/real/dest/combined.step')
 
-    await renderAppOnEnclosure()
-    await waitFor(() => screen.getByRole('button', { name: 'From board' }))
-    fireEvent.click(screen.getByRole('button', { name: 'From board' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
+    await waitFor(() => enclosureArea().getByText('board.kicad_pcb'))
+    fireEvent.click(enclosureArea().getByRole('button', { name: 'Generate Enclosure' }))
+    await waitFor(() => enclosureArea().getByRole('button', { name: 'Export…' }))
 
-    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
-    const params = generateEnclosureMock.mock.calls[0][0]
-    expect(params).not.toHaveProperty('width')
-    expect(params).not.toHaveProperty('depth')
-    expect(params.project_name).toBe('test-project')
-  })
+    fireEvent.click(enclosureArea().getByRole('button', { name: 'Export…' }))
+    fireEvent.click(enclosureArea().getByRole('button', { name: 'Choose location…' }))
 
-  it('TEST-004: submitting manual mode includes width, depth, and height exactly as today', async () => {
-    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
-
-    await renderAppOnEnclosure()
-    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
-
-    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
-    expect(generateEnclosureMock).toHaveBeenCalledWith({
-      width: 50,
-      depth: 30,
-      height: 20,
-      project_name: 'test-project',
-    })
-  })
-
-  it('TEST-005: a non-empty unrecognized_holes result renders a real warning naming the count', async () => {
-    generateEnclosureMock.mockResolvedValueOnce(
-      fakeJobHandle(
-        Promise.resolve({
-          ...fakeResult,
-          unrecognized_holes: [{ x_mm: 1, y_mm: 1, diameter_mm: 1, recognized: false as const }],
+    await waitFor(() =>
+      expect(saveProjectMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          export_history: [
+            expect.objectContaining({ area: 'enclosure', dest_path: '/real/dest/combined.step' }),
+          ],
         }),
       ),
     )
-
-    await renderAppOnEnclosure()
-    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
-
-    await waitFor(() => screen.getByText(/1 hole\(s\) on this board weren't recognized/))
   })
 
-  it("TEST-006: a real step_path result renders an Open button that calls shell open with that exact path", async () => {
-    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+  it('CTX-312.1: "Link to folder…" links the real picked directory and saves it', async () => {
+    pickProjectDirectoryMock.mockResolvedValueOnce('/real/PCBs/test-project')
 
-    await renderAppOnEnclosure()
-    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
 
-    await waitFor(() => screen.getByRole('button', { name: 'Open .step' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open .step' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Link to folder…' }))
 
-    expect(shellOpenMock).toHaveBeenCalledWith('/tmp/enclosure.step')
+    await waitFor(() =>
+      expect(saveProjectMock).toHaveBeenCalledWith(
+        expect.objectContaining({ directory: '/real/PCBs/test-project' }),
+      ),
+    )
+    await waitFor(() => screen.getByRole('button', { name: 'Linked: /real/PCBs/test-project' }))
+    // CTX-312.2: real user feedback -- a successful link/save previously
+    // gave no visible confirmation at all, reading as "nothing happened."
+    screen.getByText('Linked to /real/PCBs/test-project')
   })
 
-  /** CTX-310.2: SPEC-310's file-based mode -- unlike "From board", this
-   * must be offered regardless of kicad_available, since the whole
-   * point is not needing a live connection at all. */
-  it('TEST-007: "Import board file…" is offered even when kicad_available is false', async () => {
-    getCapabilitiesMock.mockResolvedValueOnce({ kicad_available: false })
-    await renderAppOnEnclosure()
+  it('CTX-312.1: cancelling the folder picker never calls saveProject', async () => {
+    pickProjectDirectoryMock.mockResolvedValueOnce(null)
 
-    await waitFor(() => screen.getByRole('button', { name: 'Import board file…' }))
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Link to folder…' }))
+
+    await waitFor(() => expect(pickProjectDirectoryMock).toHaveBeenCalled())
+    expect(saveProjectMock).not.toHaveBeenCalled()
   })
 
-  it('TEST-008: Generate is disabled in file mode until a file is picked', async () => {
-    await renderAppOnEnclosure()
-    fireEvent.click(screen.getByRole('button', { name: 'Import board file…' }))
+  it('CTX-312.1: "Save Project" saves the current real project state on demand', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+    })
 
-    const generateButton = screen.getByRole('button', { name: 'Generate Enclosure' }) as HTMLButtonElement
-    expect(generateButton.disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Project' }))
+
+    await waitFor(() =>
+      expect(saveProjectMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'test-project' })),
+    )
+    // CTX-312.2: real user feedback -- a successful save previously gave
+    // no visible confirmation at all, reading as "nothing happened."
+    await waitFor(() => screen.getByText('Project saved.'))
   })
 
-  it('TEST-009: picking a file displays its real path and enables Generate', async () => {
-    pickPcbFileMock.mockResolvedValueOnce('/real/board.kicad_pcb')
+  it('CTX-312.3: the real native menu\'s own Save Project event runs the same real handleSaveProject flow as the button', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    // The menu-event listener effect re-subscribes whenever `currentProject`
+    // changes (so `handleSaveProject`'s own closure is never stale) --
+    // waiting for the button to become enabled is the real signal that the
+    // *latest* subscription (the one with a real, loaded project) is in
+    // place, not an earlier one registered while it was still null.
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+    })
 
-    await renderAppOnEnclosure()
-    fireEvent.click(screen.getByRole('button', { name: 'Import board file…' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Choose .kicad_pcb file…' }))
+    const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://save-project')!
+    await act(async () => {
+      menuHandler()
+    })
 
-    await waitFor(() => screen.getByText('/real/board.kicad_pcb'))
-    const generateButton = screen.getByRole('button', { name: 'Generate Enclosure' }) as HTMLButtonElement
-    expect(generateButton.disabled).toBe(false)
+    await waitFor(() =>
+      expect(saveProjectMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'test-project' })),
+    )
+    await waitFor(() => screen.getByText('Project saved.'))
   })
 
-  it('TEST-010: a cancelled file picker leaves Generate disabled, no path shown', async () => {
-    pickPcbFileMock.mockResolvedValueOnce(null)
+  it('CTX-312.3: the real native menu\'s own Open Project… event picks a real linked folder and selects it', async () => {
+    pickProjectDirectoryMock.mockResolvedValueOnce('/real/PCBs/other-project')
+    openProjectFromDirectoryMock.mockResolvedValueOnce({
+      name: 'other-project', directory: '/real/PCBs/other-project',
+    })
 
-    await renderAppOnEnclosure()
-    fireEvent.click(screen.getByRole('button', { name: 'Import board file…' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Choose .kicad_pcb file…' }))
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+    })
 
-    await waitFor(() => expect(pickPcbFileMock).toHaveBeenCalled())
-    screen.getByText('No file selected.')
-    const generateButton = screen.getByRole('button', { name: 'Generate Enclosure' }) as HTMLButtonElement
-    expect(generateButton.disabled).toBe(true)
+    const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://open-project')!
+    await act(async () => {
+      menuHandler()
+    })
+
+    await waitFor(() => expect(openProjectFromDirectoryMock).toHaveBeenCalledWith('/real/PCBs/other-project'))
+    // The Rail prefixes "> " onto whichever project is currently
+    // selected (Rail.tsx) -- opening a project also selects it, so the
+    // real accessible name here is "> other-project", not the bare name.
+    await waitFor(() => screen.getByRole('button', { name: '> other-project' }))
+  })
+})
+
+/** Real user feedback: the ERC check briefly lived under the "PCB" tab
+ * alongside DRC, which SPEC-300's own original stage-machine design
+ * never intended (ERC belongs to the "Schematic Advisor" stage). Moved
+ * to its own Schematic tab -- same mount-persistence/project-reset
+ * behavior as the PCB tab, for the same real reason. */
+describe('App: Schematic tab persists across area switches, resets on project switch', () => {
+  const ONE_SCHEMATIC_FOUND = {
+    status: 'schematics_found' as const,
+    candidates: [{ path: '/real/board.kicad_sch', label: 'board.kicad_sch' }],
+  }
+  const CLEAN_RESULT = { violations: [], summary: '', truncated_count: 0, source_path: '/real/board.kicad_sch' }
+
+  beforeEach(() => {
+    loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    listenMock.mockReset().mockResolvedValue(() => {})
+    openProjectFromDirectoryMock.mockReset()
+    pickProjectDirectoryMock.mockReset()
+    listProjectsMock.mockReset().mockResolvedValue(['test-project'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    loadConversationMock.mockReset().mockResolvedValue([])
+    listProjectSchematicsMock.mockReset().mockResolvedValue(ONE_SCHEMATIC_FOUND)
+    checkSchematicMock.mockReset().mockResolvedValue(CLEAN_RESULT)
+    openKicadMock.mockReset()
   })
 
-  it('TEST-011: submitting file mode includes pcb_path and omits width/depth', async () => {
-    pickPcbFileMock.mockResolvedValueOnce('/real/board.kicad_pcb')
-    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+  async function renderAppOnSchematic() {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    fireEvent.click(screen.getByRole('button', { name: 'Schematic' }))
+    await waitFor(() => screen.getByText('board.kicad_sch'))
+  }
 
-    await renderAppOnEnclosure()
-    fireEvent.click(screen.getByRole('button', { name: 'Import board file…' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Choose .kicad_pcb file…' }))
-    await waitFor(() => screen.getByText('/real/board.kicad_pcb'))
-    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+  it('the Schematic tab renders the real SchematicAdvisor, not a not-built placeholder', async () => {
+    await renderAppOnSchematic()
 
-    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
-    const params = generateEnclosureMock.mock.calls[0][0]
-    expect(params.pcb_path).toBe('/real/board.kicad_pcb')
-    expect(params).not.toHaveProperty('width')
-    expect(params).not.toHaveProperty('depth')
-    expect(params.project_name).toBe('test-project')
+    expect(screen.queryByText(/not built yet/)).toBeNull()
+  })
+
+  it('a finished check is still shown after switching to another area and back to Schematic', async () => {
+    await renderAppOnSchematic()
+    fireEvent.click(screen.getByText('board.kicad_sch'))
+    await waitFor(() => screen.getByText('No violations found.'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Components' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Schematic' }))
+
+    screen.getByText('No violations found.')
+    expect(listProjectSchematicsMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('switching to a different real project resets the previous project\'s check result', async () => {
+    listProjectsMock.mockReset().mockResolvedValue(['project-a', 'project-b'])
+
+    await renderAppOnSchematic()
+    fireEvent.click(screen.getByText('board.kicad_sch'))
+    await waitFor(() => screen.getByText('No violations found.'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'project-b' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Schematic' }))
+
+    expect(screen.queryByText('No violations found.')).toBeNull()
   })
 })

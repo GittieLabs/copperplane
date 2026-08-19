@@ -4,8 +4,10 @@ Connection lifecycle to a running KiCad instance via the IPC API
 for the rest of the daemon's life, to avoid paying a handshake on every
 call.
 """
+import glob
 import logging
 import os
+import platform
 import re
 
 from kipy import KiCad
@@ -30,6 +32,62 @@ _NM_PER_MM = 1_000_000
 # default H<digits> reference-designator convention -- not a one-off
 # heuristic invented here.
 _MOUNTING_HOLE_REF_PATTERN = re.compile(r"^H\d+$")
+
+# SPEC-311: a real kipy Footprint3DModel.filename uses KiCad's own
+# "${VAR}/relative/path" convention (e.g.
+# "${KICAD10_3DMODEL_DIR}/Connector_PinHeader_2.54mm.3dshapes/...step").
+# The var name is version-numbered and will drift with future KiCad
+# major versions the same way find_kicad_cli's/find_freecadcmd's own
+# version-numbered install paths already do -- matched by pattern here,
+# never a hardcoded name.
+_ENV_VAR_PATH_PATTERN = re.compile(r"^\$\{([A-Z0-9_]+)\}(/.*)$")
+
+# Real, confirmed-existing per-OS KiCad 3D model library install
+# locations, used only when the real env var above isn't set in this
+# daemon's own process environment -- confirmed true during SPEC-311's
+# own research: KiCad resolves the var internally, but this daemon's
+# subprocess never inherits it. The macOS path is the one actually
+# verified on a real dev machine; Linux/Windows are KiCad's own
+# documented install conventions, not yet confirmed against a real
+# install of either -- the same disclosed-but-unverified status
+# kicad_cli.py's own _CANDIDATE_GLOBS already carries for those OSes.
+_3DMODEL_DIR_CANDIDATES = {
+    "Darwin": ["/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels"],
+    "Linux": ["/usr/share/kicad/3dmodels", "/usr/local/share/kicad/3dmodels"],
+    "Windows": [r"C:\Program Files\KiCad\*\share\kicad\3dmodels"],
+}
+
+
+def _resolve_3d_model_path(filename: str) -> str:
+    """Resolves a real KiCad footprint 3D model's own `${VAR}/...`
+    filename to a real, existing path on disk, or `None` -- never a
+    guessed path. Tries the real environment variable first (however
+    it's actually named); if unset, falls back to real, confirmed
+    per-OS KiCad install locations, the same fallback pattern
+    `kicad_cli.py`'s own `_CANDIDATE_GLOBS` uses for the `kicad-cli`
+    binary itself. A filename that isn't the `${VAR}/...` convention at
+    all is tried as a literal path."""
+    if not filename:
+        return None
+
+    match = _ENV_VAR_PATH_PATTERN.match(filename)
+    if not match:
+        return filename if os.path.exists(filename) else None
+
+    env_var, rel_path = match.groups()
+    env_value = os.environ.get(env_var)
+    if env_value:
+        candidate = env_value + rel_path
+        if os.path.exists(candidate):
+            return candidate
+
+    for base_pattern in _3DMODEL_DIR_CANDIDATES.get(platform.system(), []):
+        for base in glob.glob(base_pattern):
+            candidate = os.path.join(base, rel_path.lstrip("/"))
+            if os.path.exists(candidate):
+                return candidate
+
+    return None
 
 
 class KiCadUnavailableError(Exception):
@@ -74,10 +132,29 @@ def configure(socket_path=None, timeout_ms=None):
 
 def get_client() -> KiCad:
     """Returns the held-open KiCad client, connecting on first use with
-    any configured `socket_path`/`timeout_ms` override (SPEC-106)."""
+    any configured `socket_path`/`timeout_ms` override (SPEC-106).
+
+    Real, live-discovered bug: the held-open connection can go stale
+    without ever raising on its own -- `SPEC-103` §3's own documented
+    state-desync risk (closing/reopening things in KiCad while this
+    daemon holds a connection open). Confirmed live: after enough
+    opening/closing of KiCad and files in one dev session, real routes
+    that had worked moments earlier (a fresh connection found
+    everything correctly) started silently returning nothing through
+    the daemon's own long-held connection, and only a full daemon
+    restart recovered it -- the cached `_client` was never actually
+    validated before being reused. Every call now pings the cached
+    client first (a real, cheap round trip, not just checking a local
+    "am I connected" flag) and transparently reconnects if that fails,
+    instead of trusting a connection that's been open for a while."""
     global _client
     if _client is not None:
-        return _client
+        try:
+            _client.ping()
+            return _client
+        except (KiCadConnectionError, ApiError):
+            logger.warning("Cached KiCad connection failed a health-check ping; reconnecting.")
+            _client = None
 
     kwargs = {}
     if _socket_path_override:
@@ -139,34 +216,93 @@ def get_kicad_version() -> dict:
     }
 
 
-def get_open_board_path() -> str | None:
-    """SPEC-309: resolves the real, full filesystem path of whatever
-    board is currently open in KiCad -- `project.path` + `board_filename`
-    from `get_open_documents(DOCTYPE_PCB)`, confirmed live against a real
-    running KiCad 10.0.3 instance during SPEC-309's own research. Returns
-    `None` if nothing is open, rather than raising -- "no board open" is
-    a normal, expected state for the board-advisor route to handle
-    (report it plainly and ask for an explicit path), not an error.
+_NO_HANDLER_MARKER = "no handler available"
+
+
+def list_open_boards() -> list:
+    """SPEC-309/CTX-309.3: resolves every real, currently-open PCB
+    editor's full filesystem path via `get_open_documents(DOCTYPE_PCB)`
+    -- a real list, never silently narrowed to just the first one, so a
+    caller can tell "nothing open" apart from "more than one open" and
+    handle each honestly instead of guessing which board the user meant.
+
+    A real, live-confirmed finding (CTX-309.3, against this machine's
+    own actually-running KiCad instance): `get_open_documents` itself
+    raises a real `ApiError` containing "no handler available" whenever
+    no PCB Editor window is open at all -- the handler isn't registered
+    until one is (the same real constraint CTX-108.1's own Deviation 2
+    already documented for the write path). This is a normal, expected
+    "nothing open" state, treated the same as an empty list -- not
+    passed through `reset_connection()`/`KiCadUnavailableError` the way
+    a genuine dropped connection is. `SPEC-309`'s own original research
+    assumed an empty list here without live-testing the zero-open case;
+    this was a real, live-discovered correction, not a hypothetical one.
 
     Deliberately PCB-only: the identical call for `DOCTYPE_SCHEMATIC`
-    raises a real `no handler available` `ApiError` -- confirmed the
-    same way, not assumed -- so this function doesn't attempt it; the
-    schematic side of SPEC-309 always needs an explicit user-supplied
-    path."""
+    raises the same real `no handler available` `ApiError` unconditionally
+    (there's no schematic-document capability to fall back to) -- confirmed
+    the same way, not assumed. `list_project_schematics` below derives a
+    schematic path from this same real IPC data instead of needing that
+    capability at all."""
     client = get_client()
     try:
         docs = list(client.get_open_documents(DocumentType.DOCTYPE_PCB))
     except (KiCadConnectionError, ApiError) as e:
+        if isinstance(e, ApiError) and _NO_HANDLER_MARKER in str(e):
+            return []
         reset_connection()
         raise KiCadUnavailableError(
             "Lost connection to KiCad mid-request. It may have been closed."
         ) from e
 
-    if not docs:
-        return None
+    return [os.path.join(doc.project.path, doc.board_filename) for doc in docs]
 
-    doc = docs[0]
-    return os.path.join(doc.project.path, doc.board_filename)
+
+def list_project_schematics() -> list:
+    """Real user feedback: why can't Schematic checking work like Board
+    checking, with a live list instead of a blind file dialog? Answer,
+    confirmed live against a real running KiCad instance with a real
+    project open (not assumed): `get_open_documents(DOCTYPE_SCHEMATIC)`
+    raises the same `"no handler available"` `ApiError` unconditionally,
+    even with a board open and its project loaded -- unlike the PCB
+    case, KiCad's IPC server has never implemented a schematic-listing
+    handler at all. `run_action` could in principle drive KiCad's UI
+    remotely, but kipy's own docstring marks it explicitly unstable and
+    "not intended for use other than by API developers" -- not something
+    to build real functionality on.
+
+    Instead, this derives each currently open board's own root schematic
+    path from `get_open_documents(DOCTYPE_PCB)`'s own real `project.name`/
+    `project.path` fields: KiCad's own project convention names the root
+    schematic after the *project*, not the individual board file -- true
+    even for a multi-board project whose `.kicad_pcb` files don't share
+    the project's own name. Verified against a real project on this
+    machine (`NFC_Reader_ESP32.kicad_pcb` open, project name
+    `NFC_Reader_ESP32`, real `NFC_Reader_ESP32.kicad_sch` present at the
+    project root). Never returns a derived path that doesn't actually
+    exist -- a wrong guess presented as fact would be worse than the
+    manual file-picker this replaces for the common case."""
+    client = get_client()
+    try:
+        docs = list(client.get_open_documents(DocumentType.DOCTYPE_PCB))
+    except (KiCadConnectionError, ApiError) as e:
+        if isinstance(e, ApiError) and _NO_HANDLER_MARKER in str(e):
+            return []
+        reset_connection()
+        raise KiCadUnavailableError(
+            "Lost connection to KiCad mid-request. It may have been closed."
+        ) from e
+
+    seen = set()
+    candidates = []
+    for doc in docs:
+        sch_path = os.path.join(doc.project.path, doc.project.name + ".kicad_sch")
+        if sch_path in seen:
+            continue
+        seen.add(sch_path)
+        if os.path.exists(sch_path):
+            candidates.append(sch_path)
+    return candidates
 
 
 def get_board_outline() -> dict:
@@ -245,6 +381,66 @@ def get_mounting_holes() -> list:
             })
 
     return holes
+
+
+def list_footprint_models() -> list:
+    """SPEC-311: every real footprint's own attached 3D model(s) --
+    kipy's real `Footprint.models` (`Footprint3DModel`, a real property
+    since kipy 0.3.0, confirmed against this environment's installed
+    kipy). Read-only, no `freecad_bridge` dependency -- this module
+    stays independently importable per SPEC-107 §2 even when
+    `freecad_bridge`'s own dependencies (e.g. `trimesh`) aren't
+    installed; `daemon.py`'s own composition route is what turns a
+    resolved STEP path into a real height, mirroring how
+    `freecad_generate_enclosure` already composes this module's board
+    outline/mounting-hole data with `freecad_bridge.generate_enclosure`.
+
+    Real per-footprint list: [{"reference", "is_mounting_hole", "models":
+    [{"filename", "resolved_path" (real path on disk, or None),
+    "visible"}, ...]}, ...]. Every attached model is reported, not only
+    ones this function judges usable -- the caller decides format/
+    visibility handling.
+
+    `is_mounting_hole` reuses `get_mounting_holes`'s own real recognition
+    convention (KiCad's standard MountingHole library, or an `H<digits>`
+    reference) -- CTX-311.15's own real click-through found the daemon's
+    height-derivation route flagging a board's real, unannotated
+    MountingHole footprints as "missing a 3D model," which is technically
+    true but misleading: a screw hole was never expected to have a
+    rendered model, and it's already represented separately by the
+    enclosure's own standoff geometry, not this footprint list."""
+    client = get_client()
+    try:
+        board = client.get_board()
+        footprints = board.get_footprints()
+    except (KiCadConnectionError, ApiError) as e:
+        reset_connection()
+        raise KiCadUnavailableError(
+            "Lost connection to KiCad mid-request. It may have been closed."
+        ) from e
+
+    result = []
+    for fp in footprints:
+        reference = fp.reference_field.text.value if fp.reference_field else "?"
+        library = (fp.definition.id.library or "").lower()
+        is_mounting_hole = (
+            "mountinghole" in library or bool(_MOUNTING_HOLE_REF_PATTERN.match(reference))
+        )
+        models = [
+            {
+                "filename": m.filename,
+                "resolved_path": _resolve_3d_model_path(m.filename),
+                "visible": bool(m.visible),
+            }
+            for m in (fp.definition.models or [])
+        ]
+        result.append({
+            "reference": reference,
+            "is_mounting_hole": is_mounting_hole,
+            "models": models,
+        })
+
+    return result
 
 
 def inject_component(schema: dict, position_mm: tuple) -> dict:

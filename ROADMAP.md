@@ -201,6 +201,33 @@ bridges talk to each other, and it's where the product stops being two disconnec
 Scope: board outline extraction, hole positions, wall thickness/tolerance/standoff parameters,
 fillets, and STEP export alongside `.glb` so the result is usable in real mechanical CAD.
 
+#### SPEC-111 — Enclosure Lid & Component-Height Clearance — superseded in scope by SPEC-311
+
+*Module:* `services/python-daemon` · *Depends on:* SPEC-109, SPEC-202
+
+Real user feedback exercising the shipped enclosure generator: `SPEC-109` only ever builds an
+open-top tray (its own §1 Non-Goals rule out lid/fastener hardware) sized from a board's *bounding
+box*, not its real outline — both the live IPC path (`kicad_bridge.get_board_outline`) and the
+file-based path (`kicad_pcb_import.extract_board_outline`) reduce the real Edge.Cuts polygon down
+to a rectangle before it ever reaches FreeCAD. Two real, related gaps worth addressing eventually,
+neither attempted here:
+
+1.  **A real lid, not just a bottom shell.** Needs the enclosure's own interior height to clear
+    every placed component's real body height, not just the board's flat 2D outline.
+    **Correction, found while scoping `SPEC-311`:** `SPEC-202`'s extraction already persists
+    `package_dimensions.height_mm` on every saved `Part` (`CTX-308.5`) — the real gap is that no
+    stored link exists from a specific *placed footprint on a real board* back to the `Part`
+    record it came from, not a missing height field.
+2.  **A true polygon-traced shell, not a rectangular bounding box**, for a genuinely
+    non-rectangular board — real OpenCASCADE work (extrude an arbitrary closed wire, offset it
+    inward by wall thickness for the shell, handle concave sections at each corner), not a small
+    tweak to the existing `Part.makeBox` boolean-cut script.
+
+Left here as the historical record of when this gap was first named (this repo's own "Plan Drift is
+not embarrassing" norm) — **[SPEC-311](apps/tauri-ui/specs/SPEC-311-enclosure-refinement-interactive-preview.md)**
+is the real spec that now owns this scope, expanded well beyond just lid/outline once actually
+written up.
+
 ### 3.2 `2xx` — Intelligence layer
 
 **Decision (2026-08-08): the AI runtime for this layer is [AgentFlow](https://github.com/GittieLabs/agentflow)
@@ -420,6 +447,40 @@ and import/export to KiCad's own `.kicad_sym`/`.pretty` library formats.
 (enclosure-from-geometry) exists — the schema doesn't need `SPEC-109` done, only to eventually
 produce `Artifact`s it stores.
 
+#### [SPEC-312](apps/tauri-ui/specs/SPEC-312-application-shell-project-portability-persistence.md) — Application Shell, Project Portability & Persistence Model — ✅ done (items 1-3) 2026-08-19
+
+*Module:* `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-300, SPEC-304, SPEC-311
+
+Real product questions surfaced while scoping `CTX-311.13` (the Enclosure tab's real Export
+action) that its own narrow scope deliberately did not try to answer, now a real spec, per this
+repo's own "Plan Drift is not embarrassing" norm. Scoped to three of the five original questions
+below (items 1-3, all shipped) -- item 4 (Overview tab purpose) and item 5 (component library
+discovery) are explicit Non-Goals in the spec itself, real but separate decisions left for their
+own future specs:
+
+1.  **What does "Save" actually save, at the project level?** — ✅ done
+    ([CTX-312.1](apps/tauri-ui/context/CTX-312.1-project-directory-link-and-save.md)). Two named
+    actions, not three: "Link to folder…" plus "Save Project," which now writes a real manifest
+    (`last_results`/`export_history` keyed by area tab) rather than the largely-unused
+    `{name, schema_version}` record that existed before.
+2.  **Project portability.** — ✅ done (same context as above). A linked project's real state now
+    lives at `<directory>/.hardware-agent-studio/project.json` — copy the folder, send it, open it
+    on another machine — instead of only the app's own per-machine storage root.
+3.  **The native app menu.** — ✅ done
+    ([CTX-312.3](apps/tauri-ui/context/CTX-312.3-native-app-menu.md)). Real `File`/`Edit`/`View`/
+    `Help` menu via `tauri::menu`; File's Save Project/Open Project… reuse the same handlers as the
+    in-app buttons. `CTX-312.3` also built the real reverse of item 2's directory link —
+    `project.open_from_directory`, "a folder someone hands me becomes a known project here" — the
+    actual payoff of portability, not just writing a portable file no code ever reads back.
+4.  **The Overview tab's actual purpose**, undecided since `SPEC-305` first re-housed chat there: a
+    per-project dashboard (status across PCB/Schematic/Enclosure, activity history, a dedicated
+    chat surface) vs. a cross-project landing page (recent projects, app updates, roadmap news —
+    the same role VS Code's own "Welcome" tab plays). Genuinely different features; needs a real
+    decision before either gets built.
+5.  **Component library discovery/search** — connecting to a real external footprint/component
+    library service for searching and pulling in components, distinct from this app's own local
+    library (`SPEC-304`). Not named precisely yet; needs real research before scoping.
+
 ### 3.4 `4xx` — Distribution & operations
 
 #### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — ✅ Completed ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md), [CTX-401.2](context/CTX-401.2-tauri-sidecar-wiring.md)) 2026-08-14
@@ -446,18 +507,25 @@ the user directly click-testing the running dev-mode app afterward. `SPEC-101`'s
 left untouched, as designed. Windows/Linux freezing remains real, explicitly out-of-scope follow-up
 (`SPEC-403`).
 
-#### [SPEC-402](specs/SPEC-402-release-signing-and-auto-update.md) — Release, Signing & Auto-Update
+#### [SPEC-402](specs/SPEC-402-release-signing-and-auto-update.md) — Release, Signing & Auto-Update — ✅ done 2026-08-17
+
 *Module:* repo-wide · *Depends on:* SPEC-401
 
-**Rescoped 2026-08-16: unsigned first, deliberately.** A real macOS-only release pipeline (unsigned
-`.dmg` via GitHub Actions, a real Gatekeeper-bypass doc), the Tauri auto-updater (its own real,
-maintainer-generated keypair — no OS-level code-signing certificate, no cost, no identity tied to
-one person), and a changelog derived from the `CTX-*.md` implementation logs — which the framework
-already collects, and which nothing currently reads. Code signing/notarization is explicitly
-deferred: it requires either a personal Apple/Windows identity tied to releases indefinitely, or a
-real *organization* account under a project entity (GittieLabs, if it becomes the enrolled entity)
-— a real, separate, future decision this spec doesn't make. Windows/Linux builds wait on
-`SPEC-403`'s own cross-platform verification, which hasn't happened.
+**Rescoped 2026-08-16: unsigned first, deliberately** — then the deferred parts shipped anyway,
+across four more contexts, all `Completed`:
+[CTX-402.1](context/CTX-402.1-release-pipeline-and-changelog.md) (unsigned macOS pipeline + a
+changelog generator reading the framework's own `CTX-*.md` logs, v0.1.0),
+[CTX-402.2](context/CTX-402.2-auto-updater.md) (Tauri auto-updater, its own standalone signing
+keypair, v0.1.0), [CTX-402.3](context/CTX-402.3-macos-signing-notarization.md) (real macOS code
+signing + notarization under a GittieLabs Apple Developer account — the "real *organization*
+account" this entry originally deferred on, resolved rather than left open, v0.1.1),
+[CTX-402.4](context/CTX-402.4-intel-macos-build.md) (a second, Intel x86_64 macOS build alongside
+the original Apple Silicon one, v0.1.3), and
+[CTX-402.5](context/CTX-402.5-windows-linux-prerelease-builds.md) (real, unsigned,
+explicitly-pre-release Windows and Linux builds, v0.1.3). The Windows/Linux builds here are real
+compiled artifacts, not the same thing as `SPEC-403`'s still-open question below — nothing has
+live-tested the actual KiCad/FreeCAD bridges on those platforms yet, only that the app itself
+builds and launches there.
 
 #### SPEC-403 — Cross-Platform Verification Matrix
 *Module:* repo-wide · *Depends on:* SPEC-903
@@ -466,7 +534,9 @@ Every live CAD test to date has run on exactly one machine: Keith's Mac, with Ki
 FreeCAD 1.1.1. Both CTX-103.1 and CTX-104.1 say so explicitly. This spec defines how the live paths
 get exercised on Windows and Linux — self-hosted runners with real CAD installs, a documented
 manual checklist, or containerized KiCad. Until then, "works on Windows" is an untested claim about
-the two most fragile integration points in the codebase.
+the two most fragile integration points in the codebase. `SPEC-402`'s `CTX-402.5` (2026-08-17)
+shipped real Windows/Linux *builds*, still explicitly pre-release for exactly this reason — this
+spec is what would move them past that label.
 
 ### 3.5 `9xx` — The framework itself
 

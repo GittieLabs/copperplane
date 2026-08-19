@@ -1,4 +1,5 @@
 import http.server
+import json
 import os
 import shutil
 import subprocess
@@ -241,6 +242,131 @@ class TestProject(LibraryStoreTestCase):
         loaded = store.load_project("weather-station")
         self.assertEqual(loaded["name"], "weather-station")
         self.assertEqual(loaded["component_refs"], [])
+
+
+class TestProjectDirectoryLink(LibraryStoreTestCase):
+    """CTX-312.1: SPEC-304 §2.1 already described a Project as holding "a
+    link to a KiCad project directory on disk" -- these tests cover the
+    real directory-aware routing that finally builds it, and the
+    guarantee that an unlinked project's behavior is untouched."""
+
+    def setUp(self):
+        super().setUp()
+        self._real_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._real_dir.cleanup()
+        super().tearDown()
+
+    def test_001_a_directory_linked_project_writes_its_real_manifest_there(self):
+        store.save_project({
+            "name": "weather-pcb", "directory": self._real_dir.name, "wall_thickness_mm": 2,
+        })
+
+        state_path = os.path.join(
+            self._real_dir.name, store._PROJECT_STATE_SUBDIR, "project.json",
+        )
+        self.assertTrue(os.path.isfile(state_path))
+
+    def test_002_a_directory_linked_project_round_trips_through_the_real_directory(self):
+        store.save_project({
+            "name": "weather-pcb", "directory": self._real_dir.name, "wall_thickness_mm": 2,
+        })
+
+        loaded = store.load_project("weather-pcb")
+
+        self.assertEqual(loaded["wall_thickness_mm"], 2)
+        self.assertEqual(loaded["directory"], self._real_dir.name)
+
+    def test_003_an_unlinked_project_still_behaves_exactly_as_before_ctx_312_1(self):
+        store.save_project({"name": "weather-pcb", "component_refs": []})
+
+        loaded = store.load_project("weather-pcb")
+
+        self.assertEqual(loaded, {"name": "weather-pcb", "schema_version": 1, "component_refs": []})
+        self.assertNotIn("directory", loaded)
+
+    def test_004_a_moved_or_deleted_linked_directory_raises_a_clean_error_not_a_bare_one(self):
+        store.save_project({"name": "weather-pcb", "directory": self._real_dir.name})
+        self._real_dir.cleanup()
+
+        with self.assertRaises(store.ProjectDirectoryMissingError) as ctx:
+            store.load_project("weather-pcb")
+        self.assertIn("weather-pcb", str(ctx.exception))
+        self.assertIn(self._real_dir.name, str(ctx.exception))
+
+    def test_005_project_directory_returns_the_real_link_once_set(self):
+        store.save_project({"name": "weather-pcb", "directory": self._real_dir.name})
+
+        self.assertEqual(store.project_directory("weather-pcb"), self._real_dir.name)
+
+    def test_006_project_directory_falls_back_to_storage_root_when_unlinked(self):
+        store.save_project({"name": "weather-pcb"})
+
+        self.assertEqual(store.project_directory("weather-pcb"), store._project_dir("weather-pcb"))
+
+    def test_007_list_projects_still_finds_a_directory_linked_project(self):
+        store.save_project({"name": "weather-pcb", "directory": self._real_dir.name})
+
+        self.assertEqual(store.list_projects(), ["weather-pcb"])
+
+
+class TestOpenProjectFromDirectory(LibraryStoreTestCase):
+    """CTX-312.3: the real reverse of TestProjectDirectoryLink above --
+    given a real folder (as if copied from another machine), restores it
+    as a known project on this one. The actual payoff of CTX-312.1's own
+    portability work, and the real backend for the native menu's own
+    "Open Project…" action."""
+
+    def setUp(self):
+        super().setUp()
+        self._real_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._real_dir.cleanup()
+        super().tearDown()
+
+    def test_001_a_real_linked_folder_is_restored_as_a_known_project(self):
+        # Simulates a folder that already carries real project state --
+        # e.g. handed over from another machine -- written directly, not
+        # via this test's own storage-root-configured save_project (that
+        # would already register the pointer, defeating the point of
+        # this test).
+        state_dir = os.path.join(self._real_dir.name, store._PROJECT_STATE_SUBDIR)
+        os.makedirs(state_dir)
+        with open(os.path.join(state_dir, "project.json"), "w", encoding="utf-8") as f:
+            json.dump({"name": "weather-pcb", "wall_thickness_mm": 2}, f)
+
+        result = store.open_project_from_directory(self._real_dir.name)
+
+        self.assertEqual(result["name"], "weather-pcb")
+        self.assertEqual(result["wall_thickness_mm"], 2)
+        self.assertEqual(result["directory"], self._real_dir.name)
+
+    def test_002_restoring_a_project_makes_it_discoverable_via_list_projects(self):
+        state_dir = os.path.join(self._real_dir.name, store._PROJECT_STATE_SUBDIR)
+        os.makedirs(state_dir)
+        with open(os.path.join(state_dir, "project.json"), "w", encoding="utf-8") as f:
+            json.dump({"name": "weather-pcb"}, f)
+
+        store.open_project_from_directory(self._real_dir.name)
+
+        self.assertEqual(store.list_projects(), ["weather-pcb"])
+
+    def test_003_a_folder_with_no_real_state_file_raises_a_clean_error(self):
+        with self.assertRaises(store.ProjectNotLinkedError) as ctx:
+            store.open_project_from_directory(self._real_dir.name)
+        self.assertIn(self._real_dir.name, str(ctx.exception))
+
+    def test_004_never_silently_creates_a_new_project_from_the_folder_name(self):
+        """The real, deliberate design decision named in this function's
+        own docstring: no state file means a clean error, not a guessed
+        new project -- avoids a real name-collision risk against an
+        existing, unrelated storage_root/projects/<basename>/."""
+        with self.assertRaises(store.ProjectNotLinkedError):
+            store.open_project_from_directory(self._real_dir.name)
+
+        self.assertEqual(store.list_projects(), [])
 
 
 class TestArtifact(LibraryStoreTestCase):

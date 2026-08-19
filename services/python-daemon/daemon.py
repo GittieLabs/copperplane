@@ -1,4 +1,3 @@
-import hashlib
 import inspect
 import logging
 import logging.handlers
@@ -73,11 +72,12 @@ except Exception:
 
 try:
     import freecad_bridge
-    from freecad_bridge import generate_enclosure
+    from freecad_bridge import generate_enclosure, export_enclosure
 except Exception:
     logger.exception("freecad_bridge failed to import -- freecad.* routes will be unavailable")
     freecad_bridge = None
     generate_enclosure = None
+    export_enclosure = None
 
 try:
     import llm_providers
@@ -173,6 +173,13 @@ def _apply_env_config() -> None:
             socket_path=env_config.get("kicad_socket_path"),
             timeout_ms=env_config.get("kicad_timeout_ms"),
         )
+    if kicad_cli is not None:
+        # SPEC-311: kicad_cli.configure existed since SPEC-309 but was
+        # never actually called here -- kicad.export_board_glb is this
+        # module's first real, persistent-file-producing route, so it's
+        # the first to need the same real output_dir (SPEC-301 §2)
+        # freecad_bridge.configure already receives above.
+        kicad_cli.configure(output_dir=env_config.get("output_dir"))
     if library_store is not None:
         library_store.configure(storage_root=env_config.get("storage_root"))
 
@@ -236,16 +243,6 @@ def kicad_inject_component(schema: dict, x_mm: float, y_mm: float) -> dict:
     return kicad_bridge.inject_component(schema, (x_mm, y_mm))
 
 
-def _board_revision_for(outline: dict, recognized_holes: list) -> str:
-    """SPEC-109: a real sha256 of the exact board data actually used to
-    build the enclosure -- deterministic and self-contained (no extra
-    KiCad calls, no dependency on a board file path this bridge never
-    has direct filesystem access to). Only recognized holes are hashed,
-    since only they affect the physical geometry that was built."""
-    payload = json.dumps({"outline": outline, "holes": recognized_holes}, sort_keys=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
 def freecad_generate_enclosure(
     height: float,
     width: float = None,
@@ -255,7 +252,8 @@ def freecad_generate_enclosure(
     clearance_mm: float = 0.5,
     fillet_radius_mm: float = 1.0,
     standoff_height_mm: float = 5.0,
-    project_name: str = None,
+    lid: bool = False,
+    lid_thickness_mm: float = None,
     timeout_s: float = 30.0,
     cancel_event=None,
 ) -> dict:
@@ -288,16 +286,24 @@ def freecad_generate_enclosure(
     `unrecognized_holes` return value, for a future UI to surface rather
     than the daemon silently dropping it.
 
-    `library_store.save_artifact` (kind: "enclosure", a real
-    `board_revision`) only runs when the caller supplies `project_name`
-    (optional, default None) -- keeping today's frontend contract
-    (`App.tsx`'s `dims` object, no `project_name`) working unmodified
-    until the UI-wiring child context SPEC-109 already names lands."""
+    Generating no longer implicitly persists anything (`CTX-311.13`
+    removed the `project_name`-gated `library_store.save_artifact` call
+    this route used to make on every single call -- a real, confirmed,
+    live bug: the frontend always supplied `project_name`, so every
+    Generate wrote an Artifact record, and the very next regenerate's own
+    leak-bounding cleanup deleted the files that record pointed at.
+    `freecad.export_enclosure` is now the one real, explicit "keep this"
+    action; Generate stays a cheap, repeatable preview step, matching
+    `CTX-311.2`'s own explicit-save-only decision for real, not just in
+    name).
+
+    `lid` (SPEC-311) passes straight through to `generate_enclosure`,
+    which raises a clean `ValueError` in manual mode -- no board-driven
+    outline means no open top for a lid to close."""
     if width is not None and depth is not None:
         outline = None
         recognized_holes = []
         unrecognized_holes = []
-        board_revision = f"manual:{width}x{depth}x{height}"
     elif pcb_path:
         if kicad_pcb_import is None:
             raise RuntimeError(
@@ -307,7 +313,6 @@ def freecad_generate_enclosure(
         outline = kicad_pcb_import.extract_board_outline(pcb_path)
         recognized_holes = kicad_pcb_import.extract_mounting_holes(pcb_path)
         unrecognized_holes = []
-        board_revision = f"file:{pcb_path}:{_board_revision_for(outline, recognized_holes)}"
     else:
         if kicad_bridge is None:
             raise RuntimeError(
@@ -319,7 +324,6 @@ def freecad_generate_enclosure(
         holes = kicad_bridge.get_mounting_holes()
         recognized_holes = [h for h in holes if h["recognized"]]
         unrecognized_holes = [h for h in holes if not h["recognized"]]
-        board_revision = _board_revision_for(outline, recognized_holes)
 
     result = generate_enclosure(
         height=height,
@@ -338,27 +342,58 @@ def freecad_generate_enclosure(
             for h in recognized_holes
         ],
         fillet_radius_mm=fillet_radius_mm,
+        lid=lid,
+        lid_thickness_mm=lid_thickness_mm,
         timeout_s=timeout_s,
         cancel_event=cancel_event,
     )
     result = {**result, "unrecognized_holes": unrecognized_holes}
-
-    if project_name:
-        if library_store is None:
-            raise RuntimeError(
-                "Saving an enclosure Artifact requires library_store, which failed to import."
-            )
-        artifact_id = uuid.uuid4().hex
-        library_store.save_artifact(project_name, {
-            "artifact_id": artifact_id,
-            "kind": "enclosure",
-            "board_revision": board_revision,
-            "glb_path": result["glb_path"],
-            "step_path": result["step_path"],
-        })
-        result["artifact_id"] = artifact_id
+    if outline is not None:
+        # SPEC-311 §2: the pre-existing unrecognized_holes warning above
+        # only ever fires for a board that has *some* NPTH pads, just
+        # not ones this app recognizes as mounting holes. A board with
+        # *zero* holes of any kind -- recognized or not -- previously
+        # triggered no warning at all, indistinguishable from "the
+        # detection missed them." Only meaningful in file/live mode
+        # (outline is not None); manual mode has no board data to have
+        # found holes on in the first place.
+        result["no_mounting_holes_found"] = not recognized_holes and not unrecognized_holes
 
     return result
+
+
+def freecad_export_enclosure(
+    parts: str,
+    fmt: str,
+    dest_path: str,
+    glb_path: str = None,
+    step_path: str = None,
+    lid_glb_path: str = None,
+    lid_step_path: str = None,
+    timeout_s: float = 30.0,
+    cancel_event=None,
+) -> dict:
+    """The freecad.export_enclosure route (`CTX-311.13`) -- the real,
+    explicit "Save" action `SPEC-311` §2 named as an open question and
+    `CTX-311.2` decided (explicit-save-only) but never actually wired up
+    (see `freecad_generate_enclosure`'s own docstring for the real,
+    confirmed auto-save bug this replaces). A thin wrapper over
+    `freecad_bridge.export_enclosure` -- every source path comes straight
+    from the caller's own already-completed Generate result (`EnclosurePanel`'s
+    own `result` state), never looked up server-side, so this route has no
+    hidden dependency on daemon-side "last generated" state."""
+    export_enclosure(
+        parts=parts,
+        fmt=fmt,
+        dest_path=dest_path,
+        glb_path=glb_path,
+        step_path=step_path,
+        lid_glb_path=lid_glb_path,
+        lid_step_path=lid_step_path,
+        timeout_s=timeout_s,
+        cancel_event=cancel_event,
+    )
+    return {"dest_path": dest_path}
 
 
 # --- library.*/project.* routes (SPEC-304, CTX-304.1) -----------------
@@ -484,6 +519,31 @@ def project_load(name: str) -> dict:
 
 def project_list() -> list:
     return library_store.list_projects()
+
+
+def project_open_from_directory(directory: str) -> dict:
+    """CTX-312.3: the real backend for the native menu's "Open Project…"
+    action -- restores a project from a real, already-linked folder
+    (e.g. copied from another machine), the actual payoff of
+    `CTX-312.1`'s own portability work. Thin passthrough, matching every
+    other `project.*` route's own convention; `library_store`'s own
+    `ProjectNotLinkedError` surfaces as a clean route error rather than
+    silently creating a new project."""
+    return library_store.open_project_from_directory(directory)
+
+
+def project_get_directory(name: str) -> dict:
+    """CTX-311.13: the real, single source of truth for a project's own
+    real directory path -- used to default the Enclosure Export dialog's
+    save location to the project's own folder, rather than a second copy
+    of `library_store`'s own `<storage_root>/projects/<name>/` convention
+    hand-built on the frontend.
+
+    CTX-312.1: once a project is real-linked to a directory on disk
+    (`Project.directory`), that becomes this route's own real return
+    value instead -- the more correct save-dialog default once one
+    exists."""
+    return {"path": library_store.project_directory(name)}
 
 
 def project_save_artifact(project_name: str, artifact: dict) -> dict:
@@ -709,22 +769,48 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
     )
 
 
-def kicad_check_board(pcb_path: str = None) -> dict:
-    """The kicad.check_board route (SPEC-309): a real DRC via kicad-cli
-    against `pcb_path`, or -- when not given -- whatever board is
-    currently open in KiCad (kicad_bridge.get_open_board_path(),
-    confirmed live during SPEC-309's own research). Explains the real
-    violations via a real LLM call. Async: a real subprocess plus a real
-    LLM call, both genuinely multi-second, like every other real
-    kicad.*/component.* route in ASYNC_ROUTES below."""
-    if not pcb_path:
-        pcb_path = kicad_bridge.get_open_board_path()
-        if not pcb_path:
-            raise kicad_cli.KicadCliError(
-                "No board is currently open in KiCad, and no pcb_path was given. "
-                "Open a board in KiCad, or pass an explicit path."
-            )
+def kicad_list_open_boards() -> dict:
+    """The kicad.list_open_boards route (CTX-309.4): a real, cheap,
+    read-only lookup of every board currently open in KiCad, decoupled
+    from actually running a check. Feeds the Board (DRC) picker UI's
+    real, always-shown "here's what's open, pick one" flow -- real user
+    feedback exercising the actual running app found the old
+    auto-resolve-silently-when-exactly-one-is-open behavior (CTX-309.3)
+    still too opaque for someone new to KiCad: it never showed *which*
+    board was about to be checked, and the flat "no board open" state
+    never offered to open KiCad itself. Sync, not async -- this is a fast
+    IPC lookup, no subprocess or LLM call, unlike kicad_check_board below.
 
+    *   Zero boards open: {"status": "no_board_open"}.
+    *   One or more open: {"status": "boards_found", "candidates":
+        [{"path", "label"}, ...]} -- always a real list, even a single
+        entry, so the user always sees and picks the exact board before
+        any check ever runs, never a silent auto-resolution."""
+    candidates = kicad_bridge.list_open_boards()
+    if not candidates:
+        return {"status": "no_board_open"}
+    return {
+        "status": "boards_found",
+        "candidates": [
+            {"path": path, "label": os.path.basename(path)}
+            for path in candidates
+        ],
+    }
+
+
+def kicad_check_board(pcb_path: str) -> dict:
+    """The kicad.check_board route (SPEC-309): a real DRC via kicad-cli
+    against an explicit `pcb_path`. Explains the real violations via a
+    real LLM call. Async: a real subprocess plus a real LLM call, both
+    genuinely multi-second, like every other real kicad.*/component.*
+    route in ASYNC_ROUTES below.
+
+    CTX-309.4 removed the old default-`None`/auto-resolve-when-omitted
+    behavior (CTX-309.3) in favor of `kicad.list_open_boards` feeding a
+    real picker UI first -- the user always explicitly picks which board
+    before this route ever runs, the same explicit-path contract
+    `kicad_check_schematic` already used. `pcb_path` is required now, not
+    optional."""
     report = kicad_cli.run_drc(pcb_path)
     result = component_pipeline.explain_violations(
         report["violations"], "drc",
@@ -733,16 +819,45 @@ def kicad_check_board(pcb_path: str = None) -> dict:
         model=CONFIG.get("llm_model"),
     )
     result["source_path"] = pcb_path
+    result["status"] = "ok"
     return result
+
+
+def kicad_list_project_schematics() -> dict:
+    """The kicad.list_project_schematics route: real user feedback asked
+    why Schematic checking couldn't work like Board checking, with a
+    live list instead of a blind file dialog. KiCad's IPC server has no
+    handler for listing open schematics at all (confirmed live,
+    unconditionally, unlike PCB's transient "nothing open yet" case --
+    see `kicad_bridge.list_project_schematics`'s own docstring), so this
+    derives each currently open board's project's own root schematic
+    path instead, and only returns ones that actually exist on disk.
+
+    *   Nothing derivable: {"status": "no_schematic_found"}.
+    *   One or more real, existing schematic files: {"status":
+        "schematics_found", "candidates": [{"path", "label"}, ...]} --
+        mirrors kicad_list_open_boards's own shape so the frontend can
+        reuse the same picker pattern. Sync, not async, like that route,
+        for the same reason: a fast IPC lookup plus filesystem checks,
+        no subprocess or LLM call."""
+    candidates = kicad_bridge.list_project_schematics()
+    if not candidates:
+        return {"status": "no_schematic_found"}
+    return {
+        "status": "schematics_found",
+        "candidates": [
+            {"path": path, "label": os.path.basename(path)}
+            for path in candidates
+        ],
+    }
 
 
 def kicad_check_schematic(sch_path: str) -> dict:
     """The kicad.check_schematic route (SPEC-309): a real ERC via
-    kicad-cli against `sch_path` -- always an explicit, user-supplied
-    path. Unlike kicad_check_board, there is no auto-resolution: live
-    IPC has no schematic-document capability at all (a real
-    `no handler available` ApiError, confirmed live -- see SPEC-309 §2),
-    consistent with SPEC-103's own deferred-schematic-access decision.
+    kicad-cli against `sch_path` -- always an explicit path, whether
+    picked from `kicad.list_project_schematics`'s derived candidates or
+    a manually-chosen file (the picker's own fallback for a schematic
+    that isn't alongside any currently open board).
 
     ERC's real JSON nests violations per schematic sheet
     (kicad_cli.run_erc's own docstring); flattened here into one list,
@@ -765,6 +880,128 @@ def kicad_check_schematic(sch_path: str) -> dict:
     return result
 
 
+def kicad_get_component_heights() -> dict:
+    """The kicad.get_component_heights route (SPEC-311): real, honest
+    per-component height derivation, composing `kicad_bridge`'s real
+    per-footprint model list with `freecad_bridge`'s real STEP
+    bounding-box reader -- the same composition pattern
+    `freecad_generate_enclosure` already uses for board outline plus
+    mounting holes. Async: a real `freecadcmd` subprocess runs per
+    component with an attached STEP model, like every other real
+    kicad.*/freecad.* route in ASYNC_ROUTES below.
+
+    Never guesses: a footprint with no visible model, only a non-STEP
+    model, an unresolved path, or a real `freecadcmd` read failure is
+    reported unknown, not defaulted to a fallback number.
+
+    Scope, decided honestly rather than silently (SPEC-311 §2's own
+    named gap): only `.step`/`.stp` models are read. KiCad's own
+    `.wrl`/VRML fallback format is not -- its real coordinate-unit
+    convention is unverified as of this context, so it is not silently
+    assumed to already be millimeters. A model's own `scale`/
+    `rotation`/`offset` transform is also not yet applied to the
+    computed bounding box (also named there) -- a rotated component's
+    reported height may not be its true installed height.
+
+    Returns {"known": [{"reference", "height_mm"}, ...], "unknown":
+    ["<reference>", ...]} -- both real, reference-designator-keyed
+    lists, so a caller can report exactly which components it does and
+    doesn't have real data for, never a single opaque number.
+
+    CTX-311.15: a real click-through found this route flagging a board's
+    own real, unannotated MountingHole footprints (KiCad's own default
+    placeholder reference, literally the same "REF**" text repeated once
+    per unannotated footprint) as "missing a 3D model" -- true, but
+    misleading and indistinguishable to a caller: a screw hole was never
+    expected to have a rendered model, and it's already represented by
+    the enclosure's own standoff geometry, not this route's own output.
+    Skipped entirely here (`kicad_bridge.list_footprint_models`'s own
+    `is_mounting_hole`, reusing `get_mounting_holes`'s real recognition
+    convention) -- neither known nor unknown, since it was never a real
+    candidate for a rendered 3D model in the first place."""
+    if kicad_bridge is None:
+        raise RuntimeError(
+            "Component height derivation requires kicad_bridge, which failed to import."
+        )
+    if freecad_bridge is None:
+        raise RuntimeError(
+            "Component height derivation requires freecad_bridge, which failed to import."
+        )
+
+    footprints = kicad_bridge.list_footprint_models()
+    known = []
+    unknown = []
+    for fp in footprints:
+        if fp["is_mounting_hole"]:
+            continue
+        step_model = next(
+            (
+                m for m in fp["models"]
+                if m["visible"] and m["resolved_path"]
+                and os.path.splitext(m["resolved_path"])[1].lower() in (".step", ".stp")
+            ),
+            None,
+        )
+        if step_model is None:
+            unknown.append(fp["reference"])
+            continue
+        try:
+            bbox = freecad_bridge.get_step_bounding_box_mm(step_model["resolved_path"])
+        except Exception:
+            logger.exception(
+                "get_step_bounding_box_mm failed for %s (%s)",
+                fp["reference"], step_model["resolved_path"],
+            )
+            unknown.append(fp["reference"])
+            continue
+        known.append({"reference": fp["reference"], "height_mm": bbox["z_mm"]})
+
+    return {"known": known, "unknown": unknown}
+
+
+def kicad_export_board_glb(pcb_path: str) -> dict:
+    """The kicad.export_board_glb route (SPEC-311): a real, assembled-
+    board `.glb` via `kicad_cli.export_board_glb` -- the real visual
+    source for the board-inside-enclosure preview `CTX-311.15` wires
+    into `EnclosureViewer.tsx`. Async: a real `kicad-cli` subprocess,
+    like every other real kicad.*/freecad.* route in ASYNC_ROUTES below.
+
+    `kicad-cli`'s own export silently omits any component with no 3D
+    model at all -- this route is the visual, not the source of truth
+    for "is every component's height accounted for"; that honesty
+    requirement is `kicad.get_component_heights`'s job, not this one.
+
+    CTX-311.15: real-origins the export to the board's own bounding-box
+    corner (`kicad_cli.export_board_glb`'s own `origin_x_mm`/`origin_y_mm`,
+    real-verified live against `kicad-cli`) so `EnclosureViewer.tsx` can
+    composite it inside the enclosure's own glb with a simple, already-
+    known constant translation.
+
+    Deliberately always derives the outline from *this exact `pcb_path`
+    file* via `kicad_pcb_import.extract_board_outline` -- never
+    `kicad_bridge.get_board_outline()`, which reads whatever board
+    happens to be live in KiCad right now, not necessarily the same
+    file this route was actually asked to export (a real, live-open
+    board and an explicit `pcb_path` can genuinely differ, e.g. a
+    manually-picked file). `freecad_generate_enclosure`'s own board-
+    driven enclosure build already uses this same file-based extraction
+    for every real call from `EnclosurePanel.tsx`'s Board mode (which
+    always supplies `pcb_path`) -- matching that exact source, not just
+    a similar one, is what guarantees this overlay's own origin lines
+    up with the enclosure it's being placed inside."""
+    if kicad_cli is None:
+        raise RuntimeError(
+            "Board .glb export requires kicad_cli, which failed to import."
+        )
+    if kicad_pcb_import is None:
+        raise RuntimeError(
+            "Board .glb export requires kicad_pcb_import, which failed to import."
+        )
+    outline = kicad_pcb_import.extract_board_outline(pcb_path)
+    glb_path = kicad_cli.export_board_glb(pcb_path, outline["x_mm"], outline["y_mm"])
+    return {"glb_path": glb_path}
+
+
 def _build_routes() -> dict:
     """kicad.*/freecad.* are only registered if their bridge module
     actually imported (SPEC-107 §2) -- a broken kipy install shouldn't
@@ -782,6 +1019,8 @@ def _build_routes() -> dict:
         routes["kicad.inject_component"] = kicad_inject_component
     if generate_enclosure is not None:
         routes["freecad.generate_enclosure"] = freecad_generate_enclosure
+    if export_enclosure is not None:
+        routes["freecad.export_enclosure"] = freecad_export_enclosure
     if llm_providers is not None:
         routes["llm.chat"] = llm_chat
     if component_pipeline is not None:
@@ -807,6 +1046,8 @@ def _build_routes() -> dict:
         routes["project.list_artifacts"] = project_list_artifacts
         routes["project.append_conversation_turn"] = project_append_conversation_turn
         routes["project.load_conversation"] = project_load_conversation
+        routes["project.get_directory"] = project_get_directory
+        routes["project.open_from_directory"] = project_open_from_directory
     if tool_registry is not None:
         routes["agent.dispatch_tool"] = agent_dispatch_tool
     if fp_lib_table is not None:
@@ -815,10 +1056,17 @@ def _build_routes() -> dict:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
     if component_pipeline is not None and library_store is not None:
         routes["kicad.generate_connection_guidance"] = kicad_generate_connection_guidance
+    if kicad_bridge is not None:
+        routes["kicad.list_open_boards"] = kicad_list_open_boards
+        routes["kicad.list_project_schematics"] = kicad_list_project_schematics
     if kicad_cli is not None and component_pipeline is not None:
         if kicad_bridge is not None:
             routes["kicad.check_board"] = kicad_check_board
         routes["kicad.check_schematic"] = kicad_check_schematic
+    if kicad_bridge is not None and freecad_bridge is not None:
+        routes["kicad.get_component_heights"] = kicad_get_component_heights
+    if kicad_cli is not None:
+        routes["kicad.export_board_glb"] = kicad_export_board_glb
     return routes
 
 
@@ -829,9 +1077,10 @@ ROUTES = _build_routes()
 # {"job_id": ...} immediately, and the real result/failure/cancellation
 # arrives later as a job.* notification (SPEC-105 §2).
 ASYNC_ROUTES = {
-    "freecad.generate_enclosure", "llm.chat", "kicad.generate_component", "kicad.inject_component",
-    "component.search", "component.cache_datasheet", "kicad.generate_connection_guidance",
-    "kicad.check_board", "kicad.check_schematic",
+    "freecad.generate_enclosure", "freecad.export_enclosure", "llm.chat", "kicad.generate_component",
+    "kicad.inject_component", "component.search", "component.cache_datasheet",
+    "kicad.generate_connection_guidance", "kicad.check_board", "kicad.check_schematic",
+    "kicad.get_component_heights", "kicad.export_board_glb",
 } & ROUTES.keys()
 
 # job_id -> {"cancel_event": threading.Event()} for every job currently
@@ -997,18 +1246,33 @@ def _detect_capabilities() -> dict:
     """Cheap, non-blocking checks only (SPEC-107 §3) -- SPEC-103/104 both
     connect to KiCad/FreeCAD lazily on first real use, and this probe must
     not itself pay for a slow handshake on every single startup."""
+    # CTX-303.4: the real path actually checked, reported unconditionally
+    # (whether or not it exists) -- so a real "not reachable" state in
+    # Settings can say exactly where it looked instead of leaving the
+    # user to guess. The check itself stays the same cheap, non-blocking
+    # os.path.exists (see docstring); only its own diagnostic detail was
+    # ever being discarded.
+    kicad_socket_path_checked = None
     kicad_available = False
     if kicad_bridge is not None:
-        socket_path = kicad_bridge._socket_path_override or "/tmp/kicad/api.sock"
-        kicad_available = os.path.exists(socket_path)
+        kicad_socket_path_checked = kicad_bridge._socket_path_override or "/tmp/kicad/api.sock"
+        kicad_available = os.path.exists(kicad_socket_path_checked)
 
+    # CTX-303.4: find_freecadcmd() already returns the real, resolved path
+    # on success or raises a real, specific FreeCADUnavailableError message
+    # on failure -- both were being computed and immediately discarded down
+    # to a bare boolean. Captured here so Settings can show the user the
+    # real reason instead of a flat "not reachable".
     freecad_available = False
+    freecad_path_checked = None
+    freecad_error = None
     if freecad_bridge is not None:
         try:
-            freecad_bridge.find_freecadcmd()
+            freecad_path_checked = freecad_bridge.find_freecadcmd()
             freecad_available = True
-        except Exception:
+        except Exception as e:
             freecad_available = False
+            freecad_error = str(e)
 
     # SPEC-309: whether kicad-cli was actually located on this machine --
     # a broken/missing kicad-cli shouldn't take down the rest of the app,
@@ -1026,7 +1290,10 @@ def _detect_capabilities() -> dict:
 
     return {
         "kicad_available": kicad_available,
+        "kicad_socket_path_checked": kicad_socket_path_checked,
         "freecad_available": freecad_available,
+        "freecad_path_checked": freecad_path_checked,
+        "freecad_error": freecad_error,
         "kicad_cli_available": kicad_cli_available,
         # SPEC-303: reflects which providers actually have a key configured
         # right now, fixed from a hardcoded [] that predated any real

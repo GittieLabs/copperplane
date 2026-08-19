@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import kicad_bridge
 from kicad_bridge import KiCadUnavailableError, get_kicad_version
 from kipy.board_types import PadType
-from kipy.errors import ConnectionError as KiCadConnectionError
+from kipy.errors import ApiError, ConnectionError as KiCadConnectionError
 from kipy.geometry import Box2, Vector2
 from kipy.util.board_layer import BoardLayer
 
@@ -46,11 +46,18 @@ class TestKiCadBridge(unittest.TestCase):
         end-to-end against a live, locally running KiCad instance.
         Skips itself (rather than failing) when no KiCad is running —
         e.g. in CI, where KiCad isn't installed at all."""
-        socket_path = '/tmp/kicad/api.sock'
-        if not os.path.exists(socket_path):
+        try:
+            kicad_bridge.get_client()
+        except KiCadUnavailableError as e:
+            # A live connection attempt, not a socket-file existence check:
+            # macOS doesn't reliably unlink the socket file when KiCad
+            # exits, so os.path.exists() can report a stale file as if
+            # KiCad were still reachable and fail this test for real
+            # instead of skipping it.
             self.skipTest(
-                f"No live KiCad IPC socket at {socket_path}. Enable the IPC API "
-                "(Preferences > Plugins) and launch KiCad to run this test for real."
+                f"No live KiCad IPC connection reachable: {e} Enable the IPC "
+                "API (Preferences > Plugins) and launch KiCad to run this "
+                "test for real."
             )
 
         result = get_kicad_version()
@@ -99,6 +106,40 @@ class TestKiCadBridge(unittest.TestCase):
 
         kicad_bridge.get_client()
         mock_kicad_cls.assert_called_with(socket_path='/custom/kicad.sock', timeout_ms=9000)
+
+    @patch('kicad_bridge.KiCad')
+    def test_005_a_cached_client_that_fails_its_health_check_ping_is_transparently_replaced(self, mock_kicad_cls):
+        """Real, live-discovered bug: the held-open connection can go
+        silently stale (SPEC-103 §3's own documented state-desync risk)
+        without ever raising on its own -- confirmed live in an actual
+        dev session, where only a full daemon restart recovered it.
+        get_client() must now validate a cached client with a real ping
+        before reusing it, and transparently reconnect if that fails,
+        rather than handing back a connection nothing has verified is
+        still alive."""
+        stale_client = MagicMock()
+        stale_client.ping.side_effect = KiCadConnectionError("stale, no longer responds")
+        kicad_bridge._client = stale_client
+
+        fresh_client = MagicMock()
+        mock_kicad_cls.return_value = fresh_client
+
+        result = kicad_bridge.get_client()
+
+        stale_client.ping.assert_called_once()
+        self.assertIs(result, fresh_client, "a failed ping must trigger a real reconnect, not reuse the dead client")
+        self.assertIs(kicad_bridge._client, fresh_client)
+
+    @patch('kicad_bridge.KiCad')
+    def test_006_a_cached_client_that_passes_its_health_check_ping_is_reused_not_reconnected(self, mock_kicad_cls):
+        healthy_client = MagicMock()
+        kicad_bridge._client = healthy_client
+
+        result = kicad_bridge.get_client()
+
+        healthy_client.ping.assert_called_once()
+        self.assertIs(result, healthy_client)
+        mock_kicad_cls.assert_not_called()
 
 
 _SOIC8_SCHEMA = {
@@ -224,10 +265,13 @@ class _FakeShape:
         return self._bounding_box
 
 
-class TestGetOpenBoardPath(unittest.TestCase):
-    """SPEC-309/CTX-309.1: the PCB-path auto-resolution DRC's route
-    relies on -- confirmed live against a real running KiCad 10.0.3
-    instance before this test suite was written (see CTX-309.1)."""
+class TestListOpenBoards(unittest.TestCase):
+    """SPEC-309/CTX-309.3: the PCB-path auto-resolution DRC's route
+    relies on. Renamed from the original CTX-309.1 get_open_board_path
+    (single, silently-narrowed result) to a real list -- confirmed live
+    against a real running KiCad 10.0.3 instance during CTX-309.3's own
+    investigation that the zero-open-boards case is a real ApiError, not
+    an empty list, the way SPEC-309's original research assumed."""
 
     def setUp(self):
         kicad_bridge._client = None
@@ -244,17 +288,17 @@ class TestGetOpenBoardPath(unittest.TestCase):
         mock_client.get_open_documents.return_value = [mock_doc]
         mock_kicad_cls.return_value = mock_client
 
-        path = kicad_bridge.get_open_board_path()
+        paths = kicad_bridge.list_open_boards()
 
-        self.assertEqual(path, os.path.join("/Users/dev/boards/arduino", "Arduino_Pro_Mini.kicad_pcb"))
+        self.assertEqual(paths, [os.path.join("/Users/dev/boards/arduino", "Arduino_Pro_Mini.kicad_pcb")])
 
     @patch('kicad_bridge.KiCad')
-    def test_002_nothing_open_returns_none_not_an_error(self, mock_kicad_cls):
+    def test_002_nothing_open_returns_an_empty_list_not_an_error(self, mock_kicad_cls):
         mock_client = MagicMock()
         mock_client.get_open_documents.return_value = []
         mock_kicad_cls.return_value = mock_client
 
-        self.assertIsNone(kicad_bridge.get_open_board_path())
+        self.assertEqual(kicad_bridge.list_open_boards(), [])
 
     @patch('kicad_bridge.KiCad')
     def test_003_a_broken_connection_mid_call_resets_and_raises_clean(self, mock_kicad_cls):
@@ -264,13 +308,185 @@ class TestGetOpenBoardPath(unittest.TestCase):
         kicad_bridge._client = mock_client
 
         with self.assertRaises(KiCadUnavailableError):
-            kicad_bridge.get_open_board_path()
+            kicad_bridge.list_open_boards()
 
         self.assertIsNone(kicad_bridge._client)
 
-    def test_004_real_round_trip_against_a_live_kicad_instance(self):
+    @patch('kicad_bridge.KiCad')
+    def test_004_no_handler_available_api_error_is_treated_as_nothing_open(self, mock_kicad_cls):
+        """CTX-309.3's own real, live-discovered finding: when no PCB
+        Editor window is open at all, get_open_documents raises a real
+        ApiError containing "no handler available" -- a normal, expected
+        "nothing open" state, not a connection failure. Must NOT reset
+        the connection or raise KiCadUnavailableError."""
+        mock_client = MagicMock()
+        mock_client.get_open_documents.side_effect = ApiError(
+            "KiCad returned error: no handler available for request of type "
+            "kiapi.common.commands.GetOpenDocuments"
+        )
+        mock_kicad_cls.return_value = mock_client
+        kicad_bridge._client = mock_client
+
+        self.assertEqual(kicad_bridge.list_open_boards(), [])
+        self.assertIs(kicad_bridge._client, mock_client, "a real 'nothing open' state must not reset the connection")
+
+    @patch('kicad_bridge.KiCad')
+    def test_005_a_different_api_error_still_resets_and_raises_clean(self, mock_kicad_cls):
+        """Only the specific "no handler available" ApiError is treated
+        as "nothing open" -- any other real ApiError is still a genuine
+        failure."""
+        mock_client = MagicMock()
+        mock_client.get_open_documents.side_effect = ApiError("KiCad returned error: something else entirely")
+        mock_kicad_cls.return_value = mock_client
+        kicad_bridge._client = mock_client
+
+        with self.assertRaises(KiCadUnavailableError):
+            kicad_bridge.list_open_boards()
+
+        self.assertIsNone(kicad_bridge._client)
+
+    @patch('kicad_bridge.KiCad')
+    def test_006_multiple_open_boards_are_all_returned_not_narrowed_to_one(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_doc_a = MagicMock()
+        mock_doc_a.board_filename = "board_a.kicad_pcb"
+        mock_doc_a.project.path = "/Users/dev/boards/a"
+        mock_doc_b = MagicMock()
+        mock_doc_b.board_filename = "board_b.kicad_pcb"
+        mock_doc_b.project.path = "/Users/dev/boards/b"
+        mock_client.get_open_documents.return_value = [mock_doc_a, mock_doc_b]
+        mock_kicad_cls.return_value = mock_client
+
+        paths = kicad_bridge.list_open_boards()
+
+        self.assertEqual(paths, [
+            os.path.join("/Users/dev/boards/a", "board_a.kicad_pcb"),
+            os.path.join("/Users/dev/boards/b", "board_b.kicad_pcb"),
+        ])
+
+    def test_007_real_round_trip_against_a_live_kicad_instance(self):
         """Skips itself cleanly when no live KiCad is running, same
         convention as test_002_real_kicad_version_round_trip above."""
+        try:
+            kicad_bridge.get_client()
+        except KiCadUnavailableError as e:
+            # Same real-connection-attempt reasoning as
+            # test_002_real_kicad_version_round_trip above: a stale
+            # leftover socket file must not be mistaken for a live KiCad.
+            self.skipTest(
+                f"No live KiCad IPC connection reachable: {e} Enable the IPC "
+                "API (Preferences > Plugins) and launch KiCad to run this "
+                "test for real."
+            )
+
+        paths = kicad_bridge.list_open_boards()
+
+        # An empty list (nothing open, or the real "no handler available"
+        # state) or a list of real, well-formed .kicad_pcb paths are both
+        # legitimate real outcomes -- this test only proves the real IPC
+        # call itself succeeds without raising, not that a board happens
+        # to be open on whatever machine runs this.
+        for path in paths:
+            self.assertTrue(path.endswith(".kicad_pcb"))
+
+
+class TestListProjectSchematics(unittest.TestCase):
+    """Real user feedback: why can't Schematic checking list candidates
+    the way Board checking does? KiCad's IPC has no handler for listing
+    open schematics at all, confirmed live -- so this derives each open
+    board's own project's root schematic path instead, keeping only
+    ones that actually exist on disk."""
+
+    def setUp(self):
+        kicad_bridge._client = None
+
+    def tearDown(self):
+        kicad_bridge._client = None
+
+    @patch('kicad_bridge.os.path.exists')
+    @patch('kicad_bridge.KiCad')
+    def test_001_derives_the_schematic_path_from_the_open_boards_own_project_name(self, mock_kicad_cls, mock_exists):
+        mock_client = MagicMock()
+        mock_doc = MagicMock()
+        mock_doc.board_filename = "weirdly_renamed_board.kicad_pcb"
+        mock_doc.project.path = "/Users/dev/boards/arduino"
+        mock_doc.project.name = "Arduino_Pro_Mini"
+        mock_client.get_open_documents.return_value = [mock_doc]
+        mock_kicad_cls.return_value = mock_client
+        mock_exists.return_value = True
+
+        paths = kicad_bridge.list_project_schematics()
+
+        self.assertEqual(paths, [os.path.join("/Users/dev/boards/arduino", "Arduino_Pro_Mini.kicad_sch")])
+
+    @patch('kicad_bridge.os.path.exists')
+    @patch('kicad_bridge.KiCad')
+    def test_002_a_derived_path_that_does_not_exist_on_disk_is_never_returned(self, mock_kicad_cls, mock_exists):
+        mock_client = MagicMock()
+        mock_doc = MagicMock()
+        mock_doc.board_filename = "board.kicad_pcb"
+        mock_doc.project.path = "/Users/dev/boards/orphan"
+        mock_doc.project.name = "orphan"
+        mock_client.get_open_documents.return_value = [mock_doc]
+        mock_kicad_cls.return_value = mock_client
+        mock_exists.return_value = False
+
+        self.assertEqual(kicad_bridge.list_project_schematics(), [])
+
+    @patch('kicad_bridge.os.path.exists')
+    @patch('kicad_bridge.KiCad')
+    def test_003_two_open_boards_from_the_same_project_dedupe_to_one_schematic(self, mock_kicad_cls, mock_exists):
+        mock_client = MagicMock()
+        mock_doc_a = MagicMock()
+        mock_doc_a.board_filename = "top.kicad_pcb"
+        mock_doc_a.project.path = "/Users/dev/boards/multi"
+        mock_doc_a.project.name = "multi"
+        mock_doc_b = MagicMock()
+        mock_doc_b.board_filename = "bottom.kicad_pcb"
+        mock_doc_b.project.path = "/Users/dev/boards/multi"
+        mock_doc_b.project.name = "multi"
+        mock_client.get_open_documents.return_value = [mock_doc_a, mock_doc_b]
+        mock_kicad_cls.return_value = mock_client
+        mock_exists.return_value = True
+
+        self.assertEqual(kicad_bridge.list_project_schematics(), [os.path.join("/Users/dev/boards/multi", "multi.kicad_sch")])
+
+    @patch('kicad_bridge.KiCad')
+    def test_004_nothing_open_returns_an_empty_list_not_an_error(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_client.get_open_documents.return_value = []
+        mock_kicad_cls.return_value = mock_client
+
+        self.assertEqual(kicad_bridge.list_project_schematics(), [])
+
+    @patch('kicad_bridge.KiCad')
+    def test_005_no_handler_available_api_error_is_treated_as_nothing_derivable(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_client.get_open_documents.side_effect = ApiError(
+            "KiCad returned error: no handler available for request of type "
+            "kiapi.common.commands.GetOpenDocuments"
+        )
+        mock_kicad_cls.return_value = mock_client
+        kicad_bridge._client = mock_client
+
+        self.assertEqual(kicad_bridge.list_project_schematics(), [])
+        self.assertIs(kicad_bridge._client, mock_client, "a real 'nothing open' state must not reset the connection")
+
+    @patch('kicad_bridge.KiCad')
+    def test_006_a_broken_connection_mid_call_resets_and_raises_clean(self, mock_kicad_cls):
+        mock_client = MagicMock()
+        mock_client.get_open_documents.side_effect = KiCadConnectionError("gone")
+        mock_kicad_cls.return_value = mock_client
+        kicad_bridge._client = mock_client
+
+        with self.assertRaises(KiCadUnavailableError):
+            kicad_bridge.list_project_schematics()
+
+        self.assertIsNone(kicad_bridge._client)
+
+    def test_007_real_round_trip_against_a_live_kicad_instance(self):
+        """Skips itself cleanly when no live KiCad is running, same
+        convention as list_open_boards's own real round trip."""
         socket_path = '/tmp/kicad/api.sock'
         if not os.path.exists(socket_path):
             self.skipTest(
@@ -278,14 +494,11 @@ class TestGetOpenBoardPath(unittest.TestCase):
                 "(Preferences > Plugins) and launch KiCad to run this test for real."
             )
 
-        path = kicad_bridge.get_open_board_path()
+        paths = kicad_bridge.list_project_schematics()
 
-        # None (nothing open) or a real, well-formed .kicad_pcb path are
-        # both legitimate real outcomes -- this test only proves the
-        # real IPC call itself succeeds, not that a board happens to be
-        # open on whatever machine runs this.
-        if path is not None:
-            self.assertTrue(path.endswith(".kicad_pcb"))
+        for path in paths:
+            self.assertTrue(path.endswith(".kicad_sch"))
+            self.assertTrue(os.path.exists(path), "must never return a derived path that doesn't actually exist")
 
 
 class TestGetBoardOutline(unittest.TestCase):
@@ -440,6 +653,170 @@ class TestGetMountingHoles(unittest.TestCase):
         holes = kicad_bridge.get_mounting_holes()
 
         self.assertEqual(holes, [])
+
+
+class _FakeModel:
+    def __init__(self, filename, visible=True):
+        self.filename = filename
+        self.visible = visible
+
+
+class _FakeFootprintInstanceWithModels:
+    """CTX-311.1: mirrors just the real attribute chain
+    list_footprint_models reads -- a FootprintInstance's own
+    .reference_field and .definition.models (kipy's real
+    Footprint.models, confirmed live against an installed kipy during
+    SPEC-311's own research).
+
+    CTX-311.15: also sets `.definition.id.library` to a real string
+    (default "SomeLib", never a bare MagicMock -- a MagicMock's own
+    default `__contains__` is truthy, which would silently make every
+    footprint look like a mounting hole) since `is_mounting_hole`
+    (SPEC-311 §5's own honesty requirement) reads it the same way
+    `get_mounting_holes` already does."""
+
+    def __init__(self, reference, models, library="SomeLib"):
+        self.definition = MagicMock()
+        self.definition.models = models
+        self.definition.id.library = library
+        self.reference_field = MagicMock()
+        self.reference_field.text.value = reference
+
+
+class TestListFootprintModels(unittest.TestCase):
+
+    def setUp(self):
+        kicad_bridge._client = None
+
+    def tearDown(self):
+        kicad_bridge._client = None
+
+    @patch('kicad_bridge._resolve_3d_model_path')
+    @patch('kicad_bridge.KiCad')
+    def test_001_reports_every_real_attached_model_with_its_resolved_path(
+        self, mock_kicad_cls, mock_resolve,
+    ):
+        """CTX-311.1: a real footprint's real model list is reported
+        verbatim -- filename, resolved_path (delegated to
+        _resolve_3d_model_path, tested separately below), and visible."""
+        mock_client = MagicMock()
+        mock_client.check_version.return_value = True
+        mock_board = MagicMock()
+        mock_client.get_board.return_value = mock_board
+        mock_kicad_cls.return_value = mock_client
+        mock_resolve.return_value = "/resolved/real/path.step"
+
+        mock_board.get_footprints.return_value = [
+            _FakeFootprintInstanceWithModels(
+                "J3", [_FakeModel("${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step")],
+            ),
+        ]
+
+        result = kicad_bridge.list_footprint_models()
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["reference"], "J3")
+        self.assertEqual(len(result[0]["models"]), 1)
+        self.assertEqual(
+            result[0]["models"][0]["filename"], "${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step",
+        )
+        self.assertEqual(result[0]["models"][0]["resolved_path"], "/resolved/real/path.step")
+        self.assertTrue(result[0]["models"][0]["visible"])
+
+    @patch('kicad_bridge.KiCad')
+    def test_002_a_footprint_with_zero_attached_models_reports_an_empty_list(self, mock_kicad_cls):
+        """CTX-311.1: the confirmed-live gap SPEC-311 §2 names -- some
+        real footprints have zero attached models at all. Reported as
+        an empty list, never fabricated."""
+        mock_client = MagicMock()
+        mock_client.check_version.return_value = True
+        mock_board = MagicMock()
+        mock_client.get_board.return_value = mock_board
+        mock_kicad_cls.return_value = mock_client
+
+        mock_board.get_footprints.return_value = [
+            _FakeFootprintInstanceWithModels("REF**", []),
+        ]
+
+        result = kicad_bridge.list_footprint_models()
+
+        self.assertEqual(
+            result, [{"reference": "REF**", "is_mounting_hole": False, "models": []}],
+        )
+
+    @patch('kicad_bridge.KiCad')
+    def test_003_is_mounting_hole_reuses_get_mounting_holes_own_real_recognition_convention(
+        self, mock_kicad_cls,
+    ):
+        """CTX-311.15: a real click-through found `kicad_get_component_
+        heights` flagging a board's own real, unannotated MountingHole
+        footprints (KiCad's own default "REF**" placeholder) as missing
+        a 3D model -- misleading, since a screw hole was never expected
+        to have one. `is_mounting_hole` is what lets the daemon route
+        skip them, recognized the same way `get_mounting_holes` already
+        does: the standard MountingHole library, or an `H<digits>`
+        reference."""
+        mock_client = MagicMock()
+        mock_client.check_version.return_value = True
+        mock_board = MagicMock()
+        mock_client.get_board.return_value = mock_board
+        mock_kicad_cls.return_value = mock_client
+
+        mock_board.get_footprints.return_value = [
+            _FakeFootprintInstanceWithModels(
+                "REF**", [], library="MountingHole:MountingHole_3.2mm_M3",
+            ),
+            _FakeFootprintInstanceWithModels("H2", [], library="SomeLib"),
+            _FakeFootprintInstanceWithModels("J3", [], library="Connector"),
+        ]
+
+        result = kicad_bridge.list_footprint_models()
+
+        self.assertEqual(
+            [(r["reference"], r["is_mounting_hole"]) for r in result],
+            [("REF**", True), ("H2", True), ("J3", False)],
+        )
+
+
+class TestResolve3DModelPath(unittest.TestCase):
+
+    def test_001_a_set_real_env_var_resolves_first(self):
+        with patch.dict('os.environ', {'KICAD10_3DMODEL_DIR': '/env/3dmodels'}):
+            with patch('kicad_bridge.os.path.exists', return_value=True):
+                resolved = kicad_bridge._resolve_3d_model_path(
+                    "${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step"
+                )
+        self.assertEqual(resolved, "/env/3dmodels/foo.3dshapes/bar.step")
+
+    def test_002_falls_back_to_a_real_per_os_install_location_when_env_var_unset(self):
+        base = '/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels'
+        with patch.dict('os.environ', {}, clear=True):
+            with patch('kicad_bridge.platform.system', return_value='Darwin'):
+                with patch('kicad_bridge.glob.glob', return_value=[base]):
+                    with patch('kicad_bridge.os.path.exists', return_value=True):
+                        resolved = kicad_bridge._resolve_3d_model_path(
+                            "${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step"
+                        )
+        # os.path.join uses the real, current OS's own separator
+        # (confirmed live, the hard way: this test failed on Windows CI
+        # for asserting a hardcoded forward-slash path against a real
+        # backslash-joined one) -- build the expected value the same
+        # way _resolve_3d_model_path itself does, not a literal string.
+        self.assertEqual(
+            resolved, os.path.join(base, 'foo.3dshapes/bar.step'),
+        )
+
+    def test_003_returns_none_when_nothing_real_is_found_rather_than_guessing(self):
+        with patch.dict('os.environ', {}, clear=True):
+            with patch('kicad_bridge.platform.system', return_value='Darwin'):
+                with patch('kicad_bridge.glob.glob', return_value=[]):
+                    resolved = kicad_bridge._resolve_3d_model_path(
+                        "${KICAD10_3DMODEL_DIR}/foo.3dshapes/bar.step"
+                    )
+        self.assertIsNone(resolved)
+
+    def test_004_an_empty_filename_returns_none(self):
+        self.assertIsNone(kicad_bridge._resolve_3d_model_path(""))
 
 
 if __name__ == '__main__':
