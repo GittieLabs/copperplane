@@ -566,7 +566,16 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
         no environment map to reflect, regardless of scene lighting.
         Verified directly here: the real exported `.glb` now carries a
         real, matte (`metallicFactor` 0) material, and the base shell
-        and the lid get real, distinct real colors from each other."""
+        and the lid get real, distinct real colors from each other.
+
+        CTX-311.12: the base shell's own `.glb` is now a real, real
+        two-geometry `Scene` (outer + inner cavity surfaces, see
+        test_010 below), not a single mesh -- this test picks the base
+        shell's *outer* geometry (the one whose own material's base
+        color matches `_BODY_COLOR_RGB`) for the cross-part distinctness
+        check below, so it keeps meaning the same real thing it always
+        has: the base shell's outer surface and the lid are distinct
+        colors from each other."""
         self._skip_unless_freecad_available()
         import trimesh
 
@@ -577,14 +586,95 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
         try:
             base_scene = trimesh.load(result["glb_path"])
             lid_scene = trimesh.load(result["lid_glb_path"])
-            base_material = list(base_scene.geometry.values())[0].visual.material
+            base_materials = [g.visual.material for g in base_scene.geometry.values()]
             lid_material = list(lid_scene.geometry.values())[0].visual.material
+            base_outer_material = next(
+                m for m in base_materials
+                if tuple(m.baseColorFactor)[:3] == freecad_bridge._BODY_COLOR_RGB
+            )
 
-            self.assertEqual(base_material.metallicFactor, 0.0)
+            for material in base_materials:
+                self.assertEqual(material.metallicFactor, 0.0)
             self.assertEqual(lid_material.metallicFactor, 0.0)
             self.assertNotEqual(
-                tuple(base_material.baseColorFactor), tuple(lid_material.baseColorFactor),
+                tuple(base_outer_material.baseColorFactor), tuple(lid_material.baseColorFactor),
             )
+        finally:
+            for key in ("glb_path", "step_path", "lid_glb_path", "lid_step_path"):
+                if os.path.exists(result[key]):
+                    os.remove(result[key])
+
+    def test_010_real_cavity_walls_and_floor_get_a_distinct_brighter_color_from_the_outer_shell(self):
+        """CTX-311.12: real user feedback across multiple click-through
+        rounds ("can't see the inside corners," "hard to see where the
+        edges of the floor meet the floor") -- even once the camera and
+        lighting fixes (CTX-311.4 through CTX-311.11) made the cavity
+        actually visible, a single uniform material gives no real color
+        cue for where the floor and inner walls meet. This test verifies
+        the real, direct fix: the base shell's own `.glb` now contains
+        two real geometries with two real, distinct matte materials --
+        one matching `_BODY_COLOR_RGB` (outer), one matching
+        `_BODY_INNER_COLOR_RGB` (the cavity) -- and the inner one's own
+        real vertices sit closer to the shell's horizontal center than
+        the outer one's, a real, geometric sanity check that "inner"
+        was classified correctly, not just that two colors exist."""
+        self._skip_unless_freecad_available()
+        import numpy as np
+        import trimesh
+
+        result = generate_enclosure(
+            height=10, board_outline=_TEST_BOARD_OUTLINE, standoffs=[],
+            fillet_radius_mm=0, lid=False,
+        )
+        try:
+            base_scene = trimesh.load(result["glb_path"])
+            geometries = list(base_scene.geometry.values())
+            self.assertEqual(len(geometries), 2)
+
+            colors = {tuple(g.visual.material.baseColorFactor)[:3] for g in geometries}
+            self.assertEqual(
+                colors, {freecad_bridge._BODY_COLOR_RGB, freecad_bridge._BODY_INNER_COLOR_RGB},
+            )
+
+            outer_mesh = next(
+                g for g in geometries
+                if tuple(g.visual.material.baseColorFactor)[:3] == freecad_bridge._BODY_COLOR_RGB
+            )
+            inner_mesh = next(
+                g for g in geometries
+                if tuple(g.visual.material.baseColorFactor)[:3] == freecad_bridge._BODY_INNER_COLOR_RGB
+            )
+
+            # Horizontal (X/Z, the glTF Y-up file's own footprint plane)
+            # distance from the shell's own overall center -- the real
+            # cavity's own walls/floor sit closer in than the real outer
+            # shell's own walls/bottom do.
+            center = base_scene.bounds.mean(axis=0)
+            outer_radial = np.linalg.norm((outer_mesh.vertices - center)[:, [0, 2]], axis=1).mean()
+            inner_radial = np.linalg.norm((inner_mesh.vertices - center)[:, [0, 2]], axis=1).mean()
+            self.assertLess(inner_radial, outer_radial)
+        finally:
+            for key in ("glb_path", "step_path"):
+                if os.path.exists(result[key]):
+                    os.remove(result[key])
+
+    def test_011_real_lid_stays_a_single_uniform_color_not_split(self):
+        """CTX-311.12: the lid is a flat, solid slab -- convex, with no
+        real cavity of its own -- so `_export_glb`'s inner/outer split
+        is deliberately never applied to it (`inner_color_rgb` is only
+        passed for the base shell's own call site). Verified directly:
+        the lid's own `.glb` still contains exactly one real geometry,
+        not two."""
+        self._skip_unless_freecad_available()
+        import trimesh
+
+        result = generate_enclosure(
+            height=10, board_outline=_TEST_BOARD_OUTLINE, standoffs=[],
+            fillet_radius_mm=0, lid=True,
+        )
+        try:
+            lid_scene = trimesh.load(result["lid_glb_path"])
+            self.assertEqual(len(list(lid_scene.geometry.values())), 1)
         finally:
             for key in ("glb_path", "step_path", "lid_glb_path", "lid_step_path"):
                 if os.path.exists(result[key]):

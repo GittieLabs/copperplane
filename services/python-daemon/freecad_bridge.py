@@ -16,6 +16,7 @@ import tempfile
 import time
 import uuid
 
+import numpy as np
 import trimesh
 
 
@@ -240,11 +241,48 @@ def _wait_with_cancellation(proc: subprocess.Popen, timeout_s: float, cancel_eve
 _Y_UP_ROTATION = trimesh.transformations.rotation_matrix(-math.pi / 2, [1, 0, 0])
 
 
-_BODY_COLOR_RGB = (148, 163, 184)  # slate-400 -- the enclosure shell
+_BODY_COLOR_RGB = (148, 163, 184)  # slate-400 -- the enclosure shell's outer surfaces
+_BODY_INNER_COLOR_RGB = (241, 245, 249)  # slate-50 -- the cavity's own inner walls/floor
 _LID_COLOR_RGB = (249, 115, 22)  # orange-500 -- a real, high-contrast accent for the lid
 
 
-def _export_glb(stl_path: str, glb_path: str, base_color_rgb: tuple) -> None:
+def _split_inner_outer_faces(mesh: trimesh.Trimesh) -> tuple:
+    """Classifies every triangle of a real hollow-shell mesh as facing the
+    cavity (inner) or facing away from the enclosure entirely (outer), by
+    comparing each face's own normal to the direction from the mesh's real
+    bounding-box center out to that face's own centroid.
+
+    Works because the shell is genuinely concave (SPEC-109's own hollow
+    box, cut from an outer box minus an inset inner one): a real closed,
+    manifold mesh's face normals always point away from the solid material
+    they bound. On an *outer* wall, floor bottom, etc., that means pointing
+    away from the box's own center (a positive dot product with the
+    center-to-face vector); on a *cavity* wall or the cavity's own floor,
+    the solid material is on the far side from the cavity, so the normal
+    points back in, toward the center (a negative dot product) -- verified
+    by hand for a real box: outer left wall (x=0, normal -x) and inner
+    cavity's own left wall (x=wall_thickness, normal +x) land on opposite
+    sides of zero; the cavity floor's own top face (normal +z, sitting
+    below the box's mid-height) does too.
+
+    A real, known limitation: this is a global, whole-box heuristic, not a
+    watertight flood-fill from the cavity -- a standoff post's own side
+    facing *away* from the box's overall center can misclassify as
+    "outer" even though the whole post sits inside the cavity. Left as-is
+    rather than building real connected-component analysis for a cosmetic
+    detail on a small interior feature; not the surfaces this fix targets
+    (CTX-311.12's own Plan Drift)."""
+    center = mesh.bounding_box.centroid
+    to_face = mesh.triangles_center - center
+    facing = np.einsum("ij,ij->i", mesh.face_normals, to_face)
+    outer_faces = np.where(facing >= 0)[0]
+    inner_faces = np.where(facing < 0)[0]
+    return outer_faces, inner_faces
+
+
+def _export_glb(
+    stl_path: str, glb_path: str, base_color_rgb: tuple, inner_color_rgb: tuple = None,
+) -> None:
     """Converts a real FreeCAD-exported `.stl` to a real, correctly
     scaled, correctly oriented, and correctly colored `.glb` -- the one
     real conversion path every enclosure/lid mesh in this module goes
@@ -277,15 +315,20 @@ def _export_glb(stl_path: str, glb_path: str, base_color_rgb: tuple) -> None:
     rgb` also gives the base shell and the lid their own distinct real
     colors directly in the exported file, replacing the frontend-side
     `EnclosureViewer.tsx` material override `CTX-311.6` added -- a
-    single, real source of truth instead of two."""
+    single, real source of truth instead of two.
+
+    `inner_color_rgb` (CTX-311.12, real user feedback across multiple
+    click-through rounds: "can't see the inside corners," "hard to see
+    where the edges of the floor meet the floor") gives the cavity's own
+    inner walls/floor a real, distinct, brighter material from the
+    exterior's, via `_split_inner_outer_faces` -- a genuine, separate
+    fix from the camera/lighting/clipping work `CTX-311.4` through
+    `CTX-311.11` did; those made the correct geometry actually visible,
+    this makes the cavity legible once it is. `None` (the default, and
+    always used for the lid, which is a flat slab with no true cavity of
+    its own to split) keeps the single-material path unchanged."""
     mesh = trimesh.load(stl_path)
     mesh.apply_transform(_Y_UP_ROTATION)
-    r, g, b = base_color_rgb
-    mesh.visual = trimesh.visual.TextureVisuals(
-        material=trimesh.visual.material.PBRMaterial(
-            baseColorFactor=[r, g, b, 255], metallicFactor=0.0, roughnessFactor=0.6,
-        )
-    )
     # Real, confirmed bug (found while investigating SPEC-311's own
     # board-inside-enclosure preview idea): the FreeCAD build scripts
     # above write real millimeter values (`box.Height = {height}` etc.)
@@ -300,7 +343,32 @@ def _export_glb(stl_path: str, glb_path: str, base_color_rgb: tuple) -> None:
     # STEP reader already interprets it correctly -- only this derived
     # `.glb` path needed either fix.
     mesh.apply_scale(0.001)
-    mesh.export(glb_path)
+
+    def _matte_material(rgb: tuple) -> trimesh.visual.material.PBRMaterial:
+        r, g, b = rgb
+        return trimesh.visual.material.PBRMaterial(
+            baseColorFactor=[r, g, b, 255], metallicFactor=0.0, roughnessFactor=0.6,
+        )
+
+    outer_faces, inner_faces = (
+        _split_inner_outer_faces(mesh) if inner_color_rgb is not None else (None, None)
+    )
+    # Real, confirmed edge case: `generate_enclosure`'s manual-dims mode
+    # (no `board_outline`) builds a plain solid `Part::Box` -- convex,
+    # with no real cavity at all -- so every one of its faces classifies
+    # as "outer" and `inner_faces` comes back empty. `mesh.submesh` can't
+    # produce two real groups from that, so fall back to the single-
+    # material path rather than split nothing from nothing; there is no
+    # real interior surface to give a distinct color to on a solid box.
+    if inner_color_rgb is None or len(inner_faces) == 0 or len(outer_faces) == 0:
+        mesh.visual = trimesh.visual.TextureVisuals(material=_matte_material(base_color_rgb))
+        mesh.export(glb_path)
+        return
+
+    outer_mesh, inner_mesh = mesh.submesh([outer_faces, inner_faces], append=False)
+    outer_mesh.visual = trimesh.visual.TextureVisuals(material=_matte_material(base_color_rgb))
+    inner_mesh.visual = trimesh.visual.TextureVisuals(material=_matte_material(inner_color_rgb))
+    trimesh.Scene([outer_mesh, inner_mesh]).export(glb_path)
 
 
 def generate_enclosure(
@@ -497,7 +565,7 @@ def generate_enclosure(
                 f"file: {stderr_data.strip()}"
             )
 
-        _export_glb(stl_path, glb_path, _BODY_COLOR_RGB)
+        _export_glb(stl_path, glb_path, _BODY_COLOR_RGB, inner_color_rgb=_BODY_INNER_COLOR_RGB)
 
         # SPEC-301 §3's flagged known debt: nothing previously deleted a
         # generated .glb (harmless in a self-cleaning OS temp dir, a real
