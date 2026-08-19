@@ -30,10 +30,18 @@ export interface ExportHistoryEntry {
 }
 
 /** A conversation turn, matching `library_store.py`'s append-only
- * `conversation.jsonl` shape and SPEC-302's own `HistoryTurn`. */
+ * `conversation.jsonl` shape and SPEC-302's own `HistoryTurn`.
+ *
+ * CTX-313.1: `timestamp` is stamped client-side (`new Date().toISOString()`),
+ * matching `ExportHistoryEntry.exported_at`'s own existing convention --
+ * `append_conversation_turn` persists whatever dict it's given verbatim, no
+ * server clock involved. Optional because turns written before this context
+ * shipped have none; the Overview activity feed (`lib/overview.ts`) sorts a
+ * missing timestamp to the end rather than assuming every turn has one. */
 export interface ConversationTurn {
   role: 'user' | 'assistant'
   content: string
+  timestamp?: string
 }
 
 function unwrap<T>(response: { error?: { message: string }; result?: unknown }): T {

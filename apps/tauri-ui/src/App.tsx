@@ -509,13 +509,14 @@ function Overview({ projectName }: { projectName: string }) {
       })
       const reply = await handle.result
       setMessages((prev) => prev.map((m) => (m.id === id && m.kind === 'chat' ? { ...m, status: 'done', text: reply } : m)))
-      setChatHistory((prev) => [
-        ...prev,
-        { role: 'user', content: command.message },
-        { role: 'assistant', content: reply },
-      ])
-      await appendConversationTurn(projectName, { role: 'user', content: command.message })
-      await appendConversationTurn(projectName, { role: 'assistant', content: reply })
+      // CTX-313.1: stamped once per turn and reused for both the local
+      // state and the persisted call, so the Overview activity feed's
+      // merge/sort sees the same value the UI already rendered.
+      const userTurn: ConversationTurn = { role: 'user', content: command.message, timestamp: new Date().toISOString() }
+      const assistantTurn: ConversationTurn = { role: 'assistant', content: reply, timestamp: new Date().toISOString() }
+      setChatHistory((prev) => [...prev, userTurn, assistantTurn])
+      await appendConversationTurn(projectName, userTurn)
+      await appendConversationTurn(projectName, assistantTurn)
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err)
       setMessages((prev) => prev.map((m) => (m.id === id && m.kind === 'chat' ? { ...m, status: 'error', error } : m)))
