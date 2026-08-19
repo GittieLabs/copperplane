@@ -8,6 +8,8 @@ const openKicadMock = vi.fn()
 const exportEnclosureMock = vi.fn()
 const pickExportDestinationMock = vi.fn()
 const getProjectDirectoryMock = vi.fn()
+const exportBoardGlbMock = vi.fn()
+const getComponentHeightsMock = vi.fn()
 
 vi.mock('../lib/enclosure', () => ({
   generateEnclosure: (...args: unknown[]) => generateEnclosureMock(...args),
@@ -15,6 +17,8 @@ vi.mock('../lib/enclosure', () => ({
   exportEnclosure: (...args: unknown[]) => exportEnclosureMock(...args),
   pickExportDestination: (...args: unknown[]) => pickExportDestinationMock(...args),
   getProjectDirectory: (...args: unknown[]) => getProjectDirectoryMock(...args),
+  exportBoardGlb: (...args: unknown[]) => exportBoardGlbMock(...args),
+  getComponentHeights: (...args: unknown[]) => getComponentHeightsMock(...args),
 }))
 
 vi.mock('../lib/boardAdvisor', () => ({
@@ -39,9 +43,31 @@ const { EnclosurePanel } = await import('./EnclosurePanel')
  * "From board" nor "Import board file…" ever reused a board already
  * open in KiCad. Redesigned into a single "Board" mode (list-first,
  * mirrors BoardAdvisor) plus a demoted "Manual (no PCB)" mode. */
+/** Mirrors `lib/ipc.ts`'s own real behavior closely enough for these
+ * tests: once the underlying job settles, any subscribed `onUpdate`
+ * listener is told `completed` -- this is what actually flips a
+ * component's `running` flag back to `false` in the real app, so a test
+ * that clicks Generate a second time needs it too, not just the raw
+ * result promise. */
 function fakeJobHandle<T>(result: Promise<T>) {
   result.catch(() => {})
-  return { jobId: 'job_1', result, onUpdate: () => () => {}, cancel: vi.fn() }
+  return {
+    jobId: 'job_1',
+    result,
+    onUpdate: (cb: (update: { status: string }) => void) => {
+      // Attached (not pre-registered) at subscribe time, same as the real
+      // `lib/ipc.ts` -- the real component always subscribes before
+      // awaiting `handle.result`, so this listener's own `.then` fires
+      // ahead of that await's continuation, flipping `running` back to
+      // `false` in time for the caller's next assertion.
+      result.then(
+        () => cb({ status: 'completed' }),
+        () => cb({ status: 'failed' }),
+      )
+      return () => {}
+    },
+    cancel: vi.fn(),
+  }
 }
 
 const ONE_BOARD_OPEN = {
@@ -64,6 +90,8 @@ beforeEach(() => {
   exportEnclosureMock.mockReset()
   pickExportDestinationMock.mockReset()
   getProjectDirectoryMock.mockReset().mockResolvedValue('/projects/test-project')
+  exportBoardGlbMock.mockReset()
+  getComponentHeightsMock.mockReset()
 })
 
 describe('EnclosurePanel: mode selection', () => {
@@ -573,5 +601,135 @@ describe('EnclosurePanel: lid (CTX-311.2/CTX-311.3)', () => {
 
     await waitFor(() => expect(enclosureViewerSpy).toHaveBeenCalled())
     expect(enclosureViewerSpy).toHaveBeenLastCalledWith(expect.objectContaining({ lidGlbPath: null }))
+  })
+})
+
+describe('EnclosurePanel: board-inside-enclosure overlay (CTX-311.15)', () => {
+  async function generateFromBoardMode() {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+    await waitFor(() => screen.getByLabelText(/Show board/))
+  }
+
+  it('the Show board toggle never appears in Manual mode -- no real pcb_path to export', async () => {
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Manual (no PCB)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(enclosureViewerSpy).toHaveBeenCalled())
+    expect(screen.queryByLabelText(/Show board/)).toBeNull()
+  })
+
+  it('checking Show board fetches the real board glb using the exact pcb_path this result was generated from', async () => {
+    exportBoardGlbMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ glb_path: '/tmp/board.glb' })),
+    )
+    getComponentHeightsMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ known: [], unknown: [] })),
+    )
+    await generateFromBoardMode()
+
+    fireEvent.click(screen.getByLabelText(/Show board/))
+
+    await waitFor(() => expect(exportBoardGlbMock).toHaveBeenCalledWith('/real/board.kicad_pcb'))
+    await waitFor(() =>
+      expect(enclosureViewerSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          boardGlbPath: '/tmp/board.glb',
+          boardVisible: true,
+          boardOffsetMm: { margin: 2.5, floorAndStandoff: 7 },
+        }),
+      ),
+    )
+  })
+
+  it('unchecking then rechecking Show board does not re-fetch -- the glb is cached client-side', async () => {
+    exportBoardGlbMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ glb_path: '/tmp/board.glb' })),
+    )
+    getComponentHeightsMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ known: [], unknown: [] })),
+    )
+    await generateFromBoardMode()
+
+    fireEvent.click(screen.getByLabelText(/Show board/))
+    await waitFor(() => expect(exportBoardGlbMock).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByLabelText(/Show board/))
+    fireEvent.click(screen.getByLabelText(/Show board/))
+
+    expect(exportBoardGlbMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a board chosen from the real live-open list also fetches the honest unknown-3D-model disclosure', async () => {
+    exportBoardGlbMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ glb_path: '/tmp/board.glb' })),
+    )
+    getComponentHeightsMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ known: [], unknown: ['U3', 'J1'] })),
+    )
+    await generateFromBoardMode()
+
+    fireEvent.click(screen.getByLabelText(/Show board/))
+
+    await waitFor(() => expect(getComponentHeightsMock).toHaveBeenCalled())
+    await waitFor(() => screen.getByText(/U3, J1 have no 3D model in KiCad/))
+  })
+
+  it('a manually-picked file never calls get_component_heights -- it reads whatever is live, not this exact file', async () => {
+    pickPcbFileMock.mockResolvedValueOnce('/manual/other.kicad_pcb')
+    exportBoardGlbMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ glb_path: '/tmp/board.glb' })),
+    )
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByRole('button', { name: 'Choose a .kicad_pcb file…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose a .kicad_pcb file…' }))
+    await waitFor(() => screen.getByText('Manually picked: /manual/other.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+    await waitFor(() => screen.getByLabelText(/Show board/))
+
+    fireEvent.click(screen.getByLabelText(/Show board/))
+
+    await waitFor(() => expect(exportBoardGlbMock).toHaveBeenCalledWith('/manual/other.kicad_pcb'))
+    expect(getComponentHeightsMock).not.toHaveBeenCalled()
+  })
+
+  it('a real board-glb export failure shows the error message, not a silent failure', async () => {
+    exportBoardGlbMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.reject(new Error('kicad-cli not found'))),
+    )
+    await generateFromBoardMode()
+
+    fireEvent.click(screen.getByLabelText(/Show board/))
+
+    await waitFor(() => screen.getByText('kicad-cli not found'))
+  })
+
+  it('a fresh Generate clears any already-shown board overlay -- its own real params may no longer match', async () => {
+    exportBoardGlbMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ glb_path: '/tmp/board.glb' })),
+    )
+    getComponentHeightsMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ known: [], unknown: [] })),
+    )
+    await generateFromBoardMode()
+    fireEvent.click(screen.getByLabelText(/Show board/))
+    await waitFor(() => expect(exportBoardGlbMock).toHaveBeenCalledTimes(1))
+
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() =>
+      expect(enclosureViewerSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ boardGlbPath: null, boardVisible: false }),
+      ),
+    )
   })
 })

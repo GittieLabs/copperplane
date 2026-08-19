@@ -1397,7 +1397,11 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
         self.assertEqual(result["unrecognized_holes"], [_FAKE_HOLES[1]])
 
     @patch('daemon.generate_enclosure')
-    def test_004_no_longer_accepts_project_name_or_saves_anything(self, mock_generate):
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_004_no_longer_accepts_project_name_or_saves_anything(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
         """CTX-311.13: the real, confirmed, live bug this route used to
         have -- `project_name` was always supplied by the real frontend
         (`EnclosurePanel.tsx`'s own `projectName` prop), so every single
@@ -1407,7 +1411,16 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
         entirely -- `freecad.export_enclosure` is now the only real save
         action. A stray `project_name` kwarg is a real `TypeError`, not
         silently ignored -- confirms the parameter is genuinely gone, not
-        just unused."""
+        just unused.
+
+        CTX-311.15: this test previously omitted the `kicad_bridge` mocks
+        every sibling test in this class applies (`test_002`/`test_003`
+        above), so `height=20` alone (board-driven mode -- no width/depth)
+        silently depended on a real, live KiCad connection being open on
+        whatever machine ran it. It happened to pass locally against a
+        real KiCad session and failed in CI (no KiCad there at all) --
+        pre-existing, unrelated to this context's own diff, but fixed
+        here since it blocks this PR's own required checks."""
         mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
 
         result = daemon.freecad_generate_enclosure(height=20)
@@ -1759,15 +1772,45 @@ class TestKicadGetComponentHeightsRoute(unittest.TestCase):
 
 
 class TestKicadExportBoardGlbRoute(unittest.TestCase):
+    """CTX-311.15: real-origins the export to the board's own bounding-
+    box corner so `EnclosureViewer.tsx` can composite it inside the
+    enclosure's own glb with a simple, known translation -- the outline
+    always comes from `kicad_pcb_import.extract_board_outline(pcb_path)`,
+    this exact file, never `kicad_bridge.get_board_outline()` (whatever
+    happens to be live in KiCad right now, not necessarily the same
+    board this route was asked to export)."""
 
     @patch('daemon.kicad_cli.export_board_glb', return_value='/real/board.glb')
-    def test_001_delegates_and_wraps_the_real_path(self, mock_export):
+    @patch('daemon.kicad_pcb_import.extract_board_outline', return_value=_FAKE_OUTLINE)
+    def test_001_derives_the_real_outline_from_this_exact_file_and_passes_its_origin_through(
+        self, mock_extract, mock_export,
+    ):
         result = daemon.kicad_export_board_glb('/real/board.kicad_pcb')
 
-        mock_export.assert_called_once_with('/real/board.kicad_pcb')
+        mock_extract.assert_called_once_with('/real/board.kicad_pcb')
+        mock_export.assert_called_once_with(
+            '/real/board.kicad_pcb', _FAKE_OUTLINE["x_mm"], _FAKE_OUTLINE["y_mm"],
+        )
         self.assertEqual(result, {"glb_path": "/real/board.glb"})
 
-    def test_002_kicad_cli_import_failure_raises_a_clean_error(self):
+    @patch('daemon.kicad_bridge.get_board_outline', return_value={"x_mm": 999, "y_mm": 999, "width_mm": 1, "height_mm": 1})
+    @patch('daemon.kicad_cli.export_board_glb', return_value='/real/board.glb')
+    @patch('daemon.kicad_pcb_import.extract_board_outline', return_value=_FAKE_OUTLINE)
+    def test_002_never_touches_the_live_kicad_bridge_outline_even_when_a_connection_is_available(
+        self, mock_extract, mock_export, mock_live_outline,
+    ):
+        """A real, live-open board can genuinely differ from the explicit
+        `pcb_path` this route was asked to export (e.g. a manually-picked
+        file) -- using the live outline here would silently misalign the
+        overlay against a different board's own geometry."""
+        daemon.kicad_export_board_glb('/real/board.kicad_pcb')
+
+        mock_live_outline.assert_not_called()
+        mock_export.assert_called_once_with(
+            '/real/board.kicad_pcb', _FAKE_OUTLINE["x_mm"], _FAKE_OUTLINE["y_mm"],
+        )
+
+    def test_003_kicad_cli_import_failure_raises_a_clean_error(self):
         original = daemon.kicad_cli
         daemon.kicad_cli = None
         try:
@@ -1776,6 +1819,16 @@ class TestKicadExportBoardGlbRoute(unittest.TestCase):
             self.assertIn("kicad_cli", str(ctx.exception))
         finally:
             daemon.kicad_cli = original
+
+    def test_004_kicad_pcb_import_import_failure_raises_a_clean_error(self):
+        original = daemon.kicad_pcb_import
+        daemon.kicad_pcb_import = None
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                daemon.kicad_export_board_glb('/real/board.kicad_pcb')
+            self.assertIn("kicad_pcb_import", str(ctx.exception))
+        finally:
+            daemon.kicad_pcb_import = original
 
 
 class TestSpec311RouteRegistration(unittest.TestCase):

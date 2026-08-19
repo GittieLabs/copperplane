@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { type JobHandle } from '../lib/ipc'
 import {
+  exportBoardGlb,
   exportEnclosure,
   generateEnclosure,
+  getComponentHeights,
   getProjectDirectory,
   pickExportDestination,
   pickPcbFile,
@@ -107,6 +109,30 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
   const [exportError, setExportError] = useState<string | null>(null)
   const [exportedPath, setExportedPath] = useState<string | null>(null)
 
+  // CTX-311.15: the real board-inside-enclosure visual fit check
+  // (SPEC-311 §2). `resultBoardParams` freezes the exact pcb_path and
+  // geometry values *this* result was actually generated from -- the
+  // live `boardParams`/`pcbPath` state above can keep changing (the
+  // user editing fields for their *next* attempt) without invalidating
+  // an already-shown board overlay. `fromLiveList` gates the component-
+  // visibility disclosure below: `kicad.get_component_heights` reads
+  // whatever board is live in KiCad right now, not `pcbPath` -- only
+  // safe to trust when this result came from `listOpenBoards`'s own
+  // live-open list, not a manually-picked file that may not even be
+  // open in KiCad at all.
+  const [resultBoardParams, setResultBoardParams] = useState<{
+    pcbPath: string
+    wallThicknessMm: number
+    clearanceMm: number
+    standoffHeightMm: number
+    fromLiveList: boolean
+  } | null>(null)
+  const [boardGlbPath, setBoardGlbPath] = useState<string | null>(null)
+  const [boardVisible, setBoardVisible] = useState(false)
+  const [loadingBoardGlb, setLoadingBoardGlb] = useState(false)
+  const [boardGlbError, setBoardGlbError] = useState<string | null>(null)
+  const [unknownComponentRefs, setUnknownComponentRefs] = useState<string[]>([])
+
   const running = status === 'running'
   // A manually-picked file always wins once chosen -- it's the user's
   // explicit override of whatever the list auto-selected or offered.
@@ -173,6 +199,14 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
     setError(null)
     setResult(null)
     setStatus('running')
+    // A new generation invalidates any already-shown board overlay --
+    // its own real geometry params (wall thickness etc.) may no longer
+    // match what's about to be built.
+    setResultBoardParams(null)
+    setBoardGlbPath(null)
+    setBoardVisible(false)
+    setBoardGlbError(null)
+    setUnknownComponentRefs([])
 
     const params: EnclosureParams =
       mode === 'manual'
@@ -191,10 +225,49 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
 
       setLidVisible(true)
       setResult(await handle.result)
+      if (mode === 'board' && pcbPath) {
+        setResultBoardParams({
+          pcbPath,
+          wallThicknessMm: boardParams.wall_thickness_mm,
+          clearanceMm: boardParams.clearance_mm,
+          standoffHeightMm: boardParams.standoff_height_mm,
+          fromLiveList: !manualPcbPath,
+        })
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setJob(null)
+    }
+  }
+
+  async function handleToggleShowBoard(checked: boolean) {
+    setBoardVisible(checked)
+    if (!checked || boardGlbPath || !resultBoardParams || loadingBoardGlb) return
+
+    setLoadingBoardGlb(true)
+    setBoardGlbError(null)
+    try {
+      const handle = await exportBoardGlb(resultBoardParams.pcbPath)
+      const glbResult = await handle.result
+      setBoardGlbPath(glbResult.glb_path)
+
+      if (resultBoardParams.fromLiveList) {
+        try {
+          const heightsHandle = await getComponentHeights()
+          const heights = await heightsHandle.result
+          setUnknownComponentRefs(heights.unknown)
+        } catch {
+          // Best-effort disclosure only -- a failure here shouldn't block
+          // showing the board itself, and this route reads whatever's
+          // live in KiCad, which is a real, separate thing from the
+          // board glb export that just succeeded above.
+        }
+      }
+    } catch (err) {
+      setBoardGlbError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoadingBoardGlb(false)
     }
   }
 
@@ -439,7 +512,39 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
               lidGlbPath={result.lid_glb_path ?? null}
               lidVisible={lidVisible}
               onLidVisibleChange={setLidVisible}
+              boardGlbPath={boardGlbPath}
+              boardVisible={boardVisible}
+              boardOffsetMm={
+                resultBoardParams
+                  ? {
+                      margin: resultBoardParams.wallThicknessMm + resultBoardParams.clearanceMm,
+                      floorAndStandoff:
+                        resultBoardParams.wallThicknessMm + resultBoardParams.standoffHeightMm,
+                    }
+                  : null
+              }
             />
+            {resultBoardParams && (
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 text-xs text-neutral-300">
+                  <input
+                    type="checkbox"
+                    checked={boardVisible}
+                    onChange={(e) => void handleToggleShowBoard(e.target.checked)}
+                    disabled={loadingBoardGlb}
+                  />
+                  {loadingBoardGlb ? 'Loading board…' : 'Show board (visual fit check)'}
+                </label>
+                {boardGlbError && <p className="text-xs text-red-400">{boardGlbError}</p>}
+              </div>
+            )}
+            {boardVisible && unknownComponentRefs.length > 0 && (
+              <p className="text-xs text-amber-400">
+                {unknownComponentRefs.join(', ')} {unknownComponentRefs.length === 1 ? 'has' : 'have'} no
+                3D model in KiCad and won't appear above -- fix their footprint's 3D model assignment
+                and regenerate to see them.
+              </p>
+            )}
             {!exportOpen && (
               <div className="flex items-center gap-3">
                 <button

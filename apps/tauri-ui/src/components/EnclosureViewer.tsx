@@ -271,6 +271,23 @@ export function computeCameraClipping(radius: number): {
   }
 }
 
+/** CTX-311.15: real, pure translation for compositing the board-inside-
+ * enclosure overlay -- `kicad.export_board_glb` (CTX-311.15) already
+ * real-origins the board's own glb to its bounding-box corner
+ * server-side, so no board outline data is needed here at all, only the
+ * enclosure's own already-known real parameters: `marginMm` (wall
+ * thickness + clearance -- the real gap between the enclosure's own
+ * local origin, its outer box's own corner, and the board's own edge,
+ * confirmed via `daemon.py`'s own standoff-position math) and
+ * `floorAndStandoffMm` (wall thickness + standoff height -- how far
+ * above the enclosure's own floor the board's own bottom surface
+ * sits). Both real mm values, converted to this app's own real `/1000`
+ * glb scale (`CTX-109.4`) the same way every other real dimension in
+ * this file already is. */
+export function computeBoardOffset(marginMm: number, floorAndStandoffMm: number): THREE.Vector3 {
+  return new THREE.Vector3(marginMm / 1000, floorAndStandoffMm / 1000, marginMm / 1000)
+}
+
 function CameraPresetControls({
   controlsRef,
   cameraState,
@@ -326,6 +343,9 @@ export function EnclosureViewer({
   lidGlbPath = null,
   lidVisible = true,
   onLidVisibleChange,
+  boardGlbPath = null,
+  boardVisible = false,
+  boardOffsetMm = null,
 }: {
   glbPath: string
   /** SPEC-311: a generated enclosure's own real lid, when one was
@@ -342,9 +362,22 @@ export function EnclosureViewer({
    * only way that state changes when a lid exists. Renders nothing when
    * omitted. */
   onLidVisibleChange?: (visible: boolean) => void
+  /** CTX-311.15: the real, assembled board's own glb (`kicad.
+   * export_board_glb`), already real-origined server-side to its own
+   * bounding-box corner -- `boardOffsetMm` (below) is the only
+   * placement data this component needs. */
+  boardGlbPath?: string | null
+  boardVisible?: boolean
+  /** Real mm values (not yet divided by 1000) -- `computeBoardOffset`
+   * does that real unit conversion. `margin` is `wall_thickness_mm +
+   * clearance_mm`; `floorAndStandoff` is `wall_thickness_mm +
+   * standoff_height_mm`. `null` while the board's own real params
+   * aren't known yet (e.g. before a board-driven Generate). */
+  boardOffsetMm?: { margin: number; floorAndStandoff: number } | null
 }) {
   const base = useGlbScene(glbPath)
   const lid = useGlbScene(lidGlbPath)
+  const board = useGlbScene(boardGlbPath)
   const controlsRef = useRef<OrbitControlsImpl | null>(null)
   const cameraState = useRef<CameraState>({
     radius: DEFAULT_CAMERA_RADIUS,
@@ -444,6 +477,12 @@ export function EnclosureViewer({
           <directionalLight position={[-100, -60, -100]} intensity={0.25} />
           {base.scene && <primitive object={base.scene} />}
           {lid.scene && lidVisible && <primitive object={lid.scene} />}
+          {board.scene && boardVisible && boardOffsetMm && (
+            <primitive
+              object={board.scene}
+              position={computeBoardOffset(boardOffsetMm.margin, boardOffsetMm.floorAndStandoff)}
+            />
+          )}
           <OrbitControls
             ref={controlsRef}
             makeDefault
@@ -470,6 +509,9 @@ export function EnclosureViewer({
         </div>
         {lidGlbPath && lid.status === 'error' && (
           <p className="text-xs text-red-400">Failed to load lid: {lid.error}</p>
+        )}
+        {boardGlbPath && board.status === 'error' && (
+          <p className="text-xs text-red-400">Failed to load board: {board.error}</p>
         )}
       </div>
     </div>
