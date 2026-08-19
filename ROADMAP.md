@@ -294,13 +294,50 @@ reaches a board. That is domain logic particular to this product; no framework s
 hallucinated footprint that looks plausible costs a PCB spin — this is still the
 highest-consequence failure mode in the product, and it still deserves its own section in the spec.
 
-#### SPEC-203 — Supplier API Integration
+#### [SPEC-203](services/python-daemon/specs/SPEC-203-supplier-api-integration.md) — Supplier API Integration — ❌ RETIRED 2026-08-18, never built
+
 *Module:* `services/python-daemon` · *Depends on:* SPEC-106
 
-DigiKey / Octopart / Mouser: authentication, rate limits, a local cache (part data barely changes;
-re-querying on every request wastes quota and adds latency), and graceful degradation to
-LLM-only extraction when no key is configured or the user is offline. Unaffected by the AgentFlow
-decision — this is a plain HTTP integration, not an LLM-orchestration concern.
+Real research against live vendor documentation (2026-08-18) found the distributor APIs
+(DigiKey/Mouser/Octopart/Arrow/element14/LCSC/JLCPCB) return essentially none of what this product
+actually needs — no pin assignments, no footprints/symbols/3D models except Nexar Enterprise, no
+design guidance — and that nearly every vendor's terms structurally forbid what a local-first CAD
+tool does (no caching/building a local database, no multi-source aggregation, principal purpose
+must be driving that vendor's own sales). `CTX-203.1` had already shipped credential-independent
+plumbing for this (Settings UI, OS-keychain storage, a pricing cache) before this research
+happened; that code was real but never wired to a live HTTP client, and is being removed
+(`CTX-203.2`) now that the vendor-API path is permanently closed rather than left as dead,
+misleading UI. Full reasoning, the one vendor (TME) that would have actually worked, and the
+standing rules that survive this retirement for any future work in this area: read the spec itself
+— it's kept as a tombstone at its original path specifically so this isn't rediscovered from
+scratch. What replaced each of this spec's original goals: pin layouts stay `SPEC-202`; footprints
+stay `SPEC-308`; datasheet resolution stays `SPEC-306`; "open at a distributor" stays `SPEC-307`'s
+plain deep link; and design/application guidance (decoupling, pull-ups, protection, layout) gets
+its own new spec, [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md),
+below.
+
+#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — Draft
+
+*Module:* `services/python-daemon` · *Depends on:* SPEC-105, SPEC-202, SPEC-304, SPEC-306, SPEC-307
+
+The real replacement for `SPEC-203`'s "design guidance" goal, since no distributor API sells this
+data — it only exists in datasheet prose, tables, and reference designs. Given a part and its
+datasheet, surfaces what an engineer needs *around* that part to use it correctly (supply range,
+decoupling, pull-ups, crystal load capacitance, protection, layout constraints), with three
+explicitly different output classes and different contracts: **A** (tabular fact, typed and
+range-checked, must cite), **B** (cited datasheet prose, must cite, never invented), and **C**
+(general engineering practice the model holds, visually segregated, never cited to the datasheet
+itself). A guidance item with no resolvable citation is a schema-level invalid state, not a UI
+choice — the mechanism that keeps "the AI says 100 nF" checkable against a real page in five
+seconds. Retrieval-first, not one-shot extraction, given datasheet length varies from ~200 pages to
+1000+: a structure pass locates candidate sections before any extraction runs. Real, named risks
+the spec itself is explicit about: unsourced-but-fluent advice is worse here than anywhere else in
+the product since a wrong decoupling recommendation fails silently in the field months later, not
+loudly at assembly; guidance that only appears in a schematic image (not prose) is a real, harder
+extraction case the spec requires an explicit in/out-of-scope decision on, not a silent gap;
+multi-variant datasheets (one document covering several part numbers) need explicit variant
+scoping; and citations must carry the document revision, since page numbers drift across datasheet
+revisions.
 
 #### [SPEC-204](services/python-daemon/specs/SPEC-204-agent-tool-registry.md) — Agent Tool Registry — ✅ Completed ([CTX-204.1](services/python-daemon/context/CTX-204.1-agent-tool-registry.md)) 2026-08-14
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-102
