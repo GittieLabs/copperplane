@@ -20,6 +20,7 @@ child_specs:
   - "SPEC-312-application-shell-project-portability-persistence.md"
   - "SPEC-313-overview-tab-project-dashboard.md"
   - "SPEC-314-community-library-discovery.md"
+  - "SPEC-315-library-browsing-and-organization.md"
 user_facing: true
 ---
 
