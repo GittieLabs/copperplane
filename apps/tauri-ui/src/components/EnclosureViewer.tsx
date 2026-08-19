@@ -325,6 +325,7 @@ export function EnclosureViewer({
   glbPath,
   lidGlbPath = null,
   lidVisible = true,
+  onLidVisibleChange,
 }: {
   glbPath: string
   /** SPEC-311: a generated enclosure's own real lid, when one was
@@ -332,6 +333,15 @@ export function EnclosureViewer({
    * not an error state (see `useGlbScene`'s own docstring). */
   lidGlbPath?: string | null
   lidVisible?: boolean
+  /** Real user feedback (CTX-311.14): "Show lid" was mixed in among the
+   * Open/Export buttons -- a display toggle for the camera/viewer, not
+   * an action on the generated files, so it belongs beside the camera
+   * preset buttons it's grouped with here, not the panel's own action
+   * row. `EnclosurePanel` still owns the actual `lidVisible` state (it's
+   * meaningful to more than just this component); this callback is the
+   * only way that state changes when a lid exists. Renders nothing when
+   * omitted. */
+  onLidVisibleChange?: (visible: boolean) => void
 }) {
   const base = useGlbScene(glbPath)
   const lid = useGlbScene(lidGlbPath)
@@ -445,7 +455,19 @@ export function EnclosureViewer({
         </Canvas>
       </div>
       <div className="flex items-center justify-between">
-        <CameraPresetControls controlsRef={controlsRef} cameraState={cameraState} />
+        <div className="flex items-center gap-3">
+          <CameraPresetControls controlsRef={controlsRef} cameraState={cameraState} />
+          {lidGlbPath && onLidVisibleChange && (
+            <label className="flex items-center gap-2 text-xs text-neutral-300">
+              <input
+                type="checkbox"
+                checked={lidVisible}
+                onChange={(e) => onLidVisibleChange(e.target.checked)}
+              />
+              Show lid
+            </label>
+          )}
+        </div>
         {lidGlbPath && lid.status === 'error' && (
           <p className="text-xs text-red-400">Failed to load lid: {lid.error}</p>
         )}

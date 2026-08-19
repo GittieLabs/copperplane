@@ -380,12 +380,12 @@ describe('App: Enclosure tab persists across area switches', () => {
     await waitFor(() => enclosureArea().getByText('board.kicad_pcb'))
     fireEvent.click(enclosureArea().getByRole('button', { name: 'Generate Enclosure' }))
 
-    await waitFor(() => enclosureArea().getByRole('button', { name: 'Open .step' }))
+    await waitFor(() => enclosureArea().getByRole('button', { name: 'Export…' }))
 
     fireEvent.click(screen.getByRole('button', { name: 'Components' }))
     fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
 
-    enclosureArea().getByRole('button', { name: 'Open .step' })
+    enclosureArea().getByRole('button', { name: 'Export…' })
     expect(submitJobMock).toHaveBeenCalledTimes(1)
   })
 })
