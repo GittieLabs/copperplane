@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 const {
-  useGlbScene, disposeScene, sphericalToCartesian, computeFrame, computeDefaultAzimuth,
+  useGlbScene, disposeScene, sphericalToCartesian, computeFrame, computeDefaultAzimuth, computeCameraClipping,
   DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH,
 } = await import('./EnclosureViewer')
 
@@ -258,5 +258,50 @@ describe('computeDefaultAzimuth (CTX-311.10: real broadside bias for elongated b
 
   it('falls back to the fixed default for a degenerate (empty) object, never a guess', () => {
     expect(computeDefaultAzimuth(new THREE.Group())).toBe(DEFAULT_CAMERA_AZIMUTH)
+  })
+})
+
+describe('computeCameraClipping (CTX-311.11: real near-plane-clipping fix)', () => {
+  it('CTX-311.11: for a real, small enclosure (post-CTX-109.4 scale, in real meters), near is real and much smaller than the object itself -- not the real ~0.1 default that clipped through it', () => {
+    // A typical real enclosure radius in this app's own real units --
+    // small enough that PerspectiveCamera's own real default near
+    // (0.1, confirmed live against the installed three package) would
+    // already be larger than the whole object.
+    const clipping = computeCameraClipping(0.05)
+
+    expect(clipping.near).toBeLessThan(0.05)
+    expect(clipping.near).toBeLessThan(0.1)
+    expect(clipping.near).toBeGreaterThan(0)
+  })
+
+  it('far comfortably exceeds the real object\'s own scale so nothing gets far-clipped', () => {
+    const clipping = computeCameraClipping(0.05)
+    expect(clipping.far).toBeGreaterThan(0.05)
+  })
+
+  it('minDistance keeps free-orbit zoom from ever reaching inside the real object, maxDistance keeps it from zooming out to nothing', () => {
+    const clipping = computeCameraClipping(0.05)
+
+    expect(clipping.minDistance).toBeGreaterThan(0)
+    expect(clipping.minDistance).toBeLessThan(0.05)
+    expect(clipping.maxDistance).toBeGreaterThan(clipping.minDistance)
+  })
+
+  it('all four values scale proportionally with a real, larger radius -- correct at any real enclosure size, not a fixed guess', () => {
+    const small = computeCameraClipping(0.05)
+    const large = computeCameraClipping(5)
+
+    expect(large.near).toBeGreaterThan(small.near)
+    expect(large.far).toBeGreaterThan(small.far)
+    expect(large.minDistance).toBeGreaterThan(small.minDistance)
+    expect(large.maxDistance).toBeGreaterThan(small.maxDistance)
+  })
+
+  it('never divides by zero or returns a non-finite value for a degenerate zero radius', () => {
+    const clipping = computeCameraClipping(0)
+    for (const value of Object.values(clipping)) {
+      expect(Number.isFinite(value)).toBe(true)
+      expect(value).toBeGreaterThan(0)
+    }
   })
 })
