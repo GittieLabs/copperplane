@@ -521,6 +521,17 @@ def project_list() -> list:
     return library_store.list_projects()
 
 
+def project_open_from_directory(directory: str) -> dict:
+    """CTX-312.3: the real backend for the native menu's "Open Project…"
+    action -- restores a project from a real, already-linked folder
+    (e.g. copied from another machine), the actual payoff of
+    `CTX-312.1`'s own portability work. Thin passthrough, matching every
+    other `project.*` route's own convention; `library_store`'s own
+    `ProjectNotLinkedError` surfaces as a clean route error rather than
+    silently creating a new project."""
+    return library_store.open_project_from_directory(directory)
+
+
 def project_get_directory(name: str) -> dict:
     """CTX-311.13: the real, single source of truth for a project's own
     real directory path -- used to default the Enclosure Export dialog's
@@ -1036,6 +1047,7 @@ def _build_routes() -> dict:
         routes["project.append_conversation_turn"] = project_append_conversation_turn
         routes["project.load_conversation"] = project_load_conversation
         routes["project.get_directory"] = project_get_directory
+        routes["project.open_from_directory"] = project_open_from_directory
     if tool_registry is not None:
         routes["agent.dispatch_tool"] = agent_dispatch_tool
     if fp_lib_table is not None:

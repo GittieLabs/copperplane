@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const submitJobMock = vi.fn()
@@ -19,10 +19,18 @@ const checkSchematicMock = vi.fn()
 const pickSchematicFileMock = vi.fn()
 const listProjectSchematicsMock = vi.fn()
 const saveDialogMock = vi.fn()
+const openProjectFromDirectoryMock = vi.fn()
+const listenMock = vi.fn()
 
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
   dispatchTool: (...args: unknown[]) => dispatchToolMock(...args),
+  MENU_SAVE_PROJECT_EVENT: 'menu://save-project',
+  MENU_OPEN_PROJECT_EVENT: 'menu://open-project',
+}))
+
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: (...args: unknown[]) => listenMock(...args),
 }))
 
 vi.mock('./lib/projects', () => ({
@@ -31,6 +39,7 @@ vi.mock('./lib/projects', () => ({
   saveProject: (...args: unknown[]) => saveProjectMock(...args),
   loadProject: (...args: unknown[]) => loadProjectMock(...args),
   pickProjectDirectory: (...args: unknown[]) => pickProjectDirectoryMock(...args),
+  openProjectFromDirectory: (...args: unknown[]) => openProjectFromDirectoryMock(...args),
   loadConversation: (...args: unknown[]) => loadConversationMock(...args),
   appendConversationTurn: (...args: unknown[]) => appendConversationTurnMock(...args),
 }))
@@ -99,6 +108,8 @@ describe('App: chat & command surface', () => {
     submitJobMock.mockReset()
     dispatchToolMock.mockReset()
     loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    listenMock.mockReset().mockResolvedValue(() => {})
+    openProjectFromDirectoryMock.mockReset()
     pickProjectDirectoryMock.mockReset()
     listProjectsMock.mockReset().mockResolvedValue(['test-project'])
     listLibraryPartsMock.mockReset().mockResolvedValue([])
@@ -301,6 +312,8 @@ describe('App: PCB tab persists across area switches, resets on project switch',
 
   beforeEach(() => {
     loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    listenMock.mockReset().mockResolvedValue(() => {})
+    openProjectFromDirectoryMock.mockReset()
     pickProjectDirectoryMock.mockReset()
     listProjectsMock.mockReset().mockResolvedValue(['test-project'])
     listLibraryPartsMock.mockReset().mockResolvedValue([])
@@ -380,6 +393,8 @@ describe('App: Enclosure tab persists across area switches', () => {
 
   beforeEach(() => {
     loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    listenMock.mockReset().mockResolvedValue(() => {})
+    openProjectFromDirectoryMock.mockReset()
     pickProjectDirectoryMock.mockReset()
     saveProjectMock.mockReset().mockImplementation((project: unknown) => Promise.resolve(project))
     saveDialogMock.mockReset()
@@ -486,6 +501,55 @@ describe('App: Enclosure tab persists across area switches', () => {
     // no visible confirmation at all, reading as "nothing happened."
     await waitFor(() => screen.getByText('Project saved.'))
   })
+
+  it('CTX-312.3: the real native menu\'s own Save Project event runs the same real handleSaveProject flow as the button', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    // The menu-event listener effect re-subscribes whenever `currentProject`
+    // changes (so `handleSaveProject`'s own closure is never stale) --
+    // waiting for the button to become enabled is the real signal that the
+    // *latest* subscription (the one with a real, loaded project) is in
+    // place, not an earlier one registered while it was still null.
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+    })
+
+    const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://save-project')!
+    await act(async () => {
+      menuHandler()
+    })
+
+    await waitFor(() =>
+      expect(saveProjectMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'test-project' })),
+    )
+    await waitFor(() => screen.getByText('Project saved.'))
+  })
+
+  it('CTX-312.3: the real native menu\'s own Open Project… event picks a real linked folder and selects it', async () => {
+    pickProjectDirectoryMock.mockResolvedValueOnce('/real/PCBs/other-project')
+    openProjectFromDirectoryMock.mockResolvedValueOnce({
+      name: 'other-project', directory: '/real/PCBs/other-project',
+    })
+
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+    })
+
+    const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://open-project')!
+    await act(async () => {
+      menuHandler()
+    })
+
+    await waitFor(() => expect(openProjectFromDirectoryMock).toHaveBeenCalledWith('/real/PCBs/other-project'))
+    // The Rail prefixes "> " onto whichever project is currently
+    // selected (Rail.tsx) -- opening a project also selects it, so the
+    // real accessible name here is "> other-project", not the bare name.
+    await waitFor(() => screen.getByRole('button', { name: '> other-project' }))
+  })
 })
 
 /** Real user feedback: the ERC check briefly lived under the "PCB" tab
@@ -502,6 +566,8 @@ describe('App: Schematic tab persists across area switches, resets on project sw
 
   beforeEach(() => {
     loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    listenMock.mockReset().mockResolvedValue(() => {})
+    openProjectFromDirectoryMock.mockReset()
     pickProjectDirectoryMock.mockReset()
     listProjectsMock.mockReset().mockResolvedValue(['test-project'])
     listLibraryPartsMock.mockReset().mockResolvedValue([])

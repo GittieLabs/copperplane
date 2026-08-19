@@ -1,5 +1,6 @@
 mod config;
 mod daemon;
+mod menu;
 mod secrets;
 mod supervisor;
 
@@ -42,6 +43,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .menu(|app| menu::build_menu(app))
+        .on_menu_event(|app, event| menu::handle_menu_event(app, event))
         .setup(|app| {
             // SPEC-402 (CTX-402.2): desktop-only, matching the updater
             // plugin's own real platform support -- registered here
