@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { open } from '@tauri-apps/plugin-shell'
 import { type JobHandle } from '../lib/ipc'
 import {
   exportEnclosure,
@@ -88,17 +87,25 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
   const [result, setResult] = useState<EnclosureResult | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // CTX-311.13: the real explicit Save/Export action -- Generate itself
-  // no longer persists anything (see lib/enclosure.ts's own EnclosureResult
-  // docstring for the real, confirmed auto-save bug this replaces).
-  // 'body' is the only value guaranteed valid on every result -- a lid
-  // may not exist yet, and defaulting to 'combined'/'lid' would need an
-  // extra effect just to reset itself the moment a no-lid result arrives
-  // after a lidded one.
+  // CTX-311.13/CTX-311.14: the real explicit Save/Export action --
+  // Generate itself no longer persists anything (see lib/enclosure.ts's
+  // own EnclosureResult docstring for the real, confirmed auto-save bug
+  // this replaces). Real user feedback on the first click-through:
+  // format and parts weren't grouped or ordered logically (parts shown
+  // even for FreeCAD, which always ignores it), so `exportOpen` gates a
+  // real two-step reveal -- Export opens a real, ordered card (format,
+  // then parts *only if the format actually uses it*, then a real
+  // choose-location action) instead of showing every control inline in
+  // the button row at once. 'body' is the only parts value guaranteed
+  // valid on every result -- a lid may not exist yet, and defaulting to
+  // 'combined'/'lid' would need an extra effect just to reset itself the
+  // moment a no-lid result arrives after a lidded one.
+  const [exportOpen, setExportOpen] = useState(false)
   const [exportParts, setExportParts] = useState<ExportParts>('body')
   const [exportFormat, setExportFormat] = useState<ExportFormat>('step')
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
+  const [exportedPath, setExportedPath] = useState<string | null>(null)
 
   const running = status === 'running'
   // A manually-picked file always wins once chosen -- it's the user's
@@ -195,11 +202,26 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
     await job?.cancel()
   }
 
-  async function handleExport() {
+  function handleOpenExport() {
+    setExportError(null)
+    setExportedPath(null)
+    setExportOpen(true)
+  }
+
+  function handleCancelExport() {
+    setExportOpen(false)
+    setExportError(null)
+  }
+
+  async function handleConfirmExport() {
     if (!result) return
     setExportError(null)
 
-    if (exportParts !== 'body' && !result.lid_step_path) {
+    // FreeCAD export always ignores `parts` (CTX-311.13's own decision --
+    // the whole design, not a per-part document), so the defensive
+    // lid-existence check below only applies to the formats where a
+    // part choice is real.
+    if (exportFormat !== 'fcstd' && exportParts !== 'body' && !result.lid_step_path) {
       // Defensive -- the parts <select>'s own disabled options already
       // prevent choosing this combination, but a result without a lid
       // can arrive *after* 'combined'/'lid' was already selected for a
@@ -213,7 +235,8 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
     try {
       const dir = await getProjectDirectory(projectName)
       const extension = exportFormat === 'fcstd' ? 'FCStd' : exportFormat
-      defaultPath = _joinPath(dir, `${exportParts}.${extension}`)
+      const nameStem = exportFormat === 'fcstd' ? 'enclosure' : exportParts
+      defaultPath = _joinPath(dir, `${nameStem}.${extension}`)
     } catch {
       // A real default is a convenience, not a requirement -- the save
       // dialog still works fine with no default path at all.
@@ -234,6 +257,8 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
         lid_step_path: result.lid_step_path,
       })
       await handle.result
+      setExportOpen(false)
+      setExportedPath(destPath)
     } catch (err) {
       setExportError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -409,65 +434,85 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
         )}
         {result && (
           <>
-            <EnclosureViewer glbPath={result.glb_path} lidGlbPath={result.lid_glb_path ?? null} lidVisible={lidVisible} />
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
-                onClick={() => open(result.step_path)}
-              >
-                Open .step
-              </button>
-              <div className="flex items-center gap-1">
-                <select
-                  aria-label="Export parts"
-                  className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-xs text-neutral-200"
-                  value={exportParts}
-                  onChange={(e) => setExportParts(e.target.value as ExportParts)}
-                  disabled={exporting}
-                >
-                  <option value="combined" disabled={!result.lid_step_path}>Combined</option>
-                  <option value="body">Body</option>
-                  <option value="lid" disabled={!result.lid_step_path}>Lid</option>
-                </select>
-                <select
-                  aria-label="Export format"
-                  className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-xs text-neutral-200"
-                  value={exportFormat}
-                  onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
-                  disabled={exporting}
-                >
-                  <option value="step">STEP</option>
-                  <option value="stl">STL</option>
-                  <option value="glb">GLB</option>
-                  <option value="fcstd">FreeCAD (.FCStd)</option>
-                </select>
+            <EnclosureViewer
+              glbPath={result.glb_path}
+              lidGlbPath={result.lid_glb_path ?? null}
+              lidVisible={lidVisible}
+              onLidVisibleChange={setLidVisible}
+            />
+            {!exportOpen && (
+              <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs disabled:opacity-50"
-                  onClick={() => void handleExport()}
-                  disabled={exporting}
+                  className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium text-neutral-200 hover:bg-neutral-800"
+                  onClick={handleOpenExport}
                 >
-                  {exporting ? 'Exporting…' : 'Export…'}
+                  Export…
                 </button>
+                {exportedPath && (
+                  <p className="truncate text-xs text-neutral-400">Exported to {exportedPath}</p>
+                )}
               </div>
-              {result.lid_glb_path && (
-                <label className="flex items-center gap-2 text-xs text-neutral-300">
-                  <input type="checkbox" checked={lidVisible} onChange={(e) => setLidVisible(e.target.checked)} />
-                  Show lid
+            )}
+            {exportOpen && (
+              <div className="flex flex-col gap-2 rounded border border-neutral-700 bg-neutral-900 p-3 text-sm">
+                <label className="flex flex-col gap-1 text-xs">
+                  <span className="text-neutral-300">Format</span>
+                  <select
+                    aria-label="Export format"
+                    className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200"
+                    value={exportFormat}
+                    onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
+                    disabled={exporting}
+                  >
+                    <option value="step">STEP</option>
+                    <option value="stl">STL</option>
+                    <option value="glb">GLB</option>
+                    <option value="fcstd">FreeCAD (.FCStd)</option>
+                  </select>
                 </label>
-              )}
-              {result.lid_step_path && (
-                <button
-                  type="button"
-                  className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
-                  onClick={() => open(result.lid_step_path!)}
-                >
-                  Open lid .step
-                </button>
-              )}
-            </div>
-            {exportError && <p className="text-xs text-red-400">{exportError}</p>}
+                {exportFormat === 'fcstd' ? (
+                  <p className="text-xs text-neutral-500">
+                    FreeCAD export always includes the whole design -- body and lid together, when a
+                    lid was generated.
+                  </p>
+                ) : (
+                  <label className="flex flex-col gap-1 text-xs">
+                    <span className="text-neutral-300">Parts</span>
+                    <select
+                      aria-label="Export parts"
+                      className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200"
+                      value={exportParts}
+                      onChange={(e) => setExportParts(e.target.value as ExportParts)}
+                      disabled={exporting}
+                    >
+                      <option value="combined" disabled={!result.lid_step_path}>Combined (body + lid)</option>
+                      <option value="body">Body only</option>
+                      <option value="lid" disabled={!result.lid_step_path}>Lid only</option>
+                    </select>
+                  </label>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+                    onClick={() => void handleConfirmExport()}
+                    disabled={exporting}
+                  >
+                    {exporting ? 'Exporting…' : 'Choose location…'}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200 disabled:opacity-50"
+                    onClick={handleCancelExport}
+                    disabled={exporting}
+                  >
+                    Close
+                  </button>
+                </div>
+                {exportError && <p className="text-xs text-red-400">{exportError}</p>}
+              </div>
+            )}
           </>
         )}
       </div>

@@ -1,11 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const generateEnclosureMock = vi.fn()
 const pickPcbFileMock = vi.fn()
 const listOpenBoardsMock = vi.fn()
 const openKicadMock = vi.fn()
-const shellOpenMock = vi.fn()
 const exportEnclosureMock = vi.fn()
 const pickExportDestinationMock = vi.fn()
 const getProjectDirectoryMock = vi.fn()
@@ -21,10 +20,6 @@ vi.mock('../lib/enclosure', () => ({
 vi.mock('../lib/boardAdvisor', () => ({
   listOpenBoards: (...args: unknown[]) => listOpenBoardsMock(...args),
   openKicad: (...args: unknown[]) => openKicadMock(...args),
-}))
-
-vi.mock('@tauri-apps/plugin-shell', () => ({
-  open: (...args: unknown[]) => shellOpenMock(...args),
 }))
 
 const enclosureViewerSpy = vi.fn()
@@ -65,7 +60,6 @@ beforeEach(() => {
   pickPcbFileMock.mockReset()
   listOpenBoardsMock.mockReset().mockResolvedValue({ status: 'no_board_open' })
   openKicadMock.mockReset().mockResolvedValue(undefined)
-  shellOpenMock.mockReset()
   enclosureViewerSpy.mockReset()
   exportEnclosureMock.mockReset()
   pickExportDestinationMock.mockReset()
@@ -296,19 +290,6 @@ describe('EnclosurePanel: results (unchanged behavior)', () => {
     await waitFor(() => screen.getByText(/1 hole\(s\) on this board weren't recognized/))
   })
 
-  it('a real step_path result renders an Open button that calls shell open with that exact path', async () => {
-    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
-
-    render(<EnclosurePanel projectName="test-project" />)
-    fireEvent.click(screen.getByRole('button', { name: 'Manual (no PCB)' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
-
-    await waitFor(() => screen.getByRole('button', { name: 'Open .step' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open .step' }))
-
-    expect(shellOpenMock).toHaveBeenCalledWith('/tmp/enclosure.step')
-  })
-
   it('CTX-311.1: a no_mounting_holes_found result renders its own real warning', async () => {
     generateEnclosureMock.mockResolvedValueOnce(
       fakeJobHandle(Promise.resolve({ ...fakeResult, no_mounting_holes_found: true })),
@@ -328,7 +309,7 @@ describe('EnclosurePanel: results (unchanged behavior)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Manual (no PCB)' }))
     fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
 
-    await waitFor(() => screen.getByRole('button', { name: 'Open .step' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Export…' }))
     expect(screen.queryByText(/Generated:/)).toBeNull()
   })
 })
@@ -348,8 +329,18 @@ describe('EnclosurePanel: export (CTX-311.13)', () => {
     await waitFor(() => screen.getByRole('button', { name: 'Export…' }))
   }
 
+  it('Export opens a real ordered card: format first, no location dialog yet', async () => {
+    await renderWithResult(fakeResult)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+
+    screen.getByLabelText('Export format')
+    expect(pickExportDestinationMock).not.toHaveBeenCalled()
+  })
+
   it('Combined and Lid options are disabled until a lid was actually generated', async () => {
     await renderWithResult(fakeResult)
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
 
     const partsSelect = screen.getByLabelText('Export parts') as HTMLSelectElement
     const combinedOption = Array.from(partsSelect.options).find((o) => o.value === 'combined')!
@@ -360,6 +351,7 @@ describe('EnclosurePanel: export (CTX-311.13)', () => {
 
   it('Combined and Lid options are enabled once a lid was generated', async () => {
     await renderWithResult(fakeResultWithLid)
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
 
     const partsSelect = screen.getByLabelText('Export parts') as HTMLSelectElement
     const combinedOption = Array.from(partsSelect.options).find((o) => o.value === 'combined')!
@@ -368,16 +360,51 @@ describe('EnclosurePanel: export (CTX-311.13)', () => {
     expect(lidOption.disabled).toBe(false)
   })
 
-  it('clicking Export defaults the save dialog to the real project directory plus a real filename', async () => {
+  it('CTX-311.14: choosing FreeCAD (.FCStd) hides the parts selector -- it always ignores parts', async () => {
+    await renderWithResult(fakeResultWithLid)
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+
+    fireEvent.change(screen.getByLabelText('Export format'), { target: { value: 'fcstd' } })
+
+    expect(screen.queryByLabelText('Export parts')).toBeNull()
+    screen.getByText(/FreeCAD export always includes the whole design/)
+  })
+
+  it('Close dismisses the card without picking a destination or exporting', async () => {
+    await renderWithResult(fakeResult)
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(screen.queryByLabelText('Export format')).toBeNull()
+    expect(pickExportDestinationMock).not.toHaveBeenCalled()
+    screen.getByRole('button', { name: 'Export…' })
+  })
+
+  it('Choose location defaults the save dialog to the real project directory plus a real filename', async () => {
     await renderWithResult(fakeResult)
     getProjectDirectoryMock.mockResolvedValueOnce('/projects/test-project')
     pickExportDestinationMock.mockResolvedValueOnce(null)
 
     fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose location…' }))
 
     await waitFor(() => expect(pickExportDestinationMock).toHaveBeenCalled())
     expect(getProjectDirectoryMock).toHaveBeenCalledWith('test-project')
     expect(pickExportDestinationMock).toHaveBeenCalledWith('step', '/projects/test-project/body.step')
+  })
+
+  it('choosing FreeCAD defaults the filename to "enclosure", not a parts name', async () => {
+    await renderWithResult(fakeResultWithLid)
+    getProjectDirectoryMock.mockResolvedValueOnce('/projects/test-project')
+    pickExportDestinationMock.mockResolvedValueOnce(null)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+    fireEvent.change(screen.getByLabelText('Export format'), { target: { value: 'fcstd' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose location…' }))
+
+    await waitFor(() => expect(pickExportDestinationMock).toHaveBeenCalled())
+    expect(pickExportDestinationMock).toHaveBeenCalledWith('fcstd', '/projects/test-project/enclosure.FCStd')
   })
 
   it('cancelling the save dialog (null) never calls exportEnclosure', async () => {
@@ -385,6 +412,7 @@ describe('EnclosurePanel: export (CTX-311.13)', () => {
     pickExportDestinationMock.mockResolvedValueOnce(null)
 
     fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose location…' }))
 
     await waitFor(() => expect(pickExportDestinationMock).toHaveBeenCalled())
     expect(exportEnclosureMock).not.toHaveBeenCalled()
@@ -395,9 +423,10 @@ describe('EnclosurePanel: export (CTX-311.13)', () => {
     pickExportDestinationMock.mockResolvedValueOnce('/chosen/combined.glb')
     exportEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({ dest_path: '/chosen/combined.glb' })))
 
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
     fireEvent.change(screen.getByLabelText('Export parts'), { target: { value: 'combined' } })
     fireEvent.change(screen.getByLabelText('Export format'), { target: { value: 'glb' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose location…' }))
 
     await waitFor(() => expect(exportEnclosureMock).toHaveBeenCalled())
     expect(exportEnclosureMock).toHaveBeenCalledWith({
@@ -411,7 +440,19 @@ describe('EnclosurePanel: export (CTX-311.13)', () => {
     })
   })
 
-  it('a real export failure shows the error message, not a silent failure', async () => {
+  it('a successful export closes the card and shows the real real destination', async () => {
+    await renderWithResult(fakeResult)
+    pickExportDestinationMock.mockResolvedValueOnce('/chosen/body.step')
+    exportEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({ dest_path: '/chosen/body.step' })))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose location…' }))
+
+    await waitFor(() => screen.getByText(/Exported to \/chosen\/body\.step/))
+    expect(screen.queryByLabelText('Export format')).toBeNull()
+  })
+
+  it('a real export failure keeps the card open and shows the error message', async () => {
     await renderWithResult(fakeResult)
     pickExportDestinationMock.mockResolvedValueOnce('/chosen/body.step')
     exportEnclosureMock.mockResolvedValueOnce(
@@ -419,8 +460,10 @@ describe('EnclosurePanel: export (CTX-311.13)', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose location…' }))
 
     await waitFor(() => screen.getByText('Disk is full'))
+    screen.getByLabelText('Export format')
   })
 })
 
@@ -486,7 +529,13 @@ describe('EnclosurePanel: lid (CTX-311.2/CTX-311.3)', () => {
     expect(generateEnclosureMock.mock.calls[0][0].lid).toBe(false)
   })
 
-  it('a result with a real lid_glb_path passes it through to the viewer and shows a Show lid toggle', async () => {
+  it('CTX-311.14: a result with a real lid_glb_path passes lidGlbPath and a real onLidVisibleChange to the viewer', async () => {
+    // The "Show lid" checkbox itself moved into EnclosureViewer (real
+    // user feedback: it was mixed in among Open/Export buttons instead
+    // of living beside the camera preset controls it's grouped with
+    // now) -- mocked here, so its own real rendering/click behavior is
+    // covered in EnclosureViewer.test.tsx instead. This only verifies
+    // EnclosurePanel passes the right props and still owns the state.
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     generateEnclosureMock.mockResolvedValueOnce(
       fakeJobHandle(
@@ -499,16 +548,23 @@ describe('EnclosurePanel: lid (CTX-311.2/CTX-311.3)', () => {
     fireEvent.click(screen.getByLabelText('Add a lid'))
     fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
 
-    await waitFor(() => screen.getByLabelText('Show lid'))
+    await waitFor(() => expect(enclosureViewerSpy).toHaveBeenCalled())
     expect(enclosureViewerSpy).toHaveBeenLastCalledWith(
-      expect.objectContaining({ glbPath: '/tmp/enclosure.glb', lidGlbPath: '/tmp/lid.glb', lidVisible: true }),
+      expect.objectContaining({
+        glbPath: '/tmp/enclosure.glb',
+        lidGlbPath: '/tmp/lid.glb',
+        lidVisible: true,
+        onLidVisibleChange: expect.any(Function),
+      }),
     )
 
-    fireEvent.click(screen.getByLabelText('Show lid'))
+    const lastProps = enclosureViewerSpy.mock.calls[enclosureViewerSpy.mock.calls.length - 1][0]
+    act(() => lastProps.onLidVisibleChange(false))
+
     expect(enclosureViewerSpy).toHaveBeenLastCalledWith(expect.objectContaining({ lidVisible: false }))
   })
 
-  it('a result with no lid_glb_path never shows a Show lid toggle', async () => {
+  it('a result with no lid_glb_path passes a null lidGlbPath to the viewer', async () => {
     generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
 
     render(<EnclosurePanel projectName="test-project" />)
@@ -516,6 +572,6 @@ describe('EnclosurePanel: lid (CTX-311.2/CTX-311.3)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
 
     await waitFor(() => expect(enclosureViewerSpy).toHaveBeenCalled())
-    expect(screen.queryByLabelText('Show lid')).toBeNull()
+    expect(enclosureViewerSpy).toHaveBeenLastCalledWith(expect.objectContaining({ lidGlbPath: null }))
   })
 })
