@@ -447,14 +447,15 @@ and import/export to KiCad's own `.kicad_sym`/`.pretty` library formats.
 (enclosure-from-geometry) exists — the schema doesn't need `SPEC-109` done, only to eventually
 produce `Artifact`s it stores.
 
-#### SPEC-312 — Application Shell, Project Portability & Persistence Model
+#### [SPEC-312](apps/tauri-ui/specs/SPEC-312-application-shell-project-portability-persistence.md) — Application Shell, Project Portability & Persistence Model — Draft
 
 *Module:* `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-300, SPEC-304, SPEC-311
 
 Real product questions surfaced while scoping `CTX-311.13` (the Enclosure tab's real Export
-action) that its own narrow scope deliberately did not try to answer. Not yet a spec — recorded
-here as a real, connected backlog item so the discussion isn't lost, per this repo's own "Plan
-Drift is not embarrassing" norm:
+action) that its own narrow scope deliberately did not try to answer, now a real spec, per this
+repo's own "Plan Drift is not embarrassing" norm. Scoped to three of the five original questions
+below (items 1-3) -- item 4 (Overview tab purpose) and item 5 (component library discovery) are
+explicit Non-Goals in the spec itself, real but separate decisions left for their own future specs:
 
 1.  **What does "Save" actually save, at the project level?** `project.json` is real but largely
     unused today. Does it grow into a real manifest — locations of the schematic/pcb/library files,
