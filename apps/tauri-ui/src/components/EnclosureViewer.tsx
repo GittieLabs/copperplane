@@ -123,12 +123,23 @@ export function useGlbScene(
 // loaded mesh's own bounding box -- see `computeFrame` below, CTX-311.4),
 // Y-up to match glTF's own convention (confirmed live during SPEC-311's
 // own research: `kicad-cli pcb export glb`'s Y axis is height). These
-// constants are only the *fallback* used when no real mesh has loaded
-// yet to frame against -- they reproduce the viewer's own original
-// [80, 80, 80] corner view, kept only so `sphericalToCartesian` always
-// has a sane default and the camera math stays independently testable.
+// constants set the *initial* view every newly generated enclosure opens
+// with, before any free orbit or preset click moves the camera.
 export const DEFAULT_CAMERA_RADIUS = 80 * Math.sqrt(3)
-export const DEFAULT_CAMERA_POLAR = Math.acos(1 / Math.sqrt(3))
+// CTX-311.8: real user feedback -- the previous default (a classic
+// isometric ~54.7° polar angle, the same angle that reproduced this
+// viewer's own original [80, 80, 80] corner view) reads fine for a
+// closed solid, but this enclosure is a real, open-top hollow shell:
+// at that shallow an elevation, the near wall of anything but a short,
+// roughly-square shell occludes the opening almost entirely, especially
+// on a long, narrow board -- exactly what the user's own screenshot
+// showed (a shape read as a solid wedge, no visible floor or interior
+// corners, "have to rotate... to see the edges inside"). A steeper,
+// more top-down default polar angle keeps a real 3/4 perspective (not
+// a flat top-down "Top" preset view) while actually showing the
+// cavity/floor on first load, for any real enclosure's proportions --
+// not tuned to one board's own aspect ratio.
+export const DEFAULT_CAMERA_POLAR = (35 * Math.PI) / 180
 export const DEFAULT_CAMERA_AZIMUTH = Math.PI / 4
 const _ROTATE_STEP = Math.PI / 4
 const _POLE_EPSILON = 0.001

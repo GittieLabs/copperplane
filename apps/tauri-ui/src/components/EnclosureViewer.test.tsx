@@ -127,12 +127,20 @@ describe('disposeScene', () => {
 })
 
 describe('sphericalToCartesian (CTX-311.3 camera presets)', () => {
-  it('the default radius/polar/azimuth reproduce the viewer\'s own original [80, 80, 80] corner view', () => {
+  it('CTX-311.8: the default polar angle is steeper than a flat 45-degree isometric corner -- a real 3/4 view that favors seeing into an open-top cavity', () => {
     const [x, y, z] = sphericalToCartesian(DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH)
 
-    expect(x).toBeCloseTo(80, 6)
-    expect(y).toBeCloseTo(80, 6)
-    expect(z).toBeCloseTo(80, 6)
+    // Y (height off the ground) should dominate over the horizontal
+    // distance for a real "looking down into it" default, unlike the
+    // previous isometric ~54.7 degree angle where X/Y/Z were all equal.
+    const horizontalDistance = Math.sqrt(x * x + z * z)
+    expect(y).toBeGreaterThan(horizontalDistance)
+  })
+
+  it('CTX-311.8: the default polar sits strictly between a flat Top view and the old isometric angle', () => {
+    const isometricPolar = Math.acos(1 / Math.sqrt(3))
+    expect(DEFAULT_CAMERA_POLAR).toBeGreaterThan(0)
+    expect(DEFAULT_CAMERA_POLAR).toBeLessThan(isometricPolar)
   })
 
   it('a near-zero polar angle is a real top-down view -- Y equals the radius, X/Z collapse to zero', () => {
