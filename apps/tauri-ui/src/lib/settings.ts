@@ -60,6 +60,11 @@ export interface DaemonCapabilities {
    * app's default data directory or a user's real override -- reported
    * here (not config.json) since it's always Rust-computed at spawn. */
   storage_root: string | null
+  /** CTX-314.1/CTX-314.2: whether a `github_token` secret is configured
+   * -- real and dynamic since CTX-314.2 added the real KNOWN_SECRET_KEYS
+   * entry; unauthenticated community-library search still works, just
+   * at GitHub's lower unauthenticated rate limit. */
+  github_token_configured: boolean
 }
 
 /** Saves a provider API key to the OS keychain and pushes the complete

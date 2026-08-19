@@ -10,6 +10,9 @@ const attachFootprintToPartMock = vi.fn()
 const generateFootprintFromPartMock = vi.fn()
 const exportFootprintMock = vi.fn()
 const getConnectionGuidanceMock = vi.fn()
+const searchCommunityFootprintsMock = vi.fn()
+const importCommunityFootprintMock = vi.fn()
+const attachCommunityFootprintToPartMock = vi.fn()
 
 vi.mock('../lib/partDetail', () => ({
   extractPartDetail: (...args: unknown[]) => extractPartDetailMock(...args),
@@ -23,6 +26,9 @@ vi.mock('../lib/footprints', () => ({
   attachFootprintToPart: (...args: unknown[]) => attachFootprintToPartMock(...args),
   generateFootprintFromPart: (...args: unknown[]) => generateFootprintFromPartMock(...args),
   exportFootprint: (...args: unknown[]) => exportFootprintMock(...args),
+  searchCommunityFootprints: (...args: unknown[]) => searchCommunityFootprintsMock(...args),
+  importCommunityFootprint: (...args: unknown[]) => importCommunityFootprintMock(...args),
+  attachCommunityFootprintToPart: (...args: unknown[]) => attachCommunityFootprintToPartMock(...args),
 }))
 
 vi.mock('@tauri-apps/plugin-shell', () => ({
@@ -50,6 +56,9 @@ beforeEach(() => {
   generateFootprintFromPartMock.mockReset()
   exportFootprintMock.mockReset()
   getConnectionGuidanceMock.mockReset()
+  searchCommunityFootprintsMock.mockReset()
+  importCommunityFootprintMock.mockReset()
+  attachCommunityFootprintToPartMock.mockReset()
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -235,6 +244,69 @@ describe('PartDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
     await waitFor(() => screen.getByText("No match in this machine's own configured KiCad libraries."))
+  })
+
+  it('CTX-314.2: searching community libraries renders real candidates and importing a footprint attaches it to the Part', async () => {
+    searchCommunityFootprintsMock.mockResolvedValueOnce([
+      {
+        owner: 'sparkfun', repo: 'SparkFun-KiCad-Libraries', path: 'footprints/x.pretty/C_0201.kicad_mod',
+        kind: 'footprint', license: 'CC-BY-4.0', blob_sha: 'abc', download_url: 'https://example.com/C_0201.kicad_mod',
+      },
+    ])
+    const record = { footprint_id: 'sparkfun__SparkFun-KiCad-Libraries__C_0201', pad_count: 4, provenance: {} }
+    importCommunityFootprintMock.mockResolvedValueOnce(record)
+    attachCommunityFootprintToPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'sparkfun__SparkFun-KiCad-Libraries__C_0201',
+    })
+    await saveAndReachFootprintSection()
+
+    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'C_0201' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search community libraries' }))
+
+    await waitFor(() => screen.getByText(/C_0201\.kicad_mod/))
+    screen.getByText(/sparkfun\/SparkFun-KiCad-Libraries/)
+    expect(searchCommunityFootprintsMock).toHaveBeenCalledWith('C_0201')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+
+    await waitFor(() => screen.getByText('Footprint linked: sparkfun__SparkFun-KiCad-Libraries__C_0201'))
+    expect(importCommunityFootprintMock).toHaveBeenCalledWith(expect.objectContaining({ path: 'footprints/x.pretty/C_0201.kicad_mod' }))
+    expect(attachCommunityFootprintToPartMock).toHaveBeenCalledWith(SAVED_PART_NO_FOOTPRINT, record)
+  })
+
+  it('CTX-314.2: a .kicad_sym candidate imports through a real two-step browse-then-import flow, not directly', async () => {
+    searchCommunityFootprintsMock.mockResolvedValueOnce([
+      {
+        owner: 'sparkfun', repo: 'SparkFun-KiCad-Libraries', path: 'symbols/SparkFun-Capacitor.kicad_sym',
+        kind: 'symbol', license: 'CC-BY-4.0', blob_sha: 'def', download_url: 'https://example.com/SparkFun-Capacitor.kicad_sym',
+      },
+    ])
+    importCommunityFootprintMock.mockResolvedValueOnce({
+      symbols: [{ name: 'C_0402', pin_count: 2 }, { name: 'C_0603', pin_count: 2 }],
+    })
+    await saveAndReachFootprintSection()
+
+    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'Capacitor' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search community libraries' }))
+    await waitFor(() => screen.getByText(/SparkFun-Capacitor\.kicad_sym/))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+
+    await waitFor(() => screen.getByText(/contains 2 real/))
+    screen.getByText('C_0402')
+    screen.getByText('C_0603')
+    expect(attachCommunityFootprintToPartMock).not.toHaveBeenCalled()
+
+    importCommunityFootprintMock.mockResolvedValueOnce({ symbol_id: 'sparkfun__SparkFun-KiCad-Libraries__C_0402', pin_count: 2, provenance: {} })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Import' })[0])
+
+    await waitFor(() => screen.getByText(/Imported symbol/))
+    screen.getByText('sparkfun__SparkFun-KiCad-Libraries__C_0402')
+    expect(importCommunityFootprintMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ path: 'symbols/SparkFun-Capacitor.kicad_sym' }), 'C_0402',
+    )
+    expect(attachCommunityFootprintToPartMock).not.toHaveBeenCalled()
   })
 
   it('CTX-308.5: Generate from datasheet dimensions calls generateFootprintFromPart and shows an unverified badge', async () => {

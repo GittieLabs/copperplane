@@ -519,14 +519,85 @@ def library_export_footprint(footprint_id: str) -> dict:
 
 def library_search_community_footprints(query: str) -> list:
     """CTX-314.1: search-only -- real candidates from the curated
-    GitHub allowlist, no import/persistence yet. The optional
-    github_token comes from CONFIG['secrets'], the same place every
-    other configured secret already lives (SPEC-106 §2) -- not yet a
-    real KNOWN_SECRET_KEYS entry (CTX-314.2's job), so this is always
-    None today, meaning every real search runs unauthenticated."""
+    GitHub allowlist, no import/persistence. The optional github_token
+    comes from CONFIG['secrets'], the same place every other configured
+    secret already lives (SPEC-106 §2) -- a real KNOWN_SECRET_KEYS entry
+    since CTX-314.2, so this is None only when the user hasn't
+    configured one, meaning that search runs unauthenticated."""
     return community_libraries.search_community_footprints(
         query, github_token=CONFIG["secrets"].get("github_token")
     )
+
+
+def library_import_community_footprint(
+    owner: str,
+    repo: str,
+    path: str,
+    kind: str,
+    license: str,
+    download_url: str,
+    blob_sha: str | None = None,
+    symbol_name: str | None = None,
+) -> dict:
+    """CTX-314.2: fetches a candidate's real content (from the
+    raw.githubusercontent.com URL search_community_footprints already
+    returned), real-verifies it by parsing with kiutils, and persists it
+    with full provenance. A footprint is one file, imported directly. A
+    `.kicad_sym` file is a real *library* of many symbols (see
+    community_libraries.parse_symbol_library's own docstring) -- with no
+    symbol_name given, this returns the real browse list
+    (`{"symbols": [...]}`) and persists nothing; a second call with a
+    real, chosen symbol_name actually imports. Never guesses "the first
+    symbol in the file" -- SchemaValidationError, naming the real
+    available symbols, if symbol_name doesn't match any of them."""
+    content = community_libraries.fetch_raw_content(download_url)
+    provenance = {
+        "source": "community_library",
+        "owner": owner,
+        "repo": repo,
+        "path": path,
+        "license": license,
+        "blob_sha": blob_sha,
+    }
+
+    if kind == "footprint":
+        preview = community_libraries.parse_footprint(content)
+        stem = path.rsplit("/", 1)[-1].removesuffix(".kicad_mod")
+        footprint_id = f"{owner}__{repo}__{stem}"
+        return library_store.save_footprint(
+            {
+                "footprint_id": footprint_id,
+                "footprint_name": stem,
+                "raw_kicad_mod": content,
+                "pad_count": preview["pad_count"],
+                "provenance": provenance,
+            }
+        )
+
+    if kind == "symbol":
+        symbols = community_libraries.parse_symbol_library(content)
+        if symbol_name is None:
+            return {"symbols": symbols}
+
+        match = next((s for s in symbols if s["name"] == symbol_name), None)
+        if match is None:
+            available = ", ".join(s["name"] for s in symbols)
+            raise library_store.SchemaValidationError(
+                f"'{symbol_name}' is not a real symbol in {path}. Available symbols: {available}"
+            )
+
+        symbol_id = f"{owner}__{repo}__{symbol_name}"
+        return library_store.save_symbol(
+            {
+                "symbol_id": symbol_id,
+                "symbol_name": symbol_name,
+                "raw_kicad_sym": content,
+                "pin_count": match["pin_count"],
+                "provenance": provenance,
+            }
+        )
+
+    raise library_store.SchemaValidationError(f"Unknown kind '{kind}' -- expected 'footprint' or 'symbol'.")
 
 
 def project_save(project: dict) -> dict:
@@ -1070,6 +1141,7 @@ def _build_routes() -> dict:
         routes["project.open_from_directory"] = project_open_from_directory
     if community_libraries is not None:
         routes["library.search_community_footprints"] = library_search_community_footprints
+        routes["library.import_community_footprint"] = library_import_community_footprint
     if tool_registry is not None:
         routes["agent.dispatch_tool"] = agent_dispatch_tool
     if fp_lib_table is not None:
@@ -1103,6 +1175,14 @@ ASYNC_ROUTES = {
     "kicad.inject_component", "component.search", "component.cache_datasheet",
     "kicad.generate_connection_guidance", "kicad.check_board", "kicad.check_schematic",
     "kicad.get_component_heights", "kicad.export_board_glb",
+    # CTX-314.2: both make real GitHub network calls (community_libraries.py's
+    # own _github_request/fetch_raw_content) -- a real bug in CTX-314.1's own
+    # shipped code (search_community_footprints was never added here) meant
+    # any real GitHub round trip blocked the daemon's entire stdin read loop
+    # (main()'s `for line in sys.stdin` calls handle_request synchronously),
+    # freezing every other IPC command for the duration. Fixed here rather
+    # than left in place, since CTX-314.2 builds directly on this same route.
+    "library.search_community_footprints", "library.import_community_footprint",
 } & ROUTES.keys()
 
 # job_id -> {"cancel_event": threading.Event()} for every job currently

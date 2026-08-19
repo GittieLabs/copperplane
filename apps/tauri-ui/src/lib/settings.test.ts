@@ -149,6 +149,7 @@ describe('copyDiagnostics', () => {
     log_path: '/var/log/daemon.log',
     python_version: '3.12.0',
     storage_root: '/Users/test/Library/Application Support/has/storage',
+    github_token_configured: false,
   }
 
   function mockCapabilitiesAndVersion(capabilities: typeof BASE_CAPABILITIES) {

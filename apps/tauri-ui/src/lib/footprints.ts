@@ -1,4 +1,4 @@
-import { dispatch } from './ipc'
+import { dispatch, submitJob } from './ipc'
 import type { SavedPart } from './partDetail'
 
 /** CTX-308.4: kicad.search_footprints now merges two real sources --
@@ -101,4 +101,107 @@ export async function exportFootprint(footprintId: string): Promise<string> {
     await dispatch('library.export_footprint', { footprint_id: footprintId }),
   )
   return result.path
+}
+
+/** CTX-314.1's real, curated-allowlist search result shape --
+ * `community_libraries.search_community_footprints`'s own real return
+ * value, unchanged here. A `.kicad_sym` candidate's `path` names a real
+ * *library file* that may hold many symbols (SPEC-314 §2's own real,
+ * verified finding), not one -- `importCommunityFootprint` reflects
+ * that with its own two-step shape below. */
+export interface CommunityLibraryCandidate {
+  owner: string
+  repo: string
+  path: string
+  kind: 'footprint' | 'symbol'
+  license: string
+  blob_sha: string | null
+  download_url: string
+}
+
+/** CTX-314.2: `library.search_community_footprints` is a real GitHub
+ * network call (community_libraries.py's own `_github_request`), so
+ * it's ASYNC_ROUTES-registered like every other genuinely slow route --
+ * `submitJob`, not plain `dispatch` (unlike this app's own installed-
+ * library `searchFootprints` above, which is real local disk I/O). */
+export async function searchCommunityFootprints(query: string): Promise<CommunityLibraryCandidate[]> {
+  const handle = await submitJob<CommunityLibraryCandidate[]>('library.search_community_footprints', { query })
+  return handle.result
+}
+
+/** A real symbol name and its real pin count, found inside a `.kicad_sym`
+ * library file `importCommunityFootprint` fetched and parsed but has not
+ * yet imported -- the real "browse" step SPEC-314 §2's own multi-symbol
+ * finding requires before a specific one can be chosen. */
+export interface CommunitySymbolOption {
+  name: string
+  pin_count: number
+}
+export interface CommunitySymbolBrowseResult {
+  symbols: CommunitySymbolOption[]
+}
+
+/** The real, persisted record `library.import_community_footprint`
+ * returns once an import actually commits -- either a footprint
+ * (`pad_count`) or one named symbol out of its own library file
+ * (`pin_count`), both carrying real provenance back to their GitHub
+ * source. */
+export interface ImportedCommunityRecord {
+  footprint_id?: string
+  symbol_id?: string
+  pad_count?: number
+  pin_count?: number
+  provenance: {
+    source: string
+    owner: string
+    repo: string
+    path: string
+    license: string
+    blob_sha: string | null
+  }
+}
+
+/** CTX-314.2: fetches, real-verifies (kiutils), and persists a
+ * candidate `library.search_community_footprints` already found. A
+ * `.kicad_mod` candidate imports directly. A `.kicad_sym` candidate
+ * needs `symbolName` -- call once with none to get the real browse list
+ * (`CommunitySymbolBrowseResult`), then a second time with a real,
+ * chosen name to actually import (`ImportedCommunityRecord`). Never
+ * silently picks a symbol on the caller's behalf. Real GitHub network
+ * fetch + kiutils parse, so `submitJob` like the search above. */
+export async function importCommunityFootprint(
+  candidate: CommunityLibraryCandidate,
+  symbolName?: string,
+): Promise<ImportedCommunityRecord | CommunitySymbolBrowseResult> {
+  const handle = await submitJob<ImportedCommunityRecord | CommunitySymbolBrowseResult>(
+    'library.import_community_footprint',
+    {
+      owner: candidate.owner,
+      repo: candidate.repo,
+      path: candidate.path,
+      kind: candidate.kind,
+      license: candidate.license,
+      download_url: candidate.download_url,
+      blob_sha: candidate.blob_sha,
+      symbol_name: symbolName ?? null,
+    },
+  )
+  return handle.result
+}
+
+/** Links an already-imported community footprint or symbol to a saved
+ * Part -- mirrors `attachFootprintToPart`'s own real shape, but the id
+ * is already final (community_libraries' own `owner__repo__stem`
+ * naming), not derived from a library/name pair. */
+export async function attachCommunityFootprintToPart(
+  part: SavedPart,
+  record: ImportedCommunityRecord,
+): Promise<SavedPart> {
+  const footprintId = record.footprint_id
+  if (!footprintId) {
+    throw new Error('Only a footprint (not a symbol) can be attached to a Part this way.')
+  }
+  const updatedPart: SavedPart = { ...part, footprint_id: footprintId }
+  await unwrap<unknown>(await dispatch('library.save_part', { part: updatedPart }))
+  return updatedPart
 }

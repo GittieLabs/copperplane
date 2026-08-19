@@ -361,6 +361,31 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
         finally:
             daemon.CONFIG["secrets"] = original_secrets
 
+    def test_007d_library_import_community_footprint_route_is_registered_when_community_libraries_imported(self):
+        """CTX-314.2: the new import route follows the same conditional-
+        registration/omission pattern as search above."""
+        routes = daemon._build_routes()
+        self.assertIn("library.import_community_footprint", routes)
+
+        original = daemon.community_libraries
+        daemon.community_libraries = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("library.import_community_footprint", routes)
+        finally:
+            daemon.community_libraries = original
+
+    def test_007e_community_library_routes_are_registered_as_async(self):
+        """CTX-314.2: a real bug found in CTX-314.1's own shipped code --
+        library.search_community_footprints was never added to
+        ASYNC_ROUTES, so any real GitHub API round trip blocked the
+        daemon's entire stdin read loop (main()'s synchronous
+        handle_request call per line), freezing every other IPC command
+        for the duration. Both community-library routes make real
+        network calls and must run as jobs, not on the read loop."""
+        self.assertIn("library.search_community_footprints", daemon.ASYNC_ROUTES)
+        self.assertIn("library.import_community_footprint", daemon.ASYNC_ROUTES)
+
     def test_008_build_routes_omits_component_search_when_import_failed(self):
         """TEST-004 (CTX-306.1): mirrors test_006/007 for component.search
         -- a broken component_pipeline import shouldn't take down
@@ -573,6 +598,98 @@ class TestLibraryRoutes(unittest.TestCase):
         response = self._dispatch("library.export_footprint", {"footprint_id": "MyPCBLibs__X"})
         self.assertIn("error", response)
         self.assertIn("no pad geometry", response["error"]["message"])
+
+
+class TestLibraryImportCommunityFootprint(unittest.TestCase):
+    """CTX-314.2: real, live end-to-end coverage of the import route's
+    business logic -- called directly (like test_007c above), not
+    through handle_request, since the route is now ASYNC_ROUTES-
+    registered and handle_request would just hand back a job_id. Real
+    fetch + real kiutils parse against the live allowlist, skipping
+    cleanly on network/rate-limit failure, matching this test suite's
+    own established convention."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_a_real_footprint_import_persists_raw_content_and_provenance(self):
+        try:
+            results = daemon.community_libraries.search_community_footprints("C_0201")
+        except daemon.community_libraries.CommunityLibraryError as e:
+            self.skipTest(f"Real GitHub API call failed (network/rate limit): {e}")
+        candidates = [r for r in results if r["owner"] == "sparkfun" and r["kind"] == "footprint"]
+        if not candidates:
+            self.skipTest("No real sparkfun footprint match found to import.")
+        c = candidates[0]
+
+        try:
+            record = daemon.library_import_community_footprint(
+                owner=c["owner"], repo=c["repo"], path=c["path"], kind="footprint",
+                license=c["license"], download_url=c["download_url"], blob_sha=c["blob_sha"],
+            )
+        except daemon.community_libraries.CommunityLibraryError as e:
+            self.skipTest(f"Real raw-content fetch failed (network/rate limit): {e}")
+
+        self.assertIn("raw_kicad_mod", record)
+        self.assertGreater(record["pad_count"], 0)
+        self.assertEqual(record["provenance"]["source"], "community_library")
+        self.assertEqual(record["provenance"]["repo"], "SparkFun-KiCad-Libraries")
+
+        exported = daemon.library_export_footprint(record["footprint_id"])
+        self.assertTrue(os.path.exists(exported["path"]))
+        with open(exported["path"]) as f:
+            self.assertEqual(f.read(), record["raw_kicad_mod"])
+
+    def test_002_a_symbol_import_with_no_symbol_name_returns_the_real_browse_list_and_persists_nothing(self):
+        try:
+            results = daemon.community_libraries.search_community_footprints("Capacitor")
+        except daemon.community_libraries.CommunityLibraryError as e:
+            self.skipTest(f"Real GitHub API call failed (network/rate limit): {e}")
+        candidates = [r for r in results if r["owner"] == "sparkfun" and r["kind"] == "symbol"]
+        if not candidates:
+            self.skipTest("No real sparkfun symbol library match found to import.")
+        c = candidates[0]
+
+        try:
+            browse = daemon.library_import_community_footprint(
+                owner=c["owner"], repo=c["repo"], path=c["path"], kind="symbol",
+                license=c["license"], download_url=c["download_url"], blob_sha=c["blob_sha"],
+            )
+        except daemon.community_libraries.CommunityLibraryError as e:
+            self.skipTest(f"Real raw-content fetch failed (network/rate limit): {e}")
+
+        self.assertIn("symbols", browse)
+        self.assertGreater(len(browse["symbols"]), 1)
+        symbols_dir = os.path.join(self._tmpdir.name, "library", "symbols")
+        self.assertFalse(os.path.exists(symbols_dir) and os.listdir(symbols_dir))
+
+    def test_003_importing_an_unknown_symbol_name_raises_a_clear_error_naming_real_available_symbols(self):
+        with patch.object(daemon.community_libraries, "fetch_raw_content", return_value="fake content"):
+            with patch.object(
+                daemon.community_libraries, "parse_symbol_library",
+                return_value=[{"name": "C_0402", "pin_count": 2}, {"name": "C_0603", "pin_count": 2}],
+            ):
+                with self.assertRaises(daemon.library_store.SchemaValidationError) as ctx:
+                    daemon.library_import_community_footprint(
+                        owner="sparkfun", repo="SparkFun-KiCad-Libraries", path="symbols/x.kicad_sym",
+                        kind="symbol", license="CC-BY-4.0", download_url="https://example.com/x.kicad_sym",
+                        symbol_name="not_a_real_symbol",
+                    )
+        self.assertIn("C_0402", str(ctx.exception))
+        self.assertIn("C_0603", str(ctx.exception))
+
+    def test_004_an_unknown_kind_raises_a_clear_error(self):
+        with patch.object(daemon.community_libraries, "fetch_raw_content", return_value="fake content"):
+            with self.assertRaises(daemon.library_store.SchemaValidationError):
+                daemon.library_import_community_footprint(
+                    owner="sparkfun", repo="SparkFun-KiCad-Libraries", path="x.txt",
+                    kind="not_a_real_kind", license="CC-BY-4.0", download_url="https://example.com/x.txt",
+                )
 
 
 class TestLlmChatProviderFallback(unittest.TestCase):

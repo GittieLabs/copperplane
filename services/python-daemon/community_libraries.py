@@ -1,9 +1,11 @@
 """
-Search-only first slice of SPEC-314: real footprint/symbol discovery
-across a small, curated allowlist of GitHub-hosted KiCad community
-libraries. CTX-314.1 -- no import, no persistence, no UI; those are
-CTX-314.2's job, once the parsing risk this module's own docstring
-history records was resolved (see below).
+Real footprint/symbol discovery and import across a small, curated
+allowlist of GitHub-hosted KiCad community libraries. CTX-314.1 shipped
+search-only (no fetch, no parse, no persistence). CTX-314.2 adds real
+content fetch (`fetch_raw_content`) and real parsing/validation
+(`parse_footprint`/`parse_symbol_library`) -- persistence itself lives
+in `daemon.py`'s `library_import_community_footprint`, which calls
+`library_store.save_footprint`/`save_symbol`.
 
 Real, hand-verified allowlist, not a live GitHub-wide search:
 `espressif/kicad-libraries` (148 commits, active, real LICENSE.md,
@@ -41,6 +43,9 @@ import urllib.error
 import urllib.request
 
 import certifi
+import kiutils.footprint
+import kiutils.symbol
+from kiutils.utils.sexpr import parse_sexp
 
 _GITHUB_API_BASE = "https://api.github.com"
 _REQUEST_TIMEOUT_S = 15
@@ -174,6 +179,7 @@ def search_community_footprints(query: str, github_token: str | None = None) -> 
                     "path": path,
                     "kind": kind,
                     "license": entry["license"],
+                    "blob_sha": item.get("sha"),
                     "download_url": (
                         f"https://raw.githubusercontent.com/{entry['owner']}/{entry['repo']}/HEAD/{path}"
                     ),
@@ -181,3 +187,70 @@ def search_community_footprints(query: str, github_token: str | None = None) -> 
             )
 
     return candidates
+
+
+def fetch_raw_content(download_url: str) -> str:
+    """CTX-314.2: a plain HTTPS GET against the real
+    `raw.githubusercontent.com` URL `search_community_footprints` already
+    returns -- deliberately not a GitHub REST API call (`_github_request`
+    above), so fetching a file's real content never consumes the same
+    60/hour-unauthenticated budget a tree search does. GitHub serves
+    raw file content from a separate CDN (`raw.githubusercontent.com`),
+    a real, different system from `api.github.com`. Reuses this module's
+    own `_SSL_CONTEXT`/timeout/error-translation conventions exactly."""
+    request = urllib.request.Request(
+        download_url, headers={"User-Agent": "hardware-agent-studio/0.1"}
+    )
+    try:
+        with urllib.request.urlopen(
+            request, timeout=_REQUEST_TIMEOUT_S, context=_SSL_CONTEXT
+        ) as response:
+            if response.status != 200:
+                raise CommunityLibraryError(
+                    f"GitHub raw content returned HTTP {response.status} for {download_url}."
+                )
+            return response.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        raise CommunityLibraryError(
+            f"GitHub raw content request for {download_url} failed: HTTP {e.code} {e.reason}"
+        ) from e
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        raise CommunityLibraryError(f"GitHub raw content request for {download_url} failed: {e}") from e
+
+
+def parse_footprint(content: str) -> dict:
+    """CTX-314.2: real-verifies a fetched `.kicad_mod` file's content by
+    actually parsing it with kiutils, returning its real pad count.
+    Raises CommunityLibraryError (not a bare kiutils exception) on real
+    unparseable content -- this app never persists a file that didn't
+    actually parse. Real, direct verification during this context's own
+    planning confirmed kiutils parses real footprint files from both
+    allowlisted repos correctly (CTX-314.1's own earlier finding,
+    reconfirmed here against the specific `Footprint.from_sexpr` call
+    this function makes)."""
+    try:
+        parsed = kiutils.footprint.Footprint.from_sexpr(parse_sexp(content))
+    except Exception as e:
+        raise CommunityLibraryError(f"Could not parse this file as a real KiCad footprint: {e}") from e
+    return {"pad_count": len(parsed.pads)}
+
+
+def parse_symbol_library(content: str) -> list[dict]:
+    """CTX-314.2: real-verifies a fetched `.kicad_sym` file's content the
+    same way parse_footprint does, but a `.kicad_sym` file is a real
+    *library* of many symbols (verified directly during planning against
+    `sparkfun/SparkFun-KiCad-Libraries`'s own `SparkFun-Capacitor.
+    kicad_sym`, 73 real symbols in one file) -- returns every real
+    symbol's name (`libId`) and real pin count. A real symbol's own pins
+    live on its sub-units (`Symbol.units`), not the top-level `Symbol`
+    object itself -- verified directly, exactly like this app's own
+    hand-built `_0_1`/`_1_1` sub-symbol convention
+    (library_store._build_kicad_sym_text)."""
+    try:
+        lib = kiutils.symbol.SymbolLib.from_sexpr(parse_sexp(content))
+    except Exception as e:
+        raise CommunityLibraryError(f"Could not parse this file as a real KiCad symbol library: {e}") from e
+    return [
+        {"name": symbol.libId, "pin_count": sum(len(unit.pins) for unit in symbol.units)}
+        for symbol in lib.symbols
+    ]

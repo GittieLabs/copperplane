@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const getCapabilitiesMock = vi.fn()
@@ -48,6 +48,7 @@ const EMPTY_CAPABILITIES = {
   log_path: '/var/log/daemon.log',
   python_version: '3.12.0',
   storage_root: '/Users/test/Library/Application Support/has/storage',
+  github_token_configured: false,
 }
 const EMPTY_CONFIG = { llm_provider: null, llm_model: null }
 
@@ -127,6 +128,46 @@ describe('Settings: Tier 1 (provider/model/keys)', () => {
   })
 })
 
+
+describe('Settings: Community Library Search (SPEC-314, CTX-314.2)', () => {
+  it('an unconfigured GitHub token shows an input and Save button', async () => {
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
+
+    expect(screen.getByLabelText('GitHub token')).toBeTruthy()
+  })
+
+  it('saving the token calls saveSecret with github_token then refreshes capabilities', async () => {
+    render(<Settings />)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalledTimes(1))
+
+    const tokenInput = screen.getByLabelText('GitHub token')
+    fireEvent.change(tokenInput, { target: { value: 'ghp_real_token' } })
+    getCapabilitiesMock.mockResolvedValueOnce({ ...EMPTY_CAPABILITIES, github_token_configured: true })
+    fireEvent.click(within(tokenInput.parentElement as HTMLElement).getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(saveSecretMock).toHaveBeenCalledWith('github_token', 'ghp_real_token'))
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.queryByLabelText('GitHub token')).toBeNull())
+
+    expect(screen.queryByText('ghp_real_token')).toBeNull()
+    expect(screen.queryByDisplayValue('ghp_real_token')).toBeNull()
+  })
+
+  it('a configured token shows Clear instead of an input, and clearing refreshes capabilities', async () => {
+    getCapabilitiesMock.mockResolvedValue({ ...EMPTY_CAPABILITIES, github_token_configured: true })
+
+    render(<Settings />)
+    await waitFor(() => expect(screen.queryByLabelText('GitHub token')).toBeNull())
+
+    const configuredRow = screen.getByText('GitHub token').parentElement as HTMLElement
+    getCapabilitiesMock.mockResolvedValueOnce(EMPTY_CAPABILITIES)
+    fireEvent.click(within(configuredRow).getByRole('button', { name: 'Clear' }))
+
+    await waitFor(() => expect(clearSecretMock).toHaveBeenCalledWith('github_token'))
+    await waitFor(() => expect(screen.getByLabelText('GitHub token')).toBeTruthy())
+  })
+})
 
 describe('Settings: Tier 2 (KiCad/FreeCAD status + paths)', () => {
   it('TEST-007: renders reachable/not-reachable status from capabilities', async () => {

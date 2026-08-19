@@ -57,6 +57,69 @@ class TestSearchCommunityFootprintsReal(CommunityLibrariesTestCase):
         self.assertEqual(results, [])
 
 
+class TestFetchAndParseReal(CommunityLibrariesTestCase):
+    """CTX-314.2: real, live fetch + parse -- both a real
+    `.kicad_mod` and a real, multi-symbol `.kicad_sym` library file,
+    fetched live from the allowlist and parsed with kiutils. Skips
+    cleanly on any real network failure, same convention as the search
+    tests above."""
+
+    def test_001_fetches_and_parses_a_real_footprint(self):
+        try:
+            results = cl.search_community_footprints("C_0201")
+        except cl.CommunityLibraryError as e:
+            self.skipTest(f"Real GitHub API call failed (network/rate limit): {e}")
+        candidates = [r for r in results if r["owner"] == "sparkfun" and r["kind"] == "footprint"]
+        if not candidates:
+            self.skipTest("No real sparkfun footprint match found to fetch.")
+
+        try:
+            content = cl.fetch_raw_content(candidates[0]["download_url"])
+        except cl.CommunityLibraryError as e:
+            self.skipTest(f"Real raw-content fetch failed (network/rate limit): {e}")
+
+        preview = cl.parse_footprint(content)
+        self.assertGreater(preview["pad_count"], 0)
+
+    def test_002_fetches_and_parses_a_real_multi_symbol_library(self):
+        try:
+            results = cl.search_community_footprints("Capacitor")
+        except cl.CommunityLibraryError as e:
+            self.skipTest(f"Real GitHub API call failed (network/rate limit): {e}")
+        candidates = [r for r in results if r["owner"] == "sparkfun" and r["kind"] == "symbol"]
+        if not candidates:
+            self.skipTest("No real sparkfun symbol library match found to fetch.")
+
+        try:
+            content = cl.fetch_raw_content(candidates[0]["download_url"])
+        except cl.CommunityLibraryError as e:
+            self.skipTest(f"Real raw-content fetch failed (network/rate limit): {e}")
+
+        symbols = cl.parse_symbol_library(content)
+        self.assertGreater(len(symbols), 1)
+        self.assertTrue(all(s["name"] and s["pin_count"] >= 0 for s in symbols))
+
+    def test_003_a_real_404_raises_a_clear_community_library_error(self):
+        with self.assertRaises(cl.CommunityLibraryError):
+            cl.fetch_raw_content(
+                "https://raw.githubusercontent.com/sparkfun/SparkFun-KiCad-Libraries/HEAD/does-not-exist.kicad_mod"
+            )
+
+
+class TestParseFailureHandling(CommunityLibrariesTestCase):
+    """Mocked -- content that isn't real, valid KiCad S-expression
+    syntax must raise CommunityLibraryError, not a bare kiutils
+    exception a caller wouldn't recognize."""
+
+    def test_001_unparseable_footprint_content_raises_community_library_error(self):
+        with self.assertRaises(cl.CommunityLibraryError):
+            cl.parse_footprint("this is not a real kicad_mod file")
+
+    def test_002_unparseable_symbol_content_raises_community_library_error(self):
+        with self.assertRaises(cl.CommunityLibraryError):
+            cl.parse_symbol_library("this is not a real kicad_sym file")
+
+
 class TestTreeCache(CommunityLibrariesTestCase):
     """Mocked -- verifies the in-process cache behavior itself, which a
     real, slow, rate-limited API call can't reliably exercise (a live
