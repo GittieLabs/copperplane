@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const submitJobMock = vi.fn()
@@ -291,36 +291,102 @@ describe('App: PCB tab persists across area switches, resets on project switch',
     openKicadMock.mockReset()
   })
 
+  // CTX-311.5: EnclosurePanel now also stays mounted (matching BoardAdvisor/
+  // SchematicAdvisor's own always-mounted pattern) and lists the same real
+  // open boards via the same mocked listOpenBoards -- 'board.kicad_pcb'
+  // appears in both panels' own pickers now, so PCB-tab queries must be
+  // scoped to the real pcb-area container, not the whole document.
+  function pcbArea() {
+    return within(screen.getByTestId('pcb-area'))
+  }
+
   async function renderAppOnPcb() {
     render(<App />)
     await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
     fireEvent.click(screen.getByRole('button', { name: 'PCB' }))
-    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    await waitFor(() => pcbArea().getByText('board.kicad_pcb'))
   }
 
   it('a finished check is still shown after switching to another area and back to PCB', async () => {
     await renderAppOnPcb()
-    fireEvent.click(screen.getByText('board.kicad_pcb'))
+    fireEvent.click(pcbArea().getByText('board.kicad_pcb'))
     await waitFor(() => screen.getByText('No violations found.'))
+
+    // CTX-311.5: EnclosurePanel now also stays mounted from the very
+    // first render (it mirrors BoardAdvisor's own always-mounted
+    // pattern), and calls listOpenBoards on its own initial mount too --
+    // the real baseline call count here is no longer a fixed "1". What
+    // this test actually verifies is that switching *away and back*
+    // doesn't trigger a fresh scan, so it must compare against the real
+    // count already reached, not a hardcoded literal.
+    const callsBeforeSwitching = listOpenBoardsMock.mock.calls.length
 
     fireEvent.click(screen.getByRole('button', { name: 'Components' }))
     fireEvent.click(screen.getByRole('button', { name: 'PCB' }))
 
     screen.getByText('No violations found.')
-    expect(listOpenBoardsMock).toHaveBeenCalledTimes(1)
+    expect(listOpenBoardsMock).toHaveBeenCalledTimes(callsBeforeSwitching)
   })
 
   it('switching to a different real project resets the previous project\'s check result', async () => {
     listProjectsMock.mockReset().mockResolvedValue(['project-a', 'project-b'])
 
     await renderAppOnPcb()
-    fireEvent.click(screen.getByText('board.kicad_pcb'))
+    fireEvent.click(pcbArea().getByText('board.kicad_pcb'))
     await waitFor(() => screen.getByText('No violations found.'))
 
     fireEvent.click(screen.getByRole('button', { name: 'project-b' }))
     fireEvent.click(screen.getByRole('button', { name: 'PCB' }))
 
     expect(screen.queryByText('No violations found.')).toBeNull()
+  })
+})
+
+/** CTX-311.5: real user feedback exercising the actual running app --
+ * navigating away from the Enclosure tab and back lost a just-generated
+ * enclosure, since EnclosurePanel was the only area conditionally
+ * mounted/unmounted (`{view.area === 'enclosure' && ...}`) rather than
+ * always-mounted and hidden via CSS like BoardAdvisor/SchematicAdvisor
+ * already were. Same persistence pattern, same test shape as those. */
+describe('App: Enclosure tab persists across area switches', () => {
+  const ONE_BOARD_OPEN = {
+    status: 'boards_found' as const,
+    candidates: [{ path: '/real/board.kicad_pcb', label: 'board.kicad_pcb' }],
+  }
+  const ENCLOSURE_RESULT = {
+    glb_path: '/tmp/enclosure.glb',
+    step_path: '/tmp/enclosure.step',
+    unrecognized_holes: [] as { x_mm: number; y_mm: number; diameter_mm: number; recognized: false }[],
+  }
+
+  beforeEach(() => {
+    listProjectsMock.mockReset().mockResolvedValue(['test-project'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    loadConversationMock.mockReset().mockResolvedValue([])
+    listOpenBoardsMock.mockReset().mockResolvedValue(ONE_BOARD_OPEN)
+    submitJobMock.mockReset()
+  })
+
+  function enclosureArea() {
+    return within(screen.getByTestId('enclosure-area'))
+  }
+
+  it('a just-generated enclosure is still shown after switching to another area and back', async () => {
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT)))
+
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
+    await waitFor(() => enclosureArea().getByText('board.kicad_pcb'))
+    fireEvent.click(enclosureArea().getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => enclosureArea().getByText(/Generated:/))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Components' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
+
+    enclosureArea().getByText(/Generated:/)
+    expect(submitJobMock).toHaveBeenCalledTimes(1)
   })
 })
 
