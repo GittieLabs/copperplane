@@ -1397,7 +1397,11 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
         self.assertEqual(result["unrecognized_holes"], [_FAKE_HOLES[1]])
 
     @patch('daemon.generate_enclosure')
-    def test_004_no_longer_accepts_project_name_or_saves_anything(self, mock_generate):
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
+    def test_004_no_longer_accepts_project_name_or_saves_anything(
+        self, mock_get_outline, mock_get_holes, mock_generate,
+    ):
         """CTX-311.13: the real, confirmed, live bug this route used to
         have -- `project_name` was always supplied by the real frontend
         (`EnclosurePanel.tsx`'s own `projectName` prop), so every single
@@ -1407,7 +1411,16 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
         entirely -- `freecad.export_enclosure` is now the only real save
         action. A stray `project_name` kwarg is a real `TypeError`, not
         silently ignored -- confirms the parameter is genuinely gone, not
-        just unused."""
+        just unused.
+
+        CTX-311.15: this test previously omitted the `kicad_bridge` mocks
+        every sibling test in this class applies (`test_002`/`test_003`
+        above), so `height=20` alone (board-driven mode -- no width/depth)
+        silently depended on a real, live KiCad connection being open on
+        whatever machine ran it. It happened to pass locally against a
+        real KiCad session and failed in CI (no KiCad there at all) --
+        pre-existing, unrelated to this context's own diff, but fixed
+        here since it blocks this PR's own required checks."""
         mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
 
         result = daemon.freecad_generate_enclosure(height=20)
