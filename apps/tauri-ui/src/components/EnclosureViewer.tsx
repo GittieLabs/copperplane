@@ -239,6 +239,38 @@ export function computeFrame(objects: THREE.Object3D[]): { radius: number; cente
   return { radius, center }
 }
 
+/** Real, confirmed bug found by live user testing (`CTX-311.11`): the
+ * user's own screenshot showed a real enclosure rendering as a
+ * nonsensical, pointed, notched shape after normal free-orbit/zoom, and
+ * described "clipping... allowing me to see inside by removing a wall."
+ * Confirmed directly, not guessed: a plain `THREE.PerspectiveCamera`'s
+ * own real default `near` is `0.1` (verified live against the actual
+ * installed `three` package) -- larger than an entire real enclosure
+ * mesh in this app, which is routinely only `0.02`-`0.15` real meters
+ * across (post-`CTX-109.4`'s own real unit-scale fix). Any camera
+ * position within that real `0.1`-unit near-plane distance of a wall --
+ * trivially reached by an ordinary zoom-in gesture, since this viewer
+ * never set `near`/`far` explicitly and never bounded `OrbitControls`'
+ * own zoom distance either -- clips straight through it, exactly
+ * matching "removing a wall." Derives real, scale-proportional camera
+ * clipping planes and zoom limits from the same real computed `radius`
+ * every other piece of camera framing already uses, so it stays correct
+ * at any real enclosure size, not a fixed guess tuned to one. */
+export function computeCameraClipping(radius: number): {
+  near: number
+  far: number
+  minDistance: number
+  maxDistance: number
+} {
+  const safeRadius = Math.max(radius, 1e-6)
+  return {
+    near: safeRadius * 0.001,
+    far: safeRadius * 1000,
+    minDistance: safeRadius * 0.15,
+    maxDistance: safeRadius * 20,
+  }
+}
+
 function CameraPresetControls({
   controlsRef,
   cameraState,
@@ -358,6 +390,7 @@ export function EnclosureViewer({
   const [initialX, initialY, initialZ] = sphericalToCartesian(
     cameraState.current.radius, cameraState.current.polar, cameraState.current.azimuth,
   )
+  const clipping = computeCameraClipping(cameraState.current.radius)
 
   return (
     <div className="flex flex-col gap-2">
@@ -370,6 +403,8 @@ export function EnclosureViewer({
               cameraState.current.center.z + initialZ,
             ],
             fov: 50,
+            near: clipping.near,
+            far: clipping.far,
           }}
         >
           <color attach="background" args={[VIEWER_BACKGROUND_COLOR]} />
@@ -399,7 +434,14 @@ export function EnclosureViewer({
           <directionalLight position={[-100, -60, -100]} intensity={0.25} />
           {base.scene && <primitive object={base.scene} />}
           {lid.scene && lidVisible && <primitive object={lid.scene} />}
-          <OrbitControls ref={controlsRef} makeDefault enableDamping target={cameraState.current.center} />
+          <OrbitControls
+            ref={controlsRef}
+            makeDefault
+            enableDamping
+            target={cameraState.current.center}
+            minDistance={clipping.minDistance}
+            maxDistance={clipping.maxDistance}
+          />
         </Canvas>
       </div>
       <div className="flex items-center justify-between">
