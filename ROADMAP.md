@@ -447,30 +447,31 @@ and import/export to KiCad's own `.kicad_sym`/`.pretty` library formats.
 (enclosure-from-geometry) exists — the schema doesn't need `SPEC-109` done, only to eventually
 produce `Artifact`s it stores.
 
-#### [SPEC-312](apps/tauri-ui/specs/SPEC-312-application-shell-project-portability-persistence.md) — Application Shell, Project Portability & Persistence Model — Draft
+#### [SPEC-312](apps/tauri-ui/specs/SPEC-312-application-shell-project-portability-persistence.md) — Application Shell, Project Portability & Persistence Model — ✅ done (items 1-3) 2026-08-19
 
 *Module:* `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-300, SPEC-304, SPEC-311
 
 Real product questions surfaced while scoping `CTX-311.13` (the Enclosure tab's real Export
 action) that its own narrow scope deliberately did not try to answer, now a real spec, per this
 repo's own "Plan Drift is not embarrassing" norm. Scoped to three of the five original questions
-below (items 1-3) -- item 4 (Overview tab purpose) and item 5 (component library discovery) are
-explicit Non-Goals in the spec itself, real but separate decisions left for their own future specs:
+below (items 1-3, all shipped) -- item 4 (Overview tab purpose) and item 5 (component library
+discovery) are explicit Non-Goals in the spec itself, real but separate decisions left for their
+own future specs:
 
-1.  **What does "Save" actually save, at the project level?** `project.json` is real but largely
-    unused today. Does it grow into a real manifest — locations of the schematic/pcb/library files,
-    export history, an enclosure's own last-exported paths? Does "Save Project," "Save Enclosure,"
-    and "Export Enclosure" need to be three distinct, named actions, or fewer?
-2.  **Project portability.** Schematic/pcb/enclosure view state currently persists to the app's own
-    `$APPDATA` (per-machine, via `SPEC-301`'s `output_dir`), not the project's own directory.
-    Moving it into the project directory would make a project genuinely portable — copy the folder,
-    send it, open it on another machine — a real, different persistence model from what exists
-    today.
-3.  **The native app menu.** Confirmed while scoping `CTX-311.13`: no `File`/`Edit`/`View`/`Help`
-    menu is configured anywhere in `core/tauri-rust`, in any build mode — not a dev-build artifact,
-    genuinely never built (`tauri::menu` is real, separate work). A real menu is also the natural
-    home for "open a project not currently in the sidebar list" and Save/Save As/Duplicate, both
-    real, currently-missing capabilities.
+1.  **What does "Save" actually save, at the project level?** — ✅ done
+    ([CTX-312.1](apps/tauri-ui/context/CTX-312.1-project-directory-link-and-save.md)). Two named
+    actions, not three: "Link to folder…" plus "Save Project," which now writes a real manifest
+    (`last_results`/`export_history` keyed by area tab) rather than the largely-unused
+    `{name, schema_version}` record that existed before.
+2.  **Project portability.** — ✅ done (same context as above). A linked project's real state now
+    lives at `<directory>/.hardware-agent-studio/project.json` — copy the folder, send it, open it
+    on another machine — instead of only the app's own per-machine storage root.
+3.  **The native app menu.** — ✅ done
+    ([CTX-312.3](apps/tauri-ui/context/CTX-312.3-native-app-menu.md)). Real `File`/`Edit`/`View`/
+    `Help` menu via `tauri::menu`; File's Save Project/Open Project… reuse the same handlers as the
+    in-app buttons. `CTX-312.3` also built the real reverse of item 2's directory link —
+    `project.open_from_directory`, "a folder someone hands me becomes a known project here" — the
+    actual payoff of portability, not just writing a portable file no code ever reads back.
 4.  **The Overview tab's actual purpose**, undecided since `SPEC-305` first re-housed chat there: a
     per-project dashboard (status across PCB/Schematic/Enclosure, activity history, a dedicated
     chat surface) vs. a cross-project landing page (recent projects, app updates, roadmap news —
@@ -506,18 +507,25 @@ the user directly click-testing the running dev-mode app afterward. `SPEC-101`'s
 left untouched, as designed. Windows/Linux freezing remains real, explicitly out-of-scope follow-up
 (`SPEC-403`).
 
-#### [SPEC-402](specs/SPEC-402-release-signing-and-auto-update.md) — Release, Signing & Auto-Update
+#### [SPEC-402](specs/SPEC-402-release-signing-and-auto-update.md) — Release, Signing & Auto-Update — ✅ done 2026-08-17
+
 *Module:* repo-wide · *Depends on:* SPEC-401
 
-**Rescoped 2026-08-16: unsigned first, deliberately.** A real macOS-only release pipeline (unsigned
-`.dmg` via GitHub Actions, a real Gatekeeper-bypass doc), the Tauri auto-updater (its own real,
-maintainer-generated keypair — no OS-level code-signing certificate, no cost, no identity tied to
-one person), and a changelog derived from the `CTX-*.md` implementation logs — which the framework
-already collects, and which nothing currently reads. Code signing/notarization is explicitly
-deferred: it requires either a personal Apple/Windows identity tied to releases indefinitely, or a
-real *organization* account under a project entity (GittieLabs, if it becomes the enrolled entity)
-— a real, separate, future decision this spec doesn't make. Windows/Linux builds wait on
-`SPEC-403`'s own cross-platform verification, which hasn't happened.
+**Rescoped 2026-08-16: unsigned first, deliberately** — then the deferred parts shipped anyway,
+across four more contexts, all `Completed`:
+[CTX-402.1](context/CTX-402.1-release-pipeline-and-changelog.md) (unsigned macOS pipeline + a
+changelog generator reading the framework's own `CTX-*.md` logs, v0.1.0),
+[CTX-402.2](context/CTX-402.2-auto-updater.md) (Tauri auto-updater, its own standalone signing
+keypair, v0.1.0), [CTX-402.3](context/CTX-402.3-macos-signing-notarization.md) (real macOS code
+signing + notarization under a GittieLabs Apple Developer account — the "real *organization*
+account" this entry originally deferred on, resolved rather than left open, v0.1.1),
+[CTX-402.4](context/CTX-402.4-intel-macos-build.md) (a second, Intel x86_64 macOS build alongside
+the original Apple Silicon one, v0.1.3), and
+[CTX-402.5](context/CTX-402.5-windows-linux-prerelease-builds.md) (real, unsigned,
+explicitly-pre-release Windows and Linux builds, v0.1.3). The Windows/Linux builds here are real
+compiled artifacts, not the same thing as `SPEC-403`'s still-open question below — nothing has
+live-tested the actual KiCad/FreeCAD bridges on those platforms yet, only that the app itself
+builds and launches there.
 
 #### SPEC-403 — Cross-Platform Verification Matrix
 *Module:* repo-wide · *Depends on:* SPEC-903
@@ -526,7 +534,9 @@ Every live CAD test to date has run on exactly one machine: Keith's Mac, with Ki
 FreeCAD 1.1.1. Both CTX-103.1 and CTX-104.1 say so explicitly. This spec defines how the live paths
 get exercised on Windows and Linux — self-hosted runners with real CAD installs, a documented
 manual checklist, or containerized KiCad. Until then, "works on Windows" is an untested claim about
-the two most fragile integration points in the codebase.
+the two most fragile integration points in the codebase. `SPEC-402`'s `CTX-402.5` (2026-08-17)
+shipped real Windows/Linux *builds*, still explicitly pre-release for exactly this reason — this
+spec is what would move them past that label.
 
 ### 3.5 `9xx` — The framework itself
 
