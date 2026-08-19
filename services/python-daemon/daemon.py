@@ -133,6 +133,14 @@ except Exception:
     )
     kicad_pcb_import = None
 
+try:
+    import community_libraries
+except Exception:
+    logger.exception(
+        "community_libraries failed to import -- library.search_community_footprints will be unavailable"
+    )
+    community_libraries = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -507,6 +515,18 @@ def library_load_footprint(footprint_id: str) -> dict:
 
 def library_export_footprint(footprint_id: str) -> dict:
     return {"path": library_store.export_footprint_kicad_mod(footprint_id)}
+
+
+def library_search_community_footprints(query: str) -> list:
+    """CTX-314.1: search-only -- real candidates from the curated
+    GitHub allowlist, no import/persistence yet. The optional
+    github_token comes from CONFIG['secrets'], the same place every
+    other configured secret already lives (SPEC-106 §2) -- not yet a
+    real KNOWN_SECRET_KEYS entry (CTX-314.2's job), so this is always
+    None today, meaning every real search runs unauthenticated."""
+    return community_libraries.search_community_footprints(
+        query, github_token=CONFIG["secrets"].get("github_token")
+    )
 
 
 def project_save(project: dict) -> dict:
@@ -1048,6 +1068,8 @@ def _build_routes() -> dict:
         routes["project.load_conversation"] = project_load_conversation
         routes["project.get_directory"] = project_get_directory
         routes["project.open_from_directory"] = project_open_from_directory
+    if community_libraries is not None:
+        routes["library.search_community_footprints"] = library_search_community_footprints
     if tool_registry is not None:
         routes["agent.dispatch_tool"] = agent_dispatch_tool
     if fp_lib_table is not None:
@@ -1309,6 +1331,12 @@ def _detect_capabilities() -> dict:
         # storage_root_override -- so Settings can display it without
         # config.json ever needing to hold the Rust-computed value.
         "storage_root": library_store.current_storage_root() if library_store is not None else None,
+        # CTX-314.1: always False today -- no real KNOWN_SECRET_KEYS
+        # entry for github_token exists yet (CTX-314.2's job); real,
+        # honest interim state, not a placeholder pretending to be
+        # wired up. Community-library search still works unauthenticated,
+        # just at GitHub's lower 60-requests/hour rate limit.
+        "github_token_configured": bool(configured_secrets.get("github_token")),
     }
 
 

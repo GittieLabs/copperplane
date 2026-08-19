@@ -327,6 +327,40 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
         finally:
             daemon.library_store = original
 
+    def test_007b_build_routes_registers_and_omits_community_footprint_search(self):
+        """TEST-005 (CTX-314.1): the real route is registered under
+        library.search_community_footprints when community_libraries
+        imported successfully, and omitted (mirroring test_006/007's own
+        pattern) when it didn't -- a broken import there shouldn't take
+        down anything else either."""
+        routes = daemon._build_routes()
+        self.assertIn("library.search_community_footprints", routes)
+
+        original = daemon.community_libraries
+        daemon.community_libraries = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("library.search_community_footprints", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.community_libraries = original
+
+    def test_007c_library_search_community_footprints_passes_the_configured_github_token(self):
+        """CTX-314.1: the route reads github_token from CONFIG['secrets'],
+        the same place every other configured secret already lives
+        (SPEC-106 SS2) -- verifies the real wiring, not just that the
+        underlying module function works in isolation."""
+        original_secrets = daemon.CONFIG.get("secrets", {})
+        daemon.CONFIG["secrets"] = {"github_token": "ghp_real_token_value"}
+        try:
+            with patch.object(
+                daemon.community_libraries, "search_community_footprints", return_value=[]
+            ) as mock_search:
+                daemon.library_search_community_footprints("ESP32")
+                mock_search.assert_called_once_with("ESP32", github_token="ghp_real_token_value")
+        finally:
+            daemon.CONFIG["secrets"] = original_secrets
+
     def test_008_build_routes_omits_component_search_when_import_failed(self):
         """TEST-004 (CTX-306.1): mirrors test_006/007 for component.search
         -- a broken component_pipeline import shouldn't take down
@@ -725,6 +759,24 @@ class TestDaemonCapabilities(unittest.TestCase):
             self.assertIsNone(caps['storage_root'])
         finally:
             daemon.library_store = original
+
+    def test_008_github_token_configured_reflects_the_real_configured_secret(self):
+        """CTX-314.1: always False by default -- no real KNOWN_SECRET_KEYS
+        entry for github_token exists yet (CTX-314.2's job) -- but the
+        capability flag itself already reflects CONFIG['secrets'] honestly,
+        the same way every other configured-secret flag in this codebase
+        does, not hardcoded False."""
+        original_secrets = daemon.CONFIG.get("secrets", {})
+        daemon.CONFIG["secrets"] = {}
+        try:
+            caps = daemon._detect_capabilities()
+            self.assertFalse(caps['github_token_configured'])
+
+            daemon.CONFIG["secrets"] = {"github_token": "ghp_real"}
+            caps = daemon._detect_capabilities()
+            self.assertTrue(caps['github_token_configured'])
+        finally:
+            daemon.CONFIG["secrets"] = original_secrets
 
 
 class TestKicadGenerateComponentProviderOverride(unittest.TestCase):
