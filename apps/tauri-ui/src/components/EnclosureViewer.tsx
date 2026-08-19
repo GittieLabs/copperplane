@@ -320,15 +320,30 @@ export function EnclosureViewer({
           }}
         >
           <color attach="background" args={[VIEWER_BACKGROUND_COLOR]} />
-          {/* Real user feedback: a single strong directional light with
-           * a low ambient floor read as "hard, dark shadows" on a flat-
-           * shaded box -- every face's brightness swings sharply with its
-           * own normal relative to that one light. A high ambient floor
-           * plus a dim second fill light (opposite the main one) keeps a
-           * real sense of shape without that harsh swing. */}
-          <ambientLight intensity={1.1} />
-          <directionalLight position={[100, 100, 100]} intensity={0.3} />
-          <directionalLight position={[-100, -60, -100]} intensity={0.15} />
+          {/* CTX-311.9: real user feedback, after CTX-311.8's camera fix
+           * finally showed the real cavity/floor -- "still hard to see
+           * where the edges of the floor meet" the walls. CTX-311.6's own
+           * lighting rebalance (raised here to fix a real "hard, dark
+           * shadows" complaint) turns out to have overcorrected: that
+           * earlier harshness was compounded by (likely caused entirely
+           * by) `CTX-311.7`'s own root-cause bug -- the mesh rendering as
+           * a fully metallic surface with no environment map, which reads
+           * as stark near-black regardless of light balance. Now that the
+           * material is real and matte (`CTX-311.7`), a high ambient
+           * floor relative to the directional lights actively works
+           * against edge visibility instead: ambient light contributes
+           * uniformly regardless of a face's own normal, so raising it
+           * too far flattens the real brightness difference between the
+           * floor (facing up, toward the main light) and a vertical wall
+           * (facing sideways) that's exactly what makes their shared
+           * crease visible at all. Rebalanced toward the directional
+           * lights again -- real per-face contrast for genuine edge
+           * definition -- while keeping ambient and the dim fill light
+           * non-zero so no face reads as true black the way the old
+           * metallic material always did. */}
+          <ambientLight intensity={0.5} />
+          <directionalLight position={[100, 100, 100]} intensity={1.0} />
+          <directionalLight position={[-100, -60, -100]} intensity={0.25} />
           {base.scene && <primitive object={base.scene} />}
           {lid.scene && lidVisible && <primitive object={lid.scene} />}
           <OrbitControls ref={controlsRef} makeDefault enableDamping target={cameraState.current.center} />
