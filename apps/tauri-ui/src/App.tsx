@@ -17,6 +17,7 @@ import {
 import { BoardAdvisor } from './components/BoardAdvisor'
 import { ComponentDiscovery } from './components/ComponentDiscovery'
 import { EnclosurePanel, type EnclosureExportSuccessEvent } from './components/EnclosurePanel'
+import { OverviewDashboard } from './components/OverviewDashboard'
 import { Rail } from './components/Rail'
 import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
@@ -330,7 +331,7 @@ function App() {
               ))}
             </div>
 
-            {view.area === 'overview' && <Overview projectName={view.name} />}
+            {view.area === 'overview' && <Overview projectName={view.name} project={currentProject} />}
             {view.area === 'components' && <ComponentDiscovery />}
             {/* BoardAdvisor/SchematicAdvisor/EnclosurePanel stay mounted
              * across every area, not just while their own tab is selected --
@@ -371,7 +372,7 @@ function App() {
  * LLM's context or persisted in this pass. Switching projects resets
  * all of this state so no conversation leaks across the boundary
  * (SPEC-305 §3's own named hazard). */
-function Overview({ projectName }: { projectName: string }) {
+function Overview({ projectName, project }: { projectName: string; project: Project | null }) {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [latestSchema, setLatestSchema] = useState<Record<string, unknown> | null>(null)
@@ -561,6 +562,7 @@ function Overview({ projectName }: { projectName: string }) {
   return (
     <div className="flex w-full max-w-md flex-col gap-3">
       {loadError && <p className="text-sm text-red-400">{loadError}</p>}
+      <OverviewDashboard project={project} chatHistory={chatHistory} />
       <div className="flex flex-col gap-2">
         {messages.map((message) => (
           <ChatMessageView

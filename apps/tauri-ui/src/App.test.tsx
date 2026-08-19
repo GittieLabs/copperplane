@@ -296,6 +296,14 @@ describe('App: chat & command surface', () => {
     screen.getByText('hi again')
     expect(loadConversationMock).toHaveBeenCalledWith('test-project')
   })
+
+  it('CTX-313.1 TEST-007: Overview renders the real per-project dashboard alongside the existing, still-functional chat surface', async () => {
+    await renderAppOnOverview()
+
+    expect(screen.getByTestId('status-card-pcb').textContent).toContain('Not yet checked this session')
+    expect(screen.getByTestId('status-card-enclosure').textContent).toContain('Not yet checked this session')
+    expect(screen.getByPlaceholderText(/generate ATtiny85/)).toBeTruthy()
+  })
 })
 
 /** Real user feedback: switching away from the PCB tab and back threw
