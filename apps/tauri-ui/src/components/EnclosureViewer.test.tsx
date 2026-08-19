@@ -6,8 +6,10 @@ vi.mock('@tauri-apps/api/core', () => ({
   convertFileSrc: (path: string) => `asset://localhost/${path}`,
 }))
 
-const { useGlbScene, disposeScene, sphericalToCartesian, computeFrame, DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH } =
-  await import('./EnclosureViewer')
+const {
+  useGlbScene, disposeScene, sphericalToCartesian, computeFrame, applyMeshColor,
+  DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH, BODY_COLOR, LID_COLOR,
+} = await import('./EnclosureViewer')
 
 /** A `GLTFLoaderLike` fake, so tests control load timing/outcome directly
  * instead of mocking the `three` module's GLTFLoader itself. */
@@ -207,5 +209,44 @@ describe('computeFrame (CTX-311.4: the real fix for the camera-pointed-at-nothin
 
   it('returns null (never a guessed frame) when nothing real was passed', () => {
     expect(computeFrame([])).toBeNull()
+  })
+})
+
+describe('applyMeshColor (CTX-311.6: real body/lid contrast)', () => {
+  it('sets the real color on every real mesh material found in the object', () => {
+    const material = new THREE.MeshStandardMaterial({ color: 0x000000 })
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), material)
+    const group = new THREE.Group()
+    group.add(mesh)
+
+    applyMeshColor(group, 0xff0000)
+
+    expect(material.color.getHex()).toBe(0xff0000)
+  })
+
+  it('sets every material in a multi-material mesh, not just the first', () => {
+    const materials = [
+      new THREE.MeshStandardMaterial({ color: 0x000000 }),
+      new THREE.MeshStandardMaterial({ color: 0x000000 }),
+    ]
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), materials)
+    const group = new THREE.Group()
+    group.add(mesh)
+
+    applyMeshColor(group, 0x00ff00)
+
+    for (const material of materials) {
+      expect(material.color.getHex()).toBe(0x00ff00)
+    }
+  })
+
+  it('skips non-mesh nodes without throwing', () => {
+    const group = new THREE.Group()
+    group.add(new THREE.Group())
+    expect(() => applyMeshColor(group, 0x0000ff)).not.toThrow()
+  })
+
+  it('BODY_COLOR and LID_COLOR are real, distinct colors', () => {
+    expect(BODY_COLOR).not.toBe(LID_COLOR)
   })
 })
