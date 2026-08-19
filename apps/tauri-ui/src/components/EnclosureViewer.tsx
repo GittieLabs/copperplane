@@ -41,33 +41,17 @@ export function disposeScene(scene: THREE.Object3D): void {
 }
 
 // SPEC-311: real user feedback exercising the actual running app -- once
-// the lid rendered at all (post-CTX-311.5), it was still "too hard to see
-// how big the lid is" against a same-colored body on a same-toned dark
-// background. Body and lid get distinct, real fixed colors, and the
-// background moves to a light neutral -- all three real, direct contrast
-// cues, not a cosmetic afterthought.
-export const BODY_COLOR = 0x64748b // slate-500 -- distinct from both the lid and the light background
-export const LID_COLOR = 0xf97316 // orange-500 -- a real, high-contrast accent against the body and background
-export const VIEWER_BACKGROUND_COLOR = '#e5e7eb' // gray-200 -- light enough that a mid-gray body and an orange lid both read clearly
-
-/** Sets a real, uniform color on every real mesh material in `object` --
- * used to tell the enclosure body and its lid apart at a glance, since
- * both come from `freecad_bridge.py`'s own default (colorless) STL/glTF
- * export. Mutates the loaded scene's own materials directly rather than
- * cloning -- each `useGlbScene` load already produces a fresh scene/
- * material graph, never shared across renders, so there's nothing else
- * that could be affected by mutating in place. */
-export function applyMeshColor(object: THREE.Object3D, color: number): void {
-  object.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return
-    const materials = Array.isArray(child.material) ? child.material : [child.material]
-    for (const material of materials) {
-      if (material && 'color' in material && material.color instanceof THREE.Color) {
-        material.color.setHex(color)
-      }
-    }
-  })
-}
+// the lid rendered at all (post-CTX-311.5), the body and lid were still
+// "too hard" to tell apart, both rendering almost black regardless of
+// scene lighting. Root cause (CTX-311.7): `freecad_bridge.py`'s own
+// `.glb` export previously attached no material at all, so glTF's own
+// spec-default (fully metallic, fully rough, black with no environment
+// map to reflect) applied. Fixed at the source, not here -- `_export_glb`
+// now writes a real, matte, distinctly-colored material for the body and
+// the lid directly into each file, so both render correctly in any real
+// glTF viewer, not just this app's own. Only the background stays a
+// frontend concern (it's not part of either mesh's own real data).
+export const VIEWER_BACKGROUND_COLOR = '#e5e7eb' // gray-200 -- light enough to read clearly against a matte-shaded body and lid
 
 /**
  * Loads a `.glb` from an absolute filesystem path via Tauri's scoped
@@ -299,14 +283,6 @@ export function EnclosureViewer({
     applyCameraState(controlsRef.current, cameraState.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base.scene, lid.scene])
-
-  useEffect(() => {
-    if (base.scene) applyMeshColor(base.scene, BODY_COLOR)
-  }, [base.scene])
-
-  useEffect(() => {
-    if (lid.scene) applyMeshColor(lid.scene, LID_COLOR)
-  }, [lid.scene])
 
   if (base.status === 'loading') {
     return <p className="text-sm text-neutral-400">Loading mesh…</p>

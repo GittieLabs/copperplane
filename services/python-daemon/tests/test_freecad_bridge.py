@@ -554,6 +554,42 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
                 if os.path.exists(result[key]):
                     os.remove(result[key])
 
+    def test_009_real_base_and_lid_get_distinct_real_matte_materials(self):
+        """CTX-311.7: real, confirmed bug found by live user testing --
+        `Part.Shape.exportStl` writes plain, colorless geometry (STL has
+        no material concept at all), and this module's own `.glb`
+        export previously attached no material either. A mesh with no
+        material in its own glTF file isn't blank or default-gray in
+        any real glTF viewer: the glTF 2.0 spec's own default material
+        (applied whenever a primitive omits one) is `metallicFactor: 1,
+        roughnessFactor: 1` -- full metal, which renders near-black with
+        no environment map to reflect, regardless of scene lighting.
+        Verified directly here: the real exported `.glb` now carries a
+        real, matte (`metallicFactor` 0) material, and the base shell
+        and the lid get real, distinct real colors from each other."""
+        self._skip_unless_freecad_available()
+        import trimesh
+
+        result = generate_enclosure(
+            height=10, board_outline=_TEST_BOARD_OUTLINE, standoffs=[],
+            fillet_radius_mm=0, lid=True,
+        )
+        try:
+            base_scene = trimesh.load(result["glb_path"])
+            lid_scene = trimesh.load(result["lid_glb_path"])
+            base_material = list(base_scene.geometry.values())[0].visual.material
+            lid_material = list(lid_scene.geometry.values())[0].visual.material
+
+            self.assertEqual(base_material.metallicFactor, 0.0)
+            self.assertEqual(lid_material.metallicFactor, 0.0)
+            self.assertNotEqual(
+                tuple(base_material.baseColorFactor), tuple(lid_material.baseColorFactor),
+            )
+        finally:
+            for key in ("glb_path", "step_path", "lid_glb_path", "lid_step_path"):
+                if os.path.exists(result[key]):
+                    os.remove(result[key])
+
 
 if __name__ == '__main__':
     unittest.main()
