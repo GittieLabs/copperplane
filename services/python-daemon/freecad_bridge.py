@@ -240,13 +240,52 @@ def _wait_with_cancellation(proc: subprocess.Popen, timeout_s: float, cancel_eve
 _Y_UP_ROTATION = trimesh.transformations.rotation_matrix(-math.pi / 2, [1, 0, 0])
 
 
-def _export_glb(stl_path: str, glb_path: str) -> None:
+_BODY_COLOR_RGB = (148, 163, 184)  # slate-400 -- the enclosure shell
+_LID_COLOR_RGB = (249, 115, 22)  # orange-500 -- a real, high-contrast accent for the lid
+
+
+def _export_glb(stl_path: str, glb_path: str, base_color_rgb: tuple) -> None:
     """Converts a real FreeCAD-exported `.stl` to a real, correctly
-    scaled and correctly oriented `.glb` -- the one real conversion path
-    every enclosure/lid mesh in this module goes through, so both share
-    the exact same fix rather than risking the two drifting apart."""
+    scaled, correctly oriented, and correctly colored `.glb` -- the one
+    real conversion path every enclosure/lid mesh in this module goes
+    through, so all three fixes share one place rather than risking
+    drift between the base shell's and the lid's own copies.
+
+    Real, confirmed bug (found by live user testing, CTX-311.7): `Part.
+    Shape.exportStl` writes plain, colorless geometry -- there is no
+    STL material concept at all -- so the plain `trimesh.load(...);
+    mesh.export(glb_path)` this function used before never attached a
+    real material either. A mesh with literally no material in its own
+    glTF file isn't blank or default-gray in any real glTF viewer: the
+    glTF 2.0 spec's own default material (used whenever a primitive
+    omits one) is `metallicFactor: 1, roughnessFactor: 1` -- full
+    metal. A fully metallic surface's visible color comes almost
+    entirely from specular reflection of its surrounding environment,
+    not simple light-times-albedo diffuse shading, and this app's own
+    `<Canvas>` has no environment/IBL map for a metal to reflect --
+    so every enclosure/lid this function has ever produced rendered as
+    an almost-black silhouette, regardless of how the scene's own
+    lights were tuned (`CTX-311.6`'s own lighting rebalance, real and
+    correct on its own terms, could never have fixed this). Verified
+    directly: the real `.glb` this function produced before this fix
+    had no `"materials"` key in its own glTF JSON at all.
+
+    Fixed by assigning a real, explicit, matte PBR material
+    (`metallicFactor=0`, a moderate `roughnessFactor` -- the look of
+    real 3D-printed plastic, not bare metal) before export, real and
+    portable to any glTF viewer, not just this app's own. `base_color_
+    rgb` also gives the base shell and the lid their own distinct real
+    colors directly in the exported file, replacing the frontend-side
+    `EnclosureViewer.tsx` material override `CTX-311.6` added -- a
+    single, real source of truth instead of two."""
     mesh = trimesh.load(stl_path)
     mesh.apply_transform(_Y_UP_ROTATION)
+    r, g, b = base_color_rgb
+    mesh.visual = trimesh.visual.TextureVisuals(
+        material=trimesh.visual.material.PBRMaterial(
+            baseColorFactor=[r, g, b, 255], metallicFactor=0.0, roughnessFactor=0.6,
+        )
+    )
     # Real, confirmed bug (found while investigating SPEC-311's own
     # board-inside-enclosure preview idea): the FreeCAD build scripts
     # above write real millimeter values (`box.Height = {height}` etc.)
@@ -458,7 +497,7 @@ def generate_enclosure(
                 f"file: {stderr_data.strip()}"
             )
 
-        _export_glb(stl_path, glb_path)
+        _export_glb(stl_path, glb_path, _BODY_COLOR_RGB)
 
         # SPEC-301 §3's flagged known debt: nothing previously deleted a
         # generated .glb (harmless in a self-cleaning OS temp dir, a real
@@ -478,7 +517,7 @@ def generate_enclosure(
         result = {"glb_path": glb_path, "step_path": step_path}
 
         if lid:
-            _export_glb(lid_stl_path, lid_glb_path)
+            _export_glb(lid_stl_path, lid_glb_path, _LID_COLOR_RGB)
 
             if (
                 _last_lid_glb_path and _last_lid_glb_path != lid_glb_path
