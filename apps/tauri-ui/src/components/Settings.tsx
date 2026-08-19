@@ -336,8 +336,9 @@ export function Settings() {
       <section className="flex flex-col gap-2">
         <h3 className="text-sm font-medium text-neutral-400">Community Library Search</h3>
         <p className="text-xs text-neutral-500">
-          Optional. Community footprint/symbol search (SPEC-314) works without a token, at
-          GitHub&apos;s lower unauthenticated rate limit -- add one to raise it.
+          Optional. Searching community footprint/symbol libraries works without a token, limited
+          to 60 requests/hour from GitHub. Adding a personal access token (no special scopes
+          needed) raises that to 5,000/hour.
         </p>
         <div className="flex items-center gap-2">
           <span className="w-24 text-sm">GitHub token</span>
