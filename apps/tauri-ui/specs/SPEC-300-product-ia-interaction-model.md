@@ -18,6 +18,7 @@ child_specs:
   - "SPEC-310-enclosure-from-board-profile.md"
   - "SPEC-311-enclosure-refinement-interactive-preview.md"
   - "SPEC-312-application-shell-project-portability-persistence.md"
+  - "SPEC-313-overview-tab-project-dashboard.md"
 user_facing: true
 ---
 
