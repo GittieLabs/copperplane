@@ -539,7 +539,7 @@ was stuck at a 448px column) and
 [CTX-305.3](apps/tauri-ui/context/CTX-305.3-enclosure-empty-result-column-width.md) (Enclosure's
 own responsive layout reserved space for a 3D-viewer result that didn't exist yet).
 
-#### [SPEC-314](apps/tauri-ui/specs/SPEC-314-community-library-discovery.md) — Community Footprint & Symbol Library Discovery — Draft
+#### [SPEC-314](apps/tauri-ui/specs/SPEC-314-community-library-discovery.md) — Community Footprint & Symbol Library Discovery — ✅ done ([CTX-314.1](services/python-daemon/context/CTX-314.1-community-library-search.md), [CTX-314.2](services/python-daemon/context/CTX-314.2-community-library-import.md)) 2026-08-19
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-106, SPEC-304, SPEC-308
 
@@ -548,14 +548,21 @@ candidates named directly by Keith: Ultra Librarian and GitHub-hosted KiCad libr
 Librarian's own redistribution terms turned out to be genuinely permissive, but no public,
 documented API for programmatic access could be found -- real, unconfirmed, explicitly not blocked
 on here (see the spec's own Non-Goals). GitHub-hosted community libraries are the confirmed-
-buildable half: a real, curated allowlist of MIT/permissively-licensed repos (starting point:
-`kitspace/kicad_footprints`, a real aggregator of many community libraries), searched via GitHub's
-own REST API with an optional bring-your-own token (`SPEC-106`'s existing keychain mechanism,
-`SPEC-203`'s own "never bundle an API key" standing rule applied here too). A real, named open risk
-carried over from `SPEC-310`'s own research: `kiutils` (a third-party KiCad-file parser) crashed on
-a real board file during this project's own prior work -- whether it (or `kicad-cli`, or a
-hand-rolled parser) reliably handles real footprint/symbol files pulled from these repos is this
-spec's single highest-risk open question, named explicitly rather than assumed away.
+buildable half: a real, curated allowlist of MIT/permissively-licensed repos (`espressif/
+kicad-libraries`, `sparkfun/SparkFun-KiCad-Libraries` -- verified by direct inspection, not
+`kitspace/kicad_footprints`, which uses git submodules and was deliberately excluded from this
+first allowlist), searched via GitHub's own REST API with an optional bring-your-own token
+(`SPEC-106`'s existing keychain mechanism, `SPEC-203`'s own "never bundle an API key" standing rule
+applied here too). The real, named open risk carried over from `SPEC-310`'s own research --
+whether `kiutils` reliably handles real footprint/symbol files pulled from these repos, given it
+crashed on a full board file during prior work -- resolved positively: `kiutils` parses real
+`.kicad_mod`/`.kicad_sym` content from both allowlisted repos correctly (`CTX-314.1`), a different,
+simpler S-expression shape than the full-board case that failed. `CTX-314.2` shipped the real
+fetch/parse/persist path (raw content preserved verbatim, never lossily re-derived into this app's
+own generated-footprint schema), the real `github_token` keychain key, and the Settings/Part Detail
+UI -- including a real, two-step browse-then-import flow for `.kicad_sym` files, which turned out
+to be genuine multi-symbol libraries (73 real symbols in one file, verified directly), not one
+symbol per file the way this app's own hand-built symbol files are.
 
 ### 3.4 `4xx` — Distribution & operations
 
