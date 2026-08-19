@@ -675,3 +675,187 @@ def get_step_bounding_box_mm(step_path: str, timeout_s: float = 15.0, cancel_eve
     finally:
         if os.path.exists(script_path):
             os.remove(script_path)
+
+
+# CTX-311.13: the real explicit "Save" action SPEC-311 §2 always named as
+# an open question, decided (CTX-311.2) as explicit-save-only. Every
+# format here reads from an already-generated real file -- this function
+# never calls generate_enclosure itself, only reuses the .step/.glb pair
+# a prior real generation already produced.
+def _run_export_script(freecadcmd: str, script: str, dest_path: str, timeout_s: float, cancel_event) -> None:
+    """Shared subprocess/cleanup plumbing for every `export_enclosure`
+    format that needs a real `freecadcmd` call (STEP/STL compound export,
+    FCStd) -- deliberately separate from `generate_enclosure`'s own
+    subprocess handling (which also produces the initial .stl/.step and
+    manages leak-bounding cleanup, real, different concerns) and from
+    `get_step_bounding_box_mm`'s (which reads a value back, not a file)."""
+    script_id = uuid.uuid4().hex
+    script_path = os.path.join(tempfile.gettempdir(), f"temp_export_{script_id}.py")
+    with open(script_path, "w") as f:
+        f.write(script)
+    try:
+        proc = subprocess.Popen(
+            [freecadcmd, script_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        _stdout_data, stderr_data, returncode = _wait_with_cancellation(proc, timeout_s, cancel_event)
+        if returncode != 0:
+            raise FreeCADBuildError(f"freecadcmd exited with code {returncode}: {stderr_data.strip()}")
+        if not os.path.exists(dest_path):
+            raise FreeCADBuildError(
+                f"freecadcmd exited cleanly but did not produce the expected export file: "
+                f"{stderr_data.strip()}"
+            )
+    finally:
+        if os.path.exists(script_path):
+            os.remove(script_path)
+
+
+_EXPORT_COMPOUND_SCRIPT_TEMPLATE = """\
+import Part
+
+shapes = []
+{shape_reads}
+result = shapes[0] if len(shapes) == 1 else Part.makeCompound(shapes)
+result.{export_call}
+"""
+
+
+def _export_compound(
+    step_paths: list, fmt: str, dest_path: str, timeout_s: float, cancel_event,
+) -> None:
+    """STEP/STL export for one or more already-generated real STEP files
+    (the base shell's and/or the lid's own). More than one real shape is
+    combined via `Part.makeCompound` -- a real, standard FreeCAD grouping
+    mechanism (no boolean fuse, just packages multiple shapes for one
+    export call) -- confirmed live against real freecadcmd 1.1.1 before
+    writing this: a real two-box compound round-tripped through both
+    `exportStep`/`exportStl` and back with both solids intact. One shape
+    skips the compound wrapping entirely, the same real object either
+    way."""
+    freecadcmd = find_freecadcmd()
+    shape_reads = "".join(
+        f"_s = Part.Shape()\n_s.read({p!r})\nshapes.append(_s)\n" for p in step_paths
+    )
+    export_call = f"exportStep({dest_path!r})" if fmt == "step" else f"exportStl({dest_path!r})"
+    script = _EXPORT_COMPOUND_SCRIPT_TEMPLATE.format(shape_reads=shape_reads, export_call=export_call)
+    _run_export_script(freecadcmd, script, dest_path, timeout_s, cancel_event)
+
+
+_EXPORT_FCSTD_SCRIPT_TEMPLATE = """\
+import FreeCAD, Part
+
+doc = FreeCAD.newDocument("export")
+{object_adds}
+doc.recompute()
+doc.saveAs({dest_path!r})
+"""
+
+
+def _export_fcstd(named_paths: list, dest_path: str, timeout_s: float, cancel_event) -> None:
+    """Native FreeCAD (`.FCStd`) export -- always the whole design given
+    to it (one real `Part::Feature` object per `(name, step_path)` pair),
+    never gated by `parts`: a per-part `.FCStd` was a real option
+    (`CTX-311.13`'s own Plan Drift), decided against in favor of always
+    the whole document, since re-opening the full design (both bodies
+    together, ready to keep editing) is more useful than a document with
+    just one box. `doc.saveAs()` had never been used anywhere in this
+    codebase before this -- confirmed live against real freecadcmd 1.1.1
+    first: a real two-object document saved this way reloads with both
+    real objects present, not just written-and-untested."""
+    freecadcmd = find_freecadcmd()
+    object_adds = "".join(
+        f"_s = Part.Shape()\n_s.read({p!r})\n"
+        f"_obj = doc.addObject('Part::Feature', {name!r})\n_obj.Shape = _s\n"
+        for name, p in named_paths
+    )
+    script = _EXPORT_FCSTD_SCRIPT_TEMPLATE.format(object_adds=object_adds, dest_path=dest_path)
+    _run_export_script(freecadcmd, script, dest_path, timeout_s, cancel_event)
+
+
+def export_enclosure(
+    parts: str,
+    fmt: str,
+    dest_path: str,
+    step_path: str = None,
+    lid_step_path: str = None,
+    glb_path: str = None,
+    lid_glb_path: str = None,
+    timeout_s: float = 30.0,
+    cancel_event=None,
+) -> None:
+    """The real explicit Save/Export action (`CTX-311.13`, `SPEC-311` §2).
+    Never regenerates geometry -- every format here reads from files a
+    prior real `generate_enclosure` call already produced, passed in by
+    the caller (`daemon.py`'s route already has them in the job's own
+    result, no server-side lookup needed).
+
+    `parts` (`'combined'` / `'body'` / `'lid'`) selects which already-
+    generated real source file(s) to use for STEP/STL/GLB. `'lid'`/
+    `'combined'` raise a clean `ValueError` (not a confusing downstream
+    `FileNotFoundError`) when no lid was actually generated -- `lid_step_
+    path`/`lid_glb_path` are `None` in that case, same as `generate_
+    enclosure`'s own return shape already omits them.
+
+    `fmt` (`'step'` / `'stl'` / `'glb'` / `'fcstd'`) selects the output:
+    - `'glb'`: no subprocess. A single part is a real file copy of the
+      already-correct existing `.glb` (`CTX-311.7`/`.12`'s own real
+      materials, untouched); `'combined'` merges both existing glTF
+      `Scene`s' own geometries into one real merged `Scene` via `trimesh`
+      -- both meshes' vertices are already in the same real, shared
+      coordinate space the original FreeCAD build placed them in
+      (`CTX-311.5`), so no additional per-node transform is needed.
+    - `'step'`/`'stl'`: one real `freecadcmd` subprocess via `_export_
+      compound`, reading the relevant already-generated STEP file(s).
+    - `'fcstd'`: one real `freecadcmd` subprocess via `_export_fcstd`,
+      always the whole real design (ignores `parts` -- see `_export_
+      fcstd`'s own docstring)."""
+    if parts not in ("combined", "body", "lid"):
+        raise ValueError(f"Unknown export parts: {parts!r} -- expected 'combined', 'body', or 'lid'.")
+    if fmt not in ("step", "stl", "glb", "fcstd"):
+        raise ValueError(f"Unknown export format: {fmt!r} -- expected 'step', 'stl', 'glb', or 'fcstd'.")
+
+    needs_body = parts in ("combined", "body")
+    needs_lid = parts in ("combined", "lid")
+
+    if fmt == "fcstd":
+        if not step_path:
+            raise ValueError("Exporting requires step_path -- the base shell must have been generated.")
+        named_paths = [("Body", step_path)]
+        if lid_step_path:
+            named_paths.append(("Lid", lid_step_path))
+        _export_fcstd(named_paths, dest_path, timeout_s, cancel_event)
+        return
+
+    if fmt == "glb":
+        if needs_body and not glb_path:
+            raise ValueError("Exporting the body requires glb_path.")
+        if needs_lid and not lid_glb_path:
+            raise ValueError(f"parts={parts!r} requires a lid, but no lid was generated for this enclosure.")
+        if parts == "body":
+            shutil.copy(glb_path, dest_path)
+        elif parts == "lid":
+            shutil.copy(lid_glb_path, dest_path)
+        else:
+            body_scene = trimesh.load(glb_path)
+            lid_scene = trimesh.load(lid_glb_path)
+            merged = trimesh.Scene(
+                list(body_scene.geometry.values()) + list(lid_scene.geometry.values())
+            )
+            merged.export(dest_path)
+        return
+
+    # step / stl
+    if needs_body and not step_path:
+        raise ValueError("Exporting the body requires step_path.")
+    if needs_lid and not lid_step_path:
+        raise ValueError(f"parts={parts!r} requires a lid, but no lid was generated for this enclosure.")
+    step_paths = []
+    if needs_body:
+        step_paths.append(step_path)
+    if needs_lid:
+        step_paths.append(lid_step_path)
+    _export_compound(step_paths, fmt, dest_path, timeout_s, cancel_event)

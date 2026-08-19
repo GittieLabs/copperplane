@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ from freecad_bridge import (
     FreeCADBuildError,
     FreeCADCancelledError,
     FreeCADUnavailableError,
+    export_enclosure,
     find_freecadcmd,
     generate_enclosure,
     get_step_bounding_box_mm,
@@ -679,6 +681,264 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
             for key in ("glb_path", "step_path", "lid_glb_path", "lid_step_path"):
                 if os.path.exists(result[key]):
                     os.remove(result[key])
+
+
+class TestExportEnclosureValidation(unittest.TestCase):
+    """CTX-311.13: pure argument validation -- no real freecadcmd/trimesh
+    work happens before these checks, so unlike every other test in this
+    file they need no `_skip_unless_freecad_available` gate."""
+
+    def test_001_unknown_parts_raises_a_clean_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            export_enclosure("everything", "step", "/tmp/out.step", step_path="/tmp/e.step")
+        self.assertIn("everything", str(ctx.exception))
+
+    def test_002_unknown_format_raises_a_clean_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            export_enclosure("body", "obj", "/tmp/out.obj", step_path="/tmp/e.step")
+        self.assertIn("obj", str(ctx.exception))
+
+    def test_003_lid_parts_without_a_lid_raises_a_clean_error_not_a_file_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            export_enclosure("lid", "step", "/tmp/out.step", step_path="/tmp/e.step")
+        self.assertIn("no lid was generated", str(ctx.exception))
+
+    def test_004_combined_glb_without_a_lid_raises_a_clean_error(self):
+        with self.assertRaises(ValueError) as ctx:
+            export_enclosure("combined", "glb", "/tmp/out.glb", glb_path="/tmp/e.glb")
+        self.assertIn("no lid was generated", str(ctx.exception))
+
+    def test_005_fcstd_with_no_step_path_at_all_raises_a_clean_error(self):
+        with self.assertRaises(ValueError):
+            export_enclosure("combined", "fcstd", "/tmp/out.FCStd")
+
+
+class TestFreecadBridgeExportEnclosure(unittest.TestCase):
+    """CTX-311.13: `export_enclosure`'s own real geometry/subprocess
+    behavior -- the `freecad.export_enclosure` daemon route only ever
+    mocks this function in test_daemon.py, so every real freecadcmd/
+    trimesh interaction (STEP/STL compound export, native FCStd via
+    `doc.saveAs`, GLB copy/merge) is verified here against the actual
+    installed FreeCAD, once per class rather than once per test --
+    `generate_enclosure` itself is already verified exhaustively by
+    TestBoardDrivenEnclosure above; re-running it for every export
+    combination here would only add real freecadcmd cold-boot cost
+    without adding real coverage."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            find_freecadcmd()
+        except FreeCADUnavailableError:
+            raise unittest.SkipTest(
+                "No local freecadcmd found. Install FreeCAD 0.20+ to run this test for real."
+            )
+        cls._src_tmpdir = tempfile.TemporaryDirectory()
+        freecad_bridge.configure(output_dir=cls._src_tmpdir.name)
+        with_lid = generate_enclosure(
+            height=10, board_outline=_TEST_BOARD_OUTLINE, standoffs=[],
+            fillet_radius_mm=0, lid=True, lid_thickness_mm=2.0,
+        )
+        # Real, confirmed behavior (CTX-311.2 Deviation 1, hit directly by
+        # this fixture, not just described): `generate_enclosure`'s own
+        # leak-bounding cleanup deletes the *previous* successful glb/step
+        # via simple module-level `_last_glb_path`/`_last_step_path`
+        # pointers, regardless of `output_dir` -- a second real call below
+        # would delete `with_lid`'s own files out from under this class-
+        # level fixture. Copying them to independent, untracked paths
+        # first is the same real fix a durable Export action gives a user:
+        # once a file exists somewhere `generate_enclosure`'s own cleanup
+        # doesn't know about, it's safe from the next regeneration.
+        cls.with_lid = {
+            key: shutil.copy(path, os.path.join(cls._src_tmpdir.name, f"safe_{os.path.basename(path)}"))
+            for key, path in with_lid.items()
+        }
+        cls.no_lid = generate_enclosure(
+            height=10, board_outline=_TEST_BOARD_OUTLINE, standoffs=[], fillet_radius_mm=0,
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        freecad_bridge.configure(output_dir=None)
+        cls._src_tmpdir.cleanup()
+
+    def setUp(self):
+        self._dest_tmpdir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._dest_tmpdir.cleanup()
+
+    def _dest(self, filename):
+        return os.path.join(self._dest_tmpdir.name, filename)
+
+    def test_001_step_single_part_matches_the_original_bounding_box(self):
+        """A single-part STEP export is a real read-back-and-re-export of
+        the existing file, not a copy -- confirmed here by real bounding-
+        box equality (via the same `get_step_bounding_box_mm` this module
+        already uses elsewhere for real verification) rather than trusting
+        byte-for-byte identity, which a re-export through FreeCAD's own
+        STEP writer is not guaranteed to produce."""
+        dest = self._dest("body.step")
+        export_enclosure("body", "step", dest, step_path=self.with_lid["step_path"])
+
+        original_bbox = get_step_bounding_box_mm(self.with_lid["step_path"])
+        exported_bbox = get_step_bounding_box_mm(dest)
+        self.assertEqual(original_bbox, exported_bbox)
+
+    def test_002_step_combined_bounding_box_spans_both_body_and_lid(self):
+        """Real proof both shapes are actually present in one file, not
+        just the body: the combined STEP's own Z extent (FreeCAD's native
+        Z-up, pre-rotation) must cover the base shell's full height plus
+        the real 2.0mm lid thickness `setUpClass` configured -- a single-
+        shape export could never produce this Z extent."""
+        dest = self._dest("combined.step")
+        export_enclosure(
+            "combined", "step", dest,
+            step_path=self.with_lid["step_path"], lid_step_path=self.with_lid["lid_step_path"],
+        )
+
+        combined_bbox = get_step_bounding_box_mm(dest)
+        body_bbox = get_step_bounding_box_mm(self.with_lid["step_path"])
+        self.assertAlmostEqual(combined_bbox["z_mm"], body_bbox["z_mm"] + 2.0, delta=0.01)
+
+    def test_003_stl_combined_has_real_geometry_from_both_parts(self):
+        """The same real "more geometry than either part alone" proof as
+        test_002, checked via a real mesh face count instead of a STEP
+        bounding box -- STL has no bounding-box reader in this module, so
+        this exercises the actual `Part.makeCompound` -> `exportStl` path
+        directly, not just its STEP sibling."""
+        import trimesh
+
+        body_dest = self._dest("body.stl")
+        lid_dest = self._dest("lid.stl")
+        combined_dest = self._dest("combined.stl")
+        export_enclosure("body", "stl", body_dest, step_path=self.with_lid["step_path"])
+        export_enclosure("lid", "stl", lid_dest, lid_step_path=self.with_lid["lid_step_path"])
+        export_enclosure(
+            "combined", "stl", combined_dest,
+            step_path=self.with_lid["step_path"], lid_step_path=self.with_lid["lid_step_path"],
+        )
+
+        body_faces = len(trimesh.load(body_dest).faces)
+        lid_faces = len(trimesh.load(lid_dest).faces)
+        combined_faces = len(trimesh.load(combined_dest).faces)
+        self.assertEqual(combined_faces, body_faces + lid_faces)
+
+    def test_004_glb_single_part_is_a_real_copy_of_the_existing_file(self):
+        """No subprocess, no re-export -- a real byte-for-byte copy of the
+        already-correct existing `.glb` (its real materials, CTX-311.7/
+        .12, untouched)."""
+        import filecmp
+
+        dest = self._dest("body.glb")
+        export_enclosure("body", "glb", dest, glb_path=self.with_lid["glb_path"])
+
+        self.assertTrue(filecmp.cmp(dest, self.with_lid["glb_path"], shallow=False))
+
+    def test_005_glb_combined_merges_both_real_geometries_with_their_own_colors(self):
+        """Real proof the merged glTF Scene actually contains the body's
+        own two real materials (CTX-311.12's outer/inner split) plus the
+        lid's own, not a dropped or overwritten one -- three real
+        geometries, three real distinct colors."""
+        import trimesh
+
+        dest = self._dest("combined.glb")
+        export_enclosure(
+            "combined", "glb", dest,
+            glb_path=self.with_lid["glb_path"], lid_glb_path=self.with_lid["lid_glb_path"],
+        )
+
+        scene = trimesh.load(dest)
+        colors = {
+            tuple(g.visual.material.baseColorFactor)[:3] for g in scene.geometry.values()
+        }
+        self.assertEqual(len(scene.geometry), 3)
+        self.assertEqual(
+            colors,
+            {
+                freecad_bridge._BODY_COLOR_RGB,
+                freecad_bridge._BODY_INNER_COLOR_RGB,
+                freecad_bridge._LID_COLOR_RGB,
+            },
+        )
+
+    def test_006_fcstd_combined_reloads_with_both_real_objects(self):
+        """`doc.saveAs()` had never been used anywhere in this codebase
+        before CTX-311.13 -- this re-opens the real saved `.FCStd` in a
+        fresh `freecadcmd` process (not just checking the file exists) to
+        confirm both real objects genuinely round-trip."""
+        dest = self._dest("combined.FCStd")
+        export_enclosure(
+            "combined", "fcstd", dest,
+            step_path=self.with_lid["step_path"], lid_step_path=self.with_lid["lid_step_path"],
+        )
+
+        object_count = self._real_fcstd_object_count(dest)
+        self.assertEqual(object_count, 2)
+
+    def test_007_fcstd_ignores_parts_and_always_includes_the_lid_when_one_exists(self):
+        """CTX-311.13's own Plan Drift decision: `.FCStd` is always the
+        whole design, never gated by `parts` -- requesting `parts='body'`
+        must still produce a real two-object document when a lid was
+        actually generated."""
+        dest = self._dest("body_parts_but_still_combined.FCStd")
+        export_enclosure(
+            "body", "fcstd", dest,
+            step_path=self.with_lid["step_path"], lid_step_path=self.with_lid["lid_step_path"],
+        )
+
+        self.assertEqual(self._real_fcstd_object_count(dest), 2)
+
+    def test_008_fcstd_with_no_lid_generated_reloads_with_one_real_object(self):
+        dest = self._dest("body_only.FCStd")
+        export_enclosure("combined", "fcstd", dest, step_path=self.no_lid["step_path"])
+
+        self.assertEqual(self._real_fcstd_object_count(dest), 1)
+
+    def test_009_lid_parts_without_a_generated_lid_raises_a_clean_error(self):
+        with self.assertRaises(ValueError):
+            export_enclosure(
+                "lid", "step", self._dest("x.step"), step_path=self.no_lid["step_path"],
+            )
+
+    def test_010_manual_mode_solid_box_still_exports_cleanly(self):
+        """The solid, cavity-free box `_export_glb`'s inner/outer split
+        (CTX-311.12) has to special-case doesn't touch `export_enclosure`
+        at all -- STEP/STL/GLB export of a plain manual-mode box is a
+        real, ordinary single-shape path, verified here so a future
+        change to the split logic can't silently break this one."""
+        result = generate_enclosure(height=10, width=20, depth=15, fillet_radius_mm=0)
+        try:
+            dest = self._dest("manual.step")
+            export_enclosure("body", "step", dest, step_path=result["step_path"])
+            self.assertTrue(os.path.exists(dest))
+            self.assertGreater(os.path.getsize(dest), 0)
+        finally:
+            for key in ("glb_path", "step_path"):
+                if os.path.exists(result[key]):
+                    os.remove(result[key])
+
+    def _real_fcstd_object_count(self, fcstd_path: str) -> int:
+        """Not reused by `export_enclosure` itself -- a real, separate
+        `freecadcmd` read-back purely for this test file's own
+        verification, the same "read an existing file back, report one
+        real fact" shape as `get_step_bounding_box_mm`."""
+        script_path = self._dest("_count_objects.py")
+        marker = "OBJECT_COUNT:"
+        with open(script_path, "w") as f:
+            f.write(
+                "import FreeCAD\n"
+                f"doc = FreeCAD.openDocument({fcstd_path!r})\n"
+                f"print({marker!r} + str(len(doc.Objects)))\n"
+            )
+        proc = subprocess.run(
+            [find_freecadcmd(), script_path],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        for line in proc.stdout.splitlines():
+            if line.startswith(marker):
+                return int(line[len(marker):])
+        raise AssertionError(f"freecadcmd did not report an object count: {proc.stderr}")
 
 
 if __name__ == '__main__':

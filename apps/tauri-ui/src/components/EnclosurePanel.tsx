@@ -1,9 +1,30 @@
 import { useCallback, useEffect, useState } from 'react'
 import { open } from '@tauri-apps/plugin-shell'
 import { type JobHandle } from '../lib/ipc'
-import { generateEnclosure, pickPcbFile, type EnclosureParams, type EnclosureResult } from '../lib/enclosure'
+import {
+  exportEnclosure,
+  generateEnclosure,
+  getProjectDirectory,
+  pickExportDestination,
+  pickPcbFile,
+  type EnclosureParams,
+  type EnclosureResult,
+  type ExportFormat,
+  type ExportParts,
+} from '../lib/enclosure'
 import { listOpenBoards, openKicad, type BoardCandidate, type ListOpenBoardsResult } from '../lib/boardAdvisor'
 import { EnclosureViewer } from './EnclosureViewer'
+
+/** Real, defensive path join -- avoids pulling in `@tauri-apps/api/path`
+ * (a separate real permission surface) purely to pre-fill a save
+ * dialog's own default location, a nice-to-have, not required for
+ * correctness: `pickExportDestination` still works with no default at
+ * all if this guesses wrong. Detects the separator already present in a
+ * real OS-native directory path rather than assuming one. */
+function _joinPath(dir: string, filename: string): string {
+  const sep = dir.includes('\\') ? '\\' : '/'
+  return dir.endsWith(sep) ? `${dir}${filename}` : `${dir}${sep}${filename}`
+}
 
 const _DEFAULT_BOARD_PARAMS = {
   height: 20,
@@ -66,6 +87,18 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
   const [status, setStatus] = useState<string | null>(null)
   const [result, setResult] = useState<EnclosureResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // CTX-311.13: the real explicit Save/Export action -- Generate itself
+  // no longer persists anything (see lib/enclosure.ts's own EnclosureResult
+  // docstring for the real, confirmed auto-save bug this replaces).
+  // 'body' is the only value guaranteed valid on every result -- a lid
+  // may not exist yet, and defaulting to 'combined'/'lid' would need an
+  // extra effect just to reset itself the moment a no-lid result arrives
+  // after a lidded one.
+  const [exportParts, setExportParts] = useState<ExportParts>('body')
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('step')
+  const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
 
   const running = status === 'running'
   // A manually-picked file always wins once chosen -- it's the user's
@@ -136,11 +169,10 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
 
     const params: EnclosureParams =
       mode === 'manual'
-        ? { height: dims.height, width: dims.width, depth: dims.depth, project_name: projectName }
+        ? { height: dims.height, width: dims.width, depth: dims.depth }
         : {
             ...boardParams,
             pcb_path: pcbPath ?? undefined,
-            project_name: projectName,
             lid,
             lid_thickness_mm: lid && lidThicknessMm !== '' ? lidThicknessMm : undefined,
           }
@@ -161,6 +193,52 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
 
   async function handleCancel() {
     await job?.cancel()
+  }
+
+  async function handleExport() {
+    if (!result) return
+    setExportError(null)
+
+    if (exportParts !== 'body' && !result.lid_step_path) {
+      // Defensive -- the parts <select>'s own disabled options already
+      // prevent choosing this combination, but a result without a lid
+      // can arrive *after* 'combined'/'lid' was already selected for a
+      // previous, lidded result, and the <select>'s own value doesn't
+      // reset itself.
+      setExportError('No lid was generated for this enclosure.')
+      return
+    }
+
+    let defaultPath: string | undefined
+    try {
+      const dir = await getProjectDirectory(projectName)
+      const extension = exportFormat === 'fcstd' ? 'FCStd' : exportFormat
+      defaultPath = _joinPath(dir, `${exportParts}.${extension}`)
+    } catch {
+      // A real default is a convenience, not a requirement -- the save
+      // dialog still works fine with no default path at all.
+    }
+
+    const destPath = await pickExportDestination(exportFormat, defaultPath)
+    if (!destPath) return
+
+    setExporting(true)
+    try {
+      const handle = await exportEnclosure({
+        parts: exportParts,
+        fmt: exportFormat,
+        dest_path: destPath,
+        glb_path: result.glb_path,
+        step_path: result.step_path,
+        lid_glb_path: result.lid_glb_path,
+        lid_step_path: result.lid_step_path,
+      })
+      await handle.result
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setExporting(false)
+    }
   }
 
   return (
@@ -331,7 +409,6 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
         )}
         {result && (
           <>
-            <p className="text-sm text-neutral-400">Generated: {result.glb_path}</p>
             <EnclosureViewer glbPath={result.glb_path} lidGlbPath={result.lid_glb_path ?? null} lidVisible={lidVisible} />
             <div className="flex flex-wrap items-center gap-3">
               <button
@@ -341,6 +418,39 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
               >
                 Open .step
               </button>
+              <div className="flex items-center gap-1">
+                <select
+                  aria-label="Export parts"
+                  className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-xs text-neutral-200"
+                  value={exportParts}
+                  onChange={(e) => setExportParts(e.target.value as ExportParts)}
+                  disabled={exporting}
+                >
+                  <option value="combined" disabled={!result.lid_step_path}>Combined</option>
+                  <option value="body">Body</option>
+                  <option value="lid" disabled={!result.lid_step_path}>Lid</option>
+                </select>
+                <select
+                  aria-label="Export format"
+                  className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-xs text-neutral-200"
+                  value={exportFormat}
+                  onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
+                  disabled={exporting}
+                >
+                  <option value="step">STEP</option>
+                  <option value="stl">STL</option>
+                  <option value="glb">GLB</option>
+                  <option value="fcstd">FreeCAD (.FCStd)</option>
+                </select>
+                <button
+                  type="button"
+                  className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs disabled:opacity-50"
+                  onClick={() => void handleExport()}
+                  disabled={exporting}
+                >
+                  {exporting ? 'Exporting…' : 'Export…'}
+                </button>
+              </div>
               {result.lid_glb_path && (
                 <label className="flex items-center gap-2 text-xs text-neutral-300">
                   <input type="checkbox" checked={lidVisible} onChange={(e) => setLidVisible(e.target.checked)} />
@@ -357,6 +467,7 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
                 </button>
               )}
             </div>
+            {exportError && <p className="text-xs text-red-400">{exportError}</p>}
           </>
         )}
       </div>

@@ -467,6 +467,16 @@ def _project_dir(name: str) -> str:
     return _ensure_dir("projects", name)
 
 
+def project_directory(name: str) -> str:
+    """CTX-311.13: the one real, public source of truth for a project's
+    own real directory path on disk -- used to default the Enclosure
+    Export dialog's save location to the project's own folder, so a
+    caller outside this module never has to hand-build the same
+    `<storage_root>/projects/<name>/` convention `_project_dir` already
+    owns."""
+    return _project_dir(name)
+
+
 def save_project(project: dict) -> dict:
     name = project.get("name")
     if not name:

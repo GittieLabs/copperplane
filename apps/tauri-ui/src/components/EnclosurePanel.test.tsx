@@ -6,10 +6,16 @@ const pickPcbFileMock = vi.fn()
 const listOpenBoardsMock = vi.fn()
 const openKicadMock = vi.fn()
 const shellOpenMock = vi.fn()
+const exportEnclosureMock = vi.fn()
+const pickExportDestinationMock = vi.fn()
+const getProjectDirectoryMock = vi.fn()
 
 vi.mock('../lib/enclosure', () => ({
   generateEnclosure: (...args: unknown[]) => generateEnclosureMock(...args),
   pickPcbFile: (...args: unknown[]) => pickPcbFileMock(...args),
+  exportEnclosure: (...args: unknown[]) => exportEnclosureMock(...args),
+  pickExportDestination: (...args: unknown[]) => pickExportDestinationMock(...args),
+  getProjectDirectory: (...args: unknown[]) => getProjectDirectoryMock(...args),
 }))
 
 vi.mock('../lib/boardAdvisor', () => ({
@@ -61,6 +67,9 @@ beforeEach(() => {
   openKicadMock.mockReset().mockResolvedValue(undefined)
   shellOpenMock.mockReset()
   enclosureViewerSpy.mockReset()
+  exportEnclosureMock.mockReset()
+  pickExportDestinationMock.mockReset()
+  getProjectDirectoryMock.mockReset().mockResolvedValue('/projects/test-project')
 })
 
 describe('EnclosurePanel: mode selection', () => {
@@ -223,7 +232,7 @@ describe('EnclosurePanel: Board mode -- list-first picker', () => {
     screen.getByText(/rectangular box sized to your board's bounding box/)
   })
 
-  it('submitting Board mode includes pcb_path, omits width/depth, includes project_name', async () => {
+  it('submitting Board mode includes pcb_path, omits width/depth/project_name', async () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
 
@@ -236,7 +245,11 @@ describe('EnclosurePanel: Board mode -- list-first picker', () => {
     expect(params.pcb_path).toBe('/real/board.kicad_pcb')
     expect(params).not.toHaveProperty('width')
     expect(params).not.toHaveProperty('depth')
-    expect(params.project_name).toBe('test-project')
+    // CTX-311.13: Generate no longer persists anything -- project_name
+    // was removed from EnclosureParams entirely, real fix for a real,
+    // confirmed live bug (see lib/enclosure.ts's own EnclosureResult
+    // docstring).
+    expect(params).not.toHaveProperty('project_name')
   })
 })
 
@@ -249,7 +262,7 @@ describe('EnclosurePanel: Manual mode', () => {
     expect(generateButton.disabled).toBe(false)
   })
 
-  it('submitting Manual mode includes width, depth, height, and project_name', async () => {
+  it('submitting Manual mode includes width, depth, height -- no project_name', async () => {
     generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
 
     render(<EnclosurePanel projectName="test-project" />)
@@ -261,7 +274,6 @@ describe('EnclosurePanel: Manual mode', () => {
       width: 50,
       depth: 30,
       height: 20,
-      project_name: 'test-project',
     })
   })
 })
@@ -307,6 +319,108 @@ describe('EnclosurePanel: results (unchanged behavior)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
 
     await waitFor(() => screen.getByText(/No mounting holes were found on this board/))
+  })
+
+  it('CTX-311.13: no longer shows the internal Generated: <path> label', async () => {
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Manual (no PCB)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => screen.getByRole('button', { name: 'Open .step' }))
+    expect(screen.queryByText(/Generated:/)).toBeNull()
+  })
+})
+
+describe('EnclosurePanel: export (CTX-311.13)', () => {
+  const fakeResultWithLid = {
+    ...fakeResult,
+    lid_glb_path: '/tmp/lid.glb',
+    lid_step_path: '/tmp/lid.step',
+  }
+
+  async function renderWithResult(result: typeof fakeResult) {
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(result)))
+    render(<EnclosurePanel projectName="test-project" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Manual (no PCB)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Export…' }))
+  }
+
+  it('Combined and Lid options are disabled until a lid was actually generated', async () => {
+    await renderWithResult(fakeResult)
+
+    const partsSelect = screen.getByLabelText('Export parts') as HTMLSelectElement
+    const combinedOption = Array.from(partsSelect.options).find((o) => o.value === 'combined')!
+    const lidOption = Array.from(partsSelect.options).find((o) => o.value === 'lid')!
+    expect(combinedOption.disabled).toBe(true)
+    expect(lidOption.disabled).toBe(true)
+  })
+
+  it('Combined and Lid options are enabled once a lid was generated', async () => {
+    await renderWithResult(fakeResultWithLid)
+
+    const partsSelect = screen.getByLabelText('Export parts') as HTMLSelectElement
+    const combinedOption = Array.from(partsSelect.options).find((o) => o.value === 'combined')!
+    const lidOption = Array.from(partsSelect.options).find((o) => o.value === 'lid')!
+    expect(combinedOption.disabled).toBe(false)
+    expect(lidOption.disabled).toBe(false)
+  })
+
+  it('clicking Export defaults the save dialog to the real project directory plus a real filename', async () => {
+    await renderWithResult(fakeResult)
+    getProjectDirectoryMock.mockResolvedValueOnce('/projects/test-project')
+    pickExportDestinationMock.mockResolvedValueOnce(null)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+
+    await waitFor(() => expect(pickExportDestinationMock).toHaveBeenCalled())
+    expect(getProjectDirectoryMock).toHaveBeenCalledWith('test-project')
+    expect(pickExportDestinationMock).toHaveBeenCalledWith('step', '/projects/test-project/body.step')
+  })
+
+  it('cancelling the save dialog (null) never calls exportEnclosure', async () => {
+    await renderWithResult(fakeResult)
+    pickExportDestinationMock.mockResolvedValueOnce(null)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+
+    await waitFor(() => expect(pickExportDestinationMock).toHaveBeenCalled())
+    expect(exportEnclosureMock).not.toHaveBeenCalled()
+  })
+
+  it('a chosen destination calls exportEnclosure with the real source paths, parts, and format', async () => {
+    await renderWithResult(fakeResultWithLid)
+    pickExportDestinationMock.mockResolvedValueOnce('/chosen/combined.glb')
+    exportEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({ dest_path: '/chosen/combined.glb' })))
+
+    fireEvent.change(screen.getByLabelText('Export parts'), { target: { value: 'combined' } })
+    fireEvent.change(screen.getByLabelText('Export format'), { target: { value: 'glb' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+
+    await waitFor(() => expect(exportEnclosureMock).toHaveBeenCalled())
+    expect(exportEnclosureMock).toHaveBeenCalledWith({
+      parts: 'combined',
+      fmt: 'glb',
+      dest_path: '/chosen/combined.glb',
+      glb_path: fakeResultWithLid.glb_path,
+      step_path: fakeResultWithLid.step_path,
+      lid_glb_path: fakeResultWithLid.lid_glb_path,
+      lid_step_path: fakeResultWithLid.lid_step_path,
+    })
+  })
+
+  it('a real export failure shows the error message, not a silent failure', async () => {
+    await renderWithResult(fakeResult)
+    pickExportDestinationMock.mockResolvedValueOnce('/chosen/body.step')
+    exportEnclosureMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.reject(new Error('Disk is full'))),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export…' }))
+
+    await waitFor(() => screen.getByText('Disk is full'))
   })
 })
 
