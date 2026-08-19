@@ -225,14 +225,14 @@ describe('App: chat & command surface', () => {
       prompt: 'what does pin 3 do?',
       history: [],
     })
-    expect(appendConversationTurnMock).toHaveBeenCalledWith('test-project', {
-      role: 'user',
-      content: 'what does pin 3 do?',
-    })
-    expect(appendConversationTurnMock).toHaveBeenCalledWith('test-project', {
-      role: 'assistant',
-      content: 'Pin 3 is a GPIO pin.',
-    })
+    expect(appendConversationTurnMock).toHaveBeenCalledWith(
+      'test-project',
+      expect.objectContaining({ role: 'user', content: 'what does pin 3 do?', timestamp: expect.any(String) }),
+    )
+    expect(appendConversationTurnMock).toHaveBeenCalledWith(
+      'test-project',
+      expect.objectContaining({ role: 'assistant', content: 'Pin 3 is a GPIO pin.', timestamp: expect.any(String) }),
+    )
   })
 
   it('TEST-005: a second plain chat turn sends the first turn back as history', async () => {
@@ -249,8 +249,8 @@ describe('App: chat & command surface', () => {
     expect(submitJobMock).toHaveBeenLastCalledWith('llm.chat', {
       prompt: 'what is my favorite number?',
       history: [
-        { role: 'user', content: 'my favorite number is 42' },
-        { role: 'assistant', content: 'Got it, 42.' },
+        expect.objectContaining({ role: 'user', content: 'my favorite number is 42' }),
+        expect.objectContaining({ role: 'assistant', content: 'Got it, 42.' }),
       ],
     })
   })
@@ -295,6 +295,14 @@ describe('App: chat & command surface', () => {
     await waitFor(() => screen.getByText('> hello from before'))
     screen.getByText('hi again')
     expect(loadConversationMock).toHaveBeenCalledWith('test-project')
+  })
+
+  it('CTX-313.1 TEST-007: Overview renders the real per-project dashboard alongside the existing, still-functional chat surface', async () => {
+    await renderAppOnOverview()
+
+    expect(screen.getByTestId('status-card-pcb').textContent).toContain('Not yet checked this session')
+    expect(screen.getByTestId('status-card-enclosure').textContent).toContain('Not yet checked this session')
+    expect(screen.getByPlaceholderText(/generate ATtiny85/)).toBeTruthy()
   })
 })
 
