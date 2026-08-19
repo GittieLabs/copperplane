@@ -368,11 +368,10 @@ export function EnclosurePanel({
   }
 
   return (
-    // SPEC-311 §2: the Enclosure area specifically gets a wider layout
-    // (a large 3D preview is a real, direct benefit of the extra room) --
-    // every other tab keeps its existing max-w-md column unchanged; a
-    // repo-wide shell/layout redesign is a deliberate, separate follow-up
-    // (SPEC-311 §1's own Non-Goals), not silently expanded into here.
+    // SPEC-311 §2: the Enclosure area specifically gets an even wider
+    // layout than every other tab's own max-w-4xl (CTX-305.2) -- a large
+    // 3D preview is a real, direct benefit of the extra room beyond what
+    // a plain text/list column needs.
     <div className="flex w-full max-w-6xl flex-col gap-4 lg:flex-row lg:items-start">
       <div className="flex w-full flex-col gap-2 lg:w-96 lg:flex-none">
         <div className="flex gap-2">

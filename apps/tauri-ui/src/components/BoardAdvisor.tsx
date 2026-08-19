@@ -112,7 +112,7 @@ export function BoardAdvisor({ projectName }: { projectName: string }) {
   }
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-6">
+    <div className="flex w-full max-w-4xl flex-col gap-6">
       <BoardCheckSection
         loadingList={loadingBoardList}
         listResult={boardListResult}

@@ -83,7 +83,7 @@ export function ComponentDiscovery() {
 
   if (confirmed) {
     return (
-      <div className="flex w-full max-w-md flex-col gap-2 rounded border border-neutral-700 p-4">
+      <div className="flex w-full max-w-4xl flex-col gap-2 rounded border border-neutral-700 p-4">
         <p className="text-sm font-medium text-neutral-100">
           Confirmed: {confirmed.candidate.part_number} ({confirmed.candidate.manufacturer}, {confirmed.candidate.package})
         </p>
@@ -138,7 +138,7 @@ export function ComponentDiscovery() {
   }
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-3">
+    <div className="flex w-full max-w-4xl flex-col gap-3">
       <div className="flex gap-2">
         <input
           className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"

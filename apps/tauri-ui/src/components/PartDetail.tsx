@@ -216,7 +216,7 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
   const schema = extraction as ExtractedSchema
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-3">
+    <div className="flex w-full max-w-4xl flex-col gap-3">
       <p className="text-sm font-medium text-neutral-100">
         {schema.part_number} <span className="text-neutral-500">{candidate.manufacturer}</span>{' '}
         <span className="text-neutral-500">{schema.package}</span>
