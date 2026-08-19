@@ -7,7 +7,6 @@ import sys
 import tempfile
 import threading
 import unittest
-from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -565,62 +564,6 @@ class TestCacheDatasheet(LibraryStoreTestCase):
         finally:
             store._DATASHEET_FETCH_TIMEOUT_S = original_timeout
             server.stop()
-
-
-_VALID_PRICING = {"price_breaks": [{"quantity": 1, "price": 1.23}], "stock_quantity": 500, "currency": "USD"}
-
-
-class TestSupplierPricingCache(LibraryStoreTestCase):
-    """SPEC-203 (CTX-203.1): credential-independent cache plumbing only --
-    no real supplier HTTP client exists yet, so these tests exercise the
-    save/load/TTL/validation logic directly, not a real network call."""
-
-    def test_001_a_missing_required_field_is_rejected_before_anything_is_written(self):
-        with self.assertRaises(store.SchemaValidationError):
-            store.save_supplier_pricing("ATTINY85", "mouser", {"price_breaks": []})
-
-        self.assertIsNone(store.load_supplier_pricing("ATTINY85", "mouser"))
-
-    def test_002_a_saved_record_round_trips_with_a_real_cached_at_timestamp(self):
-        record = store.save_supplier_pricing("ATTINY85", "mouser", _VALID_PRICING)
-
-        self.assertEqual(record["part_number"], "ATTINY85")
-        self.assertEqual(record["supplier"], "mouser")
-        self.assertIn("cached_at", record)
-
-        loaded = store.load_supplier_pricing("ATTINY85", "mouser")
-        self.assertEqual(loaded, record)
-
-    def test_003_a_cache_miss_returns_none_not_an_error(self):
-        self.assertIsNone(store.load_supplier_pricing("NEVER-CACHED", "mouser"))
-
-    def test_004_an_entry_older_than_max_age_s_is_treated_as_a_miss(self):
-        """Backdates the real, saved cached_at directly rather than racing
-        the wall clock between two now() calls -- a real bug this exact
-        approach was needed to fix: on Windows' coarser clock resolution
-        (~15ms), two datetime.now() calls in quick succession can return
-        an identical timestamp, making a real elapsed age of exactly 0.0
-        never exceed a max_age_s=0 threshold. Rewriting cached_at to a
-        real hour in the past makes the staleness check deterministic on
-        every platform, not dependent on real elapsed time at all."""
-        store.save_supplier_pricing("ATTINY85", "mouser", _VALID_PRICING)
-        path = store._supplier_pricing_path("ATTINY85", "mouser")
-        record = store._read_json(path)
-        record["cached_at"] = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        store._write_json(path, record)
-
-        self.assertIsNone(store.load_supplier_pricing("ATTINY85", "mouser", max_age_s=1800))
-
-    def test_005_different_suppliers_for_the_same_part_are_cached_independently(self):
-        store.save_supplier_pricing("ATTINY85", "mouser", _VALID_PRICING)
-
-        self.assertIsNone(store.load_supplier_pricing("ATTINY85", "digikey"))
-
-    def test_006_a_part_number_or_supplier_with_a_path_separator_is_rejected(self):
-        with self.assertRaises(store.SchemaValidationError):
-            store.save_supplier_pricing("../../etc/passwd", "mouser", _VALID_PRICING)
-        with self.assertRaises(store.SchemaValidationError):
-            store.save_supplier_pricing("ATTINY85", "../../etc/passwd", _VALID_PRICING)
 
 
 def _find_kicad_cli():

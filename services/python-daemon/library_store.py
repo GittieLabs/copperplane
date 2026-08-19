@@ -13,7 +13,6 @@ Layout, exactly matching PRODUCT-PLAN.md §4:
         symbols/<symbol_id>.json
         footprints/<footprint_id>.json
         datasheets/<part_id>.pdf          (cache_datasheet, SPEC-306)
-        supplier_pricing/<part_number>__<supplier>.json  (SPEC-203, CTX-203.1)
       projects/
         <project_name>/
           project.json
@@ -739,68 +738,6 @@ def cache_datasheet(part_number: str, datasheet_url: str) -> str:
     with open(path, "wb") as f:
         f.write(content)
     return path
-
-
-# --- Supplier pricing (SPEC-203, CTX-203.1) -----------------------------
-# Credential-independent plumbing only -- no real per-supplier HTTP client
-# exists yet (no DigiKey/Mouser/Octopart developer credentials in this
-# repo's history). These functions exist so a future real client has a
-# real cache to write into and read from, TTL-checked here rather than
-# left to each caller to reimplement staleness logic independently.
-_SUPPLIER_PRICING_CACHE_TTL_S = 24 * 60 * 60
-SUPPLIER_PRICING_REQUIRED_FIELDS = ("price_breaks", "stock_quantity", "currency")
-
-
-def _supplier_pricing_dir() -> str:
-    return _ensure_dir("library", "supplier_pricing")
-
-
-def _supplier_pricing_path(part_number: str, supplier: str) -> str:
-    if not part_number or "/" in part_number or "\\" in part_number or ".." in part_number:
-        raise SchemaValidationError(f"'{part_number}' is not a safe part_number for a cache filename.")
-    if not supplier or "/" in supplier or "\\" in supplier or ".." in supplier:
-        raise SchemaValidationError(f"'{supplier}' is not a safe supplier name for a cache filename.")
-    return os.path.join(_supplier_pricing_dir(), f"{part_number}__{supplier}.json")
-
-
-def save_supplier_pricing(part_number: str, supplier: str, pricing: dict) -> dict:
-    """Writes a real price/stock snapshot to
-    library/supplier_pricing/<part_number>__<supplier>.json, stamped with
-    a real `cached_at` timestamp -- ROADMAP.md's own reasoning: "part data
-    barely changes; re-querying on every request wastes quota and adds
-    latency." `cached_at` is always shown alongside any cached number so
-    staleness is visible, never hidden (SPEC-203 §3)."""
-    missing = [f for f in SUPPLIER_PRICING_REQUIRED_FIELDS if f not in pricing]
-    if missing:
-        raise SchemaValidationError(
-            f"Supplier pricing is missing required field(s): {', '.join(missing)}."
-        )
-    record = {
-        **pricing,
-        "part_number": part_number,
-        "supplier": supplier,
-        "cached_at": datetime.now(timezone.utc).isoformat(),
-    }
-    _write_json(_supplier_pricing_path(part_number, supplier), record)
-    return record
-
-
-def load_supplier_pricing(
-    part_number: str, supplier: str, max_age_s: float = _SUPPLIER_PRICING_CACHE_TTL_S
-) -> dict | None:
-    """Returns the cached record if one exists and is fresher than
-    `max_age_s`, else `None` -- a cache miss (nothing cached yet, or the
-    cached entry has gone stale) is a normal state a caller checks for,
-    not an error to catch."""
-    path = _supplier_pricing_path(part_number, supplier)
-    if not os.path.exists(path):
-        return None
-    record = _read_json(path)
-    cached_at = datetime.fromisoformat(record["cached_at"])
-    age_s = (datetime.now(timezone.utc) - cached_at).total_seconds()
-    if age_s > max_age_s:
-        return None
-    return record
 
 
 # --- Conversation -------------------------------------------------------

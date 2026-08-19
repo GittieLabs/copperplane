@@ -127,65 +127,6 @@ describe('Settings: Tier 1 (provider/model/keys)', () => {
   })
 })
 
-describe('Settings: Supplier APIs (SPEC-203, CTX-203.1)', () => {
-  it('an unconfigured supplier shows one input per field, with Save disabled until all are filled', async () => {
-    render(<Settings />)
-    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
-
-    expect(screen.getByLabelText('DigiKey Client ID')).toBeTruthy()
-    expect(screen.getByLabelText('DigiKey Client Secret')).toBeTruthy()
-    expect(screen.getByLabelText('Mouser API Key')).toBeTruthy()
-    expect(screen.getByLabelText('Octopart API Key')).toBeTruthy()
-
-    const mouserSave = screen.getByLabelText('Mouser API Key').closest('div')!.parentElement!
-    const saveButton = Array.from(mouserSave.querySelectorAll('button')).find(
-      (b) => b.textContent === 'Save',
-    ) as HTMLButtonElement
-    expect(saveButton.disabled).toBe(true)
-
-    fireEvent.change(screen.getByLabelText('Mouser API Key'), { target: { value: 'm-real-key' } })
-    expect(saveButton.disabled).toBe(false)
-  })
-
-  it("DigiKey's Save stays disabled until BOTH fields are filled, then saves both on click", async () => {
-    render(<Settings />)
-    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
-
-    const digikeyRow = screen.getByLabelText('DigiKey Client ID').closest('div')!.parentElement!
-    const saveButton = Array.from(digikeyRow.querySelectorAll('button')).find(
-      (b) => b.textContent === 'Save',
-    ) as HTMLButtonElement
-
-    fireEvent.change(screen.getByLabelText('DigiKey Client ID'), { target: { value: 'id-123' } })
-    expect(saveButton.disabled).toBe(true)
-
-    fireEvent.change(screen.getByLabelText('DigiKey Client Secret'), { target: { value: 'secret-456' } })
-    expect(saveButton.disabled).toBe(false)
-
-    getCapabilitiesMock.mockResolvedValueOnce({ ...EMPTY_CAPABILITIES, digikey_available: true })
-    fireEvent.click(saveButton)
-
-    await waitFor(() => expect(saveSecretMock).toHaveBeenCalledWith('digikey_client_id', 'id-123'))
-    expect(saveSecretMock).toHaveBeenCalledWith('digikey_client_secret', 'secret-456')
-    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalledTimes(2))
-  })
-
-  it('a configured supplier shows Clear instead of inputs, and clearing clears every one of its fields', async () => {
-    getCapabilitiesMock.mockResolvedValue({ ...EMPTY_CAPABILITIES, mouser_available: true })
-
-    render(<Settings />)
-    await waitFor(() => expect(screen.getAllByText('configured').length).toBeGreaterThan(0))
-
-    expect(screen.queryByLabelText('Mouser API Key')).toBeNull()
-
-    getCapabilitiesMock.mockResolvedValueOnce(EMPTY_CAPABILITIES)
-    const mouserRow = screen.getByText('Mouser').closest('div')!
-    fireEvent.click(mouserRow.querySelector('button')!)
-
-    await waitFor(() => expect(clearSecretMock).toHaveBeenCalledWith('mouser_api_key'))
-    await waitFor(() => expect(screen.getByLabelText('Mouser API Key')).toBeTruthy())
-  })
-})
 
 describe('Settings: Tier 2 (KiCad/FreeCAD status + paths)', () => {
   it('TEST-007: renders reachable/not-reachable status from capabilities', async () => {

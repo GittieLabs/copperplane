@@ -95,23 +95,16 @@ pub const DAEMON_RESPONSE_EVENT: &str = "daemon://response";
 
 /// Secret keys this app currently stores in the OS keychain and hands to
 /// the daemon via the `daemon.configure` handshake (SPEC-106 §2). The
-/// four LLM provider keys are SPEC-201's; the four supplier keys are
-/// SPEC-203's (CTX-203.1) -- DigiKey's real OAuth2 client-credentials
-/// flow needs two secrets, not one, unlike Mouser/Octopart's single
-/// API-key auth, so its naming can't follow the single `<provider>_api_key`
-/// convention the LLM keys use. Kept as an explicit allowlist rather than
-/// "fetch everything stored under our service name" so a stray keychain
-/// entry from some unrelated feature never leaks into the daemon's
-/// configure handshake. Ollama needs no key -- it isn't listed here.
+/// four LLM provider keys are SPEC-201's. Kept as an explicit allowlist
+/// rather than "fetch everything stored under our service name" so a
+/// stray keychain entry from some unrelated feature never leaks into the
+/// daemon's configure handshake. Ollama needs no key -- it isn't listed
+/// here.
 pub const KNOWN_SECRET_KEYS: &[&str] = &[
     "anthropic_api_key",
     "google_api_key",
     "openai_api_key",
     "perplexity_api_key",
-    "digikey_client_id",
-    "digikey_client_secret",
-    "mouser_api_key",
-    "octopart_api_key",
 ];
 
 /// Rebuilds the known-secrets map fresh from the OS keychain (SPEC-106 §2)

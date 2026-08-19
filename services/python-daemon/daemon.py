@@ -1309,17 +1309,6 @@ def _detect_capabilities() -> dict:
         # storage_root_override -- so Settings can display it without
         # config.json ever needing to hold the Rust-computed value.
         "storage_root": library_store.current_storage_root() if library_store is not None else None,
-        # SPEC-203 (CTX-203.1): mirrors freecad_available's own real
-        # capability-gating pattern. digikey_available requires both real
-        # OAuth2 client-credentials secrets, not just one -- a lone
-        # digikey_client_id with no matching secret can't actually
-        # authenticate. True here means "ready to call," not "a real call
-        # has been made" -- no per-supplier HTTP client exists yet.
-        "digikey_available": bool(
-            configured_secrets.get("digikey_client_id") and configured_secrets.get("digikey_client_secret")
-        ),
-        "mouser_available": bool(configured_secrets.get("mouser_api_key")),
-        "octopart_available": bool(configured_secrets.get("octopart_api_key")),
     }
 
 
