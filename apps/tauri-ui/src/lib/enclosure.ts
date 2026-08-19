@@ -152,3 +152,37 @@ export async function getProjectDirectory(projectName: string): Promise<string> 
   }
   return (response.result as { path: string }).path
 }
+
+export interface ExportBoardGlbResult {
+  glb_path: string
+}
+
+/** CTX-311.15: the real, assembled board's own `.glb` -- substrate plus
+ * every real component's real 3D model, positioned by KiCad itself --
+ * the visual source for the board-inside-enclosure fit check
+ * `EnclosureViewer.tsx` composites. Real `kicad-cli` subprocess
+ * (`kicad.export_board_glb` is in `ASYNC_ROUTES`), so this returns a
+ * `JobHandle` like `generateEnclosure`/`exportEnclosure` above.
+ * Real-origins the export server-side to the board's own bounding-box
+ * corner -- the caller needs no board outline data of its own to place
+ * it correctly inside the enclosure, only the enclosure's own already-
+ * known wall/clearance/standoff parameters. */
+export async function exportBoardGlb(pcbPath: string): Promise<JobHandle<ExportBoardGlbResult>> {
+  return submitJob<ExportBoardGlbResult>('kicad.export_board_glb', { pcb_path: pcbPath })
+}
+
+export interface ComponentHeightsResult {
+  known: { reference: string; height_mm: number }[]
+  unknown: string[]
+}
+
+/** CTX-311.15: which real reference designators have no resolvable 3D
+ * model -- `kicad-cli`'s own board `.glb` export (above) silently omits
+ * exactly these components, so this is what lets the board overlay
+ * name them honestly (SPEC-311 §5) instead of leaving their absence
+ * unexplained. Live-only (no `pcb_path` parameter -- reads whatever
+ * board is currently open in KiCad); the caller is responsible for only
+ * calling this when that's known to be the same board being shown. */
+export async function getComponentHeights(): Promise<JobHandle<ComponentHeightsResult>> {
+  return submitJob<ComponentHeightsResult>('kicad.get_component_heights', {})
+}

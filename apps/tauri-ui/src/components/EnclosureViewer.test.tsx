@@ -8,6 +8,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 const {
   useGlbScene, disposeScene, sphericalToCartesian, computeFrame, computeDefaultAzimuth, computeCameraClipping,
+  computeBoardOffset,
   DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH,
 } = await import('./EnclosureViewer')
 
@@ -303,5 +304,29 @@ describe('computeCameraClipping (CTX-311.11: real near-plane-clipping fix)', () 
       expect(Number.isFinite(value)).toBe(true)
       expect(value).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('computeBoardOffset (CTX-311.15: board-inside-enclosure visual fit check)', () => {
+  it('converts real mm margin/floor-and-standoff values to this app\'s own real /1000 glb scale', () => {
+    const offset = computeBoardOffset(2.5, 7)
+
+    expect(offset.x).toBeCloseTo(2.5 / 1000)
+    expect(offset.y).toBeCloseTo(7 / 1000)
+    expect(offset.z).toBeCloseTo(2.5 / 1000)
+  })
+
+  it('margin applies identically to both horizontal axes (X and Z) -- the same real value on both, not two independent inputs', () => {
+    const offset = computeBoardOffset(3, 10)
+
+    expect(offset.x).toBeCloseTo(offset.z)
+  })
+
+  it('a zero margin/floor-and-standoff returns a real zero vector, not a guess', () => {
+    const offset = computeBoardOffset(0, 0)
+
+    expect(offset.x).toBe(0)
+    expect(offset.y).toBe(0)
+    expect(offset.z).toBe(0)
   })
 })

@@ -166,6 +166,35 @@ class TestRealExportBoardGlb(unittest.TestCase):
             export_board_glb('/nonexistent/board.kicad_pcb')
         self.assertIn("does not exist", str(ctx.exception))
 
+    def test_004_a_real_origin_shifts_the_real_exported_bounding_box_by_exactly_that_amount(self):
+        """CTX-311.15: `origin_x_mm`/`origin_y_mm` become `--user-origin
+        {x}x{y}mm` -- this is the real mechanism `EnclosureViewer.tsx`
+        relies on to composite the board glb inside the enclosure glb
+        with a simple, already-known constant translation. Verified here
+        against real `kicad-cli`, not assumed from the CLI's own
+        `--help` text: the real exported bounding box's X/Z minimums
+        shift by exactly `-origin_mm/1000` real meters relative to the
+        unshifted (no-origin) export -- the same real relationship the
+        live prototype that motivated this whole context found by hand
+        before any of this was implemented."""
+        import trimesh
+
+        default_path = export_board_glb(_EMPTY_BOARD)
+        shifted_path = export_board_glb(_EMPTY_BOARD, 10.0, 5.0)
+        try:
+            default_bounds = trimesh.load(default_path).bounds
+            shifted_bounds = trimesh.load(shifted_path).bounds
+            self.assertAlmostEqual(
+                shifted_bounds[0][0] - default_bounds[0][0], -10.0 / 1000, places=5,
+            )
+            self.assertAlmostEqual(
+                shifted_bounds[0][2] - default_bounds[0][2], -5.0 / 1000, places=5,
+            )
+        finally:
+            for p in (default_path, shifted_path):
+                if os.path.exists(p):
+                    os.remove(p)
+
 
 if __name__ == '__main__':
     unittest.main()

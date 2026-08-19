@@ -932,20 +932,43 @@ def kicad_get_component_heights() -> dict:
 def kicad_export_board_glb(pcb_path: str) -> dict:
     """The kicad.export_board_glb route (SPEC-311): a real, assembled-
     board `.glb` via `kicad_cli.export_board_glb` -- the real visual
-    source for the board-inside-enclosure preview a later SPEC-311
-    context wires into `EnclosureViewer.tsx`. Async: a real `kicad-cli`
-    subprocess, like every other real kicad.*/freecad.* route in
-    ASYNC_ROUTES below.
+    source for the board-inside-enclosure preview `CTX-311.15` wires
+    into `EnclosureViewer.tsx`. Async: a real `kicad-cli` subprocess,
+    like every other real kicad.*/freecad.* route in ASYNC_ROUTES below.
 
     `kicad-cli`'s own export silently omits any component with no 3D
     model at all -- this route is the visual, not the source of truth
     for "is every component's height accounted for"; that honesty
-    requirement is `kicad.get_component_heights`'s job, not this one."""
+    requirement is `kicad.get_component_heights`'s job, not this one.
+
+    CTX-311.15: real-origins the export to the board's own bounding-box
+    corner (`kicad_cli.export_board_glb`'s own `origin_x_mm`/`origin_y_mm`,
+    real-verified live against `kicad-cli`) so `EnclosureViewer.tsx` can
+    composite it inside the enclosure's own glb with a simple, already-
+    known constant translation.
+
+    Deliberately always derives the outline from *this exact `pcb_path`
+    file* via `kicad_pcb_import.extract_board_outline` -- never
+    `kicad_bridge.get_board_outline()`, which reads whatever board
+    happens to be live in KiCad right now, not necessarily the same
+    file this route was actually asked to export (a real, live-open
+    board and an explicit `pcb_path` can genuinely differ, e.g. a
+    manually-picked file). `freecad_generate_enclosure`'s own board-
+    driven enclosure build already uses this same file-based extraction
+    for every real call from `EnclosurePanel.tsx`'s Board mode (which
+    always supplies `pcb_path`) -- matching that exact source, not just
+    a similar one, is what guarantees this overlay's own origin lines
+    up with the enclosure it's being placed inside."""
     if kicad_cli is None:
         raise RuntimeError(
             "Board .glb export requires kicad_cli, which failed to import."
         )
-    glb_path = kicad_cli.export_board_glb(pcb_path)
+    if kicad_pcb_import is None:
+        raise RuntimeError(
+            "Board .glb export requires kicad_pcb_import, which failed to import."
+        )
+    outline = kicad_pcb_import.extract_board_outline(pcb_path)
+    glb_path = kicad_cli.export_board_glb(pcb_path, outline["x_mm"], outline["y_mm"])
     return {"glb_path": glb_path}
 
 
