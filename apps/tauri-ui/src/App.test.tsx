@@ -6,6 +6,8 @@ const dispatchToolMock = vi.fn()
 const listProjectsMock = vi.fn()
 const listLibraryPartsMock = vi.fn()
 const saveProjectMock = vi.fn()
+const loadProjectMock = vi.fn()
+const pickProjectDirectoryMock = vi.fn()
 const loadConversationMock = vi.fn()
 const appendConversationTurnMock = vi.fn()
 const getCapabilitiesMock = vi.fn()
@@ -16,6 +18,7 @@ const openKicadMock = vi.fn()
 const checkSchematicMock = vi.fn()
 const pickSchematicFileMock = vi.fn()
 const listProjectSchematicsMock = vi.fn()
+const saveDialogMock = vi.fn()
 
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
@@ -26,6 +29,8 @@ vi.mock('./lib/projects', () => ({
   listProjects: (...args: unknown[]) => listProjectsMock(...args),
   listLibraryParts: (...args: unknown[]) => listLibraryPartsMock(...args),
   saveProject: (...args: unknown[]) => saveProjectMock(...args),
+  loadProject: (...args: unknown[]) => loadProjectMock(...args),
+  pickProjectDirectory: (...args: unknown[]) => pickProjectDirectoryMock(...args),
   loadConversation: (...args: unknown[]) => loadConversationMock(...args),
   appendConversationTurn: (...args: unknown[]) => appendConversationTurnMock(...args),
 }))
@@ -36,6 +41,16 @@ vi.mock('./lib/settings', () => ({
 
 vi.mock('@tauri-apps/plugin-shell', () => ({
   open: (...args: unknown[]) => shellOpenMock(...args),
+}))
+
+// CTX-312.1: EnclosurePanel's own real `exportEnclosure`/`getProjectDirectory`
+// flow (`lib/enclosure.ts`) isn't otherwise mocked in this file (unlike
+// `EnclosurePanel.test.tsx`, which mocks `../lib/enclosure` wholesale) --
+// completing a real Export click-through here needs this plugin's real
+// `save()` mocked too, matching the same real dialog `pickExportDestination`
+// calls in the actual app.
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  save: (...args: unknown[]) => saveDialogMock(...args),
 }))
 
 vi.mock('./components/EnclosureViewer', () => ({
@@ -83,6 +98,8 @@ describe('App: chat & command surface', () => {
   beforeEach(() => {
     submitJobMock.mockReset()
     dispatchToolMock.mockReset()
+    loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    pickProjectDirectoryMock.mockReset()
     listProjectsMock.mockReset().mockResolvedValue(['test-project'])
     listLibraryPartsMock.mockReset().mockResolvedValue([])
     saveProjectMock.mockReset()
@@ -283,6 +300,8 @@ describe('App: PCB tab persists across area switches, resets on project switch',
   const CLEAN_RESULT = { violations: [], summary: '', truncated_count: 0, source_path: '/real/board.kicad_pcb' }
 
   beforeEach(() => {
+    loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    pickProjectDirectoryMock.mockReset()
     listProjectsMock.mockReset().mockResolvedValue(['test-project'])
     listLibraryPartsMock.mockReset().mockResolvedValue([])
     loadConversationMock.mockReset().mockResolvedValue([])
@@ -360,6 +379,10 @@ describe('App: Enclosure tab persists across area switches', () => {
   }
 
   beforeEach(() => {
+    loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    pickProjectDirectoryMock.mockReset()
+    saveProjectMock.mockReset().mockImplementation((project: unknown) => Promise.resolve(project))
+    saveDialogMock.mockReset()
     listProjectsMock.mockReset().mockResolvedValue(['test-project'])
     listLibraryPartsMock.mockReset().mockResolvedValue([])
     loadConversationMock.mockReset().mockResolvedValue([])
@@ -388,6 +411,75 @@ describe('App: Enclosure tab persists across area switches', () => {
     enclosureArea().getByRole('button', { name: 'Export…' })
     expect(submitJobMock).toHaveBeenCalledTimes(1)
   })
+
+  it('CTX-312.1: a real successful Export immediately persists a real export_history entry, not deferred to a separate Save click', async () => {
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT)))
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({ dest_path: '/real/dest/combined.step' })))
+    saveDialogMock.mockResolvedValueOnce('/real/dest/combined.step')
+
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
+    await waitFor(() => enclosureArea().getByText('board.kicad_pcb'))
+    fireEvent.click(enclosureArea().getByRole('button', { name: 'Generate Enclosure' }))
+    await waitFor(() => enclosureArea().getByRole('button', { name: 'Export…' }))
+
+    fireEvent.click(enclosureArea().getByRole('button', { name: 'Export…' }))
+    fireEvent.click(enclosureArea().getByRole('button', { name: 'Choose location…' }))
+
+    await waitFor(() =>
+      expect(saveProjectMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          export_history: [
+            expect.objectContaining({ area: 'enclosure', dest_path: '/real/dest/combined.step' }),
+          ],
+        }),
+      ),
+    )
+  })
+
+  it('CTX-312.1: "Link to folder…" links the real picked directory and saves it', async () => {
+    pickProjectDirectoryMock.mockResolvedValueOnce('/real/PCBs/test-project')
+
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Link to folder…' }))
+
+    await waitFor(() =>
+      expect(saveProjectMock).toHaveBeenCalledWith(
+        expect.objectContaining({ directory: '/real/PCBs/test-project' }),
+      ),
+    )
+    await waitFor(() => screen.getByRole('button', { name: 'Linked: /real/PCBs/test-project' }))
+  })
+
+  it('CTX-312.1: cancelling the folder picker never calls saveProject', async () => {
+    pickProjectDirectoryMock.mockResolvedValueOnce(null)
+
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Link to folder…' }))
+
+    await waitFor(() => expect(pickProjectDirectoryMock).toHaveBeenCalled())
+    expect(saveProjectMock).not.toHaveBeenCalled()
+  })
+
+  it('CTX-312.1: "Save Project" saves the current real project state on demand', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save Project' }))
+
+    await waitFor(() =>
+      expect(saveProjectMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'test-project' })),
+    )
+  })
 })
 
 /** Real user feedback: the ERC check briefly lived under the "PCB" tab
@@ -403,6 +495,8 @@ describe('App: Schematic tab persists across area switches, resets on project sw
   const CLEAN_RESULT = { violations: [], summary: '', truncated_count: 0, source_path: '/real/board.kicad_sch' }
 
   beforeEach(() => {
+    loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    pickProjectDirectoryMock.mockReset()
     listProjectsMock.mockReset().mockResolvedValue(['test-project'])
     listLibraryPartsMock.mockReset().mockResolvedValue([])
     loadConversationMock.mockReset().mockResolvedValue([])

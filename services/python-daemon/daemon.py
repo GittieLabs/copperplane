@@ -526,7 +526,12 @@ def project_get_directory(name: str) -> dict:
     real directory path -- used to default the Enclosure Export dialog's
     save location to the project's own folder, rather than a second copy
     of `library_store`'s own `<storage_root>/projects/<name>/` convention
-    hand-built on the frontend."""
+    hand-built on the frontend.
+
+    CTX-312.1: once a project is real-linked to a directory on disk
+    (`Project.directory`), that becomes this route's own real return
+    value instead -- the more correct save-dialog default once one
+    exists."""
     return {"path": library_store.project_directory(name)}
 
 
