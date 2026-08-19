@@ -9,6 +9,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 const {
   useGlbScene, disposeScene, sphericalToCartesian, computeFrame, computeDefaultAzimuth, computeCameraClipping,
   computeBoardOffset,
+  BOARD_Z_MIRROR,
   DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH,
 } = await import('./EnclosureViewer')
 
@@ -313,13 +314,14 @@ describe('computeBoardOffset (CTX-311.15: board-inside-enclosure visual fit chec
 
     expect(offset.x).toBeCloseTo(2.5 / 1000)
     expect(offset.y).toBeCloseTo(7 / 1000)
-    expect(offset.z).toBeCloseTo(2.5 / 1000)
+    expect(offset.z).toBeCloseTo(-2.5 / 1000)
   })
 
-  it('margin applies identically to both horizontal axes (X and Z) -- the same real value on both, not two independent inputs', () => {
+  it('Z is negative while X is positive -- a real, empirically-confirmed fix (not the original, disjoint-rendering bug a live click-through caught): freecad_bridge.py\'s own CTX-311.5 rotation leaves the enclosure\'s local Z running opposite its X, so a matching board offset must too', () => {
     const offset = computeBoardOffset(3, 10)
 
-    expect(offset.x).toBeCloseTo(offset.z)
+    expect(offset.x).toBeCloseTo(3 / 1000)
+    expect(offset.z).toBeCloseTo(-3 / 1000)
   })
 
   it('a zero margin/floor-and-standoff returns a real zero vector, not a guess', () => {
@@ -327,6 +329,15 @@ describe('computeBoardOffset (CTX-311.15: board-inside-enclosure visual fit chec
 
     expect(offset.x).toBe(0)
     expect(offset.y).toBe(0)
-    expect(offset.z).toBe(0)
+    // -0, not +0 -- the real result of negating zero -- but equal for
+    // every real placement purpose (three.js position math never
+    // distinguishes them).
+    expect(offset.z).toBeCloseTo(0)
+  })
+})
+
+describe('BOARD_Z_MIRROR (CTX-311.15)', () => {
+  it('mirrors only Z -- X and Y stay unflipped, matching the two toolchains\' already-agreeing conventions on those axes', () => {
+    expect(BOARD_Z_MIRROR).toEqual([1, 1, -1])
   })
 })

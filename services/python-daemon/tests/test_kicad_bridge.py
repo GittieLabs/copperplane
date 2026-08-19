@@ -666,11 +666,19 @@ class _FakeFootprintInstanceWithModels:
     list_footprint_models reads -- a FootprintInstance's own
     .reference_field and .definition.models (kipy's real
     Footprint.models, confirmed live against an installed kipy during
-    SPEC-311's own research)."""
+    SPEC-311's own research).
 
-    def __init__(self, reference, models):
+    CTX-311.15: also sets `.definition.id.library` to a real string
+    (default "SomeLib", never a bare MagicMock -- a MagicMock's own
+    default `__contains__` is truthy, which would silently make every
+    footprint look like a mounting hole) since `is_mounting_hole`
+    (SPEC-311 §5's own honesty requirement) reads it the same way
+    `get_mounting_holes` already does."""
+
+    def __init__(self, reference, models, library="SomeLib"):
         self.definition = MagicMock()
         self.definition.models = models
+        self.definition.id.library = library
         self.reference_field = MagicMock()
         self.reference_field.text.value = reference
 
@@ -732,7 +740,42 @@ class TestListFootprintModels(unittest.TestCase):
 
         result = kicad_bridge.list_footprint_models()
 
-        self.assertEqual(result, [{"reference": "REF**", "models": []}])
+        self.assertEqual(
+            result, [{"reference": "REF**", "is_mounting_hole": False, "models": []}],
+        )
+
+    @patch('kicad_bridge.KiCad')
+    def test_003_is_mounting_hole_reuses_get_mounting_holes_own_real_recognition_convention(
+        self, mock_kicad_cls,
+    ):
+        """CTX-311.15: a real click-through found `kicad_get_component_
+        heights` flagging a board's own real, unannotated MountingHole
+        footprints (KiCad's own default "REF**" placeholder) as missing
+        a 3D model -- misleading, since a screw hole was never expected
+        to have one. `is_mounting_hole` is what lets the daemon route
+        skip them, recognized the same way `get_mounting_holes` already
+        does: the standard MountingHole library, or an `H<digits>`
+        reference."""
+        mock_client = MagicMock()
+        mock_client.check_version.return_value = True
+        mock_board = MagicMock()
+        mock_client.get_board.return_value = mock_board
+        mock_kicad_cls.return_value = mock_client
+
+        mock_board.get_footprints.return_value = [
+            _FakeFootprintInstanceWithModels(
+                "REF**", [], library="MountingHole:MountingHole_3.2mm_M3",
+            ),
+            _FakeFootprintInstanceWithModels("H2", [], library="SomeLib"),
+            _FakeFootprintInstanceWithModels("J3", [], library="Connector"),
+        ]
+
+        result = kicad_bridge.list_footprint_models()
+
+        self.assertEqual(
+            [(r["reference"], r["is_mounting_hole"]) for r in result],
+            [("REF**", True), ("H2", True), ("J3", False)],
+        )
 
 
 class TestResolve3DModelPath(unittest.TestCase):
