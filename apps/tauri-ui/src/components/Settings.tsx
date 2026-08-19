@@ -35,6 +35,8 @@ export function Settings() {
   const [config, setConfig] = useState<DaemonConfig | null>(null)
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({})
   const [busyProvider, setBusyProvider] = useState<string | null>(null)
+  const [githubTokenInput, setGithubTokenInput] = useState('')
+  const [busyGithubToken, setBusyGithubToken] = useState(false)
   const [providerModel, setProviderModel] = useState('')
   const [pathFields, setPathFields] = useState({
     kicad_socket_path: '',
@@ -106,6 +108,39 @@ export function Settings() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusyProvider(null)
+    }
+  }
+
+  /** CTX-314.2: `github_token` is not an LLM provider key, so this is a
+   * standalone field/handler pair -- no `SUPPLIERS`-style N-provider
+   * list abstraction, which `CTX-203.2` already removed for exactly one
+   * field being the wrong amount of code to build a list around. */
+  async function handleSaveGithubToken() {
+    const value = githubTokenInput.trim()
+    if (!value) return
+    setBusyGithubToken(true)
+    setError(null)
+    try {
+      await saveSecret('github_token', value)
+      setGithubTokenInput('')
+      await refreshCapabilities()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyGithubToken(false)
+    }
+  }
+
+  async function handleClearGithubToken() {
+    setBusyGithubToken(true)
+    setError(null)
+    try {
+      await clearSecret('github_token')
+      await refreshCapabilities()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusyGithubToken(false)
     }
   }
 
@@ -296,6 +331,49 @@ export function Settings() {
             )}
           </div>
         ))}
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium text-neutral-400">Community Library Search</h3>
+        <p className="text-xs text-neutral-500">
+          Optional. Community footprint/symbol search (SPEC-314) works without a token, at
+          GitHub&apos;s lower unauthenticated rate limit -- add one to raise it.
+        </p>
+        <div className="flex items-center gap-2">
+          <span className="w-24 text-sm">GitHub token</span>
+          {capabilities?.github_token_configured ? (
+            <>
+              <span className="flex-1 text-sm text-emerald-400">configured</span>
+              <button
+                type="button"
+                className="rounded border border-neutral-700 px-3 py-1 text-sm disabled:opacity-50"
+                onClick={() => void handleClearGithubToken()}
+                disabled={busyGithubToken}
+              >
+                Clear
+              </button>
+            </>
+          ) : (
+            <>
+              <input
+                type="password"
+                aria-label="GitHub token"
+                className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-1 text-sm"
+                placeholder="personal access token"
+                value={githubTokenInput}
+                onChange={(e) => setGithubTokenInput(e.target.value)}
+              />
+              <button
+                type="button"
+                className="rounded bg-neutral-100 px-3 py-1 text-sm font-medium text-neutral-950 disabled:opacity-50"
+                onClick={() => void handleSaveGithubToken()}
+                disabled={busyGithubToken || !githubTokenInput.trim()}
+              >
+                Save
+              </button>
+            </>
+          )}
+        </div>
       </section>
 
       <section className="flex flex-col gap-2">

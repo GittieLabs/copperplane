@@ -325,9 +325,17 @@ def export_symbol_kicad_sym(symbol_id: str) -> str:
     library/symbols/<symbol_id>.kicad_sym, returning that path. Real
     verification (this module's own test suite) is KiCad's own
     `kicad-cli sym export svg` successfully parsing and rendering the
-    result -- not just plausible-looking text."""
+    result -- not just plausible-looking text.
+
+    CTX-314.2: a symbol imported from a real community library
+    (`daemon.library_import_community_footprint`) carries its own real,
+    verbatim `raw_kicad_sym` text -- written directly, never re-derived
+    through `_build_kicad_sym_text`'s own hand-built-from-JSON path,
+    which only ever produced this app's own generated single-symbol
+    shape and would lossily discard a real vendor file's actual
+    geometry."""
     symbol = load_symbol(symbol_id)
-    text = _build_kicad_sym_text(symbol)
+    text = symbol.get("raw_kicad_sym") or _build_kicad_sym_text(symbol)
     path = os.path.join(_symbols_dir(), f"{symbol_id}.kicad_sym")
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
@@ -466,8 +474,21 @@ def export_footprint_kicad_mod(footprint_id: str) -> str:
     Real verification (this module's own test suite) is KiCad's own
     `kicad-cli fp export svg` successfully parsing and rendering the
     result -- not just plausible-looking text, the same standard
-    export_symbol_kicad_sym already holds itself to."""
+    export_symbol_kicad_sym already holds itself to.
+
+    CTX-314.2: a footprint imported from a real community library
+    (`daemon.library_import_community_footprint`) carries its own real,
+    verbatim `raw_kicad_mod` text -- written directly, skipping the
+    pads/courtyard check below entirely, since a raw-backed record has
+    no `pads`/`courtyard` fields of its own and needs none; its real
+    geometry already lives in the raw text itself."""
     footprint = load_footprint(footprint_id)
+    if footprint.get("raw_kicad_mod"):
+        path = os.path.join(_footprints_pretty_dir(), f"{footprint_id}.kicad_mod")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(footprint["raw_kicad_mod"])
+        return path
+
     if not footprint.get("pads") or not footprint.get("courtyard"):
         raise SchemaValidationError(
             f"Footprint '{footprint_id}' has no pad geometry to export -- only a footprint "

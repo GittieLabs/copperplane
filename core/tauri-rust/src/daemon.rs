@@ -100,11 +100,19 @@ pub const DAEMON_RESPONSE_EVENT: &str = "daemon://response";
 /// stray keychain entry from some unrelated feature never leaks into the
 /// daemon's configure handshake. Ollama needs no key -- it isn't listed
 /// here.
+///
+/// `github_token` (CTX-314.2) is not an LLM provider key -- it's an
+/// optional, bring-your-own GitHub personal access token
+/// `community_libraries.py` uses to raise the GitHub API's real
+/// unauthenticated rate limit (60/hour) to 5,000/hour (SPEC-314 §2).
+/// Never bundled, same "never bundle an API key" standing rule
+/// SPEC-203's retirement doc already established for this project.
 pub const KNOWN_SECRET_KEYS: &[&str] = &[
     "anthropic_api_key",
     "google_api_key",
     "openai_api_key",
     "perplexity_api_key",
+    "github_token",
 ];
 
 /// Rebuilds the known-secrets map fresh from the OS keychain (SPEC-106 §2)

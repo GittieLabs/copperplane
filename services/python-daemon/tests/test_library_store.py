@@ -669,6 +669,41 @@ class TestExportSymbolKicadSym(LibraryStoreTestCase):
             text = f.read()
         self.assertIn('weird\\"name', text)
 
+    def test_004_a_raw_kicad_sym_backed_record_writes_verbatim_not_the_hand_built_path(self):
+        """CTX-314.2: a symbol imported from a real community library
+        carries its own real raw_kicad_sym text -- this must be written
+        as-is, never re-derived through _build_kicad_sym_text (which
+        would silently discard a real multi-symbol vendor file down to
+        this app's own single-symbol generated shape). No pins field at
+        all on this record -- the raw-content branch must not need one."""
+        raw_text = '(kicad_symbol_lib\n\t(version 20251024)\n\t(symbol "Real_Vendor_Symbol"\n\t)\n)\n'
+        store.save_symbol({"symbol_id": "vendor__lib__Real_Vendor_Symbol", "raw_kicad_sym": raw_text})
+        path = store.export_symbol_kicad_sym("vendor__lib__Real_Vendor_Symbol")
+        with open(path) as f:
+            self.assertEqual(f.read(), raw_text)
+
+    def test_005_a_real_kicad_cli_parses_and_renders_a_raw_backed_symbol(self):
+        """Same real bar test_002 already holds itself to, applied to
+        the new raw-content branch -- reuses _build_kicad_sym_text's
+        own real, valid output as the 'raw' fixture, since it's already
+        proven-parseable real KiCad S-expression text."""
+        kicad_cli = _find_kicad_cli()
+        if not kicad_cli:
+            self.skipTest("kicad-cli not found on this machine.")
+
+        raw_text = store._build_kicad_sym_text(
+            {"symbol_id": "Raw_SOIC-8", "reference_prefix": "U", "pins": _ATTINY85_PINS}
+        )
+        store.save_symbol({"symbol_id": "Raw_SOIC-8", "raw_kicad_sym": raw_text})
+        path = store.export_symbol_kicad_sym("Raw_SOIC-8")
+
+        with tempfile.TemporaryDirectory() as svg_dir:
+            result = subprocess.run(
+                [kicad_cli, "sym", "export", "svg", "-o", svg_dir, path],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+
 
 _SOIC8_PADS = [
     {"number": str(i), "x_mm": -2.0 if i <= 4 else 2.0, "y_mm": (i - 2.5) * 1.27 if i <= 4 else (6.5 - i) * 1.27,
@@ -768,6 +803,40 @@ class TestExportFootprintKicadMod(LibraryStoreTestCase):
                                "footprint_name": "MP1584EN_5V_Module"})
         with self.assertRaises(store.SchemaValidationError):
             store.export_footprint_kicad_mod("MyPCBLibs__MP1584EN_5V_Module")
+
+    def test_005_a_raw_kicad_mod_backed_record_writes_verbatim_skipping_the_pads_check(self):
+        """CTX-314.2: a footprint imported from a real community library
+        carries its own real raw_kicad_mod text and no pads/courtyard
+        fields at all -- must skip the fail-closed check above entirely
+        (real geometry already lives in the raw text) and write it
+        verbatim, never re-derived through _build_kicad_mod_text."""
+        raw_text = '(footprint "Real_Vendor_Footprint"\n\t(version 20221018)\n\t(layer "F.Cu")\n)\n'
+        store.save_footprint({"footprint_id": "vendor__lib__Real_Vendor_Footprint", "raw_kicad_mod": raw_text})
+        path = store.export_footprint_kicad_mod("vendor__lib__Real_Vendor_Footprint")
+        with open(path) as f:
+            self.assertEqual(f.read(), raw_text)
+
+    def test_006_a_real_kicad_cli_parses_and_renders_a_raw_backed_footprint(self):
+        """Same real bar test_002 already holds itself to, applied to
+        the new raw-content branch -- reuses _build_kicad_mod_text's own
+        real, valid output as the 'raw' fixture."""
+        kicad_cli = _find_kicad_cli()
+        if not kicad_cli:
+            self.skipTest("kicad-cli not found on this machine.")
+
+        raw_text = store._build_kicad_mod_text(
+            {"footprint_id": "Raw_ATtiny85", "pads": _SOIC8_PADS, "courtyard": _SOIC8_COURTYARD}
+        )
+        store.save_footprint({"footprint_id": "Raw_ATtiny85", "raw_kicad_mod": raw_text})
+        path = store.export_footprint_kicad_mod("Raw_ATtiny85")
+        pretty_dir = os.path.dirname(path)
+
+        with tempfile.TemporaryDirectory() as svg_dir:
+            result = subprocess.run(
+                [kicad_cli, "fp", "export", "svg", "-o", svg_dir, "--footprint", "Raw_ATtiny85", pretty_dir],
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
 
     # Deliberately no "footprint_id containing a double quote" test here,
     # unlike TestExportSymbolKicadSym.test_003: footprint_id doubles as

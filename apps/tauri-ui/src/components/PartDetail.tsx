@@ -1,7 +1,18 @@
 import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import type { ComponentCandidate } from '../lib/components'
-import { attachFootprintToPart, exportFootprint, generateFootprintFromPart, searchFootprints, type FootprintCandidate } from '../lib/footprints'
+import {
+  attachCommunityFootprintToPart,
+  attachFootprintToPart,
+  exportFootprint,
+  generateFootprintFromPart,
+  importCommunityFootprint,
+  searchCommunityFootprints,
+  searchFootprints,
+  type CommunityLibraryCandidate,
+  type CommunitySymbolOption,
+  type FootprintCandidate,
+} from '../lib/footprints'
 import { exportSymbol, extractPartDetail, getConnectionGuidance, saveConfirmedPart, type ConnectionGuidance, type ExtractedSchema, type SavedPart, type SavedSymbol } from '../lib/partDetail'
 
 type Status = 'extracting' | 'ready' | 'error'
@@ -34,6 +45,25 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
   const [footprintError, setFootprintError] = useState<string | null>(null)
   const [footprintCandidates, setFootprintCandidates] = useState<FootprintCandidate[] | null>(null)
   const [attachingFootprint, setAttachingFootprint] = useState<string | null>(null)
+
+  // CTX-314.2: SPEC-314's third footprint source -- a real, curated
+  // allowlist of GitHub-hosted community libraries, alongside the
+  // installed-library search above. Reuses footprintQuery as the search
+  // term but keeps its own separate results/status, since the two
+  // sources are searched by separate real network calls. A `.kicad_sym`
+  // candidate's own real, multi-symbol structure (SPEC-314 §2) means
+  // "Import" is a real two-step flow: communitySymbolBrowse holds the
+  // real symbol names found inside a chosen library file, once fetched,
+  // before any one of them is actually imported.
+  const [communityStatus, setCommunityStatus] = useState<FootprintSearchStatus>('idle')
+  const [communityError, setCommunityError] = useState<string | null>(null)
+  const [communityCandidates, setCommunityCandidates] = useState<CommunityLibraryCandidate[] | null>(null)
+  const [communityImportingPath, setCommunityImportingPath] = useState<string | null>(null)
+  const [communitySymbolBrowse, setCommunitySymbolBrowse] = useState<{
+    candidate: CommunityLibraryCandidate
+    symbols: CommunitySymbolOption[]
+  } | null>(null)
+  const [communityImportedSymbolId, setCommunityImportedSymbolId] = useState<string | null>(null)
 
   // CTX-308.5: source three (PRODUCT-PLAN.md §8 item 3) -- generate a
   // footprint from this part's own datasheet dimensions when nothing
@@ -75,6 +105,12 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     setFootprintStatus('idle')
     setFootprintError(null)
     setFootprintCandidates(null)
+    setCommunityStatus('idle')
+    setCommunityError(null)
+    setCommunityCandidates(null)
+    setCommunityImportingPath(null)
+    setCommunitySymbolBrowse(null)
+    setCommunityImportedSymbolId(null)
     setGeneratingFootprint(false)
     setFootprintGenerated(false)
     setExportedFootprintPath(null)
@@ -143,6 +179,67 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
       setFootprintError(err instanceof Error ? err.message : String(err))
     } finally {
       setAttachingFootprint(null)
+    }
+  }
+
+  async function handleCommunitySearch() {
+    const trimmed = footprintQuery.trim()
+    if (!trimmed) return
+
+    setCommunityStatus('searching')
+    setCommunityError(null)
+    setCommunitySymbolBrowse(null)
+    try {
+      const results = await searchCommunityFootprints(trimmed)
+      setCommunityCandidates(results)
+      setCommunityStatus('idle')
+    } catch (err) {
+      setCommunityCandidates(null)
+      setCommunityError(err instanceof Error ? err.message : String(err))
+      setCommunityStatus('error')
+    }
+  }
+
+  /** A `.kicad_mod` candidate imports and attaches to the Part directly.
+   * A `.kicad_sym` candidate's own file may hold many real symbols
+   * (SPEC-314 §2) -- this first call (no symbolName) always returns the
+   * real browse list, never guessing which one the user wants. */
+  async function handleImportCommunityCandidate(candidateFootprint: CommunityLibraryCandidate) {
+    if (!savedPart) return
+    setCommunityImportingPath(candidateFootprint.path)
+    setCommunityError(null)
+    try {
+      const result = await importCommunityFootprint(candidateFootprint)
+      if ('symbols' in result) {
+        setCommunitySymbolBrowse({ candidate: candidateFootprint, symbols: result.symbols })
+      } else {
+        const updated = await attachCommunityFootprintToPart(savedPart, result)
+        setSavedPart(updated)
+      }
+    } catch (err) {
+      setCommunityError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCommunityImportingPath(null)
+    }
+  }
+
+  /** The real, chosen second step for a `.kicad_sym` candidate -- SPEC-314
+   * §1's own non-goal boundary (no schematic symbol placement) means this
+   * only ever persists the symbol to the local library, never attaches it
+   * to the Part the way a footprint import does. */
+  async function handleImportCommunitySymbol(symbolName: string) {
+    if (!communitySymbolBrowse) return
+    const { candidate } = communitySymbolBrowse
+    setCommunityImportingPath(candidate.path)
+    setCommunityError(null)
+    try {
+      const result = await importCommunityFootprint(candidate, symbolName)
+      setCommunityImportedSymbolId('symbol_id' in result ? result.symbol_id ?? null : null)
+      setCommunitySymbolBrowse(null)
+    } catch (err) {
+      setCommunityError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCommunityImportingPath(null)
     }
   }
 
@@ -427,6 +524,91 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
                   ))}
                 </div>
               )}
+
+              {/* CTX-314.2/SPEC-314: source four -- a real, curated
+                  allowlist of GitHub-hosted community libraries, alongside
+                  the installed-library results above. Reuses the same
+                  query, its own separate search action/results. */}
+              <div className="flex flex-col gap-2 border-t border-neutral-800 pt-2">
+                <div className="flex items-center gap-2">
+                  <p className="flex-1 text-xs font-medium uppercase text-neutral-500">Community Libraries</p>
+                  <button
+                    type="button"
+                    className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                    onClick={handleCommunitySearch}
+                    disabled={footprintQuery.trim().length === 0 || communityStatus === 'searching'}
+                  >
+                    {communityStatus === 'searching' ? 'Searching…' : 'Search community libraries'}
+                  </button>
+                </div>
+
+                {communityStatus === 'error' && communityError && (
+                  <p className="text-sm text-red-400">{communityError}</p>
+                )}
+
+                {communityCandidates !== null && communityCandidates.length === 0 && (
+                  <p className="text-xs text-neutral-500">No match in the known community libraries.</p>
+                )}
+
+                {communityImportedSymbolId && (
+                  <p className="text-xs text-emerald-400">
+                    Imported symbol <code>{communityImportedSymbolId}</code> to your library.
+                  </p>
+                )}
+
+                {communitySymbolBrowse && (
+                  <div className="flex flex-col gap-2 rounded border border-neutral-800 p-2">
+                    <p className="text-xs text-neutral-400">
+                      {communitySymbolBrowse.candidate.path} contains {communitySymbolBrowse.symbols.length} real
+                      symbols -- choose one to import:
+                    </p>
+                    {communitySymbolBrowse.symbols.map((s) => (
+                      <div key={s.name} className="flex items-center justify-between gap-3">
+                        <p className="text-xs text-neutral-300">
+                          {s.name} <span className="text-neutral-600">· {s.pin_count} pins</span>
+                        </p>
+                        <button
+                          type="button"
+                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs font-medium disabled:opacity-50"
+                          onClick={() => handleImportCommunitySymbol(s.name)}
+                          disabled={communityImportingPath !== null}
+                        >
+                          {communityImportingPath === communitySymbolBrowse.candidate.path ? 'Importing…' : 'Import'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {communityCandidates !== null && communityCandidates.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    {communityCandidates.map((c) => (
+                      <div
+                        key={`${c.owner}/${c.repo}/${c.path}`}
+                        className="flex items-center justify-between gap-3 rounded border border-neutral-800 p-2"
+                      >
+                        <p className="text-xs text-neutral-300">
+                          {c.path.split('/').pop()}{' '}
+                          <span className="text-neutral-500">
+                            {c.owner}/{c.repo}
+                          </span>{' '}
+                          <span className="text-neutral-600">
+                            · {c.license} · {c.kind}
+                          </span>
+                        </p>
+                        <button
+                          type="button"
+                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs font-medium disabled:opacity-50"
+                          onClick={() => handleImportCommunityCandidate(c)}
+                          disabled={communityImportingPath !== null}
+                        >
+                          {communityImportingPath === c.path ? 'Importing…' : 'Import'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </>
           )}
         </div>
