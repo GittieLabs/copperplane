@@ -19,6 +19,7 @@ child_specs:
   - "SPEC-311-enclosure-refinement-interactive-preview.md"
   - "SPEC-312-application-shell-project-portability-persistence.md"
   - "SPEC-313-overview-tab-project-dashboard.md"
+  - "SPEC-314-community-library-discovery.md"
 user_facing: true
 ---
 

@@ -514,7 +514,11 @@ own future specs:
     below: decided as a per-project dashboard, not a cross-project landing page.
 5.  **Component library discovery/search** — connecting to a real external footprint/component
     library service for searching and pulling in components, distinct from this app's own local
-    library (`SPEC-304`). Not named precisely yet; needs real research before scoping.
+    library (`SPEC-304`) — **now its own spec**,
+    [SPEC-314](apps/tauri-ui/specs/SPEC-314-community-library-discovery.md) below, after real
+    research ruled vendor pricing APIs out entirely (`SPEC-203`, retired) and found Ultra
+    Librarian's real API access unconfirmed -- scoped to real, GitHub-hosted community KiCad
+    libraries instead.
 
 #### [SPEC-313](apps/tauri-ui/specs/SPEC-313-overview-tab-project-dashboard.md) — Overview Tab: Per-Project Dashboard — ✅ done ([CTX-313.1](apps/tauri-ui/context/CTX-313.1-project-dashboard.md)) 2026-08-19
 
@@ -534,6 +538,24 @@ layout bugs found by the user's own live click-through and fixed the same day, t
 was stuck at a 448px column) and
 [CTX-305.3](apps/tauri-ui/context/CTX-305.3-enclosure-empty-result-column-width.md) (Enclosure's
 own responsive layout reserved space for a 3D-viewer result that didn't exist yet).
+
+#### [SPEC-314](apps/tauri-ui/specs/SPEC-314-community-library-discovery.md) — Community Footprint & Symbol Library Discovery — Draft
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-106, SPEC-304, SPEC-308
+
+Resolves `SPEC-312`'s deferred item 5 above, scoped after real research (2026-08-19) into two real
+candidates named directly by Keith: Ultra Librarian and GitHub-hosted KiCad libraries. Ultra
+Librarian's own redistribution terms turned out to be genuinely permissive, but no public,
+documented API for programmatic access could be found -- real, unconfirmed, explicitly not blocked
+on here (see the spec's own Non-Goals). GitHub-hosted community libraries are the confirmed-
+buildable half: a real, curated allowlist of MIT/permissively-licensed repos (starting point:
+`kitspace/kicad_footprints`, a real aggregator of many community libraries), searched via GitHub's
+own REST API with an optional bring-your-own token (`SPEC-106`'s existing keychain mechanism,
+`SPEC-203`'s own "never bundle an API key" standing rule applied here too). A real, named open risk
+carried over from `SPEC-310`'s own research: `kiutils` (a third-party KiCad-file parser) crashed on
+a real board file during this project's own prior work -- whether it (or `kicad-cli`, or a
+hand-rolled parser) reliably handles real footprint/symbol files pulled from these repos is this
+spec's single highest-risk open question, named explicitly rather than assumed away.
 
 ### 3.4 `4xx` — Distribution & operations
 
