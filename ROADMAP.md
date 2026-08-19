@@ -42,7 +42,7 @@ answers three questions:
 | [SPEC-302](apps/tauri-ui/specs/SPEC-302-chat-command-surface.md) | `apps/tauri-ui` + `services/python-daemon` | [CTX-302.1](apps/tauri-ui/context/CTX-302.1-chat-command-surface.md) | ✅ Completed | Real chat & command surface — a `generate`/`inject` command recognizer plus a plain-chat fallback with real multi-turn `history`, wired to the same two already-real routes `SPEC-202`/`108` built. Two real bugs found and fixed by actually running it in the native window: a stale daemon process rejecting the new `history` param, and no LLM provider ever configured on a fresh install (`llm_chat` now falls back to a default provider). Completes M1's critical path — see §4. |
 | [SPEC-303](apps/tauri-ui/specs/SPEC-303-settings-ui.md) | `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` | [CTX-303.1](apps/tauri-ui/context/CTX-303.1-settings-plumbing-and-ui.md), [CTX-303.2](apps/tauri-ui/context/CTX-303.2-generate-provider-override.md), [CTX-303.3](apps/tauri-ui/context/CTX-303.3-copy-diagnostics.md) | ✅ Completed | Real Settings UI, all three tiers: LLM provider/model/API-key management (live, no daemon restart), KiCad/FreeCAD reachability + path overrides (restart to apply), and a "Copy Diagnostics" button bundling capability flags, the daemon's real log path, and app/Python/KiCad versions to the clipboard. Registered previously-dead-code keychain commands, added `config.json`'s first-ever writer, and installed the Tauri clipboard plugin. Verified live against real Anthropic and Google keys. `CTX-303.2` fixed a real bug that verification found — `generate` had always ignored the provider picker, hardcoded to Anthropic. |
 | [SPEC-304](apps/tauri-ui/specs/SPEC-304-project-library-storage.md) | `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` | [CTX-304.1](apps/tauri-ui/context/CTX-304.1-library-storage.md), [CTX-304.2](apps/tauri-ui/context/CTX-304.2-project-identity-folder-rename.md) | ✅ Completed | Real file-based storage for all six `SPEC-300` §2.1 objects (Project/Part/Symbol/Footprint/Artifact/Conversation), matching `PRODUCT-PLAN.md` §4's layout exactly, exposed via fourteen `library.*`/`project.*` daemon routes. Provenance is schema-enforced on Part, not documented as a convention; enclosure Artifacts must record `board_revision`, the one real gap the `SPEC-304` ID-collision resolution carried forward. `storage_root` resolves the inherited project-root-location question by reusing `output_dir`'s exact Rust-computed mechanism. `CTX-304.2` closes a gap `CTX-110.1` found: `load_project` now reports the real folder name a project was loaded from rather than a possibly-stale one saved inside `project.json`, so renaming a project's folder outside the app can't leave the two disagreeing. The `.index/` SQLite cache and KiCad `.kicad_sym`/`.pretty` import/export are still deliberately deferred, to a future context — not `CTX-304.2`, which ended up covering the folder-rename fix instead. |
-| [SPEC-305](apps/tauri-ui/specs/SPEC-305-app-shell-navigation.md) | `apps/tauri-ui` | [CTX-305.1](apps/tauri-ui/context/CTX-305.1-app-shell.md) | ✅ Completed | The real `SPEC-300` §2 shell: a Projects rail backed by `SPEC-304`'s real storage, a Library entry, a Settings anchor, and five per-project area tabs (Overview/Components/Schematic/PCB/Enclosure), replacing `App.tsx`'s `showSettings` toggle and single floating chat surface. Overview re-houses the existing chat flow unchanged in substance, now scoped per-project and persisted via `project.load_conversation`/`append_conversation_turn`. Enclosure re-houses `EnclosurePanel`/`EnclosureViewer` unchanged. Components/Schematic/PCB render as visible-but-empty placeholders naming `SPEC-306`/`308`/`309`. Verified live in the running app via screenshots covering the empty state, Settings, all five area tabs, and the re-housed Enclosure controls. |
+| [SPEC-305](apps/tauri-ui/specs/SPEC-305-app-shell-navigation.md) | `apps/tauri-ui` | [CTX-305.1](apps/tauri-ui/context/CTX-305.1-app-shell.md), [CTX-305.2](apps/tauri-ui/context/CTX-305.2-widen-narrow-tab-content.md), [CTX-305.3](apps/tauri-ui/context/CTX-305.3-enclosure-empty-result-column-width.md) | ✅ Completed | The real `SPEC-300` §2 shell: a Projects rail backed by `SPEC-304`'s real storage, a Library entry, a Settings anchor, and five per-project area tabs (Overview/Components/Schematic/PCB/Enclosure), replacing `App.tsx`'s `showSettings` toggle and single floating chat surface. Overview re-houses the existing chat flow unchanged in substance, now scoped per-project and persisted via `project.load_conversation`/`append_conversation_turn`. Enclosure re-houses `EnclosurePanel`/`EnclosureViewer` unchanged. Components/Schematic/PCB render as visible-but-empty placeholders naming `SPEC-306`/`308`/`309`. Verified live in the running app via screenshots covering the empty state, Settings, all five area tabs, and the re-housed Enclosure controls. Two real layout bugs found via `SPEC-313`'s own live click-through and fixed same-day: every tab but Enclosure was stuck at a 448px content column (`CTX-305.2`), and Enclosure's own responsive layout reserved space for a 3D-viewer result before one existed, squeezing its form narrow for no reason (`CTX-305.3`). |
 | [SPEC-306](apps/tauri-ui/specs/SPEC-306-component-discovery.md) | `apps/tauri-ui` + `services/python-daemon` | [CTX-306.1](apps/tauri-ui/context/CTX-306.1-component-discovery.md) | ✅ Completed | Real free-text search → ranked candidates with a confidence signal → a "did you mean" disambiguation card, replacing `SPEC-305`'s placeholder in the Components tab. A new `component_search` agent distinct from `component_extraction`; `cache_datasheet` closes the datasheet-cache gap `library_store.py` had named as unmanaged. Stops at a confirmed candidate -- pin display and `library.save_part` stay `SPEC-307`'s job. Five real bugs found and fixed across five rounds of live verification: prompt `max_tokens` truncation on Gemini, a URL-fallback prompt instruction that produced bot-blocked links, a broken default SSL cert path, an uncaught stalled-read `TimeoutError`, and confirmation blocking on a failed (not just slow) datasheet fetch -- now best-effort instead of a gate. Also wired up `tauri-plugin-shell` for real so datasheet links actually open, after discovering `"open": true` silently applies an overly narrow default regex. |
 | [SPEC-307](apps/tauri-ui/specs/SPEC-307-part-detail-library-export.md) | `apps/tauri-ui` + `services/python-daemon` | [CTX-307.1](apps/tauri-ui/context/CTX-307.1-part-detail-library-export.md) | ✅ Completed | Replaces `SPEC-306`'s confirmed-candidate dead end with a real Part Detail view: a real pin table (re-running `SPEC-202`'s extraction), "Save to Library" assembling Part provenance from the search candidate + extraction call, and a real, KiCad-openable `.kicad_sym` export -- verified with `kicad-cli sym export svg`, not just plausible-looking text. Defines the Symbol record's pin/layout schema (previously undefined) with a pure auto-layout on KiCad's own real 2.54mm grid; `symbol_id` is a package+pin-count signature so identical parts converge on one Symbol. Two more real bugs found by live verification: search's `max_tokens` still occasionally truncated on longer responses (2048 → 3072), and a real extraction returned "PDIP-8," a package-name synonym `PACKAGE_REFERENCE` didn't recognize -- fixed with a generated alias for every `DIP-N` entry. Found but explicitly not fixed: exported files land in a buried, non-configurable storage path -- tracked as a new follow-up task, not squeezed in here. |
 
@@ -479,17 +479,24 @@ own future specs:
     library service for searching and pulling in components, distinct from this app's own local
     library (`SPEC-304`). Not named precisely yet; needs real research before scoping.
 
-#### [SPEC-313](apps/tauri-ui/specs/SPEC-313-overview-tab-project-dashboard.md) — Overview Tab: Per-Project Dashboard — Draft
+#### [SPEC-313](apps/tauri-ui/specs/SPEC-313-overview-tab-project-dashboard.md) — Overview Tab: Per-Project Dashboard — ✅ done ([CTX-313.1](apps/tauri-ui/context/CTX-313.1-project-dashboard.md)) 2026-08-19
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-300, SPEC-305, SPEC-312
 
 Resolves `SPEC-312`'s deferred item 4 above. Decided: a per-project dashboard, not a cross-project
-landing page — the Projects rail already owns cross-project navigation. Three pieces: the existing
-chat (`CTX-305.1`, unchanged), a real status summary across PCB/Schematic/Enclosure/Components
-(honest about only Enclosure having any persisted result to show today, per `CTX-312.1`'s
-`Project.last_results`), and a real activity feed merging the two genuine timelines that already
-exist — `conversation.jsonl` and `Project.export_history`. No new area tab, no new persisted event
-log; see the spec's own Non-Goals for what this first version deliberately doesn't attempt.
+landing page — the Projects rail already owns cross-project navigation. Three pieces, all shipped:
+the existing chat (`CTX-305.1`, unchanged), a real status summary across PCB/Schematic/Enclosure/
+Components (honest about only Enclosure having any persisted result to show today, per
+`CTX-312.1`'s `Project.last_results`), and a real activity feed merging the two genuine timelines
+that already exist — `conversation.jsonl` (given a real per-turn timestamp for the first time,
+`CTX-313.1`) and `Project.export_history`. No new area tab, no new persisted event log; see the
+spec's own Non-Goals for what this first version deliberately doesn't attempt. Two real follow-on
+layout bugs found by the user's own live click-through and fixed the same day, tracked under
+`SPEC-305` since they turned out to be app-shell-wide, not specific to this dashboard:
+[CTX-305.2](apps/tauri-ui/context/CTX-305.2-widen-narrow-tab-content.md) (every tab but Enclosure
+was stuck at a 448px column) and
+[CTX-305.3](apps/tauri-ui/context/CTX-305.3-enclosure-empty-result-column-width.md) (Enclosure's
+own responsive layout reserved space for a 3D-viewer result that didn't exist yet).
 
 ### 3.4 `4xx` — Distribution & operations
 
@@ -517,18 +524,25 @@ the user directly click-testing the running dev-mode app afterward. `SPEC-101`'s
 left untouched, as designed. Windows/Linux freezing remains real, explicitly out-of-scope follow-up
 (`SPEC-403`).
 
-#### [SPEC-402](specs/SPEC-402-release-signing-and-auto-update.md) — Release, Signing & Auto-Update
+#### [SPEC-402](specs/SPEC-402-release-signing-and-auto-update.md) — Release, Signing & Auto-Update — ✅ done 2026-08-17
+
 *Module:* repo-wide · *Depends on:* SPEC-401
 
-**Rescoped 2026-08-16: unsigned first, deliberately.** A real macOS-only release pipeline (unsigned
-`.dmg` via GitHub Actions, a real Gatekeeper-bypass doc), the Tauri auto-updater (its own real,
-maintainer-generated keypair — no OS-level code-signing certificate, no cost, no identity tied to
-one person), and a changelog derived from the `CTX-*.md` implementation logs — which the framework
-already collects, and which nothing currently reads. Code signing/notarization is explicitly
-deferred: it requires either a personal Apple/Windows identity tied to releases indefinitely, or a
-real *organization* account under a project entity (GittieLabs, if it becomes the enrolled entity)
-— a real, separate, future decision this spec doesn't make. Windows/Linux builds wait on
-`SPEC-403`'s own cross-platform verification, which hasn't happened.
+**Rescoped 2026-08-16: unsigned first, deliberately** — then the deferred parts shipped anyway,
+across four more contexts, all `Completed`:
+[CTX-402.1](context/CTX-402.1-release-pipeline-and-changelog.md) (unsigned macOS pipeline + a
+changelog generator reading the framework's own `CTX-*.md` logs, v0.1.0),
+[CTX-402.2](context/CTX-402.2-auto-updater.md) (Tauri auto-updater, its own standalone signing
+keypair, v0.1.0), [CTX-402.3](context/CTX-402.3-macos-signing-notarization.md) (real macOS code
+signing + notarization under a GittieLabs Apple Developer account — the "real *organization*
+account" this entry originally deferred on, resolved rather than left open, v0.1.1),
+[CTX-402.4](context/CTX-402.4-intel-macos-build.md) (a second, Intel x86_64 macOS build alongside
+the original Apple Silicon one, v0.1.3), and
+[CTX-402.5](context/CTX-402.5-windows-linux-prerelease-builds.md) (real, unsigned,
+explicitly-pre-release Windows and Linux builds, v0.1.3). The Windows/Linux builds here are real
+compiled artifacts, not the same thing as `SPEC-403`'s still-open question below — nothing has
+live-tested the actual KiCad/FreeCAD bridges on those platforms yet, only that the app itself
+builds and launches there.
 
 #### SPEC-403 — Cross-Platform Verification Matrix
 *Module:* repo-wide · *Depends on:* SPEC-903
@@ -537,7 +551,9 @@ Every live CAD test to date has run on exactly one machine: Keith's Mac, with Ki
 FreeCAD 1.1.1. Both CTX-103.1 and CTX-104.1 say so explicitly. This spec defines how the live paths
 get exercised on Windows and Linux — self-hosted runners with real CAD installs, a documented
 manual checklist, or containerized KiCad. Until then, "works on Windows" is an untested claim about
-the two most fragile integration points in the codebase.
+the two most fragile integration points in the codebase. `SPEC-402`'s `CTX-402.5` (2026-08-17)
+shipped real Windows/Linux *builds*, still explicitly pre-release for exactly this reason — this
+spec is what would move them past that label.
 
 ### 3.5 `9xx` — The framework itself
 
