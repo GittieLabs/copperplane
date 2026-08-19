@@ -40,6 +40,35 @@ export function disposeScene(scene: THREE.Object3D): void {
   })
 }
 
+// SPEC-311: real user feedback exercising the actual running app -- once
+// the lid rendered at all (post-CTX-311.5), it was still "too hard to see
+// how big the lid is" against a same-colored body on a same-toned dark
+// background. Body and lid get distinct, real fixed colors, and the
+// background moves to a light neutral -- all three real, direct contrast
+// cues, not a cosmetic afterthought.
+export const BODY_COLOR = 0x64748b // slate-500 -- distinct from both the lid and the light background
+export const LID_COLOR = 0xf97316 // orange-500 -- a real, high-contrast accent against the body and background
+export const VIEWER_BACKGROUND_COLOR = '#e5e7eb' // gray-200 -- light enough that a mid-gray body and an orange lid both read clearly
+
+/** Sets a real, uniform color on every real mesh material in `object` --
+ * used to tell the enclosure body and its lid apart at a glance, since
+ * both come from `freecad_bridge.py`'s own default (colorless) STL/glTF
+ * export. Mutates the loaded scene's own materials directly rather than
+ * cloning -- each `useGlbScene` load already produces a fresh scene/
+ * material graph, never shared across renders, so there's nothing else
+ * that could be affected by mutating in place. */
+export function applyMeshColor(object: THREE.Object3D, color: number): void {
+  object.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return
+    const materials = Array.isArray(child.material) ? child.material : [child.material]
+    for (const material of materials) {
+      if (material && 'color' in material && material.color instanceof THREE.Color) {
+        material.color.setHex(color)
+      }
+    }
+  })
+}
+
 /**
  * Loads a `.glb` from an absolute filesystem path via Tauri's scoped
  * asset protocol (SPEC-301 §2 -- `convertFileSrc` turns it into a URL the
@@ -271,6 +300,14 @@ export function EnclosureViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base.scene, lid.scene])
 
+  useEffect(() => {
+    if (base.scene) applyMeshColor(base.scene, BODY_COLOR)
+  }, [base.scene])
+
+  useEffect(() => {
+    if (lid.scene) applyMeshColor(lid.scene, LID_COLOR)
+  }, [lid.scene])
+
   if (base.status === 'loading') {
     return <p className="text-sm text-neutral-400">Loading mesh…</p>
   }
@@ -295,9 +332,16 @@ export function EnclosureViewer({
             fov: 50,
           }}
         >
-          <color attach="background" args={['#3f3f46']} />
-          <ambientLight intensity={0.6} />
-          <directionalLight position={[100, 100, 100]} intensity={0.8} />
+          <color attach="background" args={[VIEWER_BACKGROUND_COLOR]} />
+          {/* Real user feedback: a single strong directional light with
+           * a low ambient floor read as "hard, dark shadows" on a flat-
+           * shaded box -- every face's brightness swings sharply with its
+           * own normal relative to that one light. A high ambient floor
+           * plus a dim second fill light (opposite the main one) keeps a
+           * real sense of shape without that harsh swing. */}
+          <ambientLight intensity={1.1} />
+          <directionalLight position={[100, 100, 100]} intensity={0.3} />
+          <directionalLight position={[-100, -60, -100]} intensity={0.15} />
           {base.scene && <primitive object={base.scene} />}
           {lid.scene && lidVisible && <primitive object={lid.scene} />}
           <OrbitControls ref={controlsRef} makeDefault enableDamping target={cameraState.current.center} />
