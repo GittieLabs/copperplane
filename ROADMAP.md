@@ -447,38 +447,49 @@ and import/export to KiCad's own `.kicad_sym`/`.pretty` library formats.
 (enclosure-from-geometry) exists — the schema doesn't need `SPEC-109` done, only to eventually
 produce `Artifact`s it stores.
 
-#### [SPEC-312](apps/tauri-ui/specs/SPEC-312-application-shell-project-portability-persistence.md) — Application Shell, Project Portability & Persistence Model — Draft
+#### [SPEC-312](apps/tauri-ui/specs/SPEC-312-application-shell-project-portability-persistence.md) — Application Shell, Project Portability & Persistence Model — ✅ done (items 1-3) 2026-08-19
 
 *Module:* `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-300, SPEC-304, SPEC-311
 
 Real product questions surfaced while scoping `CTX-311.13` (the Enclosure tab's real Export
 action) that its own narrow scope deliberately did not try to answer, now a real spec, per this
 repo's own "Plan Drift is not embarrassing" norm. Scoped to three of the five original questions
-below (items 1-3) -- item 4 (Overview tab purpose) and item 5 (component library discovery) are
-explicit Non-Goals in the spec itself, real but separate decisions left for their own future specs:
+below (items 1-3, all shipped) -- item 4 (Overview tab purpose) and item 5 (component library
+discovery) are explicit Non-Goals in the spec itself, real but separate decisions left for their
+own future specs:
 
-1.  **What does "Save" actually save, at the project level?** `project.json` is real but largely
-    unused today. Does it grow into a real manifest — locations of the schematic/pcb/library files,
-    export history, an enclosure's own last-exported paths? Does "Save Project," "Save Enclosure,"
-    and "Export Enclosure" need to be three distinct, named actions, or fewer?
-2.  **Project portability.** Schematic/pcb/enclosure view state currently persists to the app's own
-    `$APPDATA` (per-machine, via `SPEC-301`'s `output_dir`), not the project's own directory.
-    Moving it into the project directory would make a project genuinely portable — copy the folder,
-    send it, open it on another machine — a real, different persistence model from what exists
-    today.
-3.  **The native app menu.** Confirmed while scoping `CTX-311.13`: no `File`/`Edit`/`View`/`Help`
-    menu is configured anywhere in `core/tauri-rust`, in any build mode — not a dev-build artifact,
-    genuinely never built (`tauri::menu` is real, separate work). A real menu is also the natural
-    home for "open a project not currently in the sidebar list" and Save/Save As/Duplicate, both
-    real, currently-missing capabilities.
-4.  **The Overview tab's actual purpose**, undecided since `SPEC-305` first re-housed chat there: a
-    per-project dashboard (status across PCB/Schematic/Enclosure, activity history, a dedicated
-    chat surface) vs. a cross-project landing page (recent projects, app updates, roadmap news —
-    the same role VS Code's own "Welcome" tab plays). Genuinely different features; needs a real
-    decision before either gets built.
+1.  **What does "Save" actually save, at the project level?** — ✅ done
+    ([CTX-312.1](apps/tauri-ui/context/CTX-312.1-project-directory-link-and-save.md)). Two named
+    actions, not three: "Link to folder…" plus "Save Project," which now writes a real manifest
+    (`last_results`/`export_history` keyed by area tab) rather than the largely-unused
+    `{name, schema_version}` record that existed before.
+2.  **Project portability.** — ✅ done (same context as above). A linked project's real state now
+    lives at `<directory>/.hardware-agent-studio/project.json` — copy the folder, send it, open it
+    on another machine — instead of only the app's own per-machine storage root.
+3.  **The native app menu.** — ✅ done
+    ([CTX-312.3](apps/tauri-ui/context/CTX-312.3-native-app-menu.md)). Real `File`/`Edit`/`View`/
+    `Help` menu via `tauri::menu`; File's Save Project/Open Project… reuse the same handlers as the
+    in-app buttons. `CTX-312.3` also built the real reverse of item 2's directory link —
+    `project.open_from_directory`, "a folder someone hands me becomes a known project here" — the
+    actual payoff of portability, not just writing a portable file no code ever reads back.
+4.  **The Overview tab's actual purpose**, undecided since `SPEC-305` first re-housed chat there —
+    **now its own spec**, [SPEC-313](apps/tauri-ui/specs/SPEC-313-overview-tab-project-dashboard.md)
+    below: decided as a per-project dashboard, not a cross-project landing page.
 5.  **Component library discovery/search** — connecting to a real external footprint/component
     library service for searching and pulling in components, distinct from this app's own local
     library (`SPEC-304`). Not named precisely yet; needs real research before scoping.
+
+#### [SPEC-313](apps/tauri-ui/specs/SPEC-313-overview-tab-project-dashboard.md) — Overview Tab: Per-Project Dashboard — Draft
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-300, SPEC-305, SPEC-312
+
+Resolves `SPEC-312`'s deferred item 4 above. Decided: a per-project dashboard, not a cross-project
+landing page — the Projects rail already owns cross-project navigation. Three pieces: the existing
+chat (`CTX-305.1`, unchanged), a real status summary across PCB/Schematic/Enclosure/Components
+(honest about only Enclosure having any persisted result to show today, per `CTX-312.1`'s
+`Project.last_results`), and a real activity feed merging the two genuine timelines that already
+exist — `conversation.jsonl` and `Project.export_history`. No new area tab, no new persisted event
+log; see the spec's own Non-Goals for what this first version deliberately doesn't attempt.
 
 ### 3.4 `4xx` — Distribution & operations
 
