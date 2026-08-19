@@ -564,6 +564,27 @@ UI -- including a real, two-step browse-then-import flow for `.kicad_sym` files,
 to be genuine multi-symbol libraries (73 real symbols in one file, verified directly), not one
 symbol per file the way this app's own hand-built symbol files are.
 
+#### [SPEC-315](apps/tauri-ui/specs/SPEC-315-library-browsing-and-organization.md) — Library Browsing & Organization — Draft
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-304, SPEC-305, SPEC-314
+
+Scoped 2026-08-19 from real, hands-on user feedback after clicking through `CTX-314.2`'s own
+shipped work: the rail's Library entry has shown a real Part count since `SPEC-305`, but that
+spec's own text already named the gap directly -- "a real browsing UI ... is out of scope,
+deferred to a future spec." This is that spec. Makes a "library" a real, user-defined grouping tag
+on top of `SPEC-304`'s existing global Part/Symbol/Footprint objects (never a project-scoped copy,
+extending the same "Footprint is shared, not duplicated per Part" reasoning `SPEC-300`/`SPEC-304`
+already committed to) -- an always-present Default library plus real custom ones a user creates,
+with membership tracked per object (Part/Symbol/Footprint independently, not bundled), since a
+Footprint is already shared across many Parts and a library-membership model that ignored that
+would misrepresent it the first time two unrelated Parts shared one Footprint. Also captures three
+related-but-out-of-scope findings from the same testing session, aimed at whichever of `SPEC-202`/
+`SPEC-306` eventually picks them up: an overly generic search term returning a short candidate
+list without a "too broad, please narrow" signal; a real dead datasheet link reaching the user with
+no reachability check; and a real "Extraction did not return valid JSON" failure blocking a user
+from ever reaching Part Detail at all, which looked like a missing UI from the outside but was an
+upstream extraction bug.
+
 ### 3.4 `4xx` — Distribution & operations
 
 #### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — ✅ Completed ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md), [CTX-401.2](context/CTX-401.2-tauri-sidecar-wiring.md)) 2026-08-14
