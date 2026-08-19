@@ -29,6 +29,7 @@ child_specs:
   - "../services/python-daemon/specs/SPEC-204-agent-tool-registry.md"
   - "../services/python-daemon/specs/SPEC-203-supplier-api-integration.md"
   - "../specs/SPEC-402-release-signing-and-auto-update.md"
+  - "../services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md"
 user_facing: false
 ---
 
