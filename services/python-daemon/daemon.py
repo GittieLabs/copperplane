@@ -890,7 +890,19 @@ def kicad_get_component_heights() -> dict:
     Returns {"known": [{"reference", "height_mm"}, ...], "unknown":
     ["<reference>", ...]} -- both real, reference-designator-keyed
     lists, so a caller can report exactly which components it does and
-    doesn't have real data for, never a single opaque number."""
+    doesn't have real data for, never a single opaque number.
+
+    CTX-311.15: a real click-through found this route flagging a board's
+    own real, unannotated MountingHole footprints (KiCad's own default
+    placeholder reference, literally the same "REF**" text repeated once
+    per unannotated footprint) as "missing a 3D model" -- true, but
+    misleading and indistinguishable to a caller: a screw hole was never
+    expected to have a rendered model, and it's already represented by
+    the enclosure's own standoff geometry, not this route's own output.
+    Skipped entirely here (`kicad_bridge.list_footprint_models`'s own
+    `is_mounting_hole`, reusing `get_mounting_holes`'s real recognition
+    convention) -- neither known nor unknown, since it was never a real
+    candidate for a rendered 3D model in the first place."""
     if kicad_bridge is None:
         raise RuntimeError(
             "Component height derivation requires kicad_bridge, which failed to import."
@@ -904,6 +916,8 @@ def kicad_get_component_heights() -> dict:
     known = []
     unknown = []
     for fp in footprints:
+        if fp["is_mounting_hole"]:
+            continue
         step_model = next(
             (
                 m for m in fp["models"]

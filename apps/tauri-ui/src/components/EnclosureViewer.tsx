@@ -271,7 +271,8 @@ export function computeCameraClipping(radius: number): {
   }
 }
 
-/** CTX-311.15: real, pure translation for compositing the board-inside-
+/** CTX-311.15 (fixed after a real click-through, see `BOARD_Z_MIRROR`
+ * below): real, pure translation for compositing the board-inside-
  * enclosure overlay -- `kicad.export_board_glb` (CTX-311.15) already
  * real-origins the board's own glb to its bounding-box corner
  * server-side, so no board outline data is needed here at all, only the
@@ -283,10 +284,42 @@ export function computeCameraClipping(radius: number): {
  * above the enclosure's own floor the board's own bottom surface
  * sits). Both real mm values, converted to this app's own real `/1000`
  * glb scale (`CTX-109.4`) the same way every other real dimension in
- * this file already is. */
+ * this file already is.
+ *
+ * The Z component is negative, not positive -- `freecad_bridge.py`'s
+ * own `_Y_UP_ROTATION` (`CTX-311.5`) leaves the enclosure's own local Z
+ * axis running in the negative direction relative to its pre-rotation
+ * FreeCAD depth axis, so the board's own offset has to land in that
+ * same negative range, combined with `BOARD_Z_MIRROR` below. */
 export function computeBoardOffset(marginMm: number, floorAndStandoffMm: number): THREE.Vector3 {
-  return new THREE.Vector3(marginMm / 1000, floorAndStandoffMm / 1000, marginMm / 1000)
+  return new THREE.Vector3(marginMm / 1000, floorAndStandoffMm / 1000, -marginMm / 1000)
 }
+
+/** CTX-311.15: a real, empirically-confirmed bug found by a live user
+ * click-through, not caught by this file's own tests -- those only
+ * checked `computeBoardOffset`'s own math in isolation, never the two
+ * real toolchains' actual coordinate conventions against each other
+ * (the exact same class of blind spot `CTX-311.5`'s own `_Y_UP_
+ * ROTATION` comment already names for the enclosure body itself).
+ *
+ * `kicad.export_board_glb`'s board glb (a separate toolchain from
+ * FreeCAD, never rotated) keeps its own local Z increasing in the same
+ * direction as increasing real KiCad Y -- a plain, unflipped
+ * `--user-origin` shift, confirmed directly against `kicad-cli`.
+ * `freecad_bridge.py`'s own `-90` degree X rotation (`CTX-311.5`,
+ * fixing the unrelated Z-up/Y-up mismatch) happens to leave the
+ * enclosure's own local Z running in the *opposite* direction from its
+ * pre-rotation FreeCAD depth axis. A pure translation can only align
+ * one end of two ranges running in opposite directions, not both --
+ * verified directly against a real board+enclosure pair via `trimesh`:
+ * without this mirror, the board's real Z range sits entirely outside
+ * the enclosure's own Z range (the real, disjoint-looking render this
+ * fixes); with it, the board's Z range lands inside the enclosure's
+ * with exactly the expected wall+clearance margin on both ends. X needs
+ * no equivalent mirror -- `CTX-311.5`'s rotation is about the X axis
+ * and never touches it, and both toolchains already agree on its
+ * direction. */
+export const BOARD_Z_MIRROR: [number, number, number] = [1, 1, -1]
 
 function CameraPresetControls({
   controlsRef,
@@ -481,6 +514,7 @@ export function EnclosureViewer({
             <primitive
               object={board.scene}
               position={computeBoardOffset(boardOffsetMm.margin, boardOffsetMm.floorAndStandoff)}
+              scale={BOARD_Z_MIRROR}
             />
           )}
           <OrbitControls

@@ -395,10 +395,20 @@ def list_footprint_models() -> list:
     `freecad_generate_enclosure` already composes this module's board
     outline/mounting-hole data with `freecad_bridge.generate_enclosure`.
 
-    Real per-footprint list: [{"reference", "models": [{"filename",
-    "resolved_path" (real path on disk, or None), "visible"}, ...]},
-    ...]. Every attached model is reported, not only ones this function
-    judges usable -- the caller decides format/visibility handling."""
+    Real per-footprint list: [{"reference", "is_mounting_hole", "models":
+    [{"filename", "resolved_path" (real path on disk, or None),
+    "visible"}, ...]}, ...]. Every attached model is reported, not only
+    ones this function judges usable -- the caller decides format/
+    visibility handling.
+
+    `is_mounting_hole` reuses `get_mounting_holes`'s own real recognition
+    convention (KiCad's standard MountingHole library, or an `H<digits>`
+    reference) -- CTX-311.15's own real click-through found the daemon's
+    height-derivation route flagging a board's real, unannotated
+    MountingHole footprints as "missing a 3D model," which is technically
+    true but misleading: a screw hole was never expected to have a
+    rendered model, and it's already represented separately by the
+    enclosure's own standoff geometry, not this footprint list."""
     client = get_client()
     try:
         board = client.get_board()
@@ -412,6 +422,10 @@ def list_footprint_models() -> list:
     result = []
     for fp in footprints:
         reference = fp.reference_field.text.value if fp.reference_field else "?"
+        library = (fp.definition.id.library or "").lower()
+        is_mounting_hole = (
+            "mountinghole" in library or bool(_MOUNTING_HOLE_REF_PATTERN.match(reference))
+        )
         models = [
             {
                 "filename": m.filename,
@@ -420,7 +434,11 @@ def list_footprint_models() -> list:
             }
             for m in (fp.definition.models or [])
         ]
-        result.append({"reference": reference, "models": models})
+        result.append({
+            "reference": reference,
+            "is_mounting_hole": is_mounting_hole,
+            "models": models,
+        })
 
     return result
 

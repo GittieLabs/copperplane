@@ -1652,6 +1652,7 @@ class TestKicadGetComponentHeightsRoute(unittest.TestCase):
             'daemon.kicad_bridge.list_footprint_models',
             return_value=[{
                 "reference": "J3",
+                "is_mounting_hole": False,
                 "models": [{
                     "filename": "${KICAD10_3DMODEL_DIR}/x.step",
                     "resolved_path": "/real/x.step",
@@ -1670,7 +1671,7 @@ class TestKicadGetComponentHeightsRoute(unittest.TestCase):
     def test_002_no_attached_models_is_reported_unknown_not_defaulted(self):
         with patch(
             'daemon.kicad_bridge.list_footprint_models',
-            return_value=[{"reference": "REF**", "models": []}],
+            return_value=[{"reference": "REF**", "is_mounting_hole": False, "models": []}],
         ):
             result = daemon.kicad_get_component_heights()
 
@@ -1685,6 +1686,7 @@ class TestKicadGetComponentHeightsRoute(unittest.TestCase):
             'daemon.kicad_bridge.list_footprint_models',
             return_value=[{
                 "reference": "U1",
+                "is_mounting_hole": False,
                 "models": [{
                     "filename": "${KICAD10_3DMODEL_DIR}/x.wrl",
                     "resolved_path": "/real/x.wrl",
@@ -1701,6 +1703,7 @@ class TestKicadGetComponentHeightsRoute(unittest.TestCase):
             'daemon.kicad_bridge.list_footprint_models',
             return_value=[{
                 "reference": "U2",
+                "is_mounting_hole": False,
                 "models": [{
                     "filename": "${KICAD10_3DMODEL_DIR}/x.step",
                     "resolved_path": None,
@@ -1720,6 +1723,7 @@ class TestKicadGetComponentHeightsRoute(unittest.TestCase):
             'daemon.kicad_bridge.list_footprint_models',
             return_value=[{
                 "reference": "U3",
+                "is_mounting_hole": False,
                 "models": [{
                     "filename": "${KICAD10_3DMODEL_DIR}/x.step",
                     "resolved_path": "/real/x.step",
@@ -1739,6 +1743,7 @@ class TestKicadGetComponentHeightsRoute(unittest.TestCase):
             'daemon.kicad_bridge.list_footprint_models',
             return_value=[{
                 "reference": "U4",
+                "is_mounting_hole": False,
                 "models": [{
                     "filename": "${KICAD10_3DMODEL_DIR}/x.step",
                     "resolved_path": "/real/x.step",
@@ -1749,6 +1754,37 @@ class TestKicadGetComponentHeightsRoute(unittest.TestCase):
             result = daemon.kicad_get_component_heights()
 
         self.assertEqual(result["unknown"], ["U4"])
+
+    def test_006b_a_mounting_hole_footprint_is_skipped_entirely_not_reported_unknown(self):
+        """CTX-311.15: a real click-through against an actual board found
+        this route flagging real, unannotated MountingHole footprints
+        (KiCad's own default "REF**" placeholder, repeated once per
+        affected footprint, indistinguishable to a caller) as missing a
+        3D model -- true but misleading, since a screw hole was never
+        expected to have one and is already represented by the
+        enclosure's own standoff geometry."""
+        with patch(
+            'daemon.kicad_bridge.list_footprint_models',
+            return_value=[
+                {"reference": "REF**", "is_mounting_hole": True, "models": []},
+                {
+                    "reference": "J3",
+                    "is_mounting_hole": False,
+                    "models": [{
+                        "filename": "${KICAD10_3DMODEL_DIR}/x.step",
+                        "resolved_path": "/real/x.step",
+                        "visible": True,
+                    }],
+                },
+            ],
+        ), patch(
+            'daemon.freecad_bridge.get_step_bounding_box_mm',
+            return_value={"x_mm": 2.54, "y_mm": 10.16, "z_mm": 11.54},
+        ):
+            result = daemon.kicad_get_component_heights()
+
+        self.assertEqual(result["known"], [{"reference": "J3", "height_mm": 11.54}])
+        self.assertEqual(result["unknown"], [])
 
     def test_007_kicad_bridge_import_failure_raises_a_clean_error(self):
         original = daemon.kicad_bridge
