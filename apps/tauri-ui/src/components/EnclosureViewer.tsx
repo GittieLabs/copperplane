@@ -139,19 +139,63 @@ export const DEFAULT_CAMERA_RADIUS = 80 * Math.sqrt(3)
 // a flat top-down "Top" preset view) while actually showing the
 // cavity/floor on first load, for any real enclosure's proportions --
 // not tuned to one board's own aspect ratio.
-export const DEFAULT_CAMERA_POLAR = (35 * Math.PI) / 180
+//
+// CTX-311.10: real user feedback again -- the original 35° from
+// CTX-311.8, combined with the *default*, board-shape-blind azimuth
+// below, made a real long/narrow enclosure look like a flat, featureless
+// slab: steep enough that the vertical walls (the only real surfaces
+// whose lighting differs from the floor, with no real shadow-mapping in
+// this Canvas to otherwise reveal depth) had almost no visible on-screen
+// height. Eased back to 42° -- still steeper than the original isometric
+// angle, but real enough wall area is visible again for that lighting
+// difference to actually read as depth, now that `computeDefaultAzimuth`
+// below also does its own real part to avoid occlusion.
+export const DEFAULT_CAMERA_POLAR = (42 * Math.PI) / 180
 export const DEFAULT_CAMERA_AZIMUTH = Math.PI / 4
 const _ROTATE_STEP = Math.PI / 4
 const _POLE_EPSILON = 0.001
 // A real object's own bounding-sphere radius alone puts it right at the
 // viewport's edge -- this multiplier leaves real headroom so it doesn't.
 const _FRAME_MULTIPLIER = 1.6
+// CTX-311.10: never let the default azimuth collapse into a fully flat,
+// axis-aligned side view -- always keep at least this much real 3/4
+// perspective, even for an extremely elongated real board.
+const _MIN_AZIMUTH_OFFSET = (15 * Math.PI) / 180
 
 export function sphericalToCartesian(radius: number, polar: number, azimuth: number): [number, number, number] {
   const x = radius * Math.sin(polar) * Math.cos(azimuth)
   const y = radius * Math.cos(polar)
   const z = radius * Math.sin(polar) * Math.sin(azimuth)
   return [x, y, z]
+}
+
+/** Real user feedback (`CTX-311.10`), and something `CTX-311.8`'s own
+ * Plan Drift had already named as a real, deferred risk: a fixed 45°
+ * default azimuth looks fine for a roughly-square footprint, but for a
+ * real, elongated board (the exact real board in both the `CTX-311.8`
+ * and `CTX-311.10` screenshots), it can put the camera looking nearly
+ * along the *long* axis -- the near end wall, short relative to the
+ * board's real length, still reads as a flat, featureless slab under
+ * perspective, hiding the opening almost entirely.
+ *
+ * Derives a real azimuth from the loaded mesh's own real horizontal
+ * (X/Z) extents instead: `atan2(sizeX, sizeZ)` biases the camera toward
+ * looking *across* the shorter horizontal axis (a real "broadside" view
+ * of the longer one), reducing exactly this occlusion -- and, for a
+ * roughly-square footprint, `atan2` naturally lands back near the
+ * original 45°, so this changes nothing for the common case. Clamped to
+ * `_MIN_AZIMUTH_OFFSET` on both sides of the two horizontal axes so an
+ * extreme aspect ratio never collapses into a fully flat side view with
+ * no perspective at all. Falls back to the fixed default for a
+ * degenerate (empty, or zero-width in some real axis) box, never a
+ * guess. */
+export function computeDefaultAzimuth(object: THREE.Object3D): number {
+  const box = new THREE.Box3().setFromObject(object)
+  if (box.isEmpty()) return DEFAULT_CAMERA_AZIMUTH
+  const size = box.getSize(new THREE.Vector3())
+  if (size.x <= 0 || size.z <= 0) return DEFAULT_CAMERA_AZIMUTH
+  const raw = Math.atan2(size.x, size.z)
+  return Math.min(Math.max(raw, _MIN_AZIMUTH_OFFSET), Math.PI / 2 - _MIN_AZIMUTH_OFFSET)
 }
 
 interface CameraState {
@@ -266,6 +310,11 @@ export function EnclosureViewer({
     azimuth: DEFAULT_CAMERA_AZIMUTH,
     center: new THREE.Vector3(0, 0, 0),
   })
+  // CTX-311.10: tracks which real `base.scene` the default azimuth has
+  // already been computed for, so a real new generation gets a fresh,
+  // shape-aware default while an unrelated re-render (e.g. toggling
+  // "Show lid") never silently overwrites a user's own manual rotation.
+  const azimuthInitializedFor = useRef<THREE.Group | null>(null)
 
   // Computed synchronously during render (not an effect) so the
   // Canvas's own initial `camera` prop is correct on the very first
@@ -278,6 +327,10 @@ export function EnclosureViewer({
     if (frame) {
       cameraState.current.radius = frame.radius
       cameraState.current.center = frame.center
+    }
+    if (azimuthInitializedFor.current !== base.scene) {
+      azimuthInitializedFor.current = base.scene
+      cameraState.current.azimuth = computeDefaultAzimuth(base.scene)
     }
   }
 
