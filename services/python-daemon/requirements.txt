@@ -5,6 +5,16 @@ pyyaml==6.0.3
 certifi==2026.4.22
 gittielabs-agentflow[anthropic,openai,google]==0.9.0
 
+# CTX-314.1: real-verified against live .kicad_mod/.kicad_sym files
+# pulled from espressif/kicad-libraries and sparkfun/SparkFun-KiCad-
+# Libraries (two different KiCad format generations) -- parses both
+# correctly. Notably NOT the same result as kicad_pcb_import.py's own
+# real finding that this same version crashes on a full .kicad_pcb
+# board file (SPEC-310) -- footprints/symbols are simpler, self-
+# contained S-expressions kiutils handles fine even though full boards
+# don't.
+kiutils==1.4.8
+
 # Pinned explicitly (CTX-402.6): a transitive dependency (of anthropic/
 # openai/google SDKs pulled in above) that would otherwise float to
 # whatever's newest. Real, direct-to-PyPI checking found cryptography
