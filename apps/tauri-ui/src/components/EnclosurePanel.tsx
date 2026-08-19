@@ -62,7 +62,27 @@ const _DEFAULT_BOARD_PARAMS = {
  * docstring: "the real, sufficient board-outline data for SPEC-109's
  * fixed-rectangular-enclosure scope") -- said honestly in the UI
  * instead of implying "From board" traces a non-rectangular outline. */
-export function EnclosurePanel({ projectName }: { projectName: string }) {
+/** CTX-312.1: one real export event, reported straight from the point a
+ * real `freecad.export_enclosure` call actually succeeds -- App.tsx's
+ * own `handleExportSuccess` immediately persists it into the current
+ * Project's real, permanent `export_history`, rather than depending on
+ * a separate, easy-to-forget "Save Project" click to not lose it. */
+export interface EnclosureExportSuccessEvent {
+  destPath: string
+  glbPath: string
+  stepPath: string
+  wallThicknessMm?: number
+  clearanceMm?: number
+  standoffHeightMm?: number
+}
+
+export function EnclosurePanel({
+  projectName,
+  onExportSuccess,
+}: {
+  projectName: string
+  onExportSuccess?: (event: EnclosureExportSuccessEvent) => void
+}) {
   const [mode, setMode] = useState<'board' | 'manual'>('board')
 
   const [loadingList, setLoadingList] = useState(false)
@@ -332,6 +352,14 @@ export function EnclosurePanel({ projectName }: { projectName: string }) {
       await handle.result
       setExportOpen(false)
       setExportedPath(destPath)
+      onExportSuccess?.({
+        destPath,
+        glbPath: result.glb_path,
+        stepPath: result.step_path,
+        wallThicknessMm: resultBoardParams?.wallThicknessMm,
+        clearanceMm: resultBoardParams?.clearanceMm,
+        standoffHeightMm: resultBoardParams?.standoffHeightMm,
+      })
     } catch (err) {
       setExportError(err instanceof Error ? err.message : String(err))
     } finally {

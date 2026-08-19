@@ -6,12 +6,15 @@ import {
   listLibraryParts,
   listProjects,
   loadConversation,
+  loadProject,
+  pickProjectDirectory,
   saveProject,
   type ConversationTurn,
+  type Project,
 } from './lib/projects'
 import { BoardAdvisor } from './components/BoardAdvisor'
 import { ComponentDiscovery } from './components/ComponentDiscovery'
-import { EnclosurePanel } from './components/EnclosurePanel'
+import { EnclosurePanel, type EnclosureExportSuccessEvent } from './components/EnclosurePanel'
 import { Rail } from './components/Rail'
 import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
@@ -58,6 +61,15 @@ function App() {
   const [view, setView] = useState<View>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  // CTX-312.1: the current project's own real record -- SPEC-304 §2.1's
+  // long-described "link to a KiCad project directory on disk," plus
+  // the real Save Project manifest fields (`last_results`,
+  // `export_history`). Reloaded whenever the selected project changes;
+  // `null` while loading or when no project is selected at all.
+  const [currentProject, setCurrentProject] = useState<Project | null>(null)
+  const [savingProject, setSavingProject] = useState(false)
+  const [projectActionError, setProjectActionError] = useState<string | null>(null)
+
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -80,6 +92,30 @@ function App() {
     }
   }, [])
 
+  // CTX-312.1: loads the selected project's own real record (directory
+  // link, last results, export history) -- reset to null immediately on
+  // every project switch so a stale previous project's state can never
+  // flash or leak into the next one while the real load is in flight.
+  useEffect(() => {
+    if (view?.kind !== 'project') {
+      setCurrentProject(null)
+      return
+    }
+    let cancelled = false
+    setCurrentProject(null)
+    setProjectActionError(null)
+    loadProject(view.name)
+      .then((project) => {
+        if (!cancelled) setCurrentProject(project)
+      })
+      .catch((err) => {
+        if (!cancelled) setProjectActionError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [view?.kind === 'project' ? view.name : null])
+
   async function handleCreateProject(name: string) {
     try {
       await saveProject({ name })
@@ -96,6 +132,65 @@ function App() {
 
   function handleSelectArea(area: Area) {
     setView((prev) => (prev?.kind === 'project' ? { ...prev, area } : prev))
+  }
+
+  async function handleLinkDirectory() {
+    if (!currentProject) return
+    setProjectActionError(null)
+    try {
+      const directory = await pickProjectDirectory()
+      if (!directory) return
+      const saved = await saveProject({ ...currentProject, directory })
+      setCurrentProject(saved)
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleSaveProject() {
+    if (!currentProject) return
+    setSavingProject(true)
+    setProjectActionError(null)
+    try {
+      const saved = await saveProject(currentProject)
+      setCurrentProject(saved)
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSavingProject(false)
+    }
+  }
+
+  // CTX-312.1: a real export (CTX-311.13's own "keep this" action) is
+  // persisted to the current project's real, permanent export_history
+  // immediately, not deferred to a separate "Save Project" click a user
+  // could forget -- the real file was already kept on disk; the record
+  // of that shouldn't depend on a second, easy-to-skip step.
+  async function handleExportSuccess(event: EnclosureExportSuccessEvent) {
+    if (!currentProject) return
+    const updated: Project = {
+      ...currentProject,
+      last_results: {
+        ...currentProject.last_results,
+        enclosure: {
+          glb_path: event.glbPath,
+          step_path: event.stepPath,
+          wall_thickness_mm: event.wallThicknessMm,
+          clearance_mm: event.clearanceMm,
+          standoff_height_mm: event.standoffHeightMm,
+        },
+      },
+      export_history: [
+        ...(currentProject.export_history ?? []),
+        { area: 'enclosure', dest_path: event.destPath, exported_at: new Date().toISOString() },
+      ],
+    }
+    try {
+      const saved = await saveProject(updated)
+      setCurrentProject(saved)
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    }
   }
 
   return (
@@ -120,6 +215,35 @@ function App() {
 
         {view?.kind === 'project' && (
           <>
+            {/* CTX-312.1: project-scoped chrome, shown above every area
+             * tab rather than folded into Overview -- SPEC-312's own
+             * Non-Goals deliberately leave Overview's eventual purpose
+             * (dashboard vs. cross-project landing page) undecided, so
+             * these real, already-scoped actions don't get entangled
+             * with a surface whose future shape isn't settled yet. */}
+            <div className="flex w-full max-w-md items-center justify-between gap-2 text-xs">
+              <button
+                type="button"
+                className="truncate text-left text-neutral-400 hover:text-neutral-200"
+                onClick={() => void handleLinkDirectory()}
+                disabled={!currentProject}
+                title={currentProject?.directory ?? undefined}
+              >
+                {currentProject?.directory ? `Linked: ${currentProject.directory}` : 'Link to folder…'}
+              </button>
+              <button
+                type="button"
+                className="shrink-0 rounded border border-neutral-700 px-2 py-1 font-medium text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
+                onClick={() => void handleSaveProject()}
+                disabled={!currentProject || savingProject}
+              >
+                {savingProject ? 'Saving…' : 'Save Project'}
+              </button>
+            </div>
+            {projectActionError && (
+              <p className="w-full max-w-md text-xs text-red-400">{projectActionError}</p>
+            )}
+
             <div className="flex w-full max-w-md gap-1 border-b border-neutral-800 pb-2">
               {AREAS.map(({ key, label }) => (
                 <button
@@ -161,7 +285,7 @@ function App() {
               <BoardAdvisor projectName={view.name} />
             </div>
             <div data-testid="enclosure-area" className={view.area === 'enclosure' ? undefined : 'hidden'}>
-              <EnclosurePanel projectName={view.name} />
+              <EnclosurePanel projectName={view.name} onExportSuccess={handleExportSuccess} />
             </div>
           </>
         )}

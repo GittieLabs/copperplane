@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const dispatchMock = vi.fn()
+const openDialogMock = vi.fn()
 
 vi.mock('./ipc', () => ({ dispatch: dispatchMock }))
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: openDialogMock }))
 
 const {
   listProjects,
   saveProject,
   loadProject,
+  pickProjectDirectory,
   listLibraryParts,
   loadConversation,
   appendConversationTurn,
@@ -15,6 +18,7 @@ const {
 
 beforeEach(() => {
   dispatchMock.mockReset()
+  openDialogMock.mockReset()
 })
 
 function ok(result: unknown) {
@@ -53,6 +57,21 @@ describe('saveProject / loadProject', () => {
 
     await loadProject('weather-pcb')
     expect(dispatchMock).toHaveBeenCalledWith('project.load', { name: 'weather-pcb' })
+  })
+})
+
+describe('pickProjectDirectory', () => {
+  it('opens a real directory-mode dialog and returns the picked folder', async () => {
+    openDialogMock.mockResolvedValueOnce('/real/PCBs/weather-pcb')
+
+    await expect(pickProjectDirectory()).resolves.toBe('/real/PCBs/weather-pcb')
+    expect(openDialogMock).toHaveBeenCalledWith({ directory: true })
+  })
+
+  it('returns null, not an error, when the dialog is cancelled', async () => {
+    openDialogMock.mockResolvedValueOnce(null)
+
+    await expect(pickProjectDirectory()).resolves.toBeNull()
   })
 })
 
