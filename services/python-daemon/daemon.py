@@ -1,4 +1,3 @@
-import hashlib
 import inspect
 import logging
 import logging.handlers
@@ -73,11 +72,12 @@ except Exception:
 
 try:
     import freecad_bridge
-    from freecad_bridge import generate_enclosure
+    from freecad_bridge import generate_enclosure, export_enclosure
 except Exception:
     logger.exception("freecad_bridge failed to import -- freecad.* routes will be unavailable")
     freecad_bridge = None
     generate_enclosure = None
+    export_enclosure = None
 
 try:
     import llm_providers
@@ -243,16 +243,6 @@ def kicad_inject_component(schema: dict, x_mm: float, y_mm: float) -> dict:
     return kicad_bridge.inject_component(schema, (x_mm, y_mm))
 
 
-def _board_revision_for(outline: dict, recognized_holes: list) -> str:
-    """SPEC-109: a real sha256 of the exact board data actually used to
-    build the enclosure -- deterministic and self-contained (no extra
-    KiCad calls, no dependency on a board file path this bridge never
-    has direct filesystem access to). Only recognized holes are hashed,
-    since only they affect the physical geometry that was built."""
-    payload = json.dumps({"outline": outline, "holes": recognized_holes}, sort_keys=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
 def freecad_generate_enclosure(
     height: float,
     width: float = None,
@@ -264,7 +254,6 @@ def freecad_generate_enclosure(
     standoff_height_mm: float = 5.0,
     lid: bool = False,
     lid_thickness_mm: float = None,
-    project_name: str = None,
     timeout_s: float = 30.0,
     cancel_event=None,
 ) -> dict:
@@ -297,23 +286,24 @@ def freecad_generate_enclosure(
     `unrecognized_holes` return value, for a future UI to surface rather
     than the daemon silently dropping it.
 
-    `library_store.save_artifact` (kind: "enclosure", a real
-    `board_revision`) only runs when the caller supplies `project_name`
-    (optional, default None) -- keeping today's frontend contract
-    (`App.tsx`'s `dims` object, no `project_name`) working unmodified
-    until the UI-wiring child context SPEC-109 already names lands.
+    Generating no longer implicitly persists anything (`CTX-311.13`
+    removed the `project_name`-gated `library_store.save_artifact` call
+    this route used to make on every single call -- a real, confirmed,
+    live bug: the frontend always supplied `project_name`, so every
+    Generate wrote an Artifact record, and the very next regenerate's own
+    leak-bounding cleanup deleted the files that record pointed at.
+    `freecad.export_enclosure` is now the one real, explicit "keep this"
+    action; Generate stays a cheap, repeatable preview step, matching
+    `CTX-311.2`'s own explicit-save-only decision for real, not just in
+    name).
 
     `lid` (SPEC-311) passes straight through to `generate_enclosure`,
     which raises a clean `ValueError` in manual mode -- no board-driven
-    outline means no open top for a lid to close. When present, the
-    result's real `lid_glb_path`/`lid_step_path` are also persisted onto
-    a saved Artifact, so a saved enclosure's lid isn't silently
-    forgotten on reload."""
+    outline means no open top for a lid to close."""
     if width is not None and depth is not None:
         outline = None
         recognized_holes = []
         unrecognized_holes = []
-        board_revision = f"manual:{width}x{depth}x{height}"
     elif pcb_path:
         if kicad_pcb_import is None:
             raise RuntimeError(
@@ -323,7 +313,6 @@ def freecad_generate_enclosure(
         outline = kicad_pcb_import.extract_board_outline(pcb_path)
         recognized_holes = kicad_pcb_import.extract_mounting_holes(pcb_path)
         unrecognized_holes = []
-        board_revision = f"file:{pcb_path}:{_board_revision_for(outline, recognized_holes)}"
     else:
         if kicad_bridge is None:
             raise RuntimeError(
@@ -335,7 +324,6 @@ def freecad_generate_enclosure(
         holes = kicad_bridge.get_mounting_holes()
         recognized_holes = [h for h in holes if h["recognized"]]
         unrecognized_holes = [h for h in holes if not h["recognized"]]
-        board_revision = _board_revision_for(outline, recognized_holes)
 
     result = generate_enclosure(
         height=height,
@@ -371,26 +359,41 @@ def freecad_generate_enclosure(
         # found holes on in the first place.
         result["no_mounting_holes_found"] = not recognized_holes and not unrecognized_holes
 
-    if project_name:
-        if library_store is None:
-            raise RuntimeError(
-                "Saving an enclosure Artifact requires library_store, which failed to import."
-            )
-        artifact_id = uuid.uuid4().hex
-        artifact = {
-            "artifact_id": artifact_id,
-            "kind": "enclosure",
-            "board_revision": board_revision,
-            "glb_path": result["glb_path"],
-            "step_path": result["step_path"],
-        }
-        if lid:
-            artifact["lid_glb_path"] = result["lid_glb_path"]
-            artifact["lid_step_path"] = result["lid_step_path"]
-        library_store.save_artifact(project_name, artifact)
-        result["artifact_id"] = artifact_id
-
     return result
+
+
+def freecad_export_enclosure(
+    parts: str,
+    fmt: str,
+    dest_path: str,
+    glb_path: str = None,
+    step_path: str = None,
+    lid_glb_path: str = None,
+    lid_step_path: str = None,
+    timeout_s: float = 30.0,
+    cancel_event=None,
+) -> dict:
+    """The freecad.export_enclosure route (`CTX-311.13`) -- the real,
+    explicit "Save" action `SPEC-311` §2 named as an open question and
+    `CTX-311.2` decided (explicit-save-only) but never actually wired up
+    (see `freecad_generate_enclosure`'s own docstring for the real,
+    confirmed auto-save bug this replaces). A thin wrapper over
+    `freecad_bridge.export_enclosure` -- every source path comes straight
+    from the caller's own already-completed Generate result (`EnclosurePanel`'s
+    own `result` state), never looked up server-side, so this route has no
+    hidden dependency on daemon-side "last generated" state."""
+    export_enclosure(
+        parts=parts,
+        fmt=fmt,
+        dest_path=dest_path,
+        glb_path=glb_path,
+        step_path=step_path,
+        lid_glb_path=lid_glb_path,
+        lid_step_path=lid_step_path,
+        timeout_s=timeout_s,
+        cancel_event=cancel_event,
+    )
+    return {"dest_path": dest_path}
 
 
 # --- library.*/project.* routes (SPEC-304, CTX-304.1) -----------------
@@ -516,6 +519,15 @@ def project_load(name: str) -> dict:
 
 def project_list() -> list:
     return library_store.list_projects()
+
+
+def project_get_directory(name: str) -> dict:
+    """CTX-311.13: the real, single source of truth for a project's own
+    real directory path -- used to default the Enclosure Export dialog's
+    save location to the project's own folder, rather than a second copy
+    of `library_store`'s own `<storage_root>/projects/<name>/` convention
+    hand-built on the frontend."""
+    return {"path": library_store.project_directory(name)}
 
 
 def project_save_artifact(project_name: str, artifact: dict) -> dict:
@@ -954,6 +966,8 @@ def _build_routes() -> dict:
         routes["kicad.inject_component"] = kicad_inject_component
     if generate_enclosure is not None:
         routes["freecad.generate_enclosure"] = freecad_generate_enclosure
+    if export_enclosure is not None:
+        routes["freecad.export_enclosure"] = freecad_export_enclosure
     if llm_providers is not None:
         routes["llm.chat"] = llm_chat
     if component_pipeline is not None:
@@ -979,6 +993,7 @@ def _build_routes() -> dict:
         routes["project.list_artifacts"] = project_list_artifacts
         routes["project.append_conversation_turn"] = project_append_conversation_turn
         routes["project.load_conversation"] = project_load_conversation
+        routes["project.get_directory"] = project_get_directory
     if tool_registry is not None:
         routes["agent.dispatch_tool"] = agent_dispatch_tool
     if fp_lib_table is not None:
@@ -1008,9 +1023,9 @@ ROUTES = _build_routes()
 # {"job_id": ...} immediately, and the real result/failure/cancellation
 # arrives later as a job.* notification (SPEC-105 §2).
 ASYNC_ROUTES = {
-    "freecad.generate_enclosure", "llm.chat", "kicad.generate_component", "kicad.inject_component",
-    "component.search", "component.cache_datasheet", "kicad.generate_connection_guidance",
-    "kicad.check_board", "kicad.check_schematic",
+    "freecad.generate_enclosure", "freecad.export_enclosure", "llm.chat", "kicad.generate_component",
+    "kicad.inject_component", "component.search", "component.cache_datasheet",
+    "kicad.generate_connection_guidance", "kicad.check_board", "kicad.check_schematic",
     "kicad.get_component_heights", "kicad.export_board_glb",
 } & ROUTES.keys()
 

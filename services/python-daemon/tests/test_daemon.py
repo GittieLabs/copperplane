@@ -1397,61 +1397,29 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
         self.assertEqual(result["unrecognized_holes"], [_FAKE_HOLES[1]])
 
     @patch('daemon.generate_enclosure')
-    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
-    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
-    def test_004_project_name_saves_a_real_enclosure_artifact_with_a_real_board_revision(
-        self, mock_get_outline, mock_get_holes, mock_generate,
-    ):
-        """TEST-008: for the first time, an enclosure Artifact is
-        actually saved -- closing the board_revision requirement
-        library_store.py has enforced since CTX-304.1 but nothing has
-        ever called save_artifact against, for real (a real tmpdir
-        storage root, not mocked)."""
-        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
-        daemon.library_store.save_project({"name": "weather-pcb"})
-
-        result = daemon.freecad_generate_enclosure(height=20, project_name="weather-pcb")
-
-        self.assertIn("artifact_id", result)
-        artifacts = daemon.library_store.list_artifacts("weather-pcb")
-        self.assertEqual(artifacts, [result["artifact_id"]])
-        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
-        self.assertEqual(loaded["kind"], "enclosure")
-        self.assertTrue(loaded["board_revision"])
-
-    @patch('daemon.generate_enclosure')
-    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
-    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
-    def test_005_no_project_name_never_saves_an_artifact_matching_todays_frontend(
-        self, mock_get_outline, mock_get_holes, mock_generate,
-    ):
-        """Today's App.tsx dims object never sends project_name -- this
-        must keep working exactly as before, with no artifact saved."""
+    def test_004_no_longer_accepts_project_name_or_saves_anything(self, mock_generate):
+        """CTX-311.13: the real, confirmed, live bug this route used to
+        have -- `project_name` was always supplied by the real frontend
+        (`EnclosurePanel.tsx`'s own `projectName` prop), so every single
+        Generate silently wrote an Artifact record, and the very next
+        regenerate's own leak-bounding cleanup deleted the files that
+        record pointed at. Fixed by removing the parameter and the save
+        entirely -- `freecad.export_enclosure` is now the only real save
+        action. A stray `project_name` kwarg is a real `TypeError`, not
+        silently ignored -- confirms the parameter is genuinely gone, not
+        just unused."""
         mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
 
         result = daemon.freecad_generate_enclosure(height=20)
-
         self.assertNotIn("artifact_id", result)
 
-    @patch('daemon.generate_enclosure')
-    def test_006_manual_mode_board_revision_is_a_real_honest_sentinel(self, mock_generate):
-        """The no-board-data fallback has no real board to hash -- the
-        sentinel must say so honestly, not fabricate a hash implying real
-        board data was read."""
-        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
-        daemon.library_store.save_project({"name": "weather-pcb"})
-
-        result = daemon.freecad_generate_enclosure(
-            height=20, width=50, depth=30, project_name="weather-pcb",
-        )
-
-        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
-        self.assertEqual(loaded["board_revision"], "manual:50x30x20")
+        with self.assertRaises(TypeError):
+            daemon.freecad_generate_enclosure(height=20, project_name="weather-pcb")
 
     @patch('daemon.generate_enclosure')
     @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
     @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
-    def test_007_zero_holes_of_any_kind_sets_the_honest_no_holes_found_flag(
+    def test_005_zero_holes_of_any_kind_sets_the_honest_no_holes_found_flag(
         self, mock_get_outline, mock_get_holes, mock_generate,
     ):
         """SPEC-311 §2: distinct from the existing unrecognized_holes
@@ -1467,7 +1435,7 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
     @patch('daemon.generate_enclosure')
     @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
     @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
-    def test_008_any_real_hole_found_clears_the_no_holes_found_flag(
+    def test_006_any_real_hole_found_clears_the_no_holes_found_flag(
         self, mock_get_outline, mock_get_holes, mock_generate,
     ):
         mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
@@ -1477,7 +1445,7 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
         self.assertFalse(result["no_mounting_holes_found"])
 
     @patch('daemon.generate_enclosure')
-    def test_009_manual_mode_never_sets_the_no_holes_found_flag(self, mock_generate):
+    def test_007_manual_mode_never_sets_the_no_holes_found_flag(self, mock_generate):
         """Manual mode has no board data to have found holes on in the
         first place -- the flag is meaningless there, not falsely
         reported as True."""
@@ -1487,10 +1455,40 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
 
         self.assertNotIn("no_mounting_holes_found", result)
 
+
+class TestFreecadExportEnclosureRoute(unittest.TestCase):
+    """CTX-311.13: freecad_export_enclosure is a thin route wrapper --
+    the real geometry/subprocess/file-copy behavior is already verified
+    against real freecadcmd in TestFreecadBridgeExportEnclosure
+    (test_freecad_bridge.py). These tests cover only the route's own
+    pass-through and registration."""
+
+    @patch('daemon.export_enclosure')
+    def test_001_passes_every_param_straight_through(self, mock_export):
+        result = daemon.freecad_export_enclosure(
+            parts="combined", fmt="step", dest_path="/tmp/out.step",
+            glb_path="/tmp/e.glb", step_path="/tmp/e.step",
+            lid_glb_path="/tmp/lid.glb", lid_step_path="/tmp/lid.step",
+        )
+
+        mock_export.assert_called_once_with(
+            parts="combined", fmt="step", dest_path="/tmp/out.step",
+            glb_path="/tmp/e.glb", step_path="/tmp/e.step",
+            lid_glb_path="/tmp/lid.glb", lid_step_path="/tmp/lid.step",
+            timeout_s=30.0, cancel_event=None,
+        )
+        self.assertEqual(result, {"dest_path": "/tmp/out.step"})
+
+    def test_002_registered_as_a_real_route_and_async(self):
+        self.assertIs(daemon.ROUTES["freecad.export_enclosure"], daemon.freecad_export_enclosure)
+        self.assertIn("freecad.export_enclosure", daemon.ASYNC_ROUTES)
+
+
+class TestFreecadGenerateEnclosureLidMode(unittest.TestCase):
     @patch('daemon.generate_enclosure')
     @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
     @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
-    def test_010_lid_passes_through_to_generate_enclosure(
+    def test_001_lid_passes_through_to_generate_enclosure(
         self, mock_get_outline, mock_get_holes, mock_generate,
     ):
         """CTX-311.2: lid/lid_thickness_mm reach freecad_bridge.
@@ -1511,40 +1509,42 @@ class TestFreecadGenerateEnclosureRoute(unittest.TestCase):
     @patch('daemon.generate_enclosure')
     @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
     @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
-    def test_011_a_saved_lid_artifact_persists_its_own_real_paths(
+    def test_002_a_generated_lid_returns_its_own_real_paths(
         self, mock_get_outline, mock_get_holes, mock_generate,
     ):
-        """A saved enclosure's lid must not be silently forgotten on
-        reload -- its real glb/step paths are part of the saved
-        Artifact, not just the base shell's."""
+        """CTX-311.13: since Generate no longer persists anything itself
+        (see TestFreecadGenerateEnclosureRoute.test_004), a lid's real
+        paths only need to survive in the route's own return value --
+        EnclosurePanel keeps them in its own `result` state and passes
+        them straight to `freecad.export_enclosure` when the user
+        actually chooses to export."""
         mock_generate.return_value = {
             "glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step",
             "lid_glb_path": "/tmp/lid.glb", "lid_step_path": "/tmp/lid.step",
         }
+
+        result = daemon.freecad_generate_enclosure(height=20, lid=True)
+
+        self.assertEqual(result["lid_glb_path"], "/tmp/lid.glb")
+        self.assertEqual(result["lid_step_path"], "/tmp/lid.step")
+
+
+class TestProjectGetDirectoryRoute(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_returns_the_real_project_directory_path(self):
         daemon.library_store.save_project({"name": "weather-pcb"})
 
-        result = daemon.freecad_generate_enclosure(
-            height=20, lid=True, project_name="weather-pcb",
-        )
+        result = daemon.project_get_directory("weather-pcb")
 
-        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
-        self.assertEqual(loaded["lid_glb_path"], "/tmp/lid.glb")
-        self.assertEqual(loaded["lid_step_path"], "/tmp/lid.step")
-
-    @patch('daemon.generate_enclosure')
-    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=[])
-    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
-    def test_012_no_lid_never_adds_lid_paths_to_a_saved_artifact(
-        self, mock_get_outline, mock_get_holes, mock_generate,
-    ):
-        mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
-        daemon.library_store.save_project({"name": "weather-pcb"})
-
-        result = daemon.freecad_generate_enclosure(height=20, project_name="weather-pcb")
-
-        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
-        self.assertNotIn("lid_glb_path", loaded)
-        self.assertNotIn("lid_step_path", loaded)
+        self.assertEqual(result["path"], daemon.library_store.project_directory("weather-pcb"))
+        self.assertTrue(os.path.isdir(result["path"]))
 
 
 class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
@@ -1553,14 +1553,6 @@ class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
     TestFreecadGenerateEnclosureRoute's live-mode tests already cover
     kicad_bridge; the real DXF/Excellon parsing itself is already
     verified for real in test_kicad_pcb_import.py."""
-
-    def setUp(self):
-        self._tmpdir = tempfile.TemporaryDirectory()
-        daemon.library_store.configure(storage_root=self._tmpdir.name)
-
-    def tearDown(self):
-        daemon.library_store.configure(storage_root=None)
-        self._tmpdir.cleanup()
 
     @patch('daemon.generate_enclosure')
     @patch('daemon.kicad_pcb_import.extract_mounting_holes', return_value=_FAKE_HOLES)
@@ -1604,18 +1596,23 @@ class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
     @patch('daemon.generate_enclosure')
     @patch('daemon.kicad_pcb_import.extract_mounting_holes', return_value=_FAKE_HOLES)
     @patch('daemon.kicad_pcb_import.extract_board_outline', return_value=_FAKE_OUTLINE)
+    @patch('daemon.kicad_bridge.get_mounting_holes', return_value=_FAKE_HOLES)
+    @patch('daemon.kicad_bridge.get_board_outline', return_value=_FAKE_OUTLINE)
     def test_003_pcb_path_wins_over_a_live_connection_when_both_could_apply(
-        self, mock_extract_outline, mock_extract_holes, mock_generate,
+        self, mock_bridge_outline, mock_bridge_holes, mock_extract_outline, mock_extract_holes,
+        mock_generate,
     ):
+        """A real live connection being open at the same time a real
+        `pcb_path` is given must never flip mode selection -- the fixed
+        priority order (manual > file > live) is explicit, not
+        connection-sniffed."""
         mock_generate.return_value = {"glb_path": "/tmp/e.glb", "step_path": "/tmp/e.step"}
-        daemon.library_store.save_project({"name": "weather-pcb"})
 
-        result = daemon.freecad_generate_enclosure(
-            height=20, pcb_path='/real/board.kicad_pcb', project_name="weather-pcb",
-        )
+        daemon.freecad_generate_enclosure(height=20, pcb_path='/real/board.kicad_pcb')
 
-        loaded = daemon.library_store.load_artifact("weather-pcb", result["artifact_id"])
-        self.assertTrue(loaded["board_revision"].startswith("file:/real/board.kicad_pcb:"))
+        mock_extract_outline.assert_called_once_with('/real/board.kicad_pcb')
+        mock_bridge_outline.assert_not_called()
+        mock_bridge_holes.assert_not_called()
 
     def test_004_kicad_pcb_import_import_failure_raises_a_clean_error(self):
         original = daemon.kicad_pcb_import
