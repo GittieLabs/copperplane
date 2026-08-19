@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 
 const {
-  useGlbScene, disposeScene, sphericalToCartesian, computeFrame,
+  useGlbScene, disposeScene, sphericalToCartesian, computeFrame, computeDefaultAzimuth,
   DEFAULT_CAMERA_RADIUS, DEFAULT_CAMERA_POLAR, DEFAULT_CAMERA_AZIMUTH,
 } = await import('./EnclosureViewer')
 
@@ -217,5 +217,46 @@ describe('computeFrame (CTX-311.4: the real fix for the camera-pointed-at-nothin
 
   it('returns null (never a guessed frame) when nothing real was passed', () => {
     expect(computeFrame([])).toBeNull()
+  })
+})
+
+describe('computeDefaultAzimuth (CTX-311.10: real broadside bias for elongated boards)', () => {
+  it('a roughly-square footprint lands back near the original fixed 45-degree default', () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 10))
+    expect(computeDefaultAzimuth(mesh)).toBeCloseTo(Math.PI / 4, 6)
+  })
+
+  it('CTX-311.10: a real, elongated footprint (the exact real board shape from the user\'s own screenshot) biases well away from 45 degrees, toward a broadside view', () => {
+    // The real NFC_Reader_ESP32 board's own real footprint, confirmed
+    // live during this session's own research: ~49.5mm x ~106.5mm --
+    // Z (106.5) is the real long axis here, so the broadside bias
+    // should pull azimuth *below* 45 degrees (camera positioned more
+    // along X, looking across the short axis at the long Z face).
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(49.5, 20, 106.5))
+    const azimuth = computeDefaultAzimuth(mesh)
+
+    expect(azimuth).toBeLessThan(Math.PI / 4)
+    // A meaningfully large bias, not a rounding-error nudge.
+    expect(Math.PI / 4 - azimuth).toBeGreaterThan((10 * Math.PI) / 180)
+  })
+
+  it('an extreme aspect ratio still keeps a real minimum 3/4 perspective, never a fully flat side-on view', () => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 5, 1000))
+    const azimuth = computeDefaultAzimuth(mesh)
+
+    expect(azimuth).toBeLessThan(Math.PI / 2)
+    expect(Math.PI / 2 - azimuth).toBeGreaterThanOrEqual((15 * Math.PI) / 180 - 1e-9)
+  })
+
+  it('swapping which horizontal axis is longer swaps the bias direction relative to 45 degrees', () => {
+    const longX = computeDefaultAzimuth(new THREE.Mesh(new THREE.BoxGeometry(100, 5, 10)))
+    const longZ = computeDefaultAzimuth(new THREE.Mesh(new THREE.BoxGeometry(10, 5, 100)))
+
+    expect(longX).toBeGreaterThan(Math.PI / 4)
+    expect(longZ).toBeLessThan(Math.PI / 4)
+  })
+
+  it('falls back to the fixed default for a degenerate (empty) object, never a guess', () => {
+    expect(computeDefaultAzimuth(new THREE.Group())).toBe(DEFAULT_CAMERA_AZIMUTH)
   })
 })
