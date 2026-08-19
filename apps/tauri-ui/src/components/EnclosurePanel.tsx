@@ -373,7 +373,16 @@ export function EnclosurePanel({
     // 3D preview is a real, direct benefit of the extra room beyond what
     // a plain text/list column needs.
     <div className="flex w-full max-w-6xl flex-col gap-4 lg:flex-row lg:items-start">
-      <div className="flex w-full flex-col gap-2 lg:w-96 lg:flex-none">
+      {/* CTX-305.3: the two-column split (a fixed-width sidebar next to a
+       * flex-1 viewer column) only makes sense once there's a real result
+       * to show on the right -- the viewer column below is now entirely
+       * absent from the DOM until `result` exists, so this sidebar only
+       * takes the narrow `lg:w-96` treatment when it actually has
+       * something to share the row with. Before that, it's the row's only
+       * child and naturally uses the full width, matching the below-`lg`
+       * stacked layout instead of pre-reserving empty space for content
+       * that doesn't exist yet. */}
+      <div className={`flex w-full flex-col gap-2 ${result ? 'lg:w-96 lg:flex-none' : ''}`}>
         <div className="flex gap-2">
           <button
             type="button"
@@ -519,20 +528,20 @@ export function EnclosurePanel({
         {error && <p className="text-sm text-red-400">{error}</p>}
       </div>
 
-      <div className="flex w-full flex-1 flex-col gap-2">
-        {result && result.unrecognized_holes.length > 0 && (
-          <p className="text-sm text-amber-400">
-            {result.unrecognized_holes.length} hole(s) on this board weren't recognized as mounting
-            holes and were skipped -- no standoff was drilled for them.
-          </p>
-        )}
-        {result?.no_mounting_holes_found && (
-          <p className="text-sm text-amber-400">
-            No mounting holes were found on this board -- the enclosure has no standoffs. If this
-            board really does have mounting holes, confirm they're real NPTH pads in KiCad.
-          </p>
-        )}
-        {result && (
+      {result && (
+        <div className="flex w-full flex-1 flex-col gap-2">
+          {result.unrecognized_holes.length > 0 && (
+            <p className="text-sm text-amber-400">
+              {result.unrecognized_holes.length} hole(s) on this board weren't recognized as mounting
+              holes and were skipped -- no standoff was drilled for them.
+            </p>
+          )}
+          {result.no_mounting_holes_found && (
+            <p className="text-sm text-amber-400">
+              No mounting holes were found on this board -- the enclosure has no standoffs. If this
+              board really does have mounting holes, confirm they're real NPTH pads in KiCad.
+            </p>
+          )}
           <>
             <EnclosureViewer
               glbPath={result.glb_path}
@@ -646,8 +655,8 @@ export function EnclosurePanel({
               </div>
             )}
           </>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
