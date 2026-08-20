@@ -316,7 +316,7 @@ plain deep link; and design/application guidance (decoupling, pull-ups, protecti
 its own new spec, [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md),
 below.
 
-#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md) done, more planned) 2026-08-20
+#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md) done, more planned) 2026-08-20
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-105, SPEC-202, SPEC-304, SPEC-306, SPEC-307
 
@@ -357,6 +357,17 @@ per call, not AgentFlow's own node-output references -- the DAG itself stays 100
 Citation contract implemented literally: an item whose page or quote doesn't check out is dropped,
 not repaired. Verified end-to-end with real Anthropic calls against `CTX-205.1`'s own fixture PDF.
 Class A, Class C, the daemon route, Part-record storage, and the UI panel remain real, open work.
+
+`CTX-205.3` (2026-08-20) wired the real pipeline into the app: a new async
+`datasheet.generate_guidance` route loads a real Part, ensures its datasheet is really cached
+locally (confirmed by reading the real save path: caching is best-effort and non-gating at
+Part-save time, not guaranteed), runs the real pipeline, and persists cited guidance onto the
+Part record. New storage follows this repo's real, established schema-evolution convention
+(read-time backfill via `setdefault`, never a `schema_version` bump) -- `design_guidance`
+backfills as `None`, not `{}`, keeping "never generated" and "generated, found nothing"
+distinguishable. Real `cancel_event` support added, matching the FreeCAD routes' own pattern.
+Verified end-to-end through `handle_request` with a real HTTP server and a real Anthropic call.
+Class A, Class C, and the UI panel remain real, open work.
 
 #### [SPEC-204](services/python-daemon/specs/SPEC-204-agent-tool-registry.md) — Agent Tool Registry — ✅ Completed ([CTX-204.1](services/python-daemon/context/CTX-204.1-agent-tool-registry.md)) 2026-08-14
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-102
