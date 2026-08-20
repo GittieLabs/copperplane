@@ -4,7 +4,7 @@ description: Extracts cited design guidance for one category from real datasheet
 provider: anthropic
 model: claude-sonnet-5
 temperature: 0.2
-max_tokens: 2048
+max_tokens: 4096
 ---
 You are a hardware datasheet analysis assistant. You will be given a category name and one or
 more real, numbered page excerpts from a real datasheet. Respond with ONLY a single JSON array --

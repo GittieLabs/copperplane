@@ -19,12 +19,16 @@ import re
 import pdfplumber
 
 # SPEC-205 §2.2's own listed structure-pass targets, each mapped to a
-# real regex matched case-insensitively against a page's extracted
-# text. Deliberately permissive (substring/keyword match, not just a
-# heading pattern) -- a real datasheet's section boundaries vary too
-# much across manufacturers to rely on heading formatting alone; a page
-# is a real candidate for a category if it *mentions* that category's
-# real subject matter anywhere on it, not only in a heading line.
+# real regex. Matched first against real detected *heading* text
+# (_find_headings below) -- a real, deliberate change from this
+# module's original "match anywhere on the page" design (CTX-205.1),
+# found broken by real testing against a real 234-page ATtiny85
+# datasheet: "reset" alone matched 84 of 234 real pages (register
+# descriptions, interrupt vector tables -- anywhere the word appears in
+# running prose, not the real Reset section), "clock"/"oscillator"
+# matched 141. The same regexes now only need to be specific enough to
+# match a real, short heading string ("Reset Sources", "Clock Systems
+# and their Distribution"), which they already were.
 CATEGORY_PATTERNS = {
     "absolute_maximum_ratings": re.compile(r"absolute maximum", re.IGNORECASE),
     "recommended_operating_conditions": re.compile(r"recommended operating", re.IGNORECASE),
@@ -35,6 +39,28 @@ CATEGORY_PATTERNS = {
     "layout": re.compile(r"\blayout\b|\btrace length\b|\bpcb layout\b", re.IGNORECASE),
     "typical_application": re.compile(r"typical application", re.IGNORECASE),
 }
+
+# A real, numbered section-heading line -- "8.2 Reset Sources" (no
+# trailing period, real ATtiny85 datasheet style) or "7. Absolute
+# Maximum Ratings" (trailing period after the number, this module's
+# own synthetic test fixture's style, and a real style other real
+# datasheets use too). Anchored to the *whole line* (nothing after the
+# title but whitespace) specifically to exclude a Table of Contents'
+# own real dotted-leader-plus-page-number lines ("4.8 Reset and
+# Interrupt Handling ....... 12"), which otherwise look identical up to
+# that point -- confirmed against the real ATtiny85 ToC pages, not
+# assumed.
+_HEADING_PATTERN = re.compile(r"^[ \t]*\d+(?:\.\d+)*\.?[ \t]+([A-Za-z][A-Za-z0-9 /,&\-]{2,80})[ \t]*$", re.MULTILINE)
+
+# A real, deliberate safety cap -- how many pages a single detected
+# section (or, in the no-heading-found fallback, a single category's
+# keyword-matched pages) can contribute as candidates. Without this, a
+# real, long real section (or a real fallback keyword match with no
+# real heading anywhere) could hand dozens of full pages of real text
+# to a single downstream LLM call (`CTX-205.2`) -- real cost and
+# latency, not just a theoretical concern; this is what actually broke
+# against the real ATtiny85 document before this fix.
+_MAX_SECTION_PAGES = 4
 
 
 class DatasheetStructureError(Exception):
@@ -60,17 +86,70 @@ def extract_pages(pdf_path: str) -> list[dict]:
         raise DatasheetStructureError(f"Could not read {pdf_path}: {exc}") from exc
 
 
-def locate_candidate_sections(pages: list[dict]) -> dict[str, list[int]]:
-    """Maps each real category in `CATEGORY_PATTERNS` to the real page
-    numbers whose extracted text matches it. A category with no match
-    anywhere in the document is present in the result with an empty
-    list, not omitted -- callers (and eventually the UI's own
-    first-class empty state, SPEC-205 §5) can tell "this category was
-    checked and found nothing" from "this category was never checked"."""
-    candidates: dict[str, list[int]] = {category: [] for category in CATEGORY_PATTERNS}
+# A real, genuine false positive found by testing against the real
+# ATtiny85 datasheet: prose wrapped across lines can itself start with
+# a number ("...an external\n10 kOhm pull-up resistor to VCC should be
+# added...") -- indistinguishable from a real heading number by
+# position alone. Every real heading found in that document and this
+# module's own fixture is a handful of words; a component-value
+# sentence caught by the same pattern runs much longer. A real, simple
+# word-count cap, not a more elaborate Title-Case heuristic that would
+# also need tuning against real, varied datasheet formatting.
+_MAX_HEADING_WORDS = 8
+
+
+def _find_headings(pages: list[dict]) -> list[dict]:
+    """Every real numbered section-heading line found anywhere in the
+    document, `[{"page": N, "title": "..."}]`, in real page order --
+    used both to find a category's own real heading(s) and, via the
+    *next* real heading anywhere (any category), to bound how far a
+    found section actually extends."""
+    headings = []
     for page in pages:
-        text = page["text"]
-        for category, pattern in CATEGORY_PATTERNS.items():
-            if pattern.search(text):
-                candidates[category].append(page["page"])
+        for line in page["text"].splitlines():
+            match = _HEADING_PATTERN.match(line)
+            if not match:
+                continue
+            title = match.group(1).strip()
+            if len(title.split()) > _MAX_HEADING_WORDS:
+                continue
+            headings.append({"page": page["page"], "title": title})
+    return headings
+
+
+def locate_candidate_sections(pages: list[dict]) -> dict[str, list[int]]:
+    """Maps each real category in `CATEGORY_PATTERNS` to real candidate
+    page numbers. Primary signal: a real detected heading (`_find_headings`)
+    whose own title matches the category -- the section then runs from
+    that heading's page up to (but not including) the next real heading
+    anywhere in the document, capped at `_MAX_SECTION_PAGES`. A category
+    with zero real heading matches anywhere falls back to the original
+    whole-page keyword search (still capped) -- a real, honest fallback
+    for a datasheet whose headings don't follow a numbered-section
+    convention this module can detect, not the primary path.
+
+    A category with no real candidates at all is present in the result
+    with an empty list, not omitted -- callers (and eventually the UI's
+    own first-class empty state, SPEC-205 §5) can tell "checked, found
+    nothing" from "never checked"."""
+    headings = _find_headings(pages)
+    heading_pages = sorted({h["page"] for h in headings})
+    last_page = pages[-1]["page"] if pages else 0
+    candidates: dict[str, list[int]] = {}
+
+    for category, pattern in CATEGORY_PATTERNS.items():
+        matches = [h for h in headings if pattern.search(h["title"])]
+        if matches:
+            section_pages: set[int] = set()
+            for match in matches:
+                start = match["page"]
+                later = [p for p in heading_pages if p > start]
+                end = min(later) - 1 if later else last_page
+                end = min(end, start + _MAX_SECTION_PAGES - 1)
+                section_pages.update(range(start, end + 1))
+            candidates[category] = sorted(section_pages)
+        else:
+            fallback_pages = [page["page"] for page in pages if pattern.search(page["text"])]
+            candidates[category] = fallback_pages[:_MAX_SECTION_PAGES]
+
     return candidates
