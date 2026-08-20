@@ -1,6 +1,6 @@
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-shell'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { cacheDatasheet, searchComponents, type ComponentCandidate } from '../lib/components'
 import { PartDetail } from './PartDetail'
 
@@ -13,8 +13,19 @@ type Status = 'idle' | 'searching' | 'error'
  * (SPEC-306 §2's own rule against reintroducing the silent-substitution
  * bug with a confidence threshold instead of a regex). Stops at a
  * confirmed candidate; Part Detail and the actual library save are
- * SPEC-307's job, not built yet. */
-export function ComponentDiscovery() {
+ * SPEC-307's job, not built yet.
+ *
+ * Real bug found by live user testing: this component used to be
+ * unmounted the instant the user switched to any other area tab (a
+ * plain conditional render in App.tsx), throwing away in-progress
+ * search results, a just-confirmed candidate, and everything
+ * PartDetail itself had done underneath it (Save to Library, Export,
+ * Generate Design Requirements) with no warning. Stays mounted across
+ * every area tab now (App.tsx hides it with CSS instead of
+ * unmounting it), same as SchematicAdvisor/BoardAdvisor/EnclosurePanel
+ * and for the same reason. `projectName` only resets state on a
+ * genuine project switch, mirroring their own established pattern. */
+export function ComponentDiscovery({ projectName }: { projectName: string }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -26,6 +37,16 @@ export function ComponentDiscovery() {
   } | null>(null)
   const [confirmingPartNumber, setConfirmingPartNumber] = useState<string | null>(null)
   const [pathCopied, setPathCopied] = useState(false)
+
+  useEffect(() => {
+    setQuery('')
+    setStatus('idle')
+    setError(null)
+    setCandidates([])
+    setConfirmed(null)
+    setConfirmingPartNumber(null)
+    setPathCopied(false)
+  }, [projectName])
 
   async function handleCopyPath(path: string) {
     await writeText(path)
