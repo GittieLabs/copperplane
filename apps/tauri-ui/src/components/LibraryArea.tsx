@@ -24,7 +24,7 @@ type ViewState = { kind: 'list' } | { kind: 'detail'; library: LibrarySummary }
  * merged into one list (SPEC-315 §3's own named hazard, since a
  * Footprint is a real, independently-shared object, not bundled with
  * whichever Part happens to reference it). */
-export function LibraryArea() {
+export function LibraryArea({ initialLibraryId }: { initialLibraryId?: string } = {}) {
   const [view, setView] = useState<ViewState>({ kind: 'list' })
   const [libraries, setLibraries] = useState<LibrarySummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -47,6 +47,18 @@ export function LibraryArea() {
   useEffect(() => {
     void refreshLibraries()
   }, [])
+
+  // SPEC-316: Library menu > "Default Library" deep-links straight into
+  // Default's own detail view, reusing this component's already-existing
+  // list->detail transition -- not a new code path. Falls back to the
+  // list view (the existing initial state) if no match is found, a real
+  // edge case (e.g. Default somehow didn't load) rather than an error.
+  useEffect(() => {
+    if (!initialLibraryId || !libraries) return
+    const match = libraries.find((library) => library.id === initialLibraryId)
+    if (match) setView({ kind: 'detail', library: match })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLibraryId, libraries])
 
   useEffect(() => {
     if (view.kind !== 'detail') return

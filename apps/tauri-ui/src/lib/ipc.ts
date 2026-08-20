@@ -10,6 +10,19 @@ export const DAEMON_RESPONSE_EVENT = 'daemon://response'
 export const MENU_SAVE_PROJECT_EVENT = 'menu://save-project'
 export const MENU_OPEN_PROJECT_EVENT = 'menu://open-project'
 
+/** CTX-316.1: the rest of the native menu's command surface -- each
+ * must match its own const of the same name in
+ * `core/tauri-rust/src/menu.rs`. */
+export const MENU_OPEN_SETTINGS_EVENT = 'menu://open-settings'
+export const MENU_OPEN_DEFAULT_LIBRARY_EVENT = 'menu://open-library-default'
+export const MENU_MANAGE_LIBRARIES_EVENT = 'menu://manage-libraries'
+export const MENU_DESIGN_SCHEMATIC_OPEN_KICAD_EVENT = 'menu://design/schematic/open-kicad'
+export const MENU_DESIGN_SCHEMATIC_PICK_MANUALLY_EVENT = 'menu://design/schematic/pick-manually'
+export const MENU_DESIGN_PCB_OPEN_KICAD_EVENT = 'menu://design/pcb/open-kicad'
+export const MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT = 'menu://design/enclosure/open-kicad'
+export const MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT = 'menu://design/enclosure/pick-pcb'
+export const MENU_DESIGN_ENCLOSURE_GENERATE_EVENT = 'menu://design/enclosure/generate'
+
 export interface JsonRpcError {
   code: number
   message: string

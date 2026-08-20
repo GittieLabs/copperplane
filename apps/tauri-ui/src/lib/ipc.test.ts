@@ -12,7 +12,21 @@ const listenMock = vi.fn(async (_eventName: string, listener: DaemonEventListene
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }))
 
-const { dispatch, submitJob } = await import('./ipc')
+const {
+  dispatch,
+  submitJob,
+  MENU_SAVE_PROJECT_EVENT,
+  MENU_OPEN_PROJECT_EVENT,
+  MENU_OPEN_SETTINGS_EVENT,
+  MENU_OPEN_DEFAULT_LIBRARY_EVENT,
+  MENU_MANAGE_LIBRARIES_EVENT,
+  MENU_DESIGN_SCHEMATIC_OPEN_KICAD_EVENT,
+  MENU_DESIGN_SCHEMATIC_PICK_MANUALLY_EVENT,
+  MENU_DESIGN_PCB_OPEN_KICAD_EVENT,
+  MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT,
+  MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT,
+  MENU_DESIGN_ENCLOSURE_GENERATE_EVENT,
+} = await import('./ipc')
 
 beforeEach(() => {
   invokeMock.mockReset()
@@ -171,5 +185,24 @@ describe('submitJob', () => {
     const parsed = JSON.parse(request)
     expect(parsed.method).toBe('job.cancel')
     expect(parsed.params).toEqual({ job_id: 'job-to-cancel' })
+  })
+})
+
+// CTX-316.1: these string values must stay in sync with their own
+// same-named `const` in `core/tauri-rust/src/menu.rs` -- this test's
+// only job is to catch a future accidental rename on one side only.
+describe('MENU_* event constants', () => {
+  it('TEST-012: every real menu event constant has the expected string value', () => {
+    expect(MENU_SAVE_PROJECT_EVENT).toBe('menu://save-project')
+    expect(MENU_OPEN_PROJECT_EVENT).toBe('menu://open-project')
+    expect(MENU_OPEN_SETTINGS_EVENT).toBe('menu://open-settings')
+    expect(MENU_OPEN_DEFAULT_LIBRARY_EVENT).toBe('menu://open-library-default')
+    expect(MENU_MANAGE_LIBRARIES_EVENT).toBe('menu://manage-libraries')
+    expect(MENU_DESIGN_SCHEMATIC_OPEN_KICAD_EVENT).toBe('menu://design/schematic/open-kicad')
+    expect(MENU_DESIGN_SCHEMATIC_PICK_MANUALLY_EVENT).toBe('menu://design/schematic/pick-manually')
+    expect(MENU_DESIGN_PCB_OPEN_KICAD_EVENT).toBe('menu://design/pcb/open-kicad')
+    expect(MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT).toBe('menu://design/enclosure/open-kicad')
+    expect(MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT).toBe('menu://design/enclosure/pick-pcb')
+    expect(MENU_DESIGN_ENCLOSURE_GENERATE_EVENT).toBe('menu://design/enclosure/generate')
   })
 })

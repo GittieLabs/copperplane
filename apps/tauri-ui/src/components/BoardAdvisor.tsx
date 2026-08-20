@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { MenuCommand } from '../lib/areas'
 import {
   checkBoard,
   listOpenBoards,
@@ -38,7 +39,17 @@ import { ViolationsList } from './ViolationsList'
  * check that had just finished, with no reason to. `projectName` is
  * only used to know when to actually reset that state: a genuine
  * project switch, not a tab switch. */
-export function BoardAdvisor({ projectName }: { projectName: string }) {
+export function BoardAdvisor({
+  projectName,
+  menuCommand,
+}: {
+  projectName: string
+  /** SPEC-316: a Design > PCB menu click -- only 'open_kicad' is a real
+   * command here today; `handleCheckBoard` needs a specific candidate a
+   * menu click can't supply, and this component has no manual-pick
+   * equivalent yet. */
+  menuCommand?: MenuCommand | null
+}) {
   const [loadingBoardList, setLoadingBoardList] = useState(false)
   const [boardListResult, setBoardListResult] = useState<ListOpenBoardsResult | null>(null)
   const [boardListError, setBoardListError] = useState<string | null>(null)
@@ -110,6 +121,14 @@ export function BoardAdvisor({ projectName }: { projectName: string }) {
       setCheckingBoard(false)
     }
   }
+
+  // SPEC-316: Design > PCB menu clicks dispatch to this same handler --
+  // no new business logic, just a second entry point.
+  useEffect(() => {
+    if (menuCommand?.area !== 'pcb') return
+    if (menuCommand.command === 'open_kicad') void handleOpenKicad()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuCommand?.nonce])
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6">

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { MenuCommand } from '../lib/areas'
 import { type JobHandle } from '../lib/ipc'
 import {
   exportBoardGlb,
@@ -79,9 +80,15 @@ export interface EnclosureExportSuccessEvent {
 export function EnclosurePanel({
   projectName,
   onExportSuccess,
+  menuCommand,
 }: {
   projectName: string
   onExportSuccess?: (event: EnclosureExportSuccessEvent) => void
+  /** SPEC-316: a Design > Enclosure menu click -- 'open_kicad',
+   * 'pick_pcb', and 'generate' are real commands here;
+   * `handleSelectBoard` needs a specific candidate a menu click can't
+   * supply. */
+  menuCommand?: MenuCommand | null
 }) {
   const [mode, setMode] = useState<'board' | 'manual'>('board')
 
@@ -214,6 +221,16 @@ export function EnclosurePanel({
     setManualPcbPath(null)
     setSelectedBoard(candidate)
   }
+
+  // SPEC-316: Design > Enclosure menu clicks dispatch to these same
+  // three handlers -- no new business logic, just a second entry point.
+  useEffect(() => {
+    if (menuCommand?.area !== 'enclosure') return
+    if (menuCommand.command === 'open_kicad') void handleOpenKicad()
+    if (menuCommand.command === 'pick_pcb') void handlePickPcbFile()
+    if (menuCommand.command === 'generate') void handleGenerate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuCommand?.nonce])
 
   async function handleGenerate() {
     setError(null)

@@ -262,3 +262,45 @@ describe('SchematicAdvisor: manual file-pick fallback', () => {
     await waitFor(() => screen.getByText('/manual/other.kicad_sch'))
   })
 })
+
+describe('SchematicAdvisor: SPEC-316 menuCommand', () => {
+  it('TEST-007: a matching open_kicad menuCommand runs the real handleOpenKicad', async () => {
+    render(<SchematicAdvisor projectName="test-project" menuCommand={{ area: 'schematic', command: 'open_kicad', nonce: 0 }} />)
+
+    await waitFor(() => expect(openKicadMock).toHaveBeenCalledTimes(1))
+  })
+
+  it('TEST-007b: a matching pick_manually menuCommand runs the real handlePickManually', async () => {
+    pickSchematicFileMock.mockResolvedValueOnce('/manual/other.kicad_sch')
+    checkSchematicMock.mockResolvedValueOnce({ ...CLEAN_RESULT, source_path: '/manual/other.kicad_sch' })
+
+    render(
+      <SchematicAdvisor
+        projectName="test-project"
+        menuCommand={{ area: 'schematic', command: 'pick_manually', nonce: 0 }}
+      />,
+    )
+
+    await waitFor(() => expect(pickSchematicFileMock).toHaveBeenCalledTimes(1))
+    await waitFor(() => screen.getByText('/manual/other.kicad_sch'))
+  })
+
+  it('a menuCommand for a different area is ignored', async () => {
+    render(<SchematicAdvisor projectName="test-project" menuCommand={{ area: 'pcb', command: 'open_kicad', nonce: 0 }} />)
+
+    await waitFor(() => expect(listProjectSchematicsMock).toHaveBeenCalled())
+    expect(openKicadMock).not.toHaveBeenCalled()
+  })
+
+  it('the same command fired twice (nonce bumped) re-triggers the handler both times', async () => {
+    const { rerender } = render(
+      <SchematicAdvisor projectName="test-project" menuCommand={{ area: 'schematic', command: 'open_kicad', nonce: 0 }} />,
+    )
+    await waitFor(() => expect(openKicadMock).toHaveBeenCalledTimes(1))
+
+    rerender(
+      <SchematicAdvisor projectName="test-project" menuCommand={{ area: 'schematic', command: 'open_kicad', nonce: 1 }} />,
+    )
+    await waitFor(() => expect(openKicadMock).toHaveBeenCalledTimes(2))
+  })
+})
