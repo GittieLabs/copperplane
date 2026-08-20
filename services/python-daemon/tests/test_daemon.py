@@ -2091,5 +2091,74 @@ class TestSpec311RouteRegistration(unittest.TestCase):
         self.assertIn("kicad.export_board_glb", daemon.ASYNC_ROUTES)
 
 
+class TestDatasheetGenerateGuidanceRoute(unittest.TestCase):
+    """CTX-205.3: datasheet.generate_guidance -- real file I/O against a
+    real temp storage root, per CLAUDE.md's 'verify for real' norm."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def _dispatch(self, method, params):
+        request = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": "req"})
+        return json.loads(handle_request(request))
+
+    def _save_real_part(self, part_id="ATtiny85", datasheet_url="https://example.com/x.pdf"):
+        provenance = {f: {"source": "test"} for f in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS}
+        daemon.library_store.save_part({
+            "part_id": part_id, "manufacturer": "Microchip", "package": "SOIC-8", "pins": [],
+            "datasheet_url": datasheet_url, "package_dimensions": {}, "courtyard": {}, "provenance": provenance,
+        })
+
+    def test_001_route_is_registered_only_with_both_real_dependencies(self):
+        original_dg, original_ls = daemon.datasheet_guidance, daemon.library_store
+        try:
+            daemon.datasheet_guidance = None
+            self.assertNotIn("datasheet.generate_guidance", daemon._build_routes())
+
+            daemon.datasheet_guidance = MagicMock()
+            daemon.library_store = None
+            self.assertNotIn("datasheet.generate_guidance", daemon._build_routes())
+
+            daemon.library_store = original_ls
+            self.assertIn("datasheet.generate_guidance", daemon._build_routes())
+        finally:
+            daemon.datasheet_guidance, daemon.library_store = original_dg, original_ls
+
+    def test_002_route_is_registered_as_async(self):
+        self.assertIn("datasheet.generate_guidance", daemon.ASYNC_ROUTES)
+
+    @patch('daemon.datasheet_guidance.generate_datasheet_guidance')
+    @patch('daemon.library_store.ensure_datasheet_cached')
+    def test_003_calls_the_real_pipeline_and_persists_onto_the_real_part(self, mock_ensure_cached, mock_generate):
+        """Calls the real route function directly, not through
+        handle_request -- datasheet.generate_guidance is a real
+        ASYNC_ROUTES member (test_002), so a handle_request dispatch
+        returns a job_id immediately and runs on a background thread;
+        this test's own real subject is the route function's own
+        orchestration (load_part -> ensure_datasheet_cached ->
+        generate_datasheet_guidance -> save_part_design_guidance), not
+        the generic async-job wrapping every ASYNC_ROUTES member already
+        shares (proven for real, through handle_request, in
+        test_async_jobs.py's own TestRealDatasheetGenerateGuidanceJob)."""
+        self._save_real_part()
+        fake_pdf_path = os.path.join(self._tmpdir.name, "fake.pdf")
+        with open(fake_pdf_path, "wb") as f:
+            f.write(b"%PDF-1.4 fake")
+        mock_ensure_cached.return_value = fake_pdf_path
+        mock_generate.return_value = {"reset": [{"quote": "x", "page": 1, "category": "reset"}]}
+
+        updated = daemon.datasheet_generate_guidance("ATtiny85")
+
+        mock_ensure_cached.assert_called_once_with("ATtiny85", "https://example.com/x.pdf")
+        self.assertEqual(updated["design_guidance"]["categories"]["reset"][0]["quote"], "x")
+        reloaded = daemon.library_store.load_part("ATtiny85")
+        self.assertEqual(reloaded["design_guidance"]["categories"]["reset"][0]["quote"], "x")
+
+
 if __name__ == '__main__':
     unittest.main()

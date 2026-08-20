@@ -24,6 +24,7 @@ kicad_bridge/freecad_bridge's own pattern (SPEC-107 §2's rationale) --
 `configure()` is called explicitly from `_apply_env_config()`, this
 module never reaches into a daemon-owned global itself.
 """
+import hashlib
 import json
 import os
 import re
@@ -189,6 +190,49 @@ def _validate_part_provenance(part: dict) -> None:
         )
 
 
+_DESIGN_GUIDANCE_ITEM_REQUIRED_FIELDS = ("quote", "page", "category")
+
+
+def _validate_design_guidance(value: dict) -> None:
+    """CTX-205.3: `design_guidance` is optional -- unlike
+    `PART_PROVENANCE_REQUIRED_FIELDS`, absence is never an error, so this
+    is called from `save_part` only when the field is actually present,
+    never added to that required-fields tuple (which would gate every
+    real, unrelated Part save with no guidance yet). Real, minimal shape
+    check, not a full re-validation of `datasheet_guidance.py`'s own
+    already-enforced citation checks -- defense in depth against a
+    malformed record reaching disk, matching this codebase's general
+    fail-closed-on-malformed-data posture (`_validate_part_provenance`),
+    not a duplicate of the pipeline's own real work."""
+    if not isinstance(value, dict) or not isinstance(value.get("categories"), dict):
+        raise SchemaValidationError(
+            "Part.design_guidance must be a dict with a real 'categories' dict."
+        )
+    for category, items in value["categories"].items():
+        if not isinstance(items, list):
+            raise SchemaValidationError(
+                f"Part.design_guidance.categories['{category}'] must be a list."
+            )
+        for item in items:
+            missing = [f for f in _DESIGN_GUIDANCE_ITEM_REQUIRED_FIELDS if f not in item]
+            if missing:
+                raise SchemaValidationError(
+                    f"Part.design_guidance.categories['{category}'] has an item missing "
+                    f"required field(s): {', '.join(missing)}."
+                )
+
+
+def _backfill_design_guidance(record: dict) -> dict:
+    """A record saved before CTX-205.3 shipped -- or one whose guidance
+    has genuinely never been generated -- has no `design_guidance` key
+    at all. Backfilled as `None`, never `{}`: SPEC-205 §5's own
+    "silence must not be readable as 'no requirements'" principle means
+    "never generated" and "generated, every category came back empty"
+    must stay two real, distinguishable states, not collapsed into one."""
+    record.setdefault("design_guidance", None)
+    return record
+
+
 def save_part(part: dict, library_ids: list | None = None) -> dict:
     """Writes a Part record to library/parts/<part_id>.part.json.
     `footprint_id` may be `None` -- a Part with pins and a datasheet is
@@ -202,6 +246,8 @@ def save_part(part: dict, library_ids: list | None = None) -> dict:
     if not part_id:
         raise SchemaValidationError("Part.part_id is required.")
     _validate_part_provenance(part)
+    if part.get("design_guidance") is not None:
+        _validate_design_guidance(part["design_guidance"])
 
     record = {**part, "schema_version": 1, "library_ids": _resolve_library_ids(part, library_ids)}
     _write_json(os.path.join(_parts_dir(), f"{part_id}.part.json"), record)
@@ -209,7 +255,31 @@ def save_part(part: dict, library_ids: list | None = None) -> dict:
 
 
 def load_part(part_id: str) -> dict:
-    return _backfill_library_ids(_read_json(os.path.join(_parts_dir(), f"{part_id}.part.json")))
+    return _backfill_design_guidance(
+        _backfill_library_ids(_read_json(os.path.join(_parts_dir(), f"{part_id}.part.json")))
+    )
+
+
+def save_part_design_guidance(part_id: str, content_hash: str, categories: dict) -> dict:
+    """CTX-205.3: persists a real `datasheet_guidance.generate_datasheet_guidance(...)`
+    result onto `part_id`'s own real, current record -- loads it fresh
+    first (never blind-overwrites with a stale caller-held copy), so a
+    concurrent edit to any other field survives. `content_hash` is the
+    real sha256 of the exact datasheet PDF bytes guidance was generated
+    from (SPEC-205 §3's own "citations drift across revisions" risk).
+
+    `document_revision` (a real, human-readable string like "Rev. C")
+    is deliberately left `None` -- honest, unbuilt scope, not a
+    fabricated placeholder: no extraction step for it exists yet, and
+    inventing one would look like real data when it isn't."""
+    part = load_part(part_id)
+    part["design_guidance"] = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "content_hash": content_hash,
+        "document_revision": None,
+        "categories": categories,
+    }
+    return save_part(part)
 
 
 def list_parts(library_id: str | None = None) -> list:
@@ -927,6 +997,35 @@ def cache_datasheet(part_number: str, datasheet_url: str) -> str:
     with open(path, "wb") as f:
         f.write(content)
     return path
+
+
+def ensure_datasheet_cached(part_number: str, datasheet_url: str) -> str:
+    """CTX-205.3: returns the real local cached path for `part_number`'s
+    datasheet PDF, fetching it first only if it isn't already cached.
+    `cache_datasheet` itself always re-fetches unconditionally -- correct
+    for its own real caller (Component Discovery's disambiguation card,
+    which only ever confirms a candidate once) but a regenerate-guidance
+    action would otherwise re-download the same real PDF over the
+    network on every single call. Same real path-safety guard as
+    `cache_datasheet` -- duplicated, not shared, since raising before
+    ever touching the filesystem here (an existence check) is a
+    genuinely different real code path from raising mid-fetch there."""
+    if not part_number or "/" in part_number or "\\" in part_number or ".." in part_number:
+        raise DatasheetFetchError(f"'{part_number}' is not a safe part_number for a cache filename.")
+    path = os.path.join(_datasheets_dir(), f"{part_number}.pdf")
+    if os.path.exists(path):
+        return path
+    return cache_datasheet(part_number, datasheet_url)
+
+
+def content_hash_of_file(path: str) -> str:
+    """A real sha256 of a real file's own bytes -- CTX-205.3's own
+    citation-provenance need (SPEC-205 §3: "store... a content hash
+    alongside the citation"). No hashing precedent existed anywhere in
+    this module before this context; a plain, standard, real
+    implementation, not a new convention invented for its own sake."""
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
 
 
 # --- Conversation -------------------------------------------------------

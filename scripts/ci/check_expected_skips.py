@@ -43,6 +43,9 @@ EXPECTED_SKIPS = {
     # on a CI runner.
     "test_016_a_real_category_with_real_candidates_returns_real_cited_items",
     "test_017_every_requested_category_is_present_in_the_real_result_even_when_not_all_run",
+    # SPEC-205/CTX-205.3: datasheet.generate_guidance dispatched through
+    # handle_request end-to-end -- same reason.
+    "test_001_dispatched_through_handle_request_reports_job_completed_with_real_cited_guidance",
 }
 
 

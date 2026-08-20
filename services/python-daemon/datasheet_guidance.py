@@ -168,7 +168,7 @@ async def _run_category_workflow(
 
 async def _run_all_categories_and_close(
     categories_to_run: dict, pages_by_number: dict,
-    loader: ConfigLoader, secrets: dict, provider: str, model: str,
+    loader: ConfigLoader, secrets: dict, provider: str, model: str, cancel_event=None,
 ) -> dict:
     """Runs every real category with candidate pages sequentially (not
     concurrently -- a real, deliberate simplification for this context;
@@ -176,11 +176,24 @@ async def _run_all_categories_and_close(
     multi-category document proves this too slow later), closing every
     provider client built along the way in one shared `finally`, the
     same real leak-prevention shape
-    `component_pipeline._run_workflow_and_close` already established."""
+    `component_pipeline._run_workflow_and_close` already established.
+
+    CTX-205.3: `cancel_event` (a real `threading.Event`, matching
+    `freecad_bridge._wait_with_cancellation`'s own exact check) is
+    tested once per category, before that category's own workflow
+    starts -- coarse-grained, not mid-LLM-call, but real: an 8-category
+    document (~23s total observed) responds to cancellation within one
+    category's own real runtime, not the whole document's. A cancelled
+    run returns whatever real categories already completed, same as a
+    normal partial short-circuit -- `daemon.py`'s own `_run_job` judges
+    cancelled-vs-completed purely by `cancel_event`'s own state
+    afterward, not by what this function returns."""
     provider_clients: list = []
     results = {}
     try:
         for category, page_numbers in categories_to_run.items():
+            if cancel_event is not None and cancel_event.is_set():
+                break
             results[category] = await _run_category_workflow(
                 category, page_numbers, pages_by_number, loader, secrets, provider, model, provider_clients,
             )
@@ -192,6 +205,7 @@ async def _run_all_categories_and_close(
 
 def generate_datasheet_guidance(
     pdf_path: str, categories: list = None, secrets: dict = None, provider: str = None, model: str = None,
+    cancel_event=None,
 ) -> dict:
     """The real, top-level entry point this context ships: a real
     datasheet PDF path in, real cited guidance out, grouped by category
@@ -202,10 +216,12 @@ def generate_datasheet_guidance(
     even at this backend layer, before any UI exists to render it).
 
     `categories` restricts which of `datasheet_structure.CATEGORY_PATTERNS`'s
-    real categories to run (default: all of them). Not yet wired to a
-    daemon route or Part-record storage -- that's real, deliberately
-    deferred scope for a future context, named honestly in this one's
-    own Plan Drift."""
+    real categories to run (default: all of them). `cancel_event` is
+    optional -- `daemon.py`'s own `_run_job` only ever passes it because
+    this function's real signature declares the param (checked via
+    `inspect.signature`, the same real mechanism the FreeCAD routes
+    already use), so a direct, non-daemon caller (e.g. a test) never
+    needs to pass one."""
     secrets = secrets or {}
     categories = categories or list(CATEGORY_PATTERNS)
 
@@ -220,7 +236,9 @@ def generate_datasheet_guidance(
         loader = ConfigLoader(_AGENTFLOW_DIR)
         loader.load()
         run_results = asyncio.run(
-            _run_all_categories_and_close(categories_to_run, pages_by_number, loader, secrets, provider, model)
+            _run_all_categories_and_close(
+                categories_to_run, pages_by_number, loader, secrets, provider, model, cancel_event,
+            )
         )
         results.update(run_results)
 
