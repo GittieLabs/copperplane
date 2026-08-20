@@ -316,7 +316,7 @@ plain deep link; and design/application guidance (decoupling, pull-ups, protecti
 its own new spec, [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md),
 below.
 
-#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — Draft
+#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md) done, more planned) 2026-08-20
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-105, SPEC-202, SPEC-304, SPEC-306, SPEC-307
 
@@ -338,6 +338,15 @@ extraction case the spec requires an explicit in/out-of-scope decision on, not a
 multi-variant datasheets (one document covering several part numbers) need explicit variant
 scoping; and citations must carry the document revision, since page numbers drift across datasheet
 revisions.
+
+`CTX-205.1` (2026-08-20) shipped the first real slice: `datasheet_structure.py`, real PDF text
+extraction (`pdfplumber`, MIT -- `pymupdf`/`fitz` was considered and rejected as AGPL-3.0, ruled out
+by `SPEC-904`'s own license-consistency norm) plus deterministic, non-LLM candidate-section location
+across the spec's own 8 named structure-pass targets -- the "locate before extract" half of the
+pipeline, proven against a real, committed 8-page synthetic datasheet fixture. Deliberately scoped
+narrow (no LLM call, no AgentFlow workflow, no daemon route, no storage, no UI yet), mirroring how
+`SPEC-308`/`SPEC-311` shipped across many small contexts rather than one big-bang implementation --
+every extraction class and the UI panel remain real, open work for `CTX-205.2`+.
 
 #### [SPEC-204](services/python-daemon/specs/SPEC-204-agent-tool-registry.md) — Agent Tool Registry — ✅ Completed ([CTX-204.1](services/python-daemon/context/CTX-204.1-agent-tool-registry.md)) 2026-08-14
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-102
