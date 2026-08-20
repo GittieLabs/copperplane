@@ -316,7 +316,7 @@ plain deep link; and design/application guidance (decoupling, pull-ups, protecti
 its own new spec, [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md),
 below.
 
-#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress, Class B usable end-to-end, audience-fit question open ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md), [CTX-205.4](apps/tauri-ui/context/CTX-205.4-design-requirements-ui.md), [CTX-205.5](services/python-daemon/context/CTX-205.5-structure-pass-heading-detection.md), [CTX-205.6](services/python-daemon/context/CTX-205.6-heading-noise-and-symbol-encoding.md) done, Class A/C planned) 2026-08-20
+#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress, Class B + plain-language synthesis usable end-to-end ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md), [CTX-205.4](apps/tauri-ui/context/CTX-205.4-design-requirements-ui.md), [CTX-205.5](services/python-daemon/context/CTX-205.5-structure-pass-heading-detection.md), [CTX-205.6](services/python-daemon/context/CTX-205.6-heading-noise-and-symbol-encoding.md), [CTX-205.7](services/python-daemon/context/CTX-205.7-guidance-synthesis.md), [CTX-205.8](apps/tauri-ui/context/CTX-205.8-guidance-synthesis-ui.md) done, Class A/C planned) 2026-08-20
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-105, SPEC-202, SPEC-304, SPEC-306, SPEC-307
 
@@ -410,6 +410,22 @@ question surfaced by the same testing is explicitly deferred, not answered by th
 whether verbatim Class B citations -- even correctly cited ones -- are the right shape at all for
 this feature's actual audience, a maker/hobbyist rather than a practicing hardware engineer. This is
 `SPEC-205`'s real next decision point.
+
+`CTX-205.7`/`CTX-205.8` (2026-08-20) answered that open question directly, with the user rather than
+guessed at: `SPEC-205` was amended (§1, §2.1.1, §5) to record the real audience correction and a new
+synthesis layer -- **not** a fourth output class, and **not** a weakening of the citation contract.
+Per category, once its Class B items are validated, a second, single-node AgentFlow workflow
+generates one short plain-language paragraph strictly from those same already-cited items (never a
+new fact, never called for a category with zero valid items). Verified end-to-end against the real
+ATtiny85 PDF with a real Anthropic call across four categories, each read back for accuracy --
+`power`'s real summary correctly surfaces the brown-out/EEPROM-corruption risk and the Brown-out
+Detector mitigation, in plain language, grounded strictly in its own cited excerpts. `CTX-205.8`
+shipped the frontend the same day: each category's summary now leads as the primary reading surface
+on Part Detail, with its underlying citations collapsed below via a native `<details>` element,
+available on demand as proof rather than the first thing a reader has to parse. **SPEC-205's real
+audience-fit problem now has a first real answer, live in the app** -- whether it's the complete
+answer, or the category taxonomy itself also needs to become task-oriented (a real, live
+alternative the user named but didn't choose this round), is left for direct feedback once used.
 
 #### [SPEC-204](services/python-daemon/specs/SPEC-204-agent-tool-registry.md) — Agent Tool Registry — ✅ Completed ([CTX-204.1](services/python-daemon/context/CTX-204.1-agent-tool-registry.md)) 2026-08-14
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-102
