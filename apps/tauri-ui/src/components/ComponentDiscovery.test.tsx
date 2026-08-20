@@ -58,7 +58,7 @@ describe('ComponentDiscovery', () => {
       },
     ])
 
-    render(<ComponentDiscovery />)
+    render(<ComponentDiscovery projectName="test-project" />)
     search('atiny85')
 
     await waitFor(() => screen.getByText('ATtiny85', { exact: false }))
@@ -81,7 +81,7 @@ describe('ComponentDiscovery', () => {
       },
     ])
 
-    render(<ComponentDiscovery />)
+    render(<ComponentDiscovery projectName="test-project" />)
     search('atiny85')
 
     await waitFor(() => screen.getByRole('button', { name: 'This one' }))
@@ -91,7 +91,7 @@ describe('ComponentDiscovery', () => {
   it('a search failure shows the real error, not a silent empty list', async () => {
     searchComponentsMock.mockRejectedValueOnce(new Error('Search did not return a non-empty list of candidates.'))
 
-    render(<ComponentDiscovery />)
+    render(<ComponentDiscovery projectName="test-project" />)
     search('???')
 
     await waitFor(() => screen.getByText('Search did not return a non-empty list of candidates.'))
@@ -110,7 +110,7 @@ describe('ComponentDiscovery', () => {
     ])
     cacheDatasheetMock.mockResolvedValueOnce('/storage/library/datasheets/ATtiny85.pdf')
 
-    render(<ComponentDiscovery />)
+    render(<ComponentDiscovery projectName="test-project" />)
     search('atiny85')
     await waitFor(() => screen.getByRole('button', { name: 'This one' }))
 
@@ -150,7 +150,7 @@ describe('ComponentDiscovery', () => {
     ])
     cacheDatasheetMock.mockResolvedValueOnce('/storage/library/datasheets/ATtiny85.pdf')
 
-    render(<ComponentDiscovery />)
+    render(<ComponentDiscovery projectName="test-project" />)
     search('atiny85')
     await waitFor(() => screen.getAllByRole('button', { name: 'This one' }))
 
@@ -181,7 +181,7 @@ describe('ComponentDiscovery', () => {
     ])
     cacheDatasheetMock.mockRejectedValueOnce(new Error('Datasheet fetch for \'ATtiny85\' failed: HTTP Error 403: Forbidden'))
 
-    render(<ComponentDiscovery />)
+    render(<ComponentDiscovery projectName="test-project" />)
     search('atiny85')
     await waitFor(() => screen.getByRole('button', { name: 'This one' }))
     fireEvent.click(screen.getByRole('button', { name: 'This one' }))
@@ -192,5 +192,53 @@ describe('ComponentDiscovery', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open datasheet externally' }))
     expect(openMock).toHaveBeenCalledWith('https://www.microchip.com/en-us/product/ATtiny85')
+  })
+
+  it('real bug fix: a confirmed candidate survives being re-rendered with the same projectName', async () => {
+    // This is the exact real bug the user reported: switching tabs and
+    // back used to unmount ComponentDiscovery entirely, losing a
+    // confirmed candidate and everything PartDetail had done under it.
+    // App.tsx now hides it with CSS instead of unmounting -- a
+    // re-render with the same projectName (what a tab switch away and
+    // back actually produces) must not reset anything.
+    searchComponentsMock.mockResolvedValueOnce([
+      {
+        part_number: 'ATtiny85', manufacturer: 'Microchip', package: 'DIP-8',
+        datasheet_url: 'https://example.com/attiny85.pdf', confidence: 'high', rationale: 'Exact match.',
+      },
+    ])
+    cacheDatasheetMock.mockResolvedValueOnce('/real/library/datasheets/ATtiny85.pdf')
+
+    const { rerender } = render(<ComponentDiscovery projectName="test-project" />)
+    search('atiny85')
+    await waitFor(() => screen.getByRole('button', { name: 'This one' }))
+    fireEvent.click(screen.getByRole('button', { name: 'This one' }))
+    await waitFor(() => screen.getByText(/Confirmed: ATtiny85/))
+
+    rerender(<ComponentDiscovery projectName="test-project" />)
+
+    screen.getByText(/Confirmed: ATtiny85/)
+    screen.getByText('PartDetail stub for ATtiny85')
+  })
+
+  it('switching to a different real project resets the previous project\'s confirmed candidate', async () => {
+    searchComponentsMock.mockResolvedValueOnce([
+      {
+        part_number: 'ATtiny85', manufacturer: 'Microchip', package: 'DIP-8',
+        datasheet_url: 'https://example.com/attiny85.pdf', confidence: 'high', rationale: 'Exact match.',
+      },
+    ])
+    cacheDatasheetMock.mockResolvedValueOnce('/real/library/datasheets/ATtiny85.pdf')
+
+    const { rerender } = render(<ComponentDiscovery projectName="project-a" />)
+    search('atiny85')
+    await waitFor(() => screen.getByRole('button', { name: 'This one' }))
+    fireEvent.click(screen.getByRole('button', { name: 'This one' }))
+    await waitFor(() => screen.getByText(/Confirmed: ATtiny85/))
+
+    rerender(<ComponentDiscovery projectName="project-b" />)
+
+    expect(screen.queryByText(/Confirmed: ATtiny85/)).toBeNull()
+    screen.getByPlaceholderText(/search for a part/)
   })
 })
