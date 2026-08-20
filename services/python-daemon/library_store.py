@@ -220,6 +220,19 @@ def _validate_design_guidance(value: dict) -> None:
                     f"Part.design_guidance.categories['{category}'] has an item missing "
                     f"required field(s): {', '.join(missing)}."
                 )
+    # CTX-205.7: `category_summaries` is optional -- a record saved before
+    # this context shipped has none, backfilled by `_backfill_design_guidance`
+    # below, not required here. When present, each value is the real
+    # plain-language summary text (SPEC-205 §2.1.1) or `None` for a
+    # category with no validated items -- never anything else.
+    summaries = value.get("category_summaries", {})
+    if not isinstance(summaries, dict):
+        raise SchemaValidationError("Part.design_guidance.category_summaries must be a dict.")
+    for category, summary in summaries.items():
+        if summary is not None and not isinstance(summary, str):
+            raise SchemaValidationError(
+                f"Part.design_guidance.category_summaries['{category}'] must be a string or null."
+            )
 
 
 def _backfill_design_guidance(record: dict) -> dict:
@@ -228,8 +241,17 @@ def _backfill_design_guidance(record: dict) -> dict:
     at all. Backfilled as `None`, never `{}`: SPEC-205 §5's own
     "silence must not be readable as 'no requirements'" principle means
     "never generated" and "generated, every category came back empty"
-    must stay two real, distinguishable states, not collapsed into one."""
+    must stay two real, distinguishable states, not collapsed into one.
+
+    CTX-205.7: a record whose guidance WAS already generated, but before
+    this context shipped `category_summaries`, has a real
+    `design_guidance` dict missing that key -- backfilled to `{}` (an
+    honest "no summaries exist for this generation" state, distinct from
+    a category-keyed `None`, which means "this specific category had no
+    valid items to summarize"), never re-triggering generation."""
     record.setdefault("design_guidance", None)
+    if record["design_guidance"] is not None:
+        record["design_guidance"].setdefault("category_summaries", {})
     return record
 
 
@@ -267,7 +289,9 @@ def load_part(part_id: str) -> dict:
     )
 
 
-def save_part_design_guidance(part_id: str, content_hash: str, categories: dict) -> dict:
+def save_part_design_guidance(
+    part_id: str, content_hash: str, categories: dict, category_summaries: dict | None = None,
+) -> dict:
     """CTX-205.3: persists a real `datasheet_guidance.generate_datasheet_guidance(...)`
     result onto `part_id`'s own real, current record -- loads it fresh
     first (never blind-overwrites with a stale caller-held copy), so a
@@ -278,13 +302,21 @@ def save_part_design_guidance(part_id: str, content_hash: str, categories: dict)
     `document_revision` (a real, human-readable string like "Rev. C")
     is deliberately left `None` -- honest, unbuilt scope, not a
     fabricated placeholder: no extraction step for it exists yet, and
-    inventing one would look like real data when it isn't."""
+    inventing one would look like real data when it isn't.
+
+    CTX-205.7: `category_summaries` (SPEC-205 §2.1.1's real
+    plain-language layer) defaults to `{}`, matching
+    `generate_datasheet_guidance`'s own real return shape when called
+    with `categories=[]` -- never `None` itself, since the surrounding
+    `design_guidance` dict already carries that "never generated"
+    distinction one level up."""
     part = load_part(part_id)
     part["design_guidance"] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "content_hash": content_hash,
         "document_revision": None,
         "categories": categories,
+        "category_summaries": category_summaries or {},
     }
     return save_part(part)
 

@@ -1111,6 +1111,48 @@ class TestDesignGuidanceStorage(LibraryStoreTestCase):
 
         self.assertEqual(updated["manufacturer"], "Microchip")
 
+    def test_007_save_part_design_guidance_persists_real_category_summaries(self):
+        # CTX-205.7: SPEC-205 §2.1.1's real plain-language layer.
+        store.save_part(self._valid_part())
+
+        updated = store.save_part_design_guidance(
+            "ATtiny85", "hash", {"reset": [{"quote": "x", "page": 1, "category": "reset"}]},
+            {"reset": "A real plain-language summary."},
+        )
+
+        self.assertEqual(updated["design_guidance"]["category_summaries"]["reset"], "A real plain-language summary.")
+
+    def test_008_save_part_design_guidance_defaults_category_summaries_to_an_empty_dict(self):
+        store.save_part(self._valid_part())
+
+        updated = store.save_part_design_guidance("ATtiny85", "hash", {"reset": []})
+
+        self.assertEqual(updated["design_guidance"]["category_summaries"], {})
+
+    def test_009_load_part_backfills_category_summaries_for_a_pre_ctx_205_7_record(self):
+        # A real record generated before CTX-205.7 shipped has no
+        # `category_summaries` key at all -- backfilled to `{}` on read,
+        # never re-triggering generation or raising.
+        pre_ctx_205_7 = {**_VALID_DESIGN_GUIDANCE}
+        store.save_part(self._valid_part(design_guidance=pre_ctx_205_7))
+
+        loaded = store.load_part("ATtiny85")
+
+        self.assertEqual(loaded["design_guidance"]["category_summaries"], {})
+
+    def test_010_save_part_rejects_a_real_non_string_non_null_summary(self):
+        malformed = {**_VALID_DESIGN_GUIDANCE, "category_summaries": {"reset": 42}}
+        with self.assertRaises(store.SchemaValidationError):
+            store.save_part(self._valid_part(design_guidance=malformed))
+
+    def test_011_save_part_accepts_a_real_null_summary_for_a_category_with_no_items(self):
+        valid = {**_VALID_DESIGN_GUIDANCE, "category_summaries": {"reset": "text", "layout": None}}
+        store.save_part(self._valid_part(design_guidance=valid))
+
+        loaded = store.load_part("ATtiny85")
+
+        self.assertIsNone(loaded["design_guidance"]["category_summaries"]["layout"])
+
 
 if __name__ == '__main__':
     unittest.main()

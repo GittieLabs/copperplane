@@ -31,6 +31,17 @@ returns its real, valid ones. A category with zero candidate pages
 never reaches the LLM at all (matching
 `component_pipeline.explain_violations`'s own "empty input, no LLM
 call" precedent) -- real cost avoided, not just latency.
+
+CTX-205.7 adds a second, single-node real workflow
+(`agentflow/workflows/datasheet_guidance_synthesis.workflow.md`), run
+after a category's items are validated: a plain-language summary
+paragraph (SPEC-205 §2.1.1), generated strictly from that category's
+own already-validated items -- never a new citable fact, never run for
+a category with zero valid items. This exists because real, live user
+testing of the first shipped Class B panel showed that even correctly
+cited, verbatim datasheet prose is not the right reading experience for
+this feature's real audience (a maker/hobbyist, not a practicing
+hardware engineer) -- see SPEC-205 §1's real audience correction.
 """
 import asyncio
 import json
@@ -166,10 +177,40 @@ async def _run_category_workflow(
     return validate_output.artifacts["items"]
 
 
+async def _run_synthesis_workflow(
+    category: str, items: list,
+    loader: ConfigLoader, secrets: dict, provider: str, model: str, provider_clients: list,
+) -> str:
+    """Runs the real, single-node `datasheet_guidance_synthesis` workflow
+    (SPEC-205 §2.1.1) over one category's already-validated items,
+    returning a real plain-language summary paragraph. Never called for
+    a category with zero validated items -- the caller
+    (`_run_all_categories_and_close`) skips this entirely in that case,
+    the same real "empty input, no LLM call" discipline
+    `_run_category_workflow`'s own caller already applies."""
+    config, _ = loader.get_workflow("datasheet_guidance_synthesis")
+
+    def runner_factory(node_id: str) -> NodeRunner:
+        node = next(n for n in config.nodes if n.id == node_id)
+        executor, provider_client = _build_agent_executor(node.agent, loader, secrets, provider, model)
+        provider_clients.append(provider_client)
+        return NodeRunner(node, executor)
+
+    workflow_executor = WorkflowExecutor(config=config, runner_factory=runner_factory, handlers={})
+
+    initial_message = f"Category: {category}\n\nCited excerpts:\n{json.dumps(items)}"
+    outputs = await workflow_executor.run(initial_message=initial_message)
+
+    synthesize_output = outputs["synthesize"]
+    if synthesize_output.metadata.get("error"):
+        raise DatasheetGuidanceError(synthesize_output.text.removeprefix("Error: "))
+    return synthesize_output.text.strip()
+
+
 async def _run_all_categories_and_close(
     categories_to_run: dict, pages_by_number: dict,
     loader: ConfigLoader, secrets: dict, provider: str, model: str, cancel_event=None,
-) -> dict:
+) -> tuple:
     """Runs every real category with candidate pages sequentially (not
     concurrently -- a real, deliberate simplification for this context;
     see this module's own Plan Drift if latency against a real
@@ -187,17 +228,31 @@ async def _run_all_categories_and_close(
     run returns whatever real categories already completed, same as a
     normal partial short-circuit -- `daemon.py`'s own `_run_job` judges
     cancelled-vs-completed purely by `cancel_event`'s own state
-    afterward, not by what this function returns."""
+    afterward, not by what this function returns.
+
+    CTX-205.7: after a category's items are validated, its real
+    plain-language summary (SPEC-205 §2.1.1) is generated in the same
+    pass, in the same shared provider-client lifecycle -- never for a
+    category with zero validated items, which gets `None` directly with
+    no LLM call, the same real cost discipline as the extraction step's
+    own zero-candidates short-circuit. Returns `(items_by_category,
+    summaries_by_category)`."""
     provider_clients: list = []
     results = {}
+    summaries = {}
     try:
         for category, page_numbers in categories_to_run.items():
             if cancel_event is not None and cancel_event.is_set():
                 break
-            results[category] = await _run_category_workflow(
+            items = await _run_category_workflow(
                 category, page_numbers, pages_by_number, loader, secrets, provider, model, provider_clients,
             )
-        return results
+            results[category] = items
+            summaries[category] = (
+                await _run_synthesis_workflow(category, items, loader, secrets, provider, model, provider_clients)
+                if items else None
+            )
+        return results, summaries
     finally:
         for provider_client in provider_clients:
             await llm_providers._close_provider_client(provider_client)
@@ -208,12 +263,16 @@ def generate_datasheet_guidance(
     cancel_event=None,
 ) -> dict:
     """The real, top-level entry point this context ships: a real
-    datasheet PDF path in, real cited guidance out, grouped by category
-    -- `{category: [{"quote", "page", "category"}, ...], ...}` for
-    *every* real category (an empty list for one with no candidate
-    pages, or with only invalid items after validation, not an omitted
-    key -- SPEC-205 §5's own "first-class empty state" principle applies
-    even at this backend layer, before any UI exists to render it).
+    datasheet PDF path in, real cited guidance out, grouped by category --
+    `{"categories": {category: [{"quote", "page", "category"}, ...], ...},
+    "summaries": {category: "plain-language paragraph" | None, ...}}`.
+    Both dicts carry *every* real category (an empty list / `None` for
+    one with no candidate pages or no valid items, not an omitted key --
+    SPEC-205 §5's own "first-class empty state" principle applies even
+    at this backend layer, before any UI exists to render it).
+    `summaries` is CTX-205.7's own real plain-language layer (SPEC-205
+    §2.1.1) -- generated only for a category with at least one validated
+    item, never independently of `categories`, never a new citable fact.
 
     `categories` restricts which of `datasheet_structure.CATEGORY_PATTERNS`'s
     real categories to run (default: all of them). `cancel_event` is
@@ -231,15 +290,17 @@ def generate_datasheet_guidance(
 
     categories_to_run = {c: candidates.get(c, []) for c in categories if candidates.get(c)}
     results = {c: [] for c in categories}
+    summaries = {c: None for c in categories}
 
     if categories_to_run:
         loader = ConfigLoader(_AGENTFLOW_DIR)
         loader.load()
-        run_results = asyncio.run(
+        run_results, run_summaries = asyncio.run(
             _run_all_categories_and_close(
                 categories_to_run, pages_by_number, loader, secrets, provider, model, cancel_event,
             )
         )
         results.update(run_results)
+        summaries.update(run_summaries)
 
-    return results
+    return {"categories": results, "summaries": summaries}

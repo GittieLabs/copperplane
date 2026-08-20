@@ -2150,14 +2150,19 @@ class TestDatasheetGenerateGuidanceRoute(unittest.TestCase):
         with open(fake_pdf_path, "wb") as f:
             f.write(b"%PDF-1.4 fake")
         mock_ensure_cached.return_value = fake_pdf_path
-        mock_generate.return_value = {"reset": [{"quote": "x", "page": 1, "category": "reset"}]}
+        mock_generate.return_value = {
+            "categories": {"reset": [{"quote": "x", "page": 1, "category": "reset"}]},
+            "summaries": {"reset": "A real plain-language summary."},
+        }
 
         updated = daemon.datasheet_generate_guidance("ATtiny85")
 
         mock_ensure_cached.assert_called_once_with("ATtiny85", "https://example.com/x.pdf")
         self.assertEqual(updated["design_guidance"]["categories"]["reset"][0]["quote"], "x")
+        self.assertEqual(updated["design_guidance"]["category_summaries"]["reset"], "A real plain-language summary.")
         reloaded = daemon.library_store.load_part("ATtiny85")
         self.assertEqual(reloaded["design_guidance"]["categories"]["reset"][0]["quote"], "x")
+        self.assertEqual(reloaded["design_guidance"]["category_summaries"]["reset"], "A real plain-language summary.")
 
 
 if __name__ == '__main__':

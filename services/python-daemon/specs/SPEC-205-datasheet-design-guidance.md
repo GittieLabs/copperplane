@@ -5,7 +5,7 @@ status: Draft
 type: Module
 user_facing: true
 created: 2026-08-18
-last_updated: 2026-08-18
+last_updated: 2026-08-20
 target_version: v0.3.0
 location: "services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
@@ -13,23 +13,33 @@ child_specs: []
 ---
 # SPEC-205: Datasheet-Driven Design Guidance
 ## 1. Executive Summary & Goals
-*   **High-Level Goal:** Given a part and its datasheet, surface what an engineer needs *around*
+*   **High-Level Goal:** Given a part and its datasheet, surface what someone needs *around*
     that part to use it correctly — supply range and current, decoupling capacitors, pull-ups,
     crystal load capacitance, protection components, and layout constraints — with **every item
     citing the section of the datasheet it came from**.
-*   **Business / Technical Value:** This is the question an engineer actually asks before committing
+*   **Business / Technical Value:** This is the question a builder actually asks before committing
     a part to a board, and the one that costs the most when answered wrong. It is also the clearest
     expression of the product's "advisor, not generator" framing: the app is not placing capacitors,
-    it is telling the engineer what the datasheet requires and showing them where it says so. No
+    it is telling the builder what the datasheet requires and showing them where it says so. No
     distributor API sells this data (see [SPEC-203](SPEC-203-supplier-api-integration.md), retired);
     it exists only in datasheet prose, tables, and reference designs.
+*   **Real audience correction (2026-08-20), from live use of the first shipped slice**: this
+    spec's original text assumed a practicing hardware engineer as the reader. Real user testing of
+    `CTX-205.4`'s shipped panel against a real datasheet showed that assumption was wrong for this
+    product: the actual audience is a **maker/hobbyist**, not someone who reads datasheets for a
+    living. Correctly cited, verbatim datasheet prose — even once the extraction itself is accurate
+    — is not the right *reading experience* for that audience; it is proof, not explanation. §2.1
+    now names a synthesis layer that addresses this without touching the citation contract itself.
 *   **Non-Goals:**
     *   **Not placing components.** No schematic is generated, no netlist is written, nothing is
         injected into a board.
     *   **Not a substitute for reading the datasheet.** Every claim links back to it; the goal is to
-        get the engineer to the right page faster, not to replace the page.
-    *   **Not general electronics tutoring.** Explaining what a decoupling capacitor *is* belongs to
-        the project conversation surface, not here.
+        get the builder to the right page faster, not to replace the page.
+    *   **Not general electronics tutoring.** Explaining what a decoupling capacitor *is in general*
+        still belongs to the project conversation surface, not here. Translating *this document's
+        own cited facts* into plain language (§2.1's synthesis layer) is in scope; teaching
+        electronics from first principles is not — the difference is whether the sentence is
+        grounded in a specific citation or not.
     *   **Not application notes or reference designs** in this pass. The datasheet is the boundary —
         see §3.
     *   Not a compliance, safety, or sign-off tool.
@@ -50,6 +60,19 @@ entirely by configuration, but it should not be silently forbidden.
 **A guidance item without a resolvable citation is invalid and must not render.** This is a schema
 constraint enforced in the pipeline, not a UI convention. It is the mechanism that converts "the AI
 says 100 nF" into "the datasheet says this, §7.2, page 31" — checkable in five seconds.
+### 2.1.1 Synthesis: a plain-language layer over the citations, not a fourth class
+Added 2026-08-20, after the audience correction in §1. This is **not** a new class of claim — it
+introduces no new citable fact and does not weaken the citation requirement above. Per category,
+once its Class B items are validated, one additional short (2–4 sentence) plain-language paragraph
+is generated **from those same validated items and nothing else** — no new facts, no general
+knowledge, no filler when the underlying items are too sparse to say anything substantive (the
+synthesis says so honestly in that case, rather than padding). It is grounded translation of
+real, already-cited evidence, not independent generation — the underlying citations remain the
+actual checkable claim; the summary is a reading aid on top of them, never a replacement for them.
+A category with zero validated items gets no summary (`None`), matching the "empty is a valid,
+honest answer" rule already established for the items themselves — the synthesis step is skipped
+entirely for an empty category, the same real cost/latency discipline as the extraction step's own
+"zero candidates, no LLM call" rule.
 ### 2.2 Retrieval, not one-shot extraction
 Datasheet length varies by more than an order of magnitude — a couple hundred pages for an
 ATtiny85, well over a thousand for an ESP32-S3 technical reference manual. One-shot extraction over
@@ -124,11 +147,15 @@ Per the AgentFlow adoption decision, this is a `.workflow.md` DAG, not bespoke o
 ## 5. User & Interaction
 *   **Stage.** Component Detail (stage 2 of the product stage machine). Also feeds the Schematic
     stage (stage 3), where per-pin guidance is the primary content.
-*   **User goal.** *"Before I commit this part to my board, what do I need around it — and can I
-    trust what you're telling me?"*
+*   **User goal.** *"Before I use this part in my project, what do I need to know about it — in
+    plain terms, from someone who actually read the datasheet?"* (Corrected 2026-08-20: the real
+    reader is a maker/hobbyist, not a practicing hardware engineer — see §1.)
 *   **What the user sees and does.**
     *   On a part's detail view, a **Design Requirements** panel beside the pin diagram, grouped by
         category: Power, Decoupling, Reset/Boot, Clock, Protection, Layout.
+    *   Each category leads with its §2.1.1 **plain-language summary** where one exists — this is
+        the primary reading surface. The underlying cited items sit below it, collapsed by default,
+        available on demand as proof, not as the first thing the user has to parse.
     *   Every Class A and Class B item carries a **citation chip** (e.g. `§7.2 · p31`) that opens
         the datasheet at that page. The chip is the point of the feature — an item without one does
         not appear.
