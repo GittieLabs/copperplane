@@ -13,6 +13,7 @@ import {
   type CommunitySymbolOption,
   type FootprintCandidate,
 } from '../lib/footprints'
+import { listLibraries, tagObject, type LibrarySummary } from '../lib/library'
 import { exportSymbol, extractPartDetail, getConnectionGuidance, saveConfirmedPart, type ConnectionGuidance, type ExtractedSchema, type SavedPart, type SavedSymbol } from '../lib/partDetail'
 
 type Status = 'extracting' | 'ready' | 'error'
@@ -36,6 +37,17 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
   const [exportedPath, setExportedPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
+
+  // CTX-315.2: SPEC-315 §5's own "Add to library..." action -- a real,
+  // separate step from "Save to Library" above (which always tags into
+  // Default, unchanged). Only ever offers real custom libraries (Default
+  // is implicit, never shown as something to pick/uncheck).
+  const [libraryPickerOpen, setLibraryPickerOpen] = useState(false)
+  const [availableLibraries, setAvailableLibraries] = useState<LibrarySummary[] | null>(null)
+  const [selectedLibraryIds, setSelectedLibraryIds] = useState<string[]>([])
+  const [taggingLibraries, setTaggingLibraries] = useState(false)
+  const [libraryTagError, setLibraryTagError] = useState<string | null>(null)
+  const [libraryTagMessage, setLibraryTagMessage] = useState<string | null>(null)
 
   // CTX-308.2: the found-or-create footprint flow, once a Part exists but
   // has no footprint_id yet. Only searches this machine's own directly
@@ -119,6 +131,12 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     setGuidance(null)
     setLoadingGuidance(false)
     setGuidanceError(null)
+    setLibraryPickerOpen(false)
+    setAvailableLibraries(null)
+    setSelectedLibraryIds([])
+    setTaggingLibraries(false)
+    setLibraryTagError(null)
+    setLibraryTagMessage(null)
 
     extractPartDetail(candidate.part_number)
       .then((schema) => {
@@ -149,6 +167,44 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
+    }
+  }
+
+  /** CTX-315.2/SPEC-315 §5: a real, separate action from "Save to
+   * Library" above -- opens a picker over the real current set of
+   * custom libraries (Default excluded; it's implicit and never a
+   * choice to make here). */
+  async function handleOpenLibraryPicker() {
+    if (!savedPart) return
+    setLibraryTagError(null)
+    setLibraryTagMessage(null)
+    setLibraryPickerOpen(true)
+    try {
+      const libraries = await listLibraries()
+      setAvailableLibraries(libraries.filter((l) => l.id !== 'default'))
+    } catch (err) {
+      setLibraryTagError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  function handleToggleLibrarySelection(libraryId: string) {
+    setSelectedLibraryIds((prev) =>
+      prev.includes(libraryId) ? prev.filter((id) => id !== libraryId) : [...prev, libraryId],
+    )
+  }
+
+  async function handleConfirmAddToLibrary() {
+    if (!savedPart) return
+    setTaggingLibraries(true)
+    setLibraryTagError(null)
+    try {
+      await tagObject('part', savedPart.part_id, selectedLibraryIds)
+      setLibraryTagMessage('Added to library.')
+      setLibraryPickerOpen(false)
+    } catch (err) {
+      setLibraryTagError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setTaggingLibraries(false)
     }
   }
 
@@ -382,6 +438,61 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
 
       {savedPart && (
         <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
+          {/* CTX-315.2/SPEC-315 §5: real, separate from "Save to Library"
+              -- always saves to Default already; this tags into 0+
+              additional custom libraries. */}
+          <div className="flex flex-col gap-2 border-b border-neutral-800 pb-2">
+            {!libraryPickerOpen ? (
+              <button
+                type="button"
+                className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium"
+                onClick={() => void handleOpenLibraryPicker()}
+              >
+                Add to library…
+              </button>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {availableLibraries === null && !libraryTagError && (
+                  <p className="text-xs text-neutral-500">Loading libraries…</p>
+                )}
+                {availableLibraries !== null && availableLibraries.length === 0 && (
+                  <p className="text-xs text-neutral-500">
+                    No custom libraries yet. Create one from the Library area.
+                  </p>
+                )}
+                {availableLibraries?.map((library) => (
+                  <label key={library.id} className="flex items-center gap-2 text-xs text-neutral-300">
+                    <input
+                      type="checkbox"
+                      checked={selectedLibraryIds.includes(library.id)}
+                      onChange={() => handleToggleLibrarySelection(library.id)}
+                    />
+                    {library.name}
+                  </label>
+                ))}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="self-start rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+                    onClick={() => void handleConfirmAddToLibrary()}
+                    disabled={taggingLibraries || selectedLibraryIds.length === 0}
+                  >
+                    {taggingLibraries ? 'Adding…' : 'Confirm'}
+                  </button>
+                  <button
+                    type="button"
+                    className="self-start rounded border border-neutral-700 px-3 py-1 text-xs"
+                    onClick={() => setLibraryPickerOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {libraryTagError && <p className="text-sm text-red-400">{libraryTagError}</p>}
+            {libraryTagMessage && <p className="text-sm text-emerald-400">{libraryTagMessage}</p>}
+          </div>
+
           {savedPart.footprint_id ? (
             <>
               <p className="text-sm text-emerald-400">

@@ -13,6 +13,13 @@ const getConnectionGuidanceMock = vi.fn()
 const searchCommunityFootprintsMock = vi.fn()
 const importCommunityFootprintMock = vi.fn()
 const attachCommunityFootprintToPartMock = vi.fn()
+const listLibrariesMock = vi.fn()
+const tagObjectMock = vi.fn()
+
+vi.mock('../lib/library', () => ({
+  listLibraries: (...args: unknown[]) => listLibrariesMock(...args),
+  tagObject: (...args: unknown[]) => tagObjectMock(...args),
+}))
 
 vi.mock('../lib/partDetail', () => ({
   extractPartDetail: (...args: unknown[]) => extractPartDetailMock(...args),
@@ -59,6 +66,8 @@ beforeEach(() => {
   searchCommunityFootprintsMock.mockReset()
   importCommunityFootprintMock.mockReset()
   attachCommunityFootprintToPartMock.mockReset()
+  listLibrariesMock.mockReset()
+  tagObjectMock.mockReset()
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -307,6 +316,26 @@ describe('PartDetail', () => {
       expect.objectContaining({ path: 'symbols/SparkFun-Capacitor.kicad_sym' }), 'C_0402',
     )
     expect(attachCommunityFootprintToPartMock).not.toHaveBeenCalled()
+  })
+
+  it('CTX-315.2: Add to library… opens a real picker and calls tagObject with the chosen ids', async () => {
+    listLibrariesMock.mockResolvedValueOnce([
+      { id: 'default', name: 'Default', part_count: 3, symbol_count: 1, footprint_count: 1 },
+      { id: 'esp32-boards', name: 'ESP32 Boards', part_count: 1, symbol_count: 0, footprint_count: 0 },
+    ])
+    tagObjectMock.mockResolvedValueOnce({ library_ids: ['default', 'esp32-boards'] })
+    await saveAndReachFootprintSection()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to library…' }))
+
+    await waitFor(() => screen.getByText('ESP32 Boards'))
+    expect(screen.queryByText('Default')).toBeNull()
+
+    fireEvent.click(screen.getByLabelText('ESP32 Boards'))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => expect(tagObjectMock).toHaveBeenCalledWith('part', 'ATtiny85', ['esp32-boards']))
+    await waitFor(() => screen.getByText('Added to library.'))
   })
 
   it('CTX-308.5: Generate from datasheet dimensions calls generateFootprintFromPart and shows an unverified badge', async () => {

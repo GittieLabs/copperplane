@@ -9,6 +9,8 @@ export function Rail({
   onSelectProject,
   onCreateProject,
   libraryCount,
+  librarySelected,
+  onSelectLibrary,
   settingsSelected,
   onSelectSettings,
 }: {
@@ -17,6 +19,8 @@ export function Rail({
   onSelectProject: (name: string) => void
   onCreateProject: (name: string) => void
   libraryCount: number
+  librarySelected: boolean
+  onSelectLibrary: () => void
   settingsSelected: boolean
   onSelectSettings: () => void
 }) {
@@ -85,7 +89,15 @@ export function Rail({
 
       <div className="flex flex-col gap-1">
         <h2 className="px-2 text-xs font-medium uppercase text-neutral-500">Library</h2>
-        <span className="px-2 py-1 text-neutral-400">{libraryCount} parts</span>
+        <button
+          type="button"
+          className={`rounded px-2 py-1 text-left ${
+            librarySelected ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
+          }`}
+          onClick={onSelectLibrary}
+        >
+          {libraryCount} parts
+        </button>
       </div>
 
       <button
