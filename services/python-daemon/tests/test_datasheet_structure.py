@@ -145,6 +145,48 @@ class TestFindHeadings(unittest.TestCase):
         self.assertEqual(len(headings), 1)
 
 
+class TestNormalizePdfText(unittest.TestCase):
+    """CTX-205.6: a real bug found by live user testing -- the actual
+    ATtiny85 datasheet's embedded font places the degree sign at PDF
+    Private Use Area codepoint U+F0B0 (confirmed by direct inspection of
+    the real extracted text: "-55C to +125C" where the real
+    document reads "-55C to +125C"), which pdfplumber surfaces raw
+    instead of "°" -- rendering as replacement-character boxes in
+    the UI."""
+
+    def test_021_a_real_degree_sign_pua_codepoint_is_normalized(self):
+        self.assertEqual(ds._normalize_pdf_text("-55C to +125C"), "-55°C to +125°C")
+
+    def test_022_ordinary_text_is_left_untouched(self):
+        self.assertEqual(ds._normalize_pdf_text("Ordinary text, no PUA codepoints here."), "Ordinary text, no PUA codepoints here.")
+
+
+class TestIsCatalogEntryTitle(unittest.TestCase):
+    """CTX-205.6: a real, second false-positive class found by testing
+    the "power" category against the real ATtiny85 datasheet -- its only
+    heading match anywhere was "1.1.1 VCC", a single pin-name entry from
+    the real "1.1 Pin Descriptions" listing, not a narrative section, so
+    the whole "power" candidate section was built entirely from a
+    one-line pin label. Confirmed narrow against the real document:
+    exactly 8 of 286 real detected headings are a single all-caps word,
+    and every one is a pin name, an instruction mnemonic, or a stray
+    table-cell fragment -- never a real section title."""
+
+    def test_023_a_single_all_caps_word_is_a_real_catalog_entry(self):
+        self.assertTrue(ds._is_catalog_entry_title("VCC"))
+        self.assertTrue(ds._is_catalog_entry_title("RESET"))
+
+    def test_024_a_real_multi_word_title_case_section_title_is_not_a_catalog_entry(self):
+        self.assertFalse(ds._is_catalog_entry_title("Reset Sources"))
+
+    def test_025_a_real_multi_word_all_caps_title_is_deliberately_not_excluded(self):
+        # Only single-word all-caps titles are treated as pin/mnemonic
+        # listings -- a real multi-word all-caps section title (none
+        # observed in the real document, but plausible in another one)
+        # is left alone rather than guessed at with a broader heuristic.
+        self.assertFalse(ds._is_catalog_entry_title("POWER SUPPLY"))
+
+
 class TestLocateCandidateSectionsHeadingBased(unittest.TestCase):
     """CTX-205.5: the real section-boundary logic (a category's section
     extends from its own real heading up to, but not including, the
@@ -181,6 +223,27 @@ class TestLocateCandidateSectionsHeadingBased(unittest.TestCase):
         candidates = ds.locate_candidate_sections(pages)
 
         self.assertEqual(candidates["reset"], [1, 2])
+
+    def test_026_a_single_all_caps_pin_name_heading_does_not_hijack_a_real_section(self):
+        # CTX-205.6: the real ATtiny85 bug -- "1.1.1 VCC" (a pin-listing
+        # entry) was the ONLY heading matching the "power" category
+        # anywhere in the real document, so the whole "section" was
+        # built by extending from that one pin label's page up to the
+        # next real heading -- pulling in an unrelated page (2) purely
+        # by page-range membership, not because it said anything about
+        # power. A catalog-entry heading must not count as a real
+        # section match; the category should fall back to the real
+        # per-page keyword search instead (page 1 only -- the literal
+        # word "VCC" it contains -- not page 2, which has none).
+        pages = [
+            {"page": 1, "text": "1.1 Pin Descriptions\n1.1.1 VCC"},
+            {"page": 2, "text": "Irrelevant unrelated body text with no power keywords at all."},
+            {"page": 3, "text": "1.1.2 GND\nGround pin description."},
+        ]
+
+        candidates = ds.locate_candidate_sections(pages)
+
+        self.assertEqual(candidates["power"], [1])
 
 
 if __name__ == "__main__":

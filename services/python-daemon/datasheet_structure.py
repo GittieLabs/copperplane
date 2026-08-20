@@ -52,6 +52,34 @@ CATEGORY_PATTERNS = {
 # assumed.
 _HEADING_PATTERN = re.compile(r"^[ \t]*\d+(?:\.\d+)*\.?[ \t]+([A-Za-z][A-Za-z0-9 /,&\-]{2,80})[ \t]*$", re.MULTILINE)
 
+# A real font-encoding artifact confirmed against the real ATtiny85
+# datasheet: its embedded font places the degree sign at PDF Private Use
+# Area codepoint U+F0B0 (the classic Adobe Symbol-font "degree" slot,
+# shifted into the PUA -- a common consequence of a font with no
+# `ToUnicode` CMap entry for that glyph). `pdfplumber` surfaces the raw
+# codepoint rather than "°", so a quote like "-55°C to +125°C" comes back
+# as "-55C to +125C" and renders as replacement-character
+# boxes in the UI. Confirmed via direct inspection of the real PDF's
+# extracted text (`services/python-daemon/context/CTX-205.6-...md`'s own
+# Plan Drift) -- normalized at extraction time so every downstream
+# consumer (citation quotes, structure-pass matching) sees "°", not a
+# PUA codepoint. Deliberately narrow: only this one, unambiguous,
+# high-frequency substitution is applied -- other PUA codepoints found in
+# the same document (register-transfer arrows, multiplication dots, in
+# the Instruction Set Summary) are real but lower-confidence without a
+# full Symbol-font mapping table, and don't appear on any page this
+# module's own candidate-section logic actually surfaces.
+_PUA_CHARACTER_SUBSTITUTIONS = {
+    "": "°",  # degree sign
+}
+
+
+def _normalize_pdf_text(text: str) -> str:
+    for pua_char, real_char in _PUA_CHARACTER_SUBSTITUTIONS.items():
+        text = text.replace(pua_char, real_char)
+    return text
+
+
 # A real, deliberate safety cap -- how many pages a single detected
 # section (or, in the no-heading-found fallback, a single category's
 # keyword-matched pages) can contribute as candidates. Without this, a
@@ -81,7 +109,10 @@ def extract_pages(pdf_path: str) -> list[dict]:
     must be able to reference any page number that really exists."""
     try:
         with pdfplumber.open(pdf_path) as pdf:
-            return [{"page": i, "text": page.extract_text() or ""} for i, page in enumerate(pdf.pages, start=1)]
+            return [
+                {"page": i, "text": _normalize_pdf_text(page.extract_text() or "")}
+                for i, page in enumerate(pdf.pages, start=1)
+            ]
     except Exception as exc:
         raise DatasheetStructureError(f"Could not read {pdf_path}: {exc}") from exc
 
@@ -98,6 +129,24 @@ def extract_pages(pdf_path: str) -> list[dict]:
 _MAX_HEADING_WORDS = 8
 
 
+def _is_catalog_entry_title(title: str) -> bool:
+    """A real, second false-positive class found by testing the real
+    "power" category against the real ATtiny85 datasheet: its only
+    heading match anywhere was "1.1.1 VCC" -- a single pin-name entry
+    from the "1.1 Pin Descriptions" listing (`VCC`, `GND`, `RESET`,
+    `PB0`...), not a narrative section, so the whole "power" candidate
+    section ended up built entirely from a one-line pin label with
+    nothing useful around it. Confirmed narrow and safe against the real
+    document: exactly 8 of 286 real detected headings are a single
+    all-caps word, and every one is a pin name, an instruction mnemonic
+    (`SLEEP` in the Instruction Set Summary), or a stray table-cell
+    fragment (`N/A`, `LSB`) -- never a real section title, which in this
+    document is always a Title Case phrase of two or more words (`Reset
+    Sources`, `Clock Systems and their Distribution`)."""
+    words = title.split()
+    return len(words) == 1 and title.isupper()
+
+
 def _find_headings(pages: list[dict]) -> list[dict]:
     """Every real numbered section-heading line found anywhere in the
     document, `[{"page": N, "title": "..."}]`, in real page order --
@@ -112,6 +161,8 @@ def _find_headings(pages: list[dict]) -> list[dict]:
                 continue
             title = match.group(1).strip()
             if len(title.split()) > _MAX_HEADING_WORDS:
+                continue
+            if _is_catalog_entry_title(title):
                 continue
             headings.append({"page": page["page"], "title": title})
     return headings
