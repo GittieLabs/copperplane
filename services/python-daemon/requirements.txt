@@ -5,6 +5,12 @@ pyyaml==6.0.3
 certifi==2026.4.22
 gittielabs-agentflow[anthropic,openai,google]==0.9.0
 
+# CTX-205.1: real PDF text/page extraction for the datasheet structure
+# pass (SPEC-205) -- MIT-licensed (its own deps, pdfminer-six/pillow/
+# pypdfium2, are all permissive too -- checked given SPEC-904's own
+# license-consistency norm). No PDF library existed in this file before.
+pdfplumber==0.11.10
+
 # CTX-314.1: real-verified against live .kicad_mod/.kicad_sym files
 # pulled from espressif/kicad-libraries and sparkfun/SparkFun-KiCad-
 # Libraries (two different KiCad format generations) -- parses both
