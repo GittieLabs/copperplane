@@ -81,6 +81,21 @@ class TestDualRowLayout(unittest.TestCase):
             self.assertIsNotNone(pad["drill_mm"])
             self.assertGreater(pad["drill_mm"], 0)
 
+    def test_004b_dip8_row_spacing_is_the_real_standardized_0_3in_lead_spacing(self):
+        """A real bug found by live user testing: DIP row spacing was
+        previously derived from `package_dimensions["width_mm"]` (the
+        package BODY width, ~6.35mm for this fixture) instead of the
+        real, standardized 0.3in/7.62mm lead-to-lead spacing every
+        "wide" DIP-8/DIP-14 actually has (confirmed against the real
+        ATtiny85 datasheet's own PDIP-8 mechanical drawing: "eA 0.300
+        BSC"). A footprint generated with the wrong row spacing would
+        not physically fit a real part's leads."""
+        pin_numbers = [str(i) for i in range(1, 9)]
+        pads = kw.generate_pad_layout("DIP-8", pin_numbers, _DIP8_DIMS)
+        by_number = {p["number"]: p for p in pads}
+        row_spacing = by_number["8"]["x_mm"] - by_number["1"]["x_mm"]
+        self.assertAlmostEqual(row_spacing, 7.62)
+
     def test_005_adjacent_pads_never_touch(self):
         """TEST-001: pad size along the row axis must stay strictly
         under the pitch, or adjacent pads on the same side would
