@@ -585,7 +585,7 @@ no reachability check; and a real "Extraction did not return valid JSON" failure
 from ever reaching Part Detail at all, which looked like a missing UI from the outside but was an
 upstream extraction bug.
 
-#### [SPEC-316](apps/tauri-ui/specs/SPEC-316-native-menu-command-surface.md) — Native Menu Command Surface — 🚧 in progress ([CTX-316.1](apps/tauri-ui/context/CTX-316.1-menu-command-surface-wiring.md) done, CTX-316.2 planned) 2026-08-20
+#### [SPEC-316](apps/tauri-ui/specs/SPEC-316-native-menu-command-surface.md) — Native Menu Command Surface — ✅ done ([CTX-316.1](apps/tauri-ui/context/CTX-316.1-menu-command-surface-wiring.md), [CTX-316.2](apps/tauri-ui/context/CTX-316.2-native-menu-dynamic-sync.md)) 2026-08-20
 
 *Module:* `apps/tauri-ui` + `core/tauri-rust` · *Depends on:* SPEC-312, SPEC-315
 
@@ -604,10 +604,14 @@ via two explicit choices rather than assumed.
 `CTX-316.1` shipped the full static structure -- the app-name menu, the `Design` menu wired to
 every real, parameterless per-area action (`Open in KiCad`, `Pick Schematic Manually…`, `Pick PCB
 File…`, `Generate`), and a `Library` menu with `Default Library` (deep-linked) and `Manage
-Libraries…`. Deliberately deferred to `CTX-316.2`, named honestly in the spec's own Known
-Constraints rather than attempted here: the `Library` menu's real custom-library items (the native
-menu builds before the daemon is ready to answer `library.list_libraries()`) and syncing the
-`Design` menu's enabled state to whether a project is actually open.
+Libraries…`. `CTX-316.2` closed the two gaps that phase deliberately deferred: the `Library` menu
+now shows real custom libraries (the frontend drives the sync via a new `update_library_menu`
+command, since the native menu is built before the daemon is ready to answer
+`library.list_libraries()` -- sync-on-fetch, not a live push subscription, named honestly rather
+than solved with new plumbing this app has never needed before), and the `Design` menu is disabled
+whenever no project is open. One deliberate, one-off break from `CTX-316.1`'s own
+one-const-per-action event convention: a custom library's identity can't be a compile-time const,
+so `menu://open-library` carries a real payload instead.
 
 ### 3.4 `4xx` — Distribution & operations
 
