@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -9,6 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 import daemon
 from freecad_bridge import FreeCADUnavailableError, find_freecadcmd
+from tests.test_library_store import _OneShotServer
 
 
 class _RaceProneStdout:
@@ -467,6 +469,101 @@ class TestRealInjectComponentJob(unittest.TestCase):
         result = terminal_notification["params"]["result"]
         self.assertEqual(result["part_number"], "TEST-CTX-108-1")
         self.assertEqual(result["pins"], 8)
+
+
+class TestRealDatasheetGenerateGuidanceJob(unittest.TestCase):
+    """CTX-205.3: datasheet.generate_guidance, submitted through
+    handle_request exactly as a real client would, returns a job_id
+    immediately and reports job.completed with the real, cited,
+    persisted guidance -- proving the full route/param-resolution/
+    async-dispatch/secrets-passthrough chain, not just
+    datasheet_guidance.generate_datasheet_guidance in isolation
+    (test_datasheet_guidance.py) or the route function's own
+    orchestration in isolation (test_daemon.py). A real local HTTP
+    server serves CTX-205.1's own real fixture PDF -- no outside
+    internet access required for this real fetch, matching
+    TestCacheDatasheet's own established pattern. Skips itself cleanly
+    when no real ANTHROPIC_API_KEY is available."""
+
+    def _load_dotenv_local(self):
+        path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env.local'))
+        if not os.path.exists(path):
+            return
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, _, value = line.partition('=')
+                os.environ.setdefault(key.strip(), value.strip())
+
+    def test_001_dispatched_through_handle_request_reports_job_completed_with_real_cited_guidance(self):
+        self._load_dotenv_local()
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            self.skipTest("ANTHROPIC_API_KEY not set. Add it to .env.local to run this test for real.")
+
+        tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=tmpdir.name)
+
+        fixture_path = os.path.join(os.path.dirname(__file__), "fixtures", "sample_datasheet.pdf")
+        with open(fixture_path, "rb") as f:
+            fixture_bytes = f.read()
+        server = _OneShotServer(200, fixture_bytes)
+
+        original_secrets = daemon.CONFIG.get("secrets")
+        daemon.CONFIG["secrets"] = {"anthropic_api_key": api_key}
+
+        captured = []
+        original_write_line = daemon._write_line
+        daemon._write_line = lambda text: captured.append(json.loads(text))
+        try:
+            provenance = {f: {"source": "test"} for f in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS}
+            daemon.library_store.save_part({
+                "part_id": "ATtiny85-real-guidance", "manufacturer": "Microchip", "package": "SOIC-8",
+                "pins": [], "datasheet_url": server.url, "package_dimensions": {}, "courtyard": {},
+                "provenance": provenance,
+            })
+
+            request = json.dumps({
+                "jsonrpc": "2.0",
+                "method": "datasheet.generate_guidance",
+                "params": {"part_id": "ATtiny85-real-guidance"},
+                "id": "req_generate_guidance",
+            })
+            response = json.loads(daemon.handle_request(request))
+            self.assertNotIn("error", response)
+            job_id = response["result"]["job_id"]
+
+            deadline = time.monotonic() + 60.0
+            terminal_notification = None
+            while time.monotonic() < deadline:
+                for n in captured:
+                    if (
+                        n.get("params", {}).get("job_id") == job_id
+                        and n["method"] in ("job.completed", "job.failed")
+                    ):
+                        terminal_notification = n
+                        break
+                if terminal_notification:
+                    break
+                time.sleep(0.1)
+        finally:
+            daemon._write_line = original_write_line
+            daemon.CONFIG["secrets"] = original_secrets
+            server.stop()
+            daemon.library_store.configure(storage_root=None)
+            tmpdir.cleanup()
+
+        self.assertIsNotNone(
+            terminal_notification, "datasheet.generate_guidance job never reached a terminal state within 60s"
+        )
+        self.assertEqual(terminal_notification["method"], "job.completed")
+        updated_part = terminal_notification["params"]["result"]
+        guidance = updated_part["design_guidance"]
+        self.assertTrue(guidance["content_hash"])
+        self.assertIn("reset", guidance["categories"])
+        self.assertGreater(len(guidance["categories"]["reset"]), 0)
 
 
 if __name__ == '__main__':

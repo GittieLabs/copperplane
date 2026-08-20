@@ -141,6 +141,12 @@ except Exception:
     )
     community_libraries = None
 
+try:
+    import datasheet_guidance
+except Exception:
+    logger.exception("datasheet_guidance failed to import -- datasheet.generate_guidance will be unavailable")
+    datasheet_guidance = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -880,6 +886,32 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
     )
 
 
+def datasheet_generate_guidance(part_id: str, cancel_event=None) -> dict:
+    """The datasheet.generate_guidance route (SPEC-205, CTX-205.3): loads
+    the real Part, ensures its datasheet PDF is really cached locally
+    (SPEC-306's own caching is best-effort and non-gating at Part-save
+    time -- `library_store.ensure_datasheet_cached` fetches it here if
+    it never was), runs CTX-205.1/.2's real structure-pass + Class B
+    extraction pipeline, persists the real, cited result onto the Part
+    record, and returns the updated Part. A real, multi-category LLM
+    pipeline (~20+s observed for a real 8-category document), so
+    registered in ASYNC_ROUTES below and threading `cancel_event`
+    through, matching `freecad_generate_enclosure`'s own real pattern --
+    checked once per category, not mid-call, in
+    `datasheet_guidance._run_all_categories_and_close`."""
+    part = library_store.load_part(part_id)
+    pdf_path = library_store.ensure_datasheet_cached(part["part_id"], part["datasheet_url"])
+    categories = datasheet_guidance.generate_datasheet_guidance(
+        pdf_path,
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+        cancel_event=cancel_event,
+    )
+    content_hash = library_store.content_hash_of_file(pdf_path)
+    return library_store.save_part_design_guidance(part["part_id"], content_hash, categories)
+
+
 def kicad_list_open_boards() -> dict:
     """The kicad.list_open_boards route (CTX-309.4): a real, cheap,
     read-only lookup of every board currently open in KiCad, decoupled
@@ -1175,6 +1207,8 @@ def _build_routes() -> dict:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
     if component_pipeline is not None and library_store is not None:
         routes["kicad.generate_connection_guidance"] = kicad_generate_connection_guidance
+    if datasheet_guidance is not None and library_store is not None:
+        routes["datasheet.generate_guidance"] = datasheet_generate_guidance
     if kicad_bridge is not None:
         routes["kicad.list_open_boards"] = kicad_list_open_boards
         routes["kicad.list_project_schematics"] = kicad_list_project_schematics
@@ -1199,7 +1233,7 @@ ASYNC_ROUTES = {
     "freecad.generate_enclosure", "freecad.export_enclosure", "llm.chat", "kicad.generate_component",
     "kicad.inject_component", "component.search", "component.cache_datasheet",
     "kicad.generate_connection_guidance", "kicad.check_board", "kicad.check_schematic",
-    "kicad.get_component_heights", "kicad.export_board_glb",
+    "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
     # CTX-314.2: both make real GitHub network calls (community_libraries.py's
     # own _github_request/fetch_raw_content) -- a real bug in CTX-314.1's own
     # shipped code (search_community_footprints was never added here) meant

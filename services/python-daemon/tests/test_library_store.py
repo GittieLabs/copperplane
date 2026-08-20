@@ -1,3 +1,4 @@
+import hashlib
 import http.server
 import json
 import os
@@ -980,6 +981,125 @@ class TestExportFootprintKicadMod(LibraryStoreTestCase):
     # that established convention, so this isn't a realistic input to
     # defend against here. _sexpr_str's own escaping is already covered
     # by the symbol export test above (same shared helper).
+
+
+_VALID_DESIGN_GUIDANCE = {
+    "generated_at": "2026-08-20T00:00:00+00:00",
+    "content_hash": "deadbeef",
+    "document_revision": None,
+    "categories": {"reset": [{"quote": "real quote", "page": 5, "category": "reset"}], "layout": []},
+}
+
+
+class TestContentHashOfFile(unittest.TestCase):
+
+    def test_001_hashes_real_file_bytes(self):
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(b"real content")
+            path = f.name
+        try:
+            expected = hashlib.sha256(b"real content").hexdigest()
+            self.assertEqual(store.content_hash_of_file(path), expected)
+        finally:
+            os.remove(path)
+
+    def test_002_different_real_content_hashes_differently(self):
+        with tempfile.NamedTemporaryFile(delete=False) as f1, tempfile.NamedTemporaryFile(delete=False) as f2:
+            f1.write(b"content one")
+            f2.write(b"content two")
+            path1, path2 = f1.name, f2.name
+        try:
+            self.assertNotEqual(store.content_hash_of_file(path1), store.content_hash_of_file(path2))
+        finally:
+            os.remove(path1)
+            os.remove(path2)
+
+
+class TestEnsureDatasheetCached(LibraryStoreTestCase):
+
+    def test_001_an_already_cached_real_file_is_returned_without_a_new_fetch(self):
+        server = _OneShotServer(200, b"%PDF-1.4 first fetch")
+        try:
+            first_path = store.cache_datasheet("ATtiny85", server.url)
+        finally:
+            server.stop()
+
+        # A server that would fail any real fetch -- proves the second
+        # call never actually reaches the network, only the filesystem.
+        path = store.ensure_datasheet_cached("ATtiny85", "http://127.0.0.1:1/unreachable.pdf")
+
+        self.assertEqual(path, first_path)
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"%PDF-1.4 first fetch")
+
+    def test_002_a_real_cache_miss_fetches_and_caches_for_real(self):
+        server = _OneShotServer(200, b"%PDF-1.4 real fetch")
+        try:
+            path = store.ensure_datasheet_cached("ATtiny85", server.url)
+        finally:
+            server.stop()
+
+        with open(path, "rb") as f:
+            self.assertEqual(f.read(), b"%PDF-1.4 real fetch")
+
+    def test_003_a_real_unsafe_part_number_is_rejected_before_any_fetch(self):
+        with self.assertRaises(store.DatasheetFetchError):
+            store.ensure_datasheet_cached("../../etc/passwd", "http://127.0.0.1:1/nope.pdf")
+
+
+class TestDesignGuidanceStorage(LibraryStoreTestCase):
+
+    def _valid_part(self, **overrides):
+        provenance = {field: {"source": "datasheet_pdf"} for field in store.PART_PROVENANCE_REQUIRED_FIELDS}
+        part = {
+            "part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8", "pins": [],
+            "datasheet_url": "https://example.com/x.pdf", "package_dimensions": {}, "courtyard": {},
+            "provenance": provenance,
+        }
+        part.update(overrides)
+        return part
+
+    def test_001_load_part_backfills_design_guidance_as_none_not_an_empty_dict(self):
+        store.save_part(self._valid_part())
+
+        loaded = store.load_part("ATtiny85")
+
+        self.assertIsNone(loaded["design_guidance"])
+
+    def test_002_save_part_accepts_a_real_valid_design_guidance(self):
+        store.save_part(self._valid_part(design_guidance=_VALID_DESIGN_GUIDANCE))
+
+        loaded = store.load_part("ATtiny85")
+
+        self.assertEqual(loaded["design_guidance"]["categories"]["reset"][0]["quote"], "real quote")
+
+    def test_003_save_part_rejects_design_guidance_missing_the_real_categories_key(self):
+        with self.assertRaises(store.SchemaValidationError):
+            store.save_part(self._valid_part(design_guidance={"generated_at": "x"}))
+
+    def test_004_save_part_rejects_a_real_item_missing_a_required_citation_field(self):
+        malformed = {**_VALID_DESIGN_GUIDANCE, "categories": {"reset": [{"quote": "x"}]}}
+        with self.assertRaises(store.SchemaValidationError):
+            store.save_part(self._valid_part(design_guidance=malformed))
+
+    def test_005_save_part_design_guidance_persists_onto_the_real_current_record(self):
+        store.save_part(self._valid_part())
+
+        updated = store.save_part_design_guidance(
+            "ATtiny85", "real-content-hash", {"reset": [{"quote": "x", "page": 1, "category": "reset"}]},
+        )
+
+        self.assertEqual(updated["design_guidance"]["content_hash"], "real-content-hash")
+        self.assertIsNone(updated["design_guidance"]["document_revision"])
+        reloaded = store.load_part("ATtiny85")
+        self.assertEqual(reloaded["design_guidance"]["categories"]["reset"][0]["page"], 1)
+
+    def test_006_save_part_design_guidance_preserves_the_real_records_other_fields(self):
+        store.save_part(self._valid_part())
+
+        updated = store.save_part_design_guidance("ATtiny85", "hash", {"reset": []})
+
+        self.assertEqual(updated["manufacturer"], "Microchip")
 
 
 if __name__ == '__main__':
