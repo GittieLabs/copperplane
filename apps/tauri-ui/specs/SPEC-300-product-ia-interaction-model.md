@@ -21,6 +21,7 @@ child_specs:
   - "SPEC-313-overview-tab-project-dashboard.md"
   - "SPEC-314-community-library-discovery.md"
   - "SPEC-315-library-browsing-and-organization.md"
+  - "SPEC-316-native-menu-command-surface.md"
 user_facing: true
 ---
 
