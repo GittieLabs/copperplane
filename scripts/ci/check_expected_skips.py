@@ -46,6 +46,9 @@ EXPECTED_SKIPS = {
     # SPEC-205/CTX-205.3: datasheet.generate_guidance dispatched through
     # handle_request end-to-end -- same reason.
     "test_001_dispatched_through_handle_request_reports_job_completed_with_real_cited_guidance",
+    # SPEC-205/CTX-205.7: the real plain-language synthesis workflow --
+    # same reason, no real ANTHROPIC_API_KEY on a CI runner.
+    "test_018_a_real_category_with_real_cited_items_gets_a_real_plain_language_summary",
 }
 
 

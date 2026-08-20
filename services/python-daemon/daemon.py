@@ -898,10 +898,14 @@ def datasheet_generate_guidance(part_id: str, cancel_event=None) -> dict:
     registered in ASYNC_ROUTES below and threading `cancel_event`
     through, matching `freecad_generate_enclosure`'s own real pattern --
     checked once per category, not mid-call, in
-    `datasheet_guidance._run_all_categories_and_close`."""
+    `datasheet_guidance._run_all_categories_and_close`.
+
+    CTX-205.7: `generate_datasheet_guidance` now also returns a real
+    `summaries` dict (SPEC-205 §2.1.1's plain-language layer) alongside
+    `categories` -- both are threaded through to storage."""
     part = library_store.load_part(part_id)
     pdf_path = library_store.ensure_datasheet_cached(part["part_id"], part["datasheet_url"])
-    categories = datasheet_guidance.generate_datasheet_guidance(
+    guidance = datasheet_guidance.generate_datasheet_guidance(
         pdf_path,
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
@@ -909,7 +913,9 @@ def datasheet_generate_guidance(part_id: str, cancel_event=None) -> dict:
         cancel_event=cancel_event,
     )
     content_hash = library_store.content_hash_of_file(pdf_path)
-    return library_store.save_part_design_guidance(part["part_id"], content_hash, categories)
+    return library_store.save_part_design_guidance(
+        part["part_id"], content_hash, guidance["categories"], guidance["summaries"],
+    )
 
 
 def kicad_list_open_boards() -> dict:

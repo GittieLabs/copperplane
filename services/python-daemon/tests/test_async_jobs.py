@@ -564,6 +564,10 @@ class TestRealDatasheetGenerateGuidanceJob(unittest.TestCase):
         self.assertTrue(guidance["content_hash"])
         self.assertIn("reset", guidance["categories"])
         self.assertGreater(len(guidance["categories"]["reset"]), 0)
+        # CTX-205.7: SPEC-205 §2.1.1's real plain-language layer, threaded
+        # through the full route/async-dispatch/storage chain.
+        self.assertIn("reset", guidance["category_summaries"])
+        self.assertTrue(guidance["category_summaries"]["reset"].strip())
 
 
 if __name__ == '__main__':
