@@ -103,6 +103,17 @@ export async function saveConfirmedPart(
   return unwrap(await dispatch('library.save_confirmed_part', { candidate, extraction }))
 }
 
+/** CTX-315.4: reuses `library.load_part` (already `lib/library.ts`'s own
+ * route for a Library detail view's summary rows) but returns the whole
+ * real record -- the same shape `saveConfirmedPart`/`generateDesignGuidance`
+ * already return -- so Part Detail can be reopened from an already-saved
+ * Part without re-running SPEC-202's extraction. Fast, local file I/O
+ * (`library_store.load_part`), so plain `dispatch`, matching
+ * `saveConfirmedPart`'s own precedent -- not `submitJob`. */
+export async function loadPart(partId: string): Promise<SavedPart> {
+  return unwrap(await dispatch('library.load_part', { part_id: partId }))
+}
+
 export async function exportSymbol(symbolId: string): Promise<string> {
   const result = await unwrap<{ path: string }>(await dispatch('library.export_symbol', { symbol_id: symbolId }))
   return result.path

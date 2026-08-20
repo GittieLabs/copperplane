@@ -8,7 +8,9 @@ vi.mock('./ipc', () => ({
   dispatch: (...args: unknown[]) => dispatchMock(...args),
 }))
 
-const { extractPartDetail, saveConfirmedPart, exportSymbol, generateDesignGuidance } = await import('./partDetail')
+const { extractPartDetail, saveConfirmedPart, exportSymbol, generateDesignGuidance, loadPart } = await import(
+  './partDetail'
+)
 
 function fakeJobHandle<T>(result: Promise<T>) {
   result.catch(() => {})
@@ -61,6 +63,27 @@ describe('saveConfirmedPart', () => {
         { part_number: 'X', package: 'X', pins: [] },
       ),
     ).rejects.toThrow('missing provenance')
+  })
+})
+
+describe('loadPart', () => {
+  it('CTX-315.4: dispatches library.load_part and returns the real whole Part record', async () => {
+    const part = {
+      part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8',
+      pins: [{ number: '1', name: 'RESET', electrical_type: 'bidirectional' }],
+      datasheet_url: 'https://example.com/attiny85.pdf', symbol_id: 'SOIC-8_1pin', footprint_id: null,
+      provenance: {}, design_guidance: null,
+    }
+    dispatchMock.mockResolvedValueOnce(ok(part))
+
+    await expect(loadPart('ATtiny85')).resolves.toEqual(part)
+    expect(dispatchMock).toHaveBeenCalledWith('library.load_part', { part_id: 'ATtiny85' })
+  })
+
+  it('throws on a daemon error rather than returning a partial record', async () => {
+    dispatchMock.mockResolvedValueOnce(fail('No Part found with id ATtiny85.'))
+
+    await expect(loadPart('ATtiny85')).rejects.toThrow('No Part found')
   })
 })
 

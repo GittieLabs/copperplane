@@ -25,7 +25,10 @@ type ViewState = { kind: 'list' } | { kind: 'detail'; library: LibrarySummary }
  * merged into one list (SPEC-315 §3's own named hazard, since a
  * Footprint is a real, independently-shared object, not bundled with
  * whichever Part happens to reference it). */
-export function LibraryArea({ initialLibraryId }: { initialLibraryId?: string } = {}) {
+export function LibraryArea({
+  initialLibraryId,
+  onSelectPart,
+}: { initialLibraryId?: string; onSelectPart?: (partId: string) => void } = {}) {
   const [view, setView] = useState<ViewState>({ kind: 'list' })
   const [libraries, setLibraries] = useState<LibrarySummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -154,11 +157,22 @@ export function LibraryArea({ initialLibraryId }: { initialLibraryId?: string } 
           {parts !== null && parts.length === 0 && (
             <p className="text-xs text-neutral-500">No parts in this library yet.</p>
           )}
-          {parts?.map((p) => (
-            <div key={p.part_id} className="rounded border border-neutral-800 p-2 text-xs text-neutral-300">
-              {[p.part_id, p.manufacturer, p.package].filter(Boolean).join(' · ')}
-            </div>
-          ))}
+          {parts?.map((p) =>
+            onSelectPart ? (
+              <button
+                key={p.part_id}
+                type="button"
+                className="rounded border border-neutral-800 p-2 text-left text-xs text-neutral-300 hover:bg-neutral-900"
+                onClick={() => onSelectPart(p.part_id)}
+              >
+                {[p.part_id, p.manufacturer, p.package].filter(Boolean).join(' · ')}
+              </button>
+            ) : (
+              <div key={p.part_id} className="rounded border border-neutral-800 p-2 text-xs text-neutral-300">
+                {[p.part_id, p.manufacturer, p.package].filter(Boolean).join(' · ')}
+              </div>
+            ),
+          )}
         </section>
 
         <section className="flex flex-col gap-2">
