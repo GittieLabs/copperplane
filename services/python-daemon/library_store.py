@@ -622,6 +622,17 @@ def _build_kicad_mod_text(footprint: dict) -> str:
             f'\t)'
         )
     pads_block = "\n".join(pad_lines)
+    # A real bug found by live user testing: this line was hardcoded to
+    # `(attr smd)` regardless of the footprint's own real pads, so an
+    # exported through-hole (DIP) footprint claimed to be surface-mount
+    # -- a real, visible inconsistency in KiCad (every pad genuinely
+    # `thru_hole`, the footprint itself tagged `smd`). Real KiCad
+    # attribute for a footprint whose pads are entirely through-hole is
+    # `through_hole`; anything with at least one real SMD pad keeps
+    # `smd`, matching every one of this module's other real
+    # already-generated footprints (SOIC/TSSOP), which are 100% SMD.
+    all_through_hole = all(pad["pad_type"] == "pth" for pad in footprint["pads"])
+    footprint_attr = "through_hole" if all_through_hole else "smd"
 
     courtyard = footprint["courtyard"]
     half_length = courtyard["length_mm"] / 2
@@ -632,7 +643,7 @@ def _build_kicad_mod_text(footprint: dict) -> str:
         f'\t(version {_KICAD_MOD_VERSION})\n'
         f'\t(generator "{_KICAD_MOD_GENERATOR}")\n'
         f'\t(layer "F.Cu")\n'
-        f'\t(attr smd)\n'
+        f'\t(attr {footprint_attr})\n'
         f'\t(fp_rect\n'
         f'\t\t(start {_sexpr_num(-half_length)} {_sexpr_num(-half_width)})\n'
         f'\t\t(end {_sexpr_num(half_length)} {_sexpr_num(half_width)})\n'

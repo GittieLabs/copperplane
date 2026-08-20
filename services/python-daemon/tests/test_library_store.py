@@ -927,6 +927,35 @@ class TestExportFootprintKicadMod(LibraryStoreTestCase):
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr)
 
+    def test_004b_an_all_smd_footprint_is_tagged_attr_smd(self):
+        store.save_footprint({
+            "footprint_id": "generated__ATtiny85", "pads": _SOIC8_PADS, "courtyard": _SOIC8_COURTYARD,
+        })
+        path = store.export_footprint_kicad_mod("generated__ATtiny85")
+
+        with open(path) as f:
+            text = f.read()
+        self.assertIn("(attr smd)", text)
+
+    def test_004c_an_all_through_hole_footprint_is_tagged_attr_through_hole_not_smd(self):
+        # A real bug found by live user testing: this line was
+        # previously hardcoded to `(attr smd)` regardless of the
+        # footprint's own real pads, so an exported through-hole (DIP)
+        # footprint claimed to be surface-mount in KiCad.
+        pads = [
+            {"number": "1", "x_mm": -1.27, "y_mm": -3.81, "width_mm": 1.6, "height_mm": 1.6,
+             "pad_type": "pth", "drill_mm": 0.8},
+        ]
+        store.save_footprint({
+            "footprint_id": "generated__DIPTest", "pads": pads, "courtyard": {"length_mm": 10.0, "width_mm": 8.0},
+        })
+        path = store.export_footprint_kicad_mod("generated__DIPTest")
+
+        with open(path) as f:
+            text = f.read()
+        self.assertIn("(attr through_hole)", text)
+        self.assertNotIn("(attr smd)", text)
+
     def test_004_a_footprint_with_no_pad_geometry_fails_closed_not_a_meaningless_file(self):
         """A footprint attached via CTX-308.2's own find flow
         ({footprint_id, library, footprint_name}, no pads at all) has

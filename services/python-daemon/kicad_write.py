@@ -70,6 +70,21 @@ _DUAL_ROW_SMD_PAD_SPAN_RATIO = 1.5
 _THROUGH_HOLE_PAD_SIZE_MM = 1.6
 _THROUGH_HOLE_DRILL_MM = 0.8
 
+# Real, standardized lead-to-lead row spacing for the "wide" (0.3in body)
+# DIP-8/DIP-14 family this module supports (JEDEC MS-001; the real
+# ATtiny85 datasheet's own PDIP-8 mechanical drawing states this
+# explicitly as "eA 0.300 BSC" = 7.62mm). A real bug found by live user
+# testing: this row spacing was previously computed from
+# `package_dimensions["width_mm"]` -- the package BODY width, a
+# genuinely different real dimension (JEDEC "E1", typically ~0.25in for
+# this same package) -- producing a generated footprint whose pads sat
+# 6.35mm apart instead of the real 7.62mm the part's actual leads need,
+# silently unusable with a real, physically fabricated part. Row spacing
+# for a through-hole DIP is a fixed, standardized package-family
+# constant, never derived from body width the way an SMD package's pad
+# span legitimately is.
+_DIP_ROW_SPACING_MM = 7.62
+
 
 def _parse_pin_sequence(pin_numbers: list[str], expected_count: int, package: str) -> list[int]:
     """Parses each pin's `number` field as an int and confirms they form
@@ -123,14 +138,14 @@ def _dual_row_layout(
     parsed = _parse_pin_sequence(pin_numbers, n, package)
     rows = n // 2
 
-    span = package_dimensions["width_mm"]
-
     if through_hole:
+        span = _DIP_ROW_SPACING_MM
         pad_size = _THROUGH_HOLE_PAD_SIZE_MM
         pad_row_size = pad_size
         drill_mm = _THROUGH_HOLE_DRILL_MM
         pad_type = "pth"
     else:
+        span = package_dimensions["width_mm"]
         pad_size = pitch_mm * _DUAL_ROW_SMD_PAD_SPAN_RATIO
         pad_row_size = pitch_mm * _DUAL_ROW_SMD_PAD_ROW_RATIO
         drill_mm = None
