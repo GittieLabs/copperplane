@@ -14,6 +14,7 @@ import {
   MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT,
   MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT,
   MENU_DESIGN_ENCLOSURE_GENERATE_EVENT,
+  MENU_OPEN_LIBRARY_EVENT,
 } from './lib/ipc'
 import { parseCommand } from './lib/commands'
 import {
@@ -28,6 +29,8 @@ import {
   type ConversationTurn,
   type Project,
 } from './lib/projects'
+import { listLibraries } from './lib/library'
+import { syncLibraryMenu, setDesignMenuEnabled } from './lib/menu'
 import type { Area, MenuCommand } from './lib/areas'
 import { BoardAdvisor } from './components/BoardAdvisor'
 import { ComponentDiscovery } from './components/ComponentDiscovery'
@@ -92,6 +95,25 @@ function App() {
   useEffect(() => {
     viewRef.current = view
   }, [view])
+
+  // CTX-316.2: populates the native Library menu's real custom-library
+  // items even before a user ever opens the Library area -- the native
+  // menu is built before the daemon is ready to answer
+  // `library.list_libraries()`, so this is the real, later sync
+  // `SPEC-316`'s own Known Constraints named. Best-effort: `syncLibraryMenu`
+  // swallows its own failures, and `.catch` here covers `listLibraries()`
+  // itself rejecting before that ever runs.
+  useEffect(() => {
+    void listLibraries().then(syncLibraryMenu).catch(() => {})
+  }, [])
+
+  // CTX-316.2: keeps the native Design menu's enabled state in sync with
+  // whether a project is actually open -- the one real, coarse-grained
+  // sync point SPEC-316's own Known Constraints named (not per-action
+  // preconditions).
+  useEffect(() => {
+    void setDesignMenuEnabled(view?.kind === 'project')
+  }, [view?.kind])
 
   // CTX-312.1: the current project's own real record -- SPEC-304 §2.1's
   // long-described "link to a KiCad project directory on disk," plus
@@ -267,6 +289,20 @@ function App() {
     on(MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT, () => onDesignCommand('enclosure', 'open_kicad'))
     on(MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT, () => onDesignCommand('enclosure', 'pick_pcb'))
     on(MENU_DESIGN_ENCLOSURE_GENERATE_EVENT, () => onDesignCommand('enclosure', 'generate'))
+
+    // CTX-316.2: the one menu event with a real payload -- a custom
+    // library's own id, which can't have a compile-time const the way
+    // every other event above does. Wired directly rather than through
+    // `on()`, which only supports payload-less handlers.
+    listen<string>(MENU_OPEN_LIBRARY_EVENT, (event) =>
+      setView({ kind: 'library', initialLibraryId: event.payload }),
+    ).then((fn) => {
+      if (cancelled) {
+        fn()
+        return
+      }
+      unlisten.push(fn)
+    })
 
     return () => {
       cancelled = true

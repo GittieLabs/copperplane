@@ -29,11 +29,29 @@
 //! append real per-library items, without this file needing to change
 //! again just to add an id it forgot.
 
+use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{AboutMetadataBuilder, Menu, MenuBuilder, MenuEvent, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     AppHandle, Emitter, Manager, Wry,
 };
 use tauri_plugin_shell::ShellExt;
+
+/// CTX-316.2: the frontend's own real `LibrarySummary` (`SPEC-315`),
+/// trimmed to just what the native Library menu needs. Crosses the
+/// Tauri command boundary from `update_library_menu`'s own `Vec`
+/// argument.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LibraryMenuEntry {
+    pub id: String,
+    pub name: String,
+}
+
+/// Emitted when a real, dynamically-listed custom library is clicked in
+/// the Library menu -- payload is that library's own real id. Unlike
+/// every other menu event in this file, this one can't have a
+/// compile-time const per action: a custom library's identity is
+/// inherently open-ended and user-defined.
+pub const MENU_OPEN_LIBRARY_EVENT: &str = "menu://open-library";
 
 /// Emitted when "Save Project" is clicked -- the frontend's own
 /// already-existing `handleSaveProject()` (`CTX-312.1`) is the real
@@ -78,10 +96,33 @@ const DESIGN_PCB_OPEN_KICAD_ID: &str = "design_pcb_open_kicad";
 const DESIGN_ENCLOSURE_OPEN_KICAD_ID: &str = "design_enclosure_open_kicad";
 const DESIGN_ENCLOSURE_PICK_PCB_ID: &str = "design_enclosure_pick_pcb";
 const DESIGN_ENCLOSURE_GENERATE_ID: &str = "design_enclosure_generate";
+const LIBRARY_OPEN_CUSTOM_PREFIX: &str = "library_open_custom_";
+/// Must match `library_store.DEFAULT_LIBRARY_ID` in
+/// `services/python-daemon/library_store.py` -- Default already has its
+/// own always-present static item, so it's excluded here rather than
+/// risking a real, visible duplicate if the registry ever returns it.
+const DEFAULT_LIBRARY_ID: &str = "default";
 
-/// Builds the real app-global menu. Called once from `lib.rs`'s own
-/// `Builder::menu(...)`.
+/// CTX-316.2: excludes Default (already a static menu item) from a real
+/// library list before it becomes dynamic Library-menu entries. No
+/// `AppHandle` involved -- real, directly unit-testable Rust, unlike
+/// menu construction itself.
+fn filter_custom_libraries(libraries: Vec<LibraryMenuEntry>) -> Vec<LibraryMenuEntry> {
+    libraries.into_iter().filter(|entry| entry.id != DEFAULT_LIBRARY_ID).collect()
+}
+
+/// Builds the real app-global menu with no real custom libraries yet --
+/// called once from `lib.rs`'s own `Builder::menu(...)`, before the
+/// daemon is ready to answer `library.list_libraries()`. See
+/// `update_library_menu` for the real, later rebuild.
 pub fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
+    build_menu_inner(app, &[])
+}
+
+/// The real menu builder both `build_menu` and `update_library_menu`
+/// share -- `custom_libraries` is empty at initial launch, real once
+/// `CTX-316.2`'s own sync has run at least once.
+fn build_menu_inner(app: &AppHandle<Wry>, custom_libraries: &[LibraryMenuEntry]) -> tauri::Result<Menu<Wry>> {
     // The leftmost, app-name menu -- macOS replaces whatever title string
     // is passed here with the running app's own real bundle name, so the
     // literal text below is never actually shown. Standard macOS home for
@@ -183,18 +224,26 @@ pub fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
         .item(&enclosure_menu)
         .build()?;
 
-    // SPEC-315: Default is always real and present; real custom libraries
-    // need live daemon data the menu doesn't have at build time
-    // (CTX-316.2's own scope, named in SPEC-316's Known Constraints) --
-    // "Manage Libraries…" is this phase's real way to reach them.
+    // SPEC-315: Default is always real and present. Real custom libraries
+    // (CTX-316.2) are appended after it, in real registry order, only
+    // when `update_library_menu` has actually run with a non-empty list
+    // -- at initial launch (`custom_libraries` empty) this renders
+    // byte-identical to CTX-316.1's own static Default/Manage-only shape.
     let library_open_default =
         MenuItemBuilder::with_id(LIBRARY_OPEN_DEFAULT_ID, "Default Library").build(app)?;
+    let custom_library_items = custom_libraries
+        .iter()
+        .map(|entry| {
+            MenuItemBuilder::with_id(format!("{LIBRARY_OPEN_CUSTOM_PREFIX}{}", entry.id), &entry.name).build(app)
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
     let library_manage = MenuItemBuilder::with_id(LIBRARY_MANAGE_ID, "Manage Libraries…").build(app)?;
-    let library_menu = SubmenuBuilder::with_id(app, "menu_library", "Library")
-        .item(&library_open_default)
-        .separator()
-        .item(&library_manage)
-        .build()?;
+    let mut library_menu_builder =
+        SubmenuBuilder::with_id(app, "menu_library", "Library").item(&library_open_default);
+    for item in &custom_library_items {
+        library_menu_builder = library_menu_builder.item(item);
+    }
+    let library_menu = library_menu_builder.separator().item(&library_manage).build()?;
 
     let github = MenuItemBuilder::with_id(HELP_GITHUB_ID, "GitHub Repository").build(app)?;
     let help_menu = SubmenuBuilder::new(app, "Help").item(&github).build()?;
@@ -221,6 +270,31 @@ pub fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
     }
 
     builder.item(&help_menu).build()
+}
+
+/// CTX-316.2: rebuilds the whole menu with `libraries`' real, non-Default
+/// entries as the Library menu's dynamic items, then replaces the app's
+/// live menu with it (`AppHandle::set_menu`, real and confirmed present
+/// via `shared_app_impl!(AppHandle<R>)`) -- called from the frontend
+/// after every real `library.list_libraries()` fetch (`lib/menu.ts`'s
+/// own `syncLibraryMenu`), not pushed proactively by the daemon.
+#[tauri::command]
+pub fn update_library_menu(app: AppHandle<Wry>, libraries: Vec<LibraryMenuEntry>) -> Result<(), String> {
+    let custom = filter_custom_libraries(libraries);
+    let menu = build_menu_inner(&app, &custom).map_err(|e| e.to_string())?;
+    app.set_menu(menu).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// CTX-316.2: enables/disables the whole `Design` menu based on whether
+/// a project is currently open -- one real, coarse-grained sync point
+/// (SPEC-316's own Known Constraints named this as the deliberately
+/// simple starting behavior, not per-action preconditions).
+#[tauri::command]
+pub fn set_design_menu_enabled(app: AppHandle<Wry>, enabled: bool) -> Result<(), String> {
+    let menu = app.menu().ok_or_else(|| "no app menu set".to_string())?;
+    let design_item = menu.get("menu_design").ok_or_else(|| "menu_design not found".to_string())?;
+    design_item.as_submenu_unchecked().set_enabled(enabled).map_err(|e| e.to_string())
 }
 
 /// Handles a real menu click. Registered once from `lib.rs`'s own
@@ -262,6 +336,10 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, event: MenuEvent) {
         DESIGN_ENCLOSURE_GENERATE_ID => {
             let _ = app.emit(MENU_DESIGN_ENCLOSURE_GENERATE_EVENT, ());
         }
+        id if id.starts_with(LIBRARY_OPEN_CUSTOM_PREFIX) => {
+            let library_id = &id[LIBRARY_OPEN_CUSTOM_PREFIX.len()..];
+            let _ = app.emit(MENU_OPEN_LIBRARY_EVENT, library_id);
+        }
         #[cfg(debug_assertions)]
         VIEW_TOGGLE_DEVTOOLS_ID => {
             if let Some(window) = app.get_webview_window("main") {
@@ -276,5 +354,35 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, event: MenuEvent) {
             let _ = app.shell().open(GITHUB_REPO_URL, None);
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{filter_custom_libraries, LibraryMenuEntry};
+
+    fn entry(id: &str, name: &str) -> LibraryMenuEntry {
+        LibraryMenuEntry { id: id.to_string(), name: name.to_string() }
+    }
+
+    #[test]
+    fn filter_custom_libraries_excludes_default_and_preserves_real_order() {
+        let libraries = vec![entry("default", "Default"), entry("esp32-boards", "ESP32 Boards"), entry("sensors", "Sensors")];
+
+        let custom = filter_custom_libraries(libraries);
+
+        assert_eq!(custom.len(), 2);
+        assert_eq!(custom[0].id, "esp32-boards");
+        assert_eq!(custom[1].id, "sensors");
+    }
+
+    #[test]
+    fn filter_custom_libraries_on_an_empty_input_returns_an_empty_output() {
+        assert!(filter_custom_libraries(vec![]).is_empty());
+    }
+
+    #[test]
+    fn filter_custom_libraries_with_only_default_returns_an_empty_output() {
+        assert!(filter_custom_libraries(vec![entry("default", "Default")]).is_empty());
     }
 }

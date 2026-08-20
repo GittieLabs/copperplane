@@ -13,6 +13,7 @@ import {
   type LibrarySummary,
   type LibrarySymbolSummary,
 } from '../lib/library'
+import { syncLibraryMenu } from '../lib/menu'
 
 type ViewState = { kind: 'list' } | { kind: 'detail'; library: LibrarySummary }
 
@@ -38,7 +39,13 @@ export function LibraryArea({ initialLibraryId }: { initialLibraryId?: string } 
 
   async function refreshLibraries() {
     try {
-      setLibraries(await listLibraries())
+      const result = await listLibraries()
+      setLibraries(result)
+      // CTX-316.2: keeps the native Library menu in sync with the real
+      // registry -- covers both this component's own initial mount and
+      // the post-create refresh below ("+ New library" already calls
+      // this same function today).
+      void syncLibraryMenu(result)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }

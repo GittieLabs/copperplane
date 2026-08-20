@@ -21,6 +21,9 @@ const listProjectSchematicsMock = vi.fn()
 const saveDialogMock = vi.fn()
 const openProjectFromDirectoryMock = vi.fn()
 const listenMock = vi.fn()
+const listLibrariesMock = vi.fn()
+const syncLibraryMenuMock = vi.fn()
+const setDesignMenuEnabledMock = vi.fn()
 
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
@@ -36,6 +39,7 @@ vi.mock('./lib/ipc', () => ({
   MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT: 'menu://design/enclosure/open-kicad',
   MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT: 'menu://design/enclosure/pick-pcb',
   MENU_DESIGN_ENCLOSURE_GENERATE_EVENT: 'menu://design/enclosure/generate',
+  MENU_OPEN_LIBRARY_EVENT: 'menu://open-library',
 }))
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -55,6 +59,15 @@ vi.mock('./lib/projects', () => ({
 
 vi.mock('./lib/settings', () => ({
   getCapabilities: (...args: unknown[]) => getCapabilitiesMock(...args),
+}))
+
+vi.mock('./lib/library', () => ({
+  listLibraries: (...args: unknown[]) => listLibrariesMock(...args),
+}))
+
+vi.mock('./lib/menu', () => ({
+  syncLibraryMenu: (...args: unknown[]) => syncLibraryMenuMock(...args),
+  setDesignMenuEnabled: (...args: unknown[]) => setDesignMenuEnabledMock(...args),
 }))
 
 vi.mock('@tauri-apps/plugin-shell', () => ({
@@ -97,6 +110,16 @@ vi.mock('./lib/boardAdvisor', () => ({
 }))
 
 const { default: App } = await import('./App')
+
+// CTX-316.2: App.tsx now calls `listLibraries()` unconditionally on every
+// mount to sync the native Library menu -- every test in this file renders
+// `<App />`, so a real default here (not per-describe) keeps that new
+// effect from rejecting in every single test that doesn't care about it.
+beforeEach(() => {
+  listLibrariesMock.mockReset().mockResolvedValue([])
+  syncLibraryMenuMock.mockReset().mockResolvedValue(undefined)
+  setDesignMenuEnabledMock.mockReset().mockResolvedValue(undefined)
+})
 
 /** Builds a fake JobHandle whose `result` resolves/rejects on demand --
  * enough for these tests without a real daemon round-trip. A pre-built
@@ -653,6 +676,39 @@ describe('App: Enclosure tab persists across area switches', () => {
 
     expect(openKicadMock).not.toHaveBeenCalled()
     screen.getByText('Create a project on the left to get started.')
+  })
+
+  it('TEST-008: calls syncLibraryMenu with the real fetched library list on mount', async () => {
+    const libraries = [{ id: 'default', name: 'Default', part_count: 0, symbol_count: 0, footprint_count: 0 }]
+    listLibrariesMock.mockReset().mockResolvedValueOnce(libraries)
+
+    render(<App />)
+
+    await waitFor(() => expect(syncLibraryMenuMock).toHaveBeenCalledWith(libraries))
+  })
+
+  it('TEST-009: calls setDesignMenuEnabled(true) once a project is selected, and (false) when none is', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+
+    await waitFor(() => expect(setDesignMenuEnabledMock).toHaveBeenCalledWith(true))
+
+    fireEvent.click(screen.getByRole('button', { name: '⚙ Settings' }))
+
+    await waitFor(() => expect(setDesignMenuEnabledMock).toHaveBeenCalledWith(false))
+  })
+
+  it('TEST-010: the Open Library menu event sets view to library with the real payload as initialLibraryId', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+
+    const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://open-library')!
+    act(() => menuHandler({ payload: 'esp32-boards' }))
+
+    await waitFor(() => {
+      const el = screen.getByTestId('library-area-mock')
+      expect(el.getAttribute('data-initial-library-id')).toBe('esp32-boards')
+    })
   })
 })
 

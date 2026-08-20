@@ -75,6 +75,8 @@ pub fn run() {
             config::save_config_cmd,
             get_app_version,
             open_kicad,
+            menu::update_library_menu,
+            menu::set_design_menu_enabled,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -23,6 +23,12 @@ export const MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT = 'menu://design/enclosure/o
 export const MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT = 'menu://design/enclosure/pick-pcb'
 export const MENU_DESIGN_ENCLOSURE_GENERATE_EVENT = 'menu://design/enclosure/generate'
 
+/** CTX-316.2: payload is the real, dynamically-listed custom library's
+ * own id -- unlike every other MENU_* event above, this one can't have
+ * a compile-time-fixed set, so it carries a real payload instead of one
+ * const per library. Must match `menu::MENU_OPEN_LIBRARY_EVENT`. */
+export const MENU_OPEN_LIBRARY_EVENT = 'menu://open-library'
+
 export interface JsonRpcError {
   code: number
   message: string
