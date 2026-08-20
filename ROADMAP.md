@@ -585,7 +585,7 @@ no reachability check; and a real "Extraction did not return valid JSON" failure
 from ever reaching Part Detail at all, which looked like a missing UI from the outside but was an
 upstream extraction bug.
 
-#### [SPEC-316](apps/tauri-ui/specs/SPEC-316-native-menu-command-surface.md) — Native Menu Command Surface — Draft
+#### [SPEC-316](apps/tauri-ui/specs/SPEC-316-native-menu-command-surface.md) — Native Menu Command Surface — 🚧 in progress ([CTX-316.1](apps/tauri-ui/context/CTX-316.1-menu-command-surface-wiring.md) done, CTX-316.2 planned) 2026-08-20
 
 *Module:* `apps/tauri-ui` + `core/tauri-rust` · *Depends on:* SPEC-312, SPEC-315
 
@@ -600,6 +600,14 @@ Default-plus-custom-libraries model), one grouped `Design` menu holding `Schemat
 menus specifically so the top-level bar doesn't grow unbounded as each area's action count grows),
 and moving Settings/About/Quit into the native macOS app-name menu. Confirmed directly with Keith
 via two explicit choices rather than assumed.
+
+`CTX-316.1` shipped the full static structure -- the app-name menu, the `Design` menu wired to
+every real, parameterless per-area action (`Open in KiCad`, `Pick Schematic Manually…`, `Pick PCB
+File…`, `Generate`), and a `Library` menu with `Default Library` (deep-linked) and `Manage
+Libraries…`. Deliberately deferred to `CTX-316.2`, named honestly in the spec's own Known
+Constraints rather than attempted here: the `Library` menu's real custom-library items (the native
+menu builds before the daemon is ready to answer `library.list_libraries()`) and syncing the
+`Design` menu's enabled state to whether a project is actually open.
 
 ### 3.4 `4xx` — Distribution & operations
 
