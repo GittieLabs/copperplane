@@ -316,7 +316,7 @@ plain deep link; and design/application guidance (decoupling, pull-ups, protecti
 its own new spec, [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md),
 below.
 
-#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress, Class B usable end-to-end ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md), [CTX-205.4](apps/tauri-ui/context/CTX-205.4-design-requirements-ui.md), [CTX-205.5](services/python-daemon/context/CTX-205.5-structure-pass-heading-detection.md) done, Class A/C planned) 2026-08-20
+#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress, Class B usable end-to-end, audience-fit question open ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md), [CTX-205.4](apps/tauri-ui/context/CTX-205.4-design-requirements-ui.md), [CTX-205.5](services/python-daemon/context/CTX-205.5-structure-pass-heading-detection.md), [CTX-205.6](services/python-daemon/context/CTX-205.6-heading-noise-and-symbol-encoding.md) done, Class A/C planned) 2026-08-20
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-105, SPEC-202, SPEC-304, SPEC-306, SPEC-307
 
@@ -396,6 +396,20 @@ end-to-end with zero JSON errors. A second, unrelated real bug found in the same
 session is recorded in this context's own Plan Drift, not repeated here: the dev-mode daemon's
 Python interpreter (separate from this repo's own `.venv`) was missing `pdfplumber` -- a real,
 local-environment gap, not a code change.
+
+`CTX-205.6` (2026-08-20) fixed two more real bugs found by continued live testing against the same
+real ATtiny85 datasheet: a garbled degree sign (the datasheet's embedded font places `°` at PDF
+Private Use Area codepoint `U+F0B0`, a font missing a `ToUnicode` CMap entry, which `pdfplumber`
+surfaced raw), and a "Power" guidance panel built entirely from meaningless pin-listing labels
+("1.1.1 VCC Supply voltage.") -- its only heading match anywhere in the real 234-page document was
+that one pin-description entry, not a narrative section. Confirmed narrow before fixing: exactly 8
+of 286 real detected headings are a single all-caps word, and every one is a pin name, instruction
+mnemonic, or table fragment, never a real section title. Verified end-to-end with a real Anthropic
+call: "power" now returns 5 real cited items instead of 2 pin labels. **A larger, real, open
+question surfaced by the same testing is explicitly deferred, not answered by this context**:
+whether verbatim Class B citations -- even correctly cited ones -- are the right shape at all for
+this feature's actual audience, a maker/hobbyist rather than a practicing hardware engineer. This is
+`SPEC-205`'s real next decision point.
 
 #### [SPEC-204](services/python-daemon/specs/SPEC-204-agent-tool-registry.md) — Agent Tool Registry — ✅ Completed ([CTX-204.1](services/python-daemon/context/CTX-204.1-agent-tool-registry.md)) 2026-08-14
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-102
