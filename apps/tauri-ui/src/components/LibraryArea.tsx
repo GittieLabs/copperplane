@@ -135,21 +135,38 @@ export function LibraryArea({ initialLibraryId }: { initialLibraryId?: string } 
         <h2 className="text-lg font-medium">{view.library.name}</h2>
         {detailError && <p className="text-sm text-red-400">{detailError}</p>}
 
+        {/* Real bug found by live user testing: Parts and Symbols were
+            rendered as siblings under one combined "Datasheets / Pins"
+            label, so a Symbol (e.g. "DIP-8_8pin", the raw symbol_id
+            `library.save_confirmed_part` derives from a Part's own
+            package/pin-count) looked like a second, unrelated entry
+            rather than that same Part's own generated symbol. This
+            module's own doc comment above already named the underlying
+            principle for Footprints ("a real, independently-shared
+            object... never bundled with whichever Part happens to
+            reference it") -- Symbols share that same real property and
+            should never have been merged into Parts' own section
+            either. Split into two real, separately-labeled sections,
+            matching Footprints' own already-correct precedent below. */}
         <section className="flex flex-col gap-2">
-          <h3 className="text-sm font-medium text-neutral-400">
-            Datasheets / Pins ({(parts?.length ?? 0) + (symbols?.length ?? 0)})
-          </h3>
-          {parts === null && symbols === null && !detailError && (
-            <p className="text-xs text-neutral-500">Loading…</p>
-          )}
-          {parts !== null && symbols !== null && parts.length === 0 && symbols.length === 0 && (
-            <p className="text-xs text-neutral-500">No parts or symbols in this library yet.</p>
+          <h3 className="text-sm font-medium text-neutral-400">Parts ({parts?.length ?? 0})</h3>
+          {parts === null && !detailError && <p className="text-xs text-neutral-500">Loading…</p>}
+          {parts !== null && parts.length === 0 && (
+            <p className="text-xs text-neutral-500">No parts in this library yet.</p>
           )}
           {parts?.map((p) => (
             <div key={p.part_id} className="rounded border border-neutral-800 p-2 text-xs text-neutral-300">
               {[p.part_id, p.manufacturer, p.package].filter(Boolean).join(' · ')}
             </div>
           ))}
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="text-sm font-medium text-neutral-400">Symbols ({symbols?.length ?? 0})</h3>
+          {symbols === null && !detailError && <p className="text-xs text-neutral-500">Loading…</p>}
+          {symbols !== null && symbols.length === 0 && (
+            <p className="text-xs text-neutral-500">No symbols in this library yet.</p>
+          )}
           {symbols?.map((s) => (
             <div key={s.symbol_id} className="rounded border border-neutral-800 p-2 text-xs text-neutral-300">
               {s.symbol_name ?? s.symbol_id}

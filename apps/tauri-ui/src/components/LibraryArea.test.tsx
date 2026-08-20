@@ -101,6 +101,28 @@ describe('LibraryArea: detail view', () => {
     expect(listPartsMock).toHaveBeenCalledWith('default')
   })
 
+  it('real bug fix: Parts and Symbols render as two real, separately-labeled sections, not one merged list', async () => {
+    // The real bug: a Symbol's own raw symbol_id (e.g. "DIP-8_8pin",
+    // derived from a Part's package/pin-count) previously rendered as
+    // a sibling under one combined "Datasheets / Pins" count, looking
+    // like a second, unrelated entry rather than that same Part's own
+    // generated symbol.
+    listLibrariesMock.mockResolvedValueOnce(DEFAULT_ONLY)
+    listPartsMock.mockResolvedValueOnce(['ATtiny85'])
+    listSymbolsMock.mockResolvedValueOnce(['DIP-8_8pin'])
+    listFootprintsMock.mockResolvedValueOnce([])
+    loadPartMock.mockResolvedValueOnce({ part_id: 'ATtiny85', manufacturer: 'Microchip Technology', package: 'DIP-8' })
+    loadSymbolMock.mockResolvedValueOnce({ symbol_id: 'DIP-8_8pin' })
+
+    render(<LibraryArea />)
+    await waitFor(() => screen.getByText('Default'))
+    fireEvent.click(screen.getByText('Default'))
+
+    await waitFor(() => screen.getByText('Parts (1)'))
+    screen.getByText('Symbols (1)')
+    expect(screen.queryByText(/Datasheets \/ Pins/)).toBeNull()
+  })
+
   it('an empty custom library renders a real, honest empty state, not an error', async () => {
     listLibrariesMock.mockResolvedValueOnce([
       { id: 'esp32-boards', name: 'ESP32 Boards', part_count: 0, symbol_count: 0, footprint_count: 0 },
@@ -111,7 +133,8 @@ describe('LibraryArea: detail view', () => {
 
     fireEvent.click(screen.getByText('ESP32 Boards'))
 
-    await waitFor(() => screen.getByText('No parts or symbols in this library yet.'))
+    await waitFor(() => screen.getByText('No parts in this library yet.'))
+    screen.getByText('No symbols in this library yet.')
     screen.getByText('No footprints in this library yet.')
   })
 

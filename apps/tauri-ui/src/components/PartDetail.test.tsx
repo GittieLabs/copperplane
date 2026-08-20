@@ -188,6 +188,27 @@ describe('PartDetail', () => {
     expect(openMock).toHaveBeenCalledWith('/storage/library/symbols/SOIC-8_0pin.kicad_sym')
   })
 
+  it('a real "Open symbol" failure (e.g. no OS file association) shows an error, not a silent no-op', async () => {
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
+    saveConfirmedPartMock.mockResolvedValueOnce({
+      part: { part_id: 'ATtiny85' },
+      symbol: { symbol_id: 'SOIC-8_0pin', reference_prefix: 'U', pins: [] },
+    })
+    exportSymbolMock.mockResolvedValueOnce('/storage/library/symbols/SOIC-8_0pin.kicad_sym')
+    openMock.mockRejectedValueOnce(new Error('No application associated with this file type.'))
+
+    render(<PartDetail candidate={CANDIDATE} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Export Symbol (.kicad_sym)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Export Symbol (.kicad_sym)' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Open symbol' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open symbol' }))
+
+    await waitFor(() => screen.getByText(/No application associated with this file type/))
+  })
+
   it('TEST-001: the Find Footprint section only appears once a part is saved and has no footprint_id yet', async () => {
     extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
     saveConfirmedPartMock.mockResolvedValueOnce({
@@ -416,6 +437,24 @@ describe('PartDetail', () => {
     expect(openMock).toHaveBeenCalledWith('/storage/library/footprints.pretty/generated__ATtiny85.kicad_mod')
   })
 
+  it('a real "Open footprint" failure shows an error, not a silent no-op', async () => {
+    generateFootprintFromPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'generated__ATtiny85',
+    })
+    exportFootprintMock.mockResolvedValueOnce('/storage/library/footprints.pretty/generated__ATtiny85.kicad_mod')
+    openMock.mockRejectedValueOnce(new Error('No application associated with this file type.'))
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate from datasheet dimensions' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Export Footprint (.kicad_mod)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Export Footprint (.kicad_mod)' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Open footprint' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open footprint' }))
+
+    await waitFor(() => screen.getByText(/No application associated with this file type/))
+  })
+
   it('CTX-308.6: an export failure (e.g. a found, not generated, footprint) shows the real error', async () => {
     searchFootprintsMock.mockResolvedValueOnce([{ library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module' }])
     attachFootprintToPartMock.mockResolvedValueOnce({
@@ -547,7 +586,7 @@ describe('PartDetail', () => {
     await waitFor(() => screen.getByText(/A 100 nF decoupling capacitor/))
     expect(generateDesignGuidanceMock).toHaveBeenCalledWith('ATtiny85')
     screen.getByText('Decoupling')
-    screen.getByRole('button', { name: 'p4' })
+    screen.getByRole('button', { name: 'Page 4' })
   })
 
   it('CTX-205.4: a category with no real items renders an honest empty state, not an omitted section', async () => {
@@ -590,7 +629,7 @@ describe('PartDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
     await waitFor(() => screen.getByText(/A 100 nF decoupling capacitor/))
 
-    fireEvent.click(screen.getByRole('button', { name: 'p4' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Page 4' }))
 
     await waitFor(() =>
       expect(cacheDatasheetMock).toHaveBeenCalledWith('ATtiny85', 'https://example.com/attiny85.pdf'),
@@ -605,7 +644,7 @@ describe('PartDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
     await waitFor(() => screen.getByText(/A 100 nF decoupling capacitor/))
 
-    fireEvent.click(screen.getByRole('button', { name: 'p4' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Page 4' }))
 
     await waitFor(() => screen.getByText(/Datasheet fetch failed/))
   })
@@ -637,7 +676,7 @@ describe('PartDetail', () => {
 
     const details = screen.getByText('1 citation').closest('details') as HTMLDetailsElement | null
     expect(details?.open).toBe(true)
-    screen.getByRole('button', { name: 'p4' })
+    screen.getByRole('button', { name: 'Page 4' })
   })
 
   it('CTX-205.7: a category with no summary yet falls back to citations open by default', async () => {
