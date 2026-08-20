@@ -38,6 +38,11 @@ EXPECTED_SKIPS = {
     # -- no real GOOGLE_API_KEY exists on a CI runner either.
     "test_003_real_extraction_via_an_overridden_provider",
     "test_001_kicad_generate_component_dispatched_through_handle_request_reports_job_completed",
+    # SPEC-205/CTX-205.2: the real extract -> validate DAG against the
+    # real committed fixture PDF -- same reason, no real ANTHROPIC_API_KEY
+    # on a CI runner.
+    "test_016_a_real_category_with_real_candidates_returns_real_cited_items",
+    "test_017_every_requested_category_is_present_in_the_real_result_even_when_not_all_run",
 }
 
 

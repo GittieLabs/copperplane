@@ -1,0 +1,227 @@
+"""
+Datasheet guidance extraction (SPEC-205): consumes CTX-205.1's real
+structure pass (`datasheet_structure.extract_pages`/
+`locate_candidate_sections`) and, for each real category with at least
+one candidate page, runs a real AgentFlow `.workflow.md` DAG
+(`agentflow/workflows/datasheet_guidance.workflow.md`) to extract Class
+B (cited prose) guidance items -- SPEC-205 §2.1's "must cite" contract.
+
+Real DAG shape, mirroring `component_pipeline.py`'s own
+`component_intelligence` DAG exactly: `extract` (an agent node, calls
+the configured LLM) then `validate` (a handler node, plain Python, no
+LLM call). The one real difference from that precedent: AgentFlow's own
+`WorkflowExecutor`/`NodeRunner` (confirmed directly against the
+vendored source, `workflow/executor.py`/`workflow/node.py`) only ever
+gives a handler node access to *prior node outputs* -- there is no
+mechanism for a downstream handler to see the workflow's own
+`initial_message` once execution has moved past the entry node. Citation
+validation here genuinely needs the real page texts (external data, not
+a node's own output) to check a quote actually appears where it's
+cited. Resolved with a closure -- `_make_validate_handler` builds a
+fresh `validate` handler function per real call, bound to that call's
+own real page texts via Python closure, not AgentFlow's own (narrower)
+node-output wiring. The DAG structure and execution are still 100% real
+AgentFlow; only the handler's own captured inputs are plain Python,
+exactly as legitimate as `component_pipeline.py`'s own inline
+`runner_factory` closures already are.
+
+Items that fail citation validation are dropped, not repaired or
+promoted (SPEC-205 §2.2) -- a category with some invalid items still
+returns its real, valid ones. A category with zero candidate pages
+never reaches the LLM at all (matching
+`component_pipeline.explain_violations`'s own "empty input, no LLM
+call" precedent) -- real cost avoided, not just latency.
+"""
+import asyncio
+import json
+import os
+import re
+
+from agentflow import ConfigLoader, NodeOutput, WorkflowExecutor
+from agentflow.workflow.node import NodeRunner
+
+import llm_providers
+from component_pipeline import _build_agent_executor
+from datasheet_structure import CATEGORY_PATTERNS, extract_pages, locate_candidate_sections
+
+
+class DatasheetGuidanceError(Exception):
+    """Raised when an extraction response can't be parsed as JSON at all --
+    a real, visible pipeline failure, distinct from a real, valid empty
+    result (`[]`) or from an individual item silently failing citation
+    validation (dropped, not raised)."""
+
+
+_AGENTFLOW_DIR = os.path.join(os.path.dirname(__file__), "agentflow")
+
+
+def _extract_json(text: str) -> object:
+    """Parses an extraction agent's response as JSON, tolerating a
+    markdown code fence the model wasn't supposed to add -- the same
+    real-world tolerance `component_pipeline._extract_json` already
+    applies, duplicated here (not imported) to keep this module
+    independent of SPEC-202's own pipeline module, matching this
+    repo's established per-feature-module convention (`kicad_bridge`/
+    `freecad_bridge`/`component_pipeline` don't cross-import each
+    other either)."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        stripped = "\n".join(lines).strip()
+
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError as e:
+        raise DatasheetGuidanceError(f"Extraction did not return valid JSON: {e}") from e
+
+
+def _normalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _quote_appears_on_page(quote: str, page_text: str) -> bool:
+    """The real citation check: `quote` must be a real (whitespace-
+    normalized, case-insensitive) substring of `page_text` -- not an
+    exact byte match, since PDF text extraction's own line-wrapping
+    rarely matches a model's quoted wording exactly, but never a
+    paraphrase either."""
+    return _normalize_whitespace(quote).lower() in _normalize_whitespace(page_text).lower()
+
+
+def _build_page_excerpt(pages_by_number: dict, page_numbers: list) -> str:
+    """A real, labeled, numbered excerpt of just this category's real
+    candidate pages -- the extraction agent only ever sees these pages,
+    so it can only ever cite a page number that's genuinely present
+    here (enforced again, deterministically, by the validate handler)."""
+    sections = [f"--- Page {n} ---\n{pages_by_number.get(n, '')}" for n in page_numbers]
+    return "\n\n".join(sections)
+
+
+def _make_validate_handler(pages_by_number: dict, category: str, page_numbers: list):
+    """Builds a real `validate` handler closure bound to this specific
+    call's own real page texts and real candidate page numbers -- see
+    this module's own docstring for why a closure, not AgentFlow's
+    node-output wiring, is how this handler gets that data."""
+    real_pages = set(page_numbers)
+
+    async def validate_datasheet_guidance(message: str, prior_outputs: dict) -> NodeOutput:
+        items = _extract_json(message)
+        valid_items = []
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            page = item.get("page")
+            quote = item.get("quote")
+            if not isinstance(page, int) or page not in real_pages:
+                continue
+            if not isinstance(quote, str) or not quote.strip():
+                continue
+            if _quote_appears_on_page(quote, pages_by_number.get(page, "")):
+                valid_items.append({"quote": quote, "page": page, "category": category})
+
+        return NodeOutput(
+            node_id="validate",
+            agent_id="validate_datasheet_guidance",
+            text=json.dumps(valid_items),
+            artifacts={"items": valid_items},
+        )
+
+    return validate_datasheet_guidance
+
+
+async def _run_category_workflow(
+    category: str, page_numbers: list, pages_by_number: dict,
+    loader: ConfigLoader, secrets: dict, provider: str, model: str, provider_clients: list,
+) -> list:
+    """Runs the real `extract -> validate` DAG for one real category and
+    returns its real, citation-valid guidance items. `provider_clients`
+    is the caller's own accumulator -- appended to here, closed by the
+    caller in one shared `finally` block, the same real leak-prevention
+    shape `component_pipeline._run_workflow_and_close` already
+    established."""
+    config, _ = loader.get_workflow("datasheet_guidance")
+
+    def runner_factory(node_id: str) -> NodeRunner:
+        node = next(n for n in config.nodes if n.id == node_id)
+        executor, provider_client = _build_agent_executor(node.agent, loader, secrets, provider, model)
+        provider_clients.append(provider_client)
+        return NodeRunner(node, executor)
+
+    handler = _make_validate_handler(pages_by_number, category, page_numbers)
+    workflow_executor = WorkflowExecutor(
+        config=config, runner_factory=runner_factory,
+        handlers={"validate_datasheet_guidance": handler},
+    )
+
+    initial_message = f"Category: {category}\n\n{_build_page_excerpt(pages_by_number, page_numbers)}"
+    outputs = await workflow_executor.run(initial_message=initial_message)
+
+    validate_output = outputs["validate"]
+    if validate_output.metadata.get("error"):
+        raise DatasheetGuidanceError(validate_output.text.removeprefix("Error: "))
+    return validate_output.artifacts["items"]
+
+
+async def _run_all_categories_and_close(
+    categories_to_run: dict, pages_by_number: dict,
+    loader: ConfigLoader, secrets: dict, provider: str, model: str,
+) -> dict:
+    """Runs every real category with candidate pages sequentially (not
+    concurrently -- a real, deliberate simplification for this context;
+    see this module's own Plan Drift if latency against a real
+    multi-category document proves this too slow later), closing every
+    provider client built along the way in one shared `finally`, the
+    same real leak-prevention shape
+    `component_pipeline._run_workflow_and_close` already established."""
+    provider_clients: list = []
+    results = {}
+    try:
+        for category, page_numbers in categories_to_run.items():
+            results[category] = await _run_category_workflow(
+                category, page_numbers, pages_by_number, loader, secrets, provider, model, provider_clients,
+            )
+        return results
+    finally:
+        for provider_client in provider_clients:
+            await llm_providers._close_provider_client(provider_client)
+
+
+def generate_datasheet_guidance(
+    pdf_path: str, categories: list = None, secrets: dict = None, provider: str = None, model: str = None,
+) -> dict:
+    """The real, top-level entry point this context ships: a real
+    datasheet PDF path in, real cited guidance out, grouped by category
+    -- `{category: [{"quote", "page", "category"}, ...], ...}` for
+    *every* real category (an empty list for one with no candidate
+    pages, or with only invalid items after validation, not an omitted
+    key -- SPEC-205 §5's own "first-class empty state" principle applies
+    even at this backend layer, before any UI exists to render it).
+
+    `categories` restricts which of `datasheet_structure.CATEGORY_PATTERNS`'s
+    real categories to run (default: all of them). Not yet wired to a
+    daemon route or Part-record storage -- that's real, deliberately
+    deferred scope for a future context, named honestly in this one's
+    own Plan Drift."""
+    secrets = secrets or {}
+    categories = categories or list(CATEGORY_PATTERNS)
+
+    pages = extract_pages(pdf_path)
+    pages_by_number = {p["page"]: p["text"] for p in pages}
+    candidates = locate_candidate_sections(pages)
+
+    categories_to_run = {c: candidates.get(c, []) for c in categories if candidates.get(c)}
+    results = {c: [] for c in categories}
+
+    if categories_to_run:
+        loader = ConfigLoader(_AGENTFLOW_DIR)
+        loader.load()
+        run_results = asyncio.run(
+            _run_all_categories_and_close(categories_to_run, pages_by_number, loader, secrets, provider, model)
+        )
+        results.update(run_results)
+
+    return results
