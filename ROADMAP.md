@@ -652,7 +652,7 @@ UI -- including a real, two-step browse-then-import flow for `.kicad_sym` files,
 to be genuine multi-symbol libraries (73 real symbols in one file, verified directly), not one
 symbol per file the way this app's own hand-built symbol files are.
 
-#### [SPEC-315](apps/tauri-ui/specs/SPEC-315-library-browsing-and-organization.md) — Library Browsing & Organization — ✅ done ([CTX-315.1](apps/tauri-ui/context/CTX-315.1-library-storage-schema.md), [CTX-315.2](apps/tauri-ui/context/CTX-315.2-library-area-ui.md), [CTX-315.3](apps/tauri-ui/context/CTX-315.3-parts-symbols-section-split.md)) 2026-08-20
+#### [SPEC-315](apps/tauri-ui/specs/SPEC-315-library-browsing-and-organization.md) — Library Browsing & Organization — ✅ done ([CTX-315.1](apps/tauri-ui/context/CTX-315.1-library-storage-schema.md), [CTX-315.2](apps/tauri-ui/context/CTX-315.2-library-area-ui.md), [CTX-315.3](apps/tauri-ui/context/CTX-315.3-parts-symbols-section-split.md), [CTX-315.4](apps/tauri-ui/context/CTX-315.4-part-detail-from-library.md)) 2026-08-20
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-304, SPEC-305, SPEC-314
 
@@ -679,6 +679,21 @@ Symbol (e.g. `DIP-8_8pin`, `library.save_confirmed_part`'s real symbol_id conven
 second, unrelated component even though only one Part had ever been saved. Split into two real,
 separately-labeled sections, applying `CTX-315.2`'s own already-stated "independently-shared
 object" principle to Symbols, which were missed when Footprints got it.
+
+`CTX-315.4` (2026-08-20) closed the last real hole `SPEC-315` §5 itself already named: "find a
+Part... they already saved... without re-searching or re-generating it." Until this, "Save to
+Library" was the only door into a Part's full detail view -- reopening a saved Part meant starting a
+brand-new search from scratch, re-running `SPEC-202`'s LLM extraction as if it were a fresh,
+unconfirmed candidate. Adds a properly-typed `loadPart(partId): Promise<SavedPart>` (reusing the
+already-existing `library.load_part` route, previously only exposed through a narrower summary
+shape), a new `PartDetail` entry point (`initialPart`) that hydrates directly from an already-saved
+record and skips re-extraction entirely, and clickable Library Part rows wired to a new top-level
+`partDetail` view in `App.tsx` -- a Part is a global `SPEC-304` object, so reopening one doesn't
+require a project to be open. A real crash the test suite itself caught on first run (a lazy-init
+gap left `extraction`/`savedPart` null on the very first render) is recorded honestly in the
+context's own Plan Drift, exactly the value this repo's "verify against the real thing" norm names.
+**Not yet verified live in the running app** -- flagged honestly, not assumed equivalent to the
+mocked test suite; a real manual click-through is still owed.
 
 #### [SPEC-316](apps/tauri-ui/specs/SPEC-316-native-menu-command-surface.md) — Native Menu Command Surface — ✅ done ([CTX-316.1](apps/tauri-ui/context/CTX-316.1-menu-command-surface-wiring.md), [CTX-316.2](apps/tauri-ui/context/CTX-316.2-native-menu-dynamic-sync.md)) 2026-08-20
 
