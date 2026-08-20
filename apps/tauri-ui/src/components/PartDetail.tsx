@@ -56,12 +56,35 @@ type FootprintSearchStatus = 'idle' | 'searching' | 'error'
  * confirmed candidate plus this extraction and persists a real Part +
  * Symbol; "Export Symbol" then writes a real, KiCad-openable
  * .kicad_sym file. */
-export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
-  const [status, setStatus] = useState<Status>('extracting')
+/** CTX-315.4: a Part opened from the Library (`App.tsx`'s `partDetail`
+ * view) already has its full saved record -- `initialPart` skips
+ * `candidate`'s LLM re-extraction entirely rather than re-running
+ * SPEC-202's pipeline on a part that's already confirmed and saved. */
+type PartDetailProps =
+  | { candidate: ComponentCandidate; initialPart?: never }
+  | { candidate?: never; initialPart: SavedPart }
+
+// CTX-315.4: derives the initialPart entry point's own starting
+// extraction/symbol shape once, reused by both the lazy `useState`
+// initializers below (so the very first render already has real data,
+// not a null flash before the effect runs) and the effect itself.
+function initialPartToExtraction(part: SavedPart): ExtractedSchema {
+  return { part_number: part.part_id, package: part.package, pins: part.pins }
+}
+function initialPartToSymbol(part: SavedPart): SavedSymbol {
+  return { symbol_id: part.symbol_id, reference_prefix: '', pins: part.pins }
+}
+
+export function PartDetail({ candidate, initialPart }: PartDetailProps) {
+  const [status, setStatus] = useState<Status>(initialPart ? 'ready' : 'extracting')
   const [error, setError] = useState<string | null>(null)
-  const [extraction, setExtraction] = useState<ExtractedSchema | null>(null)
-  const [savedSymbol, setSavedSymbol] = useState<SavedSymbol | null>(null)
-  const [savedPart, setSavedPart] = useState<SavedPart | null>(null)
+  const [extraction, setExtraction] = useState<ExtractedSchema | null>(() =>
+    initialPart ? initialPartToExtraction(initialPart) : null,
+  )
+  const [savedSymbol, setSavedSymbol] = useState<SavedSymbol | null>(() =>
+    initialPart ? initialPartToSymbol(initialPart) : null,
+  )
+  const [savedPart, setSavedPart] = useState<SavedPart | null>(initialPart ?? null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [exportedPath, setExportedPath] = useState<string | null>(null)
@@ -145,7 +168,6 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
 
   useEffect(() => {
     let cancelled = false
-    setStatus('extracting')
     setError(null)
     setExtraction(null)
     setSavedSymbol(null)
@@ -182,6 +204,23 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     setLibraryTagError(null)
     setLibraryTagMessage(null)
 
+    if (initialPart) {
+      // Already-saved -- hydrate directly from the Library's own real
+      // record rather than replaying SPEC-202's LLM extraction for a
+      // part that's already confirmed. Matches the lazy `useState`
+      // initializers above, which already seeded the very first render
+      // with this same data -- this just re-applies it if `initialPart`
+      // itself changes later (a different Part opened while mounted).
+      setExtraction(initialPartToExtraction(initialPart))
+      setSavedPart(initialPart)
+      setSavedSymbol(initialPartToSymbol(initialPart))
+      setStatus('ready')
+      return () => {
+        cancelled = true
+      }
+    }
+
+    setStatus('extracting')
     extractPartDetail(candidate.part_number)
       .then((schema) => {
         if (cancelled) return
@@ -197,10 +236,10 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     return () => {
       cancelled = true
     }
-  }, [candidate.part_number])
+  }, [candidate?.part_number, initialPart?.part_id])
 
   async function handleSave() {
-    if (!extraction) return
+    if (!extraction || !candidate) return
     setSaving(true)
     setSaveError(null)
     try {
@@ -470,7 +509,7 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
   }
 
   if (status === 'extracting') {
-    return <p className="text-sm text-neutral-500">Extracting pin data for {candidate.part_number}…</p>
+    return <p className="text-sm text-neutral-500">Extracting pin data for {candidate?.part_number}…</p>
   }
 
   if (status === 'error') {
@@ -478,11 +517,15 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
   }
 
   const schema = extraction as ExtractedSchema
+  // CTX-315.4: a freshly-confirmed candidate carries manufacturer on its
+  // own record (SPEC-202's extraction call never returns it); an
+  // already-saved Part carries it on the Part record itself instead.
+  const manufacturer = initialPart?.manufacturer ?? candidate?.manufacturer
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-3">
       <p className="text-sm font-medium text-neutral-100">
-        {schema.part_number} <span className="text-neutral-500">{candidate.manufacturer}</span>{' '}
+        {schema.part_number} <span className="text-neutral-500">{manufacturer}</span>{' '}
         <span className="text-neutral-500">{schema.package}</span>
       </p>
 

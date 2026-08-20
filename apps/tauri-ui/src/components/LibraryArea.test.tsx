@@ -123,6 +123,35 @@ describe('LibraryArea: detail view', () => {
     expect(screen.queryByText(/Datasheets \/ Pins/)).toBeNull()
   })
 
+  it('CTX-315.4: clicking a Part with onSelectPart provided calls it with the real part_id', async () => {
+    listLibrariesMock.mockResolvedValueOnce(DEFAULT_ONLY)
+    listPartsMock.mockResolvedValueOnce(['ATtiny85'])
+    loadPartMock.mockResolvedValueOnce({ part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8' })
+    const onSelectPart = vi.fn()
+
+    render(<LibraryArea onSelectPart={onSelectPart} />)
+    await waitFor(() => screen.getByText('Default'))
+    fireEvent.click(screen.getByText('Default'))
+    await waitFor(() => screen.getByText('ATtiny85 · Microchip · SOIC-8'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'ATtiny85 · Microchip · SOIC-8' }))
+
+    expect(onSelectPart).toHaveBeenCalledWith('ATtiny85')
+  })
+
+  it('CTX-315.4: without onSelectPart, a Part row renders as plain, non-interactive text (no regression to the old behavior)', async () => {
+    listLibrariesMock.mockResolvedValueOnce(DEFAULT_ONLY)
+    listPartsMock.mockResolvedValueOnce(['ATtiny85'])
+    loadPartMock.mockResolvedValueOnce({ part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8' })
+
+    render(<LibraryArea />)
+    await waitFor(() => screen.getByText('Default'))
+    fireEvent.click(screen.getByText('Default'))
+
+    await waitFor(() => screen.getByText('ATtiny85 · Microchip · SOIC-8'))
+    expect(screen.queryByRole('button', { name: 'ATtiny85 · Microchip · SOIC-8' })).toBeNull()
+  })
+
   it('an empty custom library renders a real, honest empty state, not an error', async () => {
     listLibrariesMock.mockResolvedValueOnce([
       { id: 'esp32-boards', name: 'ESP32 Boards', part_count: 0, symbol_count: 0, footprint_count: 0 },

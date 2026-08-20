@@ -37,9 +37,11 @@ import { ComponentDiscovery } from './components/ComponentDiscovery'
 import { EnclosurePanel, type EnclosureExportSuccessEvent } from './components/EnclosurePanel'
 import { LibraryArea } from './components/LibraryArea'
 import { OverviewDashboard } from './components/OverviewDashboard'
+import { PartDetail } from './components/PartDetail'
 import { Rail } from './components/Rail'
 import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
+import { loadPart, type SavedPart } from './lib/partDetail'
 
 // SPEC-108's own Cross-Module Impacts section names a fixed placement
 // position as enough for a first UI trigger ("even a hardcoded
@@ -79,6 +81,10 @@ type View =
   | { kind: 'settings' }
   | { kind: 'library'; initialLibraryId?: string }
   | { kind: 'project'; name: string; area: Area }
+  // CTX-315.4: a Part is a global SPEC-304 object, not project-scoped, so
+  // reopening one from the Library doesn't require a project to be open --
+  // a real, separate top-level view rather than folding it into `project`.
+  | { kind: 'partDetail'; partId: string }
   | null
 
 function App() {
@@ -350,7 +356,7 @@ function App() {
         onSelectProject={handleSelectProject}
         onCreateProject={handleCreateProject}
         libraryCount={libraryCount}
-        librarySelected={view?.kind === 'library'}
+        librarySelected={view?.kind === 'library' || view?.kind === 'partDetail'}
         onSelectLibrary={() => setView({ kind: 'library' })}
         settingsSelected={view?.kind === 'settings'}
         onSelectSettings={() => setView({ kind: 'settings' })}
@@ -364,7 +370,16 @@ function App() {
 
         {view?.kind === 'settings' && <Settings />}
 
-        {view?.kind === 'library' && <LibraryArea initialLibraryId={view.initialLibraryId} />}
+        {view?.kind === 'library' && (
+          <LibraryArea
+            initialLibraryId={view.initialLibraryId}
+            onSelectPart={(partId) => setView({ kind: 'partDetail', partId })}
+          />
+        )}
+
+        {view?.kind === 'partDetail' && (
+          <PartDetailView partId={view.partId} onBack={() => setView({ kind: 'library' })} />
+        )}
 
         {view?.kind === 'project' && (
           <>
@@ -449,6 +464,50 @@ function App() {
           </>
         )}
       </main>
+    </div>
+  )
+}
+
+/** CTX-315.4: loads an already-saved Part's whole record (`loadPart`,
+ * reusing `library.load_part`) before rendering `PartDetail` with
+ * `initialPart` -- the real fix for "Save to Library is the only way
+ * in": until now, reopening a saved Part meant re-running the search/
+ * confirm/extract flow from scratch, as if it were a brand-new,
+ * unconfirmed candidate. Kept as its own small component (not folded
+ * into `App`) so its load state doesn't entangle with `App`'s own
+ * project-loading effects. */
+function PartDetailView({ partId, onBack }: { partId: string; onBack: () => void }) {
+  const [part, setPart] = useState<SavedPart | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setPart(null)
+    setLoadError(null)
+    loadPart(partId)
+      .then((loaded) => {
+        if (!cancelled) setPart(loaded)
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [partId])
+
+  return (
+    <div className="flex w-full max-w-4xl flex-col gap-4">
+      <button
+        type="button"
+        className="self-start text-xs text-neutral-500 hover:text-neutral-300"
+        onClick={onBack}
+      >
+        ← Library
+      </button>
+      {loadError && <p className="text-sm text-red-400">{loadError}</p>}
+      {!loadError && !part && <p className="text-sm text-neutral-500">Loading…</p>}
+      {part && <PartDetail initialPart={part} />}
     </div>
   )
 }

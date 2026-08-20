@@ -24,6 +24,7 @@ const listenMock = vi.fn()
 const listLibrariesMock = vi.fn()
 const syncLibraryMenuMock = vi.fn()
 const setDesignMenuEnabledMock = vi.fn()
+const loadPartMock = vi.fn()
 
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
@@ -95,9 +96,31 @@ vi.mock('./components/Settings', () => ({
   Settings: () => <div data-testid="settings-mock" />,
 }))
 vi.mock('./components/LibraryArea', () => ({
-  LibraryArea: ({ initialLibraryId }: { initialLibraryId?: string }) => (
-    <div data-testid="library-area-mock" data-initial-library-id={initialLibraryId ?? ''} />
+  LibraryArea: ({
+    initialLibraryId,
+    onSelectPart,
+  }: {
+    initialLibraryId?: string
+    onSelectPart?: (partId: string) => void
+  }) => (
+    <div data-testid="library-area-mock" data-initial-library-id={initialLibraryId ?? ''}>
+      {/* CTX-315.4: stands in for a real Part row's click -- App.tsx's own
+       * routing from a Library click to the partDetail view is what's
+       * under test here, not LibraryArea's own rendering (covered by
+       * LibraryArea.test.tsx). */}
+      <button type="button" onClick={() => onSelectPart?.('ATtiny85')}>
+        select-part-mock
+      </button>
+    </div>
   ),
+}))
+vi.mock('./components/PartDetail', () => ({
+  PartDetail: ({ initialPart }: { initialPart: { part_id: string } }) => (
+    <div data-testid="part-detail-mock" data-part-id={initialPart.part_id} />
+  ),
+}))
+vi.mock('./lib/partDetail', () => ({
+  loadPart: (...args: unknown[]) => loadPartMock(...args),
 }))
 
 vi.mock('./lib/boardAdvisor', () => ({
@@ -119,6 +142,7 @@ beforeEach(() => {
   listLibrariesMock.mockReset().mockResolvedValue([])
   syncLibraryMenuMock.mockReset().mockResolvedValue(undefined)
   setDesignMenuEnabledMock.mockReset().mockResolvedValue(undefined)
+  loadPartMock.mockReset()
 })
 
 /** Builds a fake JobHandle whose `result` resolves/rejects on demand --
@@ -709,6 +733,36 @@ describe('App: Enclosure tab persists across area switches', () => {
       const el = screen.getByTestId('library-area-mock')
       expect(el.getAttribute('data-initial-library-id')).toBe('esp32-boards')
     })
+  })
+
+  it('CTX-315.4: selecting a Part in the Library loads its real full record and shows Part Detail', async () => {
+    loadPartMock.mockResolvedValueOnce({ part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8' })
+
+    await renderAppOnOverview()
+    fireEvent.click(screen.getByRole('button', { name: '0 parts' }))
+    await waitFor(() => screen.getByTestId('library-area-mock'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'select-part-mock' }))
+
+    await waitFor(() => expect(loadPartMock).toHaveBeenCalledWith('ATtiny85'))
+    await waitFor(() => {
+      const el = screen.getByTestId('part-detail-mock')
+      expect(el.getAttribute('data-part-id')).toBe('ATtiny85')
+    })
+  })
+
+  it('CTX-315.4: "← Library" from Part Detail returns to the Library view', async () => {
+    loadPartMock.mockResolvedValueOnce({ part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8' })
+
+    await renderAppOnOverview()
+    fireEvent.click(screen.getByRole('button', { name: '0 parts' }))
+    fireEvent.click(screen.getByRole('button', { name: 'select-part-mock' }))
+    await waitFor(() => screen.getByTestId('part-detail-mock'))
+
+    fireEvent.click(screen.getByRole('button', { name: '← Library' }))
+
+    await waitFor(() => screen.getByTestId('library-area-mock'))
+    expect(screen.queryByTestId('part-detail-mock')).toBeNull()
   })
 })
 

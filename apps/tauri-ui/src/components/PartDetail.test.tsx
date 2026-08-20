@@ -689,3 +689,40 @@ describe('PartDetail', () => {
     expect(details?.open).toBe(true)
   })
 })
+
+describe('PartDetail: CTX-315.4 initialPart (reopened from the Library)', () => {
+  const SAVED_PART_WITH_PINS = {
+    ...SAVED_PART_NO_FOOTPRINT,
+    pins: [{ number: '1', name: 'RESET', electrical_type: 'bidirectional' }],
+    design_guidance: null,
+  }
+
+  it('renders the already-saved Part directly, without re-running extraction', async () => {
+    render(<PartDetail initialPart={SAVED_PART_WITH_PINS} />)
+
+    await waitFor(() => screen.getByText('RESET'))
+    screen.getByText('Microchip')
+    expect(extractPartDetailMock).not.toHaveBeenCalled()
+  })
+
+  it('shows "Saved to library." immediately -- never the "Save to Library" button a fresh candidate gets', async () => {
+    render(<PartDetail initialPart={SAVED_PART_WITH_PINS} />)
+
+    await waitFor(() => screen.getByText('Saved to library.'))
+    expect(screen.queryByRole('button', { name: 'Save to Library' })).toBeNull()
+    screen.getByRole('button', { name: 'Export Symbol (.kicad_sym)' })
+  })
+
+  it('"Add to library..." still works from a reopened Part, the same as a freshly-saved one', async () => {
+    listLibrariesMock.mockResolvedValueOnce([
+      { id: 'esp32-boards', name: 'ESP32 Boards', part_count: 0, symbol_count: 0, footprint_count: 0 },
+    ])
+
+    render(<PartDetail initialPart={SAVED_PART_WITH_PINS} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Add to library…' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to library…' }))
+
+    await waitFor(() => screen.getByText('ESP32 Boards'))
+  })
+})
