@@ -652,7 +652,7 @@ UI -- including a real, two-step browse-then-import flow for `.kicad_sym` files,
 to be genuine multi-symbol libraries (73 real symbols in one file, verified directly), not one
 symbol per file the way this app's own hand-built symbol files are.
 
-#### [SPEC-315](apps/tauri-ui/specs/SPEC-315-library-browsing-and-organization.md) — Library Browsing & Organization — ✅ done ([CTX-315.1](apps/tauri-ui/context/CTX-315.1-library-storage-schema.md), [CTX-315.2](apps/tauri-ui/context/CTX-315.2-library-area-ui.md)) 2026-08-19
+#### [SPEC-315](apps/tauri-ui/specs/SPEC-315-library-browsing-and-organization.md) — Library Browsing & Organization — ✅ done ([CTX-315.1](apps/tauri-ui/context/CTX-315.1-library-storage-schema.md), [CTX-315.2](apps/tauri-ui/context/CTX-315.2-library-area-ui.md), [CTX-315.3](apps/tauri-ui/context/CTX-315.3-parts-symbols-section-split.md)) 2026-08-20
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-304, SPEC-305, SPEC-314
 
@@ -672,6 +672,13 @@ list without a "too broad, please narrow" signal; a real dead datasheet link rea
 no reachability check; and a real "Extraction did not return valid JSON" failure blocking a user
 from ever reaching Part Detail at all, which looked like a missing UI from the outside but was an
 upstream extraction bug.
+
+`CTX-315.3` (2026-08-20) fixed a real bug shown in a live screenshot: the "Datasheets / Pins"
+section rendered Parts and Symbols as siblings under one combined count, so a Part's own generated
+Symbol (e.g. `DIP-8_8pin`, `library.save_confirmed_part`'s real symbol_id convention) looked like a
+second, unrelated component even though only one Part had ever been saved. Split into two real,
+separately-labeled sections, applying `CTX-315.2`'s own already-stated "independently-shared
+object" principle to Symbols, which were missed when Footprints got it.
 
 #### [SPEC-316](apps/tauri-ui/specs/SPEC-316-native-menu-command-surface.md) — Native Menu Command Surface — ✅ done ([CTX-316.1](apps/tauri-ui/context/CTX-316.1-menu-command-surface-wiring.md), [CTX-316.2](apps/tauri-ui/context/CTX-316.2-native-menu-dynamic-sync.md)) 2026-08-20
 
