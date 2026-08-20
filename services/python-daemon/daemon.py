@@ -416,8 +416,28 @@ def library_load_part(part_id: str) -> dict:
     return library_store.load_part(part_id)
 
 
-def library_list_parts() -> list:
-    return library_store.list_parts()
+def library_list_parts(library_id: str = None) -> list:
+    return library_store.list_parts(library_id)
+
+
+def library_list_symbols(library_id: str = None) -> list:
+    return library_store.list_symbols(library_id)
+
+
+def library_list_footprints(library_id: str = None) -> list:
+    return library_store.list_footprints(library_id)
+
+
+def library_list_libraries() -> list:
+    return library_store.list_libraries()
+
+
+def library_create_library(name: str) -> dict:
+    return library_store.create_library(name)
+
+
+def library_tag_object(kind: str, object_id: str, library_ids: list) -> dict:
+    return library_store.tag_object(kind, object_id, library_ids)
 
 
 def library_save_symbol(symbol: dict) -> dict:
@@ -1129,6 +1149,11 @@ def _build_routes() -> dict:
         routes["library.save_footprint"] = library_save_footprint
         routes["library.load_footprint"] = library_load_footprint
         routes["library.export_footprint"] = library_export_footprint
+        routes["library.list_symbols"] = library_list_symbols
+        routes["library.list_footprints"] = library_list_footprints
+        routes["library.list_libraries"] = library_list_libraries
+        routes["library.create_library"] = library_create_library
+        routes["library.tag_object"] = library_tag_object
         routes["project.save"] = project_save
         routes["project.load"] = project_load
         routes["project.list"] = project_list

@@ -209,6 +209,139 @@ class TestSymbolAndFootprint(LibraryStoreTestCase):
         self.assertEqual(store.search_footprints("definitely_not_present"), [])
 
 
+class TestLibraryTagging(LibraryStoreTestCase):
+    """CTX-315.1: SPEC-315's real library_ids/registry/tagging layer."""
+
+    def _save_part(self, part_id, **overrides):
+        return store.save_part({
+            "part_id": part_id, "manufacturer": "X", "package": "SOIC-8", "pins": [],
+            "datasheet_url": "https://example.com/x.pdf", "provenance": _VALID_PROVENANCE,
+            **overrides,
+        })
+
+    def test_001_saving_with_no_library_ids_persists_default_only(self):
+        saved = self._save_part("P1")
+        self.assertEqual(saved["library_ids"], ["default"])
+
+    def test_002_saving_with_a_real_custom_set_force_includes_default(self):
+        store.create_library("ESP32 Boards")
+        saved = self._save_part("P1", library_ids=["esp32-boards"])
+        self.assertEqual(saved["library_ids"], ["default", "esp32-boards"])
+
+    def test_003_loading_a_real_pre_migration_record_backfills_default(self):
+        """A real record saved before CTX-315.1 shipped has no
+        `library_ids` key at all -- hand-write one directly to disk
+        (bypassing save_part) to prove the real read-time backfill,
+        not just that save_part always adds the field."""
+        part = {
+            "part_id": "PreMigration", "manufacturer": "X", "package": "SOIC-8", "pins": [],
+            "datasheet_url": "https://example.com/x.pdf", "provenance": _VALID_PROVENANCE,
+            "schema_version": 1,
+        }
+        path = os.path.join(self._tmpdir.name, "library", "parts", "PreMigration.part.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(part, f)
+
+        loaded = store.load_part("PreMigration")
+        self.assertEqual(loaded["library_ids"], ["default"])
+
+    def test_004_re_saving_a_tagged_part_preserves_its_real_custom_tags(self):
+        """The real, important precedence bug this slice found while
+        wiring it in: every existing caller of save_part (attaching a
+        footprint, re-saving a confirmed candidate) re-saves an
+        already-loaded record without passing library_ids explicitly --
+        that must never silently reset a user's real custom tags."""
+        store.create_library("ESP32 Boards")
+        self._save_part("P1", library_ids=["esp32-boards"])
+
+        reloaded = store.load_part("P1")
+        resaved = store.save_part(reloaded)
+
+        self.assertEqual(resaved["library_ids"], ["default", "esp32-boards"])
+
+    def test_005_create_library_derives_a_real_collision_checked_id(self):
+        first = store.create_library("ESP32 Boards")
+        second = store.create_library("ESP32 Boards")
+
+        self.assertEqual(first["id"], "esp32-boards")
+        self.assertNotEqual(first["id"], second["id"])
+
+    def test_006_create_library_rejects_an_empty_name(self):
+        with self.assertRaises(store.SchemaValidationError):
+            store.create_library("   ")
+
+    def test_007_list_libraries_reports_default_with_real_counts_across_everything(self):
+        self._save_part("P1")
+        self._save_part("P2")
+        store.save_footprint({"footprint_id": "SOIC-8", "pads": []})
+
+        libraries = store.list_libraries()
+
+        default = next(lib for lib in libraries if lib["id"] == "default")
+        self.assertEqual(default["part_count"], 2)
+        self.assertEqual(default["footprint_count"], 1)
+
+    def test_008_list_libraries_reports_a_real_custom_librarys_own_counts(self):
+        store.create_library("ESP32 Boards")
+        self._save_part("P1", library_ids=["esp32-boards"])
+        self._save_part("P2")
+
+        libraries = store.list_libraries()
+
+        custom = next(lib for lib in libraries if lib["id"] == "esp32-boards")
+        self.assertEqual(custom["part_count"], 1)
+
+    def test_009_list_parts_with_a_library_id_filter_returns_only_real_tagged_members(self):
+        store.create_library("ESP32 Boards")
+        self._save_part("Tagged", library_ids=["esp32-boards"])
+        self._save_part("Untagged")
+
+        self.assertEqual(store.list_parts("esp32-boards"), ["Tagged"])
+        self.assertEqual(sorted(store.list_parts("default")), ["Tagged", "Untagged"])
+
+    def test_010_list_symbols_mirrors_list_footprints_real_pattern(self):
+        store.save_symbol({"symbol_id": "Zeta", "pins": []})
+        store.save_symbol({"symbol_id": "Alpha", "pins": []})
+
+        self.assertEqual(store.list_symbols(), ["Alpha", "Zeta"])
+
+    def test_011_tag_object_replaces_a_real_parts_own_custom_membership(self):
+        store.create_library("ESP32 Boards")
+        store.create_library("Client X")
+        self._save_part("P1", library_ids=["esp32-boards"])
+
+        tagged = store.tag_object("part", "P1", ["client-x"])
+
+        self.assertEqual(tagged["library_ids"], ["client-x", "default"])
+
+    def test_012_tag_object_rejects_an_unknown_library_id(self):
+        self._save_part("P1")
+        with self.assertRaises(store.SchemaValidationError) as ctx:
+            store.tag_object("part", "P1", ["not-a-real-library"])
+        self.assertIn("not-a-real-library", str(ctx.exception))
+
+    def test_013_tag_object_works_for_symbols_and_footprints_independently(self):
+        """A Footprint's own library membership is tracked independently
+        of whichever Part references it -- SPEC-315 §2's own real
+        design call, since a Footprint is already shared across many
+        Parts (test_005 above)."""
+        store.create_library("ESP32 Boards")
+        store.save_symbol({"symbol_id": "Sym1", "pins": []})
+        store.save_footprint({"footprint_id": "Fp1", "pads": []})
+
+        tagged_symbol = store.tag_object("symbol", "Sym1", ["esp32-boards"])
+        tagged_footprint = store.tag_object("footprint", "Fp1", ["esp32-boards"])
+
+        self.assertEqual(tagged_symbol["library_ids"], ["default", "esp32-boards"])
+        self.assertEqual(tagged_footprint["library_ids"], ["default", "esp32-boards"])
+
+    def test_014_tag_object_rejects_an_unknown_kind(self):
+        self._save_part("P1")
+        with self.assertRaises(store.SchemaValidationError):
+            store.tag_object("not_a_real_kind", "P1", [])
+
+
 class TestProject(LibraryStoreTestCase):
 
     def test_001_save_and_load_round_trip(self):

@@ -599,6 +599,60 @@ class TestLibraryRoutes(unittest.TestCase):
         self.assertIn("error", response)
         self.assertIn("no pad geometry", response["error"]["message"])
 
+    def test_009_library_list_parts_with_zero_params_is_unchanged_real_behavior(self):
+        """CTX-315.1 TEST-010: the one existing real caller (lib/
+        projects.ts) calls this with no params at all -- must keep
+        returning every real part id, unaffected by the new optional
+        library_id filter."""
+        provenance = {
+            field: {"source": "datasheet_pdf"}
+            for field in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS
+        }
+        self._dispatch("library.save_part", {"part": {
+            "part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8", "pins": [],
+            "datasheet_url": "https://example.com/x.pdf", "provenance": provenance,
+        }})
+
+        response = self._dispatch("library.list_parts", {})
+
+        self.assertNotIn("error", response)
+        self.assertEqual(response["result"], ["ATtiny85"])
+
+    def test_010_library_create_list_and_tag_routes_dispatch_correctly(self):
+        provenance = {
+            field: {"source": "datasheet_pdf"}
+            for field in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS
+        }
+        self._dispatch("library.save_part", {"part": {
+            "part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8", "pins": [],
+            "datasheet_url": "https://example.com/x.pdf", "provenance": provenance,
+        }})
+
+        created = self._dispatch("library.create_library", {"name": "ESP32 Boards"})
+        self.assertEqual(created["result"]["id"], "esp32-boards")
+
+        tagged = self._dispatch("library.tag_object", {
+            "kind": "part", "object_id": "ATtiny85", "library_ids": ["esp32-boards"],
+        })
+        self.assertEqual(tagged["result"]["library_ids"], ["default", "esp32-boards"])
+
+        libraries = self._dispatch("library.list_libraries", {})
+        custom = next(lib for lib in libraries["result"] if lib["id"] == "esp32-boards")
+        self.assertEqual(custom["part_count"], 1)
+
+    def test_011_library_list_footprints_and_list_symbols_are_real_registered_routes(self):
+        """CTX-315.1 TEST-011: both were real, pre-existing gaps -- never
+        registered as daemon routes at all before this slice, confirmed
+        directly by grepping the real route table during planning."""
+        self._dispatch("library.save_footprint", {"footprint": {"footprint_id": "SOIC-8", "pads": []}})
+        self._dispatch("library.save_symbol", {"symbol": {"symbol_id": "Sym1", "pins": []}})
+
+        footprints = self._dispatch("library.list_footprints", {})
+        symbols = self._dispatch("library.list_symbols", {})
+
+        self.assertEqual(footprints["result"], ["SOIC-8"])
+        self.assertEqual(symbols["result"], ["Sym1"])
+
 
 class TestLibraryImportCommunityFootprint(unittest.TestCase):
     """CTX-314.2: real, live end-to-end coverage of the import route's

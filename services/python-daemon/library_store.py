@@ -26,6 +26,7 @@ module never reaches into a daemon-owned global itself.
 """
 import json
 import os
+import re
 import ssl
 import urllib.error
 import urllib.request
@@ -135,6 +136,45 @@ def _parts_dir() -> str:
     return _ensure_dir("library", "parts")
 
 
+# CTX-315.1: every real Part/Symbol/Footprint belongs to the always-present
+# Default library implicitly -- SPEC-315 §2's own rule that Default
+# membership is never shown as something to remove. "default" is force-
+# included here rather than trusted from the caller, so a real object can
+# never end up missing from it by omission.
+DEFAULT_LIBRARY_ID = "default"
+
+
+def _normalize_library_ids(library_ids: list | None) -> list:
+    ids = set(library_ids or [])
+    ids.add(DEFAULT_LIBRARY_ID)
+    return sorted(ids)
+
+
+def _resolve_library_ids(record: dict, explicit_library_ids: list | None) -> list:
+    """A real, important precedence rule found while wiring this in: every
+    existing real caller of save_part (attachFootprintToPart,
+    generateFootprintFromPart, saveConfirmedPart's own re-save path) calls
+    it with an already-loaded record that may already carry a real,
+    user-set `library_ids` -- if this function blindly defaulted to
+    Default-only whenever the caller didn't pass `library_ids` explicitly,
+    every one of those existing re-save paths would silently wipe a real
+    custom tag the moment a user, say, attached a footprint to a Part they
+    had already organized into a custom library. Precedence: an explicit
+    `library_ids` argument wins; otherwise the record's own already-set
+    field is preserved; only a record with neither becomes Default-only."""
+    if explicit_library_ids is not None:
+        return _normalize_library_ids(explicit_library_ids)
+    return _normalize_library_ids(record.get("library_ids"))
+
+
+def _backfill_library_ids(record: dict) -> dict:
+    """A record saved before CTX-315.1 shipped has no `library_ids` key at
+    all -- real, honest read-time migration: treat it as Default-only,
+    never a crash and never a silently empty library."""
+    record.setdefault("library_ids", [DEFAULT_LIBRARY_ID])
+    return record
+
+
 def _validate_part_provenance(part: dict) -> None:
     provenance = part.get("provenance")
     if not isinstance(provenance, dict):
@@ -149,28 +189,37 @@ def _validate_part_provenance(part: dict) -> None:
         )
 
 
-def save_part(part: dict) -> dict:
+def save_part(part: dict, library_ids: list | None = None) -> dict:
     """Writes a Part record to library/parts/<part_id>.part.json.
     `footprint_id` may be `None` -- a Part with pins and a datasheet is
     useful before any Footprint exists (SPEC-300 §2.1). Raises
-    SchemaValidationError, never writes a partially-provenanced record."""
+    SchemaValidationError, never writes a partially-provenanced record.
+
+    CTX-315.1: `library_ids` is a real, independent tag on this one Part
+    record (SPEC-315 §2 -- a Part, its Symbol, and its Footprint are
+    tagged independently, never bundled), always including Default."""
     part_id = part.get("part_id")
     if not part_id:
         raise SchemaValidationError("Part.part_id is required.")
     _validate_part_provenance(part)
 
-    record = {**part, "schema_version": 1}
+    record = {**part, "schema_version": 1, "library_ids": _resolve_library_ids(part, library_ids)}
     _write_json(os.path.join(_parts_dir(), f"{part_id}.part.json"), record)
     return record
 
 
 def load_part(part_id: str) -> dict:
-    return _read_json(os.path.join(_parts_dir(), f"{part_id}.part.json"))
+    return _backfill_library_ids(_read_json(os.path.join(_parts_dir(), f"{part_id}.part.json")))
 
 
-def list_parts() -> list:
+def list_parts(library_id: str | None = None) -> list:
+    """CTX-315.1: optional real `library_id` filter, same real O(n)-scan
+    shape as list_footprints's own."""
     suffix = ".part.json"
-    return sorted(f[: -len(suffix)] for f in os.listdir(_parts_dir()) if f.endswith(suffix))
+    ids = sorted(f[: -len(suffix)] for f in os.listdir(_parts_dir()) if f.endswith(suffix))
+    if library_id is None:
+        return ids
+    return [i for i in ids if library_id in load_part(i).get("library_ids", [])]
 
 
 # --- Symbol -------------------------------------------------------------
@@ -178,17 +227,30 @@ def _symbols_dir() -> str:
     return _ensure_dir("library", "symbols")
 
 
-def save_symbol(symbol: dict) -> dict:
+def save_symbol(symbol: dict, library_ids: list | None = None) -> dict:
     symbol_id = symbol.get("symbol_id")
     if not symbol_id:
         raise SchemaValidationError("Symbol.symbol_id is required.")
-    record = {**symbol, "schema_version": 1}
+    record = {**symbol, "schema_version": 1, "library_ids": _resolve_library_ids(symbol, library_ids)}
     _write_json(os.path.join(_symbols_dir(), f"{symbol_id}.json"), record)
     return record
 
 
 def load_symbol(symbol_id: str) -> dict:
-    return _read_json(os.path.join(_symbols_dir(), f"{symbol_id}.json"))
+    return _backfill_library_ids(_read_json(os.path.join(_symbols_dir(), f"{symbol_id}.json")))
+
+
+def list_symbols(library_id: str | None = None) -> list:
+    """CTX-315.1: mirrors list_footprints's own real, established pattern
+    -- a real, pre-existing gap (Symbol never got a list_* function at
+    all) closed here since a library's Datasheets/Pins section needs to
+    list Symbols, not just Parts. Optional real `library_id` filter, same
+    real O(n)-scan shape as list_footprints's own."""
+    suffix = ".json"
+    ids = sorted(f[: -len(suffix)] for f in os.listdir(_symbols_dir()) if f.endswith(suffix))
+    if library_id is None:
+        return ids
+    return [i for i in ids if library_id in load_symbol(i).get("library_ids", [])]
 
 
 # --- Symbol -> real .kicad_sym export (SPEC-307) --------------------------
@@ -347,27 +409,43 @@ def _footprints_dir() -> str:
     return _ensure_dir("library", "footprints")
 
 
-def save_footprint(footprint: dict) -> dict:
+def save_footprint(footprint: dict, library_ids: list | None = None) -> dict:
     """A Footprint is deliberately its own object, shared by many Parts --
     SPEC-300 §2.1's explicit cardinality call. This module doesn't enforce
-    the many-to-one sharing itself; a Part just stores a footprint_id."""
+    the many-to-one sharing itself; a Part just stores a footprint_id.
+
+    CTX-315.1: real, direct consequence of that sharing -- this
+    Footprint's own `library_ids` is tracked independently of whichever
+    Part(s) reference it, never inherited from one."""
     footprint_id = footprint.get("footprint_id")
     if not footprint_id:
         raise SchemaValidationError("Footprint.footprint_id is required.")
-    record = {**footprint, "schema_version": 1}
+    record = {
+        **footprint, "schema_version": 1,
+        "library_ids": _resolve_library_ids(footprint, library_ids),
+    }
     _write_json(os.path.join(_footprints_dir(), f"{footprint_id}.json"), record)
     return record
 
 
 def load_footprint(footprint_id: str) -> dict:
-    return _read_json(os.path.join(_footprints_dir(), f"{footprint_id}.json"))
+    return _backfill_library_ids(_read_json(os.path.join(_footprints_dir(), f"{footprint_id}.json")))
 
 
-def list_footprints() -> list:
+def list_footprints(library_id: str | None = None) -> list:
     """Mirrors list_parts()'s own real pattern -- .json files in the
-    footprints dir, extension stripped, sorted."""
+    footprints dir, extension stripped, sorted.
+
+    CTX-315.1: an optional real `library_id` filter -- a real, honest
+    O(n) scan (loading and checking every real record's own
+    `library_ids`), not a SQLite-backed lookup. `SPEC-304`'s own
+    `.index/` cache is explicitly out of scope for this slice; acceptable
+    at this app's real current scale."""
     suffix = ".json"
-    return sorted(f[: -len(suffix)] for f in os.listdir(_footprints_dir()) if f.endswith(suffix))
+    ids = sorted(f[: -len(suffix)] for f in os.listdir(_footprints_dir()) if f.endswith(suffix))
+    if library_id is None:
+        return ids
+    return [i for i in ids if library_id in load_footprint(i).get("library_ids", [])]
 
 
 def search_footprints(query: str) -> list:
@@ -502,6 +580,96 @@ def export_footprint_kicad_mod(footprint_id: str) -> str:
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
     return path
+
+
+# --- Library registry (CTX-315.1) ------------------------------------------
+# SPEC-315 §2: a real, small registry of user-created custom libraries.
+# Default is never a real entry here -- it's implicit (every Part/Symbol/
+# Footprint already belongs to it, per `DEFAULT_LIBRARY_ID` above), so a
+# missing or empty registry file is a normal, honest starting state, not an
+# error.
+def _libraries_registry_path() -> str:
+    return os.path.join(_ensure_dir("library"), "libraries.json")
+
+
+def _load_libraries_registry() -> list:
+    path = _libraries_registry_path()
+    if not os.path.exists(path):
+        return []
+    return _read_json(path).get("libraries", [])
+
+
+def _save_libraries_registry(libraries: list) -> None:
+    _write_json(_libraries_registry_path(), {"libraries": libraries})
+
+
+def _slugify(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    return slug or "library"
+
+
+def create_library(name: str) -> dict:
+    """A real, collision-checked id derived from `name` -- a second
+    "ESP32 Boards" gets a real, distinct id, never silently overwrites
+    the first. Never collides with the implicit `DEFAULT_LIBRARY_ID`
+    either."""
+    if not name or not name.strip():
+        raise SchemaValidationError("Library name is required.")
+
+    libraries = _load_libraries_registry()
+    existing_ids = {lib["id"] for lib in libraries} | {DEFAULT_LIBRARY_ID}
+    base_slug = _slugify(name)
+    slug = base_slug
+    suffix = 2
+    while slug in existing_ids:
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1
+
+    entry = {"id": slug, "name": name.strip()}
+    libraries.append(entry)
+    _save_libraries_registry(libraries)
+    return entry
+
+
+def list_libraries() -> list:
+    """Real Default (implicit, computed over *every* real Part/Symbol/
+    Footprint -- not just ones explicitly tagged, since Default
+    membership is implicit) plus every real custom registry entry, each
+    with its own real, freshly-scanned counts."""
+    def counts_for(library_id: str | None) -> dict:
+        return {
+            "part_count": len(list_parts(library_id)),
+            "symbol_count": len(list_symbols(library_id)),
+            "footprint_count": len(list_footprints(library_id)),
+        }
+
+    result = [{"id": DEFAULT_LIBRARY_ID, "name": "Default", **counts_for(None)}]
+    for lib in _load_libraries_registry():
+        result.append({**lib, **counts_for(lib["id"])})
+    return result
+
+
+def tag_object(kind: str, object_id: str, library_ids: list) -> dict:
+    """The real, chosen replace-not-append semantics for one object's own
+    custom-library membership (SPEC-315 §5's own "Add to library..."
+    shape -- a user picks the full set, not an incremental add). Raises
+    SchemaValidationError for a `library_id` not in the real registry --
+    never silently created."""
+    known_ids = {DEFAULT_LIBRARY_ID} | {lib["id"] for lib in _load_libraries_registry()}
+    unknown = set(library_ids) - known_ids
+    if unknown:
+        raise SchemaValidationError(
+            f"Unknown library id(s): {', '.join(sorted(unknown))}. Real registered libraries: "
+            f"{', '.join(sorted(known_ids))}."
+        )
+
+    if kind == "part":
+        return save_part(load_part(object_id), library_ids=library_ids)
+    if kind == "symbol":
+        return save_symbol(load_symbol(object_id), library_ids=library_ids)
+    if kind == "footprint":
+        return save_footprint(load_footprint(object_id), library_ids=library_ids)
+    raise SchemaValidationError(f"Unknown kind '{kind}' -- expected 'part', 'symbol', or 'footprint'.")
 
 
 # --- Project --------------------------------------------------------------
