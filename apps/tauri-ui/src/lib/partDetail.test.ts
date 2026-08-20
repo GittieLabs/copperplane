@@ -82,6 +82,7 @@ describe('generateDesignGuidance', () => {
       design_guidance: {
         generated_at: '2026-08-20T00:00:00+00:00', content_hash: 'abc123', document_revision: null,
         categories: { decoupling: [{ quote: 'x', page: 4, category: 'decoupling' }] },
+        category_summaries: { decoupling: 'A real plain-language summary.' },
       },
     }
     submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(updatedPart)))

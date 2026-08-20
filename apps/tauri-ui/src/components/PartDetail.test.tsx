@@ -524,6 +524,17 @@ describe('PartDetail', () => {
       layout: [],
       typical_application: [],
     },
+    category_summaries: {},
+  }
+
+  // CTX-205.7, SPEC-205 §2.1.1: a real plain-language summary alongside
+  // decoupling's own citations -- the same category as DESIGN_GUIDANCE
+  // above, so these tests exercise the "summary present" branch while
+  // the tests above continue to exercise the "no summary yet" fallback
+  // (a pre-CTX-205.7 record) with no changes to their own assertions.
+  const DESIGN_GUIDANCE_WITH_SUMMARY = {
+    ...DESIGN_GUIDANCE,
+    category_summaries: { decoupling: 'Add a small capacitor near VCC to keep the supply steady.' },
   }
 
   it('CTX-205.4: Generate Design Requirements calls generateDesignGuidance and renders real cited guidance', async () => {
@@ -597,5 +608,45 @@ describe('PartDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'p4' }))
 
     await waitFor(() => screen.getByText(/Datasheet fetch failed/))
+  })
+
+  it('CTX-205.7: a category with a real summary shows it as the primary text, with citations collapsed below', async () => {
+    generateDesignGuidanceMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      design_guidance: DESIGN_GUIDANCE_WITH_SUMMARY,
+    })
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
+
+    await waitFor(() => screen.getByText(/Add a small capacitor near VCC/))
+    const details = screen.getByText('1 citation').closest('details') as HTMLDetailsElement | null
+    expect(details).not.toBeNull()
+    expect(details?.open).toBe(false)
+  })
+
+  it('CTX-205.7: clicking the citations toggle reveals the underlying cited items', async () => {
+    generateDesignGuidanceMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      design_guidance: DESIGN_GUIDANCE_WITH_SUMMARY,
+    })
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
+    await waitFor(() => screen.getByText(/Add a small capacitor near VCC/))
+
+    fireEvent.click(screen.getByText('1 citation'))
+
+    const details = screen.getByText('1 citation').closest('details') as HTMLDetailsElement | null
+    expect(details?.open).toBe(true)
+    screen.getByRole('button', { name: 'p4' })
+  })
+
+  it('CTX-205.7: a category with no summary yet falls back to citations open by default', async () => {
+    generateDesignGuidanceMock.mockResolvedValueOnce({ ...SAVED_PART_NO_FOOTPRINT, design_guidance: DESIGN_GUIDANCE })
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
+
+    await waitFor(() => screen.getByText(/A 100 nF decoupling capacitor/))
+    const details = screen.getByText('Citations').closest('details') as HTMLDetailsElement | null
+    expect(details?.open).toBe(true)
   })
 })

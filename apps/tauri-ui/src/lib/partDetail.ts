@@ -55,6 +55,14 @@ export interface DesignGuidance {
   content_hash: string
   document_revision: string | null
   categories: Record<string, DesignGuidanceItem[]>
+  /** CTX-205.7, SPEC-205 §2.1.1: a real plain-language paragraph per
+   * category, generated strictly from that category's own already-cited
+   * `categories` items -- never a new citable fact. `null` for a
+   * category with no validated items (never called the LLM); absent
+   * entirely for a record generated before this field existed (backend
+   * backfills to `{}` on read, so a lookup here is simply `undefined`,
+   * treated the same as `null` by the UI). */
+  category_summaries: Record<string, string | null>
 }
 
 export interface SavedSymbol {

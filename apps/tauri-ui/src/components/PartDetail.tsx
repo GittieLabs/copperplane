@@ -577,14 +577,23 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
             {libraryTagMessage && <p className="text-sm text-emerald-400">{libraryTagMessage}</p>}
           </div>
 
-          {/* CTX-205.3/.4, SPEC-205: real, cited (Class B) design
+          {/* CTX-205.3/.4/.7, SPEC-205: real, cited (Class B) design
               requirements grouped by category -- available as soon as a
               Part is real, not gated on a footprint the way Connection
               Guidance below is (decoupling/reset/layout guidance is
               useful before any footprint exists). Only Class B (cited
               datasheet prose) exists today; Class A (typed facts) and
               Class C (general practice) are real, deferred backend
-              work, not shown as an empty placeholder section. */}
+              work, not shown as an empty placeholder section. Per
+              SPEC-205 §5 (amended in CTX-205.7): each category leads
+              with its real plain-language summary -- the primary
+              reading surface -- with its underlying cited items
+              collapsed below it, available on demand as proof, not the
+              first thing a reader has to parse. A category with no
+              summary yet (a pre-CTX-205.7 record, or a category whose
+              synthesis genuinely produced nothing) falls back to
+              showing its citations directly, open by default, since
+              there's nothing else to lead with. */}
           <div className="flex flex-col gap-2 border-b border-neutral-800 pb-2">
             <div className="flex items-center gap-2">
               <p className="flex-1 text-xs font-medium uppercase text-neutral-500">Design Requirements</p>
@@ -613,28 +622,39 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
               <div className="flex flex-col gap-3">
                 {Object.entries(DESIGN_GUIDANCE_CATEGORY_LABELS).map(([key, label]) => {
                   const items = savedPart.design_guidance?.categories[key] ?? []
+                  const summary = savedPart.design_guidance?.category_summaries[key] ?? null
                   return (
                     <div key={key} className="flex flex-col gap-1">
                       <p className="text-xs font-medium text-neutral-300">{label}</p>
                       {items.length === 0 ? (
                         <p className="text-xs text-neutral-500">No guidance found for this category.</p>
                       ) : (
-                        <ul className="flex flex-col gap-1">
-                          {items.map((item, i) => (
-                            <li key={i} className="flex items-start gap-2 text-xs text-neutral-300">
-                              <button
-                                type="button"
-                                className="shrink-0 rounded border border-neutral-700 px-2 py-0.5 text-xs font-medium text-neutral-300 disabled:opacity-50"
-                                onClick={() => void handleOpenCitation(item)}
-                                disabled={openingCitationPage !== null}
-                                title="Open the datasheet at this page"
-                              >
-                                {openingCitationPage === item.page ? '…' : `p${item.page}`}
-                              </button>
-                              <span>{item.quote}</span>
-                            </li>
-                          ))}
-                        </ul>
+                        <>
+                          {summary && <p className="text-xs text-neutral-300">{summary}</p>}
+                          <details open={!summary}>
+                            <summary className="cursor-pointer text-xs font-medium text-neutral-500">
+                              {summary
+                                ? `${items.length} citation${items.length === 1 ? '' : 's'}`
+                                : 'Citations'}
+                            </summary>
+                            <ul className="mt-1 flex flex-col gap-1">
+                              {items.map((item, i) => (
+                                <li key={i} className="flex items-start gap-2 text-xs text-neutral-300">
+                                  <button
+                                    type="button"
+                                    className="shrink-0 rounded border border-neutral-700 px-2 py-0.5 text-xs font-medium text-neutral-300 disabled:opacity-50"
+                                    onClick={() => void handleOpenCitation(item)}
+                                    disabled={openingCitationPage !== null}
+                                    title="Open the datasheet at this page"
+                                  >
+                                    {openingCitationPage === item.page ? '…' : `p${item.page}`}
+                                  </button>
+                                  <span>{item.quote}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        </>
                       )}
                     </div>
                   )
