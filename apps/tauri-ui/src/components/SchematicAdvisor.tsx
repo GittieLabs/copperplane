@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { MenuCommand } from '../lib/areas'
 import {
   checkSchematic,
   listProjectSchematics,
@@ -33,7 +34,16 @@ import { ViolationsList } from './ViolationsList'
  * reason: a finished check shouldn't disappear just because the user
  * glanced at another tab. `projectName` only resets state on a genuine
  * project switch. */
-export function SchematicAdvisor({ projectName }: { projectName: string }) {
+export function SchematicAdvisor({
+  projectName,
+  menuCommand,
+}: {
+  projectName: string
+  /** SPEC-316: a Design > Schematic menu click -- only 'open_kicad' and
+   * 'pick_manually' are real commands here, `handleCheck` needs a
+   * specific candidate a menu click can't supply. */
+  menuCommand?: MenuCommand | null
+}) {
   const [loadingList, setLoadingList] = useState(false)
   const [listResult, setListResult] = useState<ListProjectSchematicsResult | null>(null)
   const [listError, setListError] = useState<string | null>(null)
@@ -100,6 +110,15 @@ export function SchematicAdvisor({ projectName }: { projectName: string }) {
     if (!path) return
     await handleCheck({ path, label: path.split('/').pop() ?? path })
   }
+
+  // SPEC-316: Design > Schematic menu clicks dispatch to these same two
+  // handlers -- no new business logic, just a second entry point.
+  useEffect(() => {
+    if (menuCommand?.area !== 'schematic') return
+    if (menuCommand.command === 'open_kicad') void handleOpenKicad()
+    if (menuCommand.command === 'pick_manually') void handlePickManually()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuCommand?.nonce])
 
   const showGuidance = !loadingList && (listError !== null || listResult?.status === 'no_schematic_found')
   const selectedIsListed =

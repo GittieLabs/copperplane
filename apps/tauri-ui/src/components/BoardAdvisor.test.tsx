@@ -278,3 +278,18 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     expect(screen.queryByText('No violations found.')).toBeNull()
   })
 })
+
+describe('BoardAdvisor: SPEC-316 menuCommand', () => {
+  it('TEST-008: a matching open_kicad menuCommand runs the real handleOpenKicad', async () => {
+    render(<BoardAdvisor projectName="test-project" menuCommand={{ area: 'pcb', command: 'open_kicad', nonce: 0 }} />)
+
+    await waitFor(() => expect(openKicadMock).toHaveBeenCalledTimes(1))
+  })
+
+  it('a menuCommand for a different area is ignored', async () => {
+    render(<BoardAdvisor projectName="test-project" menuCommand={{ area: 'schematic', command: 'open_kicad', nonce: 0 }} />)
+
+    await waitFor(() => expect(listOpenBoardsMock).toHaveBeenCalled())
+    expect(openKicadMock).not.toHaveBeenCalled()
+  })
+})

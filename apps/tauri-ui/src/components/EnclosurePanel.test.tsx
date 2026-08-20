@@ -733,3 +733,52 @@ describe('EnclosurePanel: board-inside-enclosure overlay (CTX-311.15)', () => {
     )
   })
 })
+
+describe('EnclosurePanel: SPEC-316 menuCommand', () => {
+  it('TEST-009: a matching open_kicad menuCommand runs the real handleOpenKicad', async () => {
+    render(
+      <EnclosurePanel
+        projectName="test-project"
+        menuCommand={{ area: 'enclosure', command: 'open_kicad', nonce: 0 }}
+      />,
+    )
+
+    await waitFor(() => expect(openKicadMock).toHaveBeenCalledTimes(1))
+  })
+
+  it('TEST-009b: a matching pick_pcb menuCommand runs the real handlePickPcbFile', async () => {
+    pickPcbFileMock.mockResolvedValueOnce('/manual/other.kicad_pcb')
+
+    render(
+      <EnclosurePanel
+        projectName="test-project"
+        menuCommand={{ area: 'enclosure', command: 'pick_pcb', nonce: 0 }}
+      />,
+    )
+
+    await waitFor(() => expect(pickPcbFileMock).toHaveBeenCalledTimes(1))
+  })
+
+  it('TEST-009c: a matching generate menuCommand runs the real handleGenerate', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    render(
+      <EnclosurePanel
+        projectName="test-project"
+        menuCommand={{ area: 'enclosure', command: 'generate', nonce: 0 }}
+      />,
+    )
+
+    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
+  })
+
+  it('a menuCommand for a different area is ignored', async () => {
+    render(
+      <EnclosurePanel projectName="test-project" menuCommand={{ area: 'pcb', command: 'open_kicad', nonce: 0 }} />,
+    )
+
+    await waitFor(() => expect(listOpenBoardsMock).toHaveBeenCalled())
+    expect(openKicadMock).not.toHaveBeenCalled()
+  })
+})

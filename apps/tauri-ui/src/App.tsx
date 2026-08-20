@@ -1,6 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
-import { submitJob, dispatchTool, MENU_SAVE_PROJECT_EVENT, MENU_OPEN_PROJECT_EVENT } from './lib/ipc'
+import {
+  submitJob,
+  dispatchTool,
+  MENU_SAVE_PROJECT_EVENT,
+  MENU_OPEN_PROJECT_EVENT,
+  MENU_OPEN_SETTINGS_EVENT,
+  MENU_OPEN_DEFAULT_LIBRARY_EVENT,
+  MENU_MANAGE_LIBRARIES_EVENT,
+  MENU_DESIGN_SCHEMATIC_OPEN_KICAD_EVENT,
+  MENU_DESIGN_SCHEMATIC_PICK_MANUALLY_EVENT,
+  MENU_DESIGN_PCB_OPEN_KICAD_EVENT,
+  MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT,
+  MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT,
+  MENU_DESIGN_ENCLOSURE_GENERATE_EVENT,
+} from './lib/ipc'
 import { parseCommand } from './lib/commands'
 import {
   appendConversationTurn,
@@ -14,6 +28,7 @@ import {
   type ConversationTurn,
   type Project,
 } from './lib/projects'
+import type { Area, MenuCommand } from './lib/areas'
 import { BoardAdvisor } from './components/BoardAdvisor'
 import { ComponentDiscovery } from './components/ComponentDiscovery'
 import { EnclosurePanel, type EnclosureExportSuccessEvent } from './components/EnclosurePanel'
@@ -46,9 +61,9 @@ function newMessageId(): string {
 /** SPEC-305 §2: the five per-project area tabs, in the shell's own
  * order. Overview and Enclosure carry real, already-shipped content
  * forward; Components/Schematic/PCB are visible-but-empty until
- * SPEC-306/308/309 build them. */
-type Area = 'overview' | 'components' | 'schematic' | 'pcb' | 'enclosure'
-
+ * SPEC-306/308/309 build them. `Area` itself lives in `lib/areas.ts`,
+ * not here, so the area components (SPEC-316's `menuCommand` prop) can
+ * import it without a circular import back into this file. */
 const AREAS: { key: Area; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'components', label: 'Components' },
@@ -57,13 +72,26 @@ const AREAS: { key: Area; label: string }[] = [
   { key: 'enclosure', label: 'Enclosure' },
 ]
 
-type View = { kind: 'settings' } | { kind: 'library' } | { kind: 'project'; name: string; area: Area } | null
+type View =
+  | { kind: 'settings' }
+  | { kind: 'library'; initialLibraryId?: string }
+  | { kind: 'project'; name: string; area: Area }
+  | null
 
 function App() {
   const [projects, setProjects] = useState<string[]>([])
   const [libraryCount, setLibraryCount] = useState(0)
   const [view, setView] = useState<View>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [menuCommand, setMenuCommand] = useState<MenuCommand | null>(null)
+  // Read by the menu-listener effect below, which only re-subscribes on
+  // `currentProject` changes -- a ref keeps it seeing the real current
+  // `view` (e.g. after switching area tabs) without resubscribing on
+  // every tab switch.
+  const viewRef = useRef<View>(null)
+  useEffect(() => {
+    viewRef.current = view
+  }, [view])
 
   // CTX-312.1: the current project's own real record -- SPEC-304 §2.1's
   // long-described "link to a KiCad project directory on disk," plus
@@ -202,30 +230,47 @@ function App() {
   // `currentProject` changes so `handleSaveProject`'s own closure never
   // sees a stale value (`handleOpenProject` captures no project state at
   // all, so it's always fresh regardless).
+  //
+  // CTX-316.1 adds the rest of the menu's real command surface to this
+  // same effect/cleanup pattern. A Design command with no project open
+  // is a real, silent no-op for this phase -- CTX-316.2's own enable/
+  // disable sync is what prevents the click from being possible at all,
+  // not this handler.
   useEffect(() => {
     let cancelled = false
-    let unlistenSave: (() => void) | undefined
-    let unlistenOpen: (() => void) | undefined
+    const unlisten: (() => void)[] = []
 
-    listen(MENU_SAVE_PROJECT_EVENT, () => void handleSaveProject()).then((fn) => {
-      if (cancelled) {
-        fn()
-        return
-      }
-      unlistenSave = fn
-    })
-    listen(MENU_OPEN_PROJECT_EVENT, () => void handleOpenProject()).then((fn) => {
-      if (cancelled) {
-        fn()
-        return
-      }
-      unlistenOpen = fn
-    })
+    function on(event: string, handler: () => void) {
+      listen(event, handler).then((fn) => {
+        if (cancelled) {
+          fn()
+          return
+        }
+        unlisten.push(fn)
+      })
+    }
+
+    function onDesignCommand(area: Area, command: string) {
+      if (viewRef.current?.kind !== 'project') return
+      setView({ ...viewRef.current, area })
+      setMenuCommand((prev) => ({ area, command, nonce: prev ? prev.nonce + 1 : 0 }))
+    }
+
+    on(MENU_SAVE_PROJECT_EVENT, () => void handleSaveProject())
+    on(MENU_OPEN_PROJECT_EVENT, () => void handleOpenProject())
+    on(MENU_OPEN_SETTINGS_EVENT, () => setView({ kind: 'settings' }))
+    on(MENU_OPEN_DEFAULT_LIBRARY_EVENT, () => setView({ kind: 'library', initialLibraryId: 'default' }))
+    on(MENU_MANAGE_LIBRARIES_EVENT, () => setView({ kind: 'library' }))
+    on(MENU_DESIGN_SCHEMATIC_OPEN_KICAD_EVENT, () => onDesignCommand('schematic', 'open_kicad'))
+    on(MENU_DESIGN_SCHEMATIC_PICK_MANUALLY_EVENT, () => onDesignCommand('schematic', 'pick_manually'))
+    on(MENU_DESIGN_PCB_OPEN_KICAD_EVENT, () => onDesignCommand('pcb', 'open_kicad'))
+    on(MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT, () => onDesignCommand('enclosure', 'open_kicad'))
+    on(MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT, () => onDesignCommand('enclosure', 'pick_pcb'))
+    on(MENU_DESIGN_ENCLOSURE_GENERATE_EVENT, () => onDesignCommand('enclosure', 'generate'))
 
     return () => {
       cancelled = true
-      unlistenSave?.()
-      unlistenOpen?.()
+      unlisten.forEach((fn) => fn())
     }
   }, [currentProject])
 
@@ -283,7 +328,7 @@ function App() {
 
         {view?.kind === 'settings' && <Settings />}
 
-        {view?.kind === 'library' && <LibraryArea />}
+        {view?.kind === 'library' && <LibraryArea initialLibraryId={view.initialLibraryId} />}
 
         {view?.kind === 'project' && (
           <>
@@ -354,13 +399,13 @@ function App() {
              * connection-guidance work, which will eventually join
              * SchematicAdvisor here. */}
             <div data-testid="schematic-area" className={view.area === 'schematic' ? undefined : 'hidden'}>
-              <SchematicAdvisor projectName={view.name} />
+              <SchematicAdvisor projectName={view.name} menuCommand={menuCommand} />
             </div>
             <div data-testid="pcb-area" className={view.area === 'pcb' ? undefined : 'hidden'}>
-              <BoardAdvisor projectName={view.name} />
+              <BoardAdvisor projectName={view.name} menuCommand={menuCommand} />
             </div>
             <div data-testid="enclosure-area" className={view.area === 'enclosure' ? undefined : 'hidden'}>
-              <EnclosurePanel projectName={view.name} onExportSuccess={handleExportSuccess} />
+              <EnclosurePanel projectName={view.name} onExportSuccess={handleExportSuccess} menuCommand={menuCommand} />
             </div>
           </>
         )}

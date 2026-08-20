@@ -122,3 +122,30 @@ describe('LibraryArea: detail view', () => {
     await waitFor(() => screen.getByRole('button', { name: '+ New library' }))
   })
 })
+
+describe('LibraryArea: SPEC-316 initialLibraryId deep link', () => {
+  it('TEST-010: an initialLibraryId matching a real library opens straight into its detail view', async () => {
+    listLibrariesMock.mockResolvedValueOnce([
+      ...DEFAULT_ONLY,
+      { id: 'esp32-boards', name: 'ESP32 Boards', part_count: 0, symbol_count: 0, footprint_count: 0 },
+    ])
+    listPartsMock.mockResolvedValueOnce(['ATtiny85'])
+    loadPartMock.mockResolvedValueOnce({ part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8' })
+
+    render(<LibraryArea initialLibraryId="default" />)
+
+    await waitFor(() => screen.getByText('ATtiny85 · Microchip · SOIC-8'))
+    expect(listPartsMock).toHaveBeenCalledWith('default')
+    // Never landed on the list view at all.
+    expect(screen.queryByRole('button', { name: '+ New library' })).toBeNull()
+  })
+
+  it('TEST-011: an initialLibraryId with no matching library falls back to the list view', async () => {
+    listLibrariesMock.mockResolvedValueOnce(DEFAULT_ONLY)
+
+    render(<LibraryArea initialLibraryId="does-not-exist" />)
+
+    await waitFor(() => screen.getByRole('button', { name: '+ New library' }))
+    expect(listPartsMock).not.toHaveBeenCalled()
+  })
+})

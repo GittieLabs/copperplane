@@ -27,6 +27,15 @@ vi.mock('./lib/ipc', () => ({
   dispatchTool: (...args: unknown[]) => dispatchToolMock(...args),
   MENU_SAVE_PROJECT_EVENT: 'menu://save-project',
   MENU_OPEN_PROJECT_EVENT: 'menu://open-project',
+  MENU_OPEN_SETTINGS_EVENT: 'menu://open-settings',
+  MENU_OPEN_DEFAULT_LIBRARY_EVENT: 'menu://open-library-default',
+  MENU_MANAGE_LIBRARIES_EVENT: 'menu://manage-libraries',
+  MENU_DESIGN_SCHEMATIC_OPEN_KICAD_EVENT: 'menu://design/schematic/open-kicad',
+  MENU_DESIGN_SCHEMATIC_PICK_MANUALLY_EVENT: 'menu://design/schematic/pick-manually',
+  MENU_DESIGN_PCB_OPEN_KICAD_EVENT: 'menu://design/pcb/open-kicad',
+  MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT: 'menu://design/enclosure/open-kicad',
+  MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT: 'menu://design/enclosure/pick-pcb',
+  MENU_DESIGN_ENCLOSURE_GENERATE_EVENT: 'menu://design/enclosure/generate',
 }))
 
 vi.mock('@tauri-apps/api/event', () => ({
@@ -64,6 +73,18 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 
 vi.mock('./components/EnclosureViewer', () => ({
   EnclosureViewer: () => null,
+}))
+
+// CTX-316.1: only App.tsx's own view/prop wiring is under test here --
+// Settings/LibraryArea's own real internals are covered by their own
+// dedicated test files, not re-exercised through App.test.tsx.
+vi.mock('./components/Settings', () => ({
+  Settings: () => <div data-testid="settings-mock" />,
+}))
+vi.mock('./components/LibraryArea', () => ({
+  LibraryArea: ({ initialLibraryId }: { initialLibraryId?: string }) => (
+    <div data-testid="library-area-mock" data-initial-library-id={initialLibraryId ?? ''} />
+  ),
 }))
 
 vi.mock('./lib/boardAdvisor', () => ({
@@ -557,6 +578,81 @@ describe('App: Enclosure tab persists across area switches', () => {
     // selected (Rail.tsx) -- opening a project also selects it, so the
     // real accessible name here is "> other-project", not the bare name.
     await waitFor(() => screen.getByRole('button', { name: '> other-project' }))
+  })
+
+  it('CTX-316.1: the Settings… menu event shows the real Settings screen', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+
+    const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://open-settings')!
+    act(() => menuHandler())
+
+    await waitFor(() => screen.getByTestId('settings-mock'))
+  })
+
+  it('CTX-316.1: the Default Library menu event opens Library deep-linked to Default', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+
+    const [, menuHandler] = listenMock.mock.calls.findLast(
+      ([event]) => event === 'menu://open-library-default',
+    )!
+    act(() => menuHandler())
+
+    await waitFor(() => {
+      const el = screen.getByTestId('library-area-mock')
+      expect(el.getAttribute('data-initial-library-id')).toBe('default')
+    })
+  })
+
+  it('CTX-316.1: the Manage Libraries… menu event opens Library with no deep link', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+
+    const [, menuHandler] = listenMock.mock.calls.findLast(
+      ([event]) => event === 'menu://manage-libraries',
+    )!
+    act(() => menuHandler())
+
+    await waitFor(() => {
+      const el = screen.getByTestId('library-area-mock')
+      expect(el.getAttribute('data-initial-library-id')).toBe('')
+    })
+  })
+
+  it('CTX-316.1: a Design menu event switches to the matching area and runs the real handler', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    // Starts on Overview -- confirms the PCB area really was hidden
+    // before the menu event, not just already active.
+    expect(screen.getByTestId('pcb-area').className).toContain('hidden')
+
+    const [, menuHandler] = listenMock.mock.calls.findLast(
+      ([event]) => event === 'menu://design/pcb/open-kicad',
+    )!
+    act(() => menuHandler())
+
+    await waitFor(() => expect(screen.getByTestId('pcb-area').className).not.toContain('hidden'))
+    await waitFor(() => expect(openKicadMock).toHaveBeenCalled())
+  })
+
+  it('CTX-316.1: a Design menu event with no project open is a real, silent no-op', async () => {
+    listProjectsMock.mockResolvedValueOnce([])
+    // openKicadMock isn't reset by this describe's own beforeEach --
+    // clearing it here isolates this assertion from calls other tests
+    // in this same describe block may have already made.
+    openKicadMock.mockClear()
+
+    render(<App />)
+    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+
+    const [, menuHandler] = listenMock.mock.calls.findLast(
+      ([event]) => event === 'menu://design/pcb/open-kicad',
+    )!
+    act(() => menuHandler())
+
+    expect(openKicadMock).not.toHaveBeenCalled()
+    screen.getByText('Create a project on the left to get started.')
   })
 })
 
