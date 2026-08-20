@@ -374,6 +374,33 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     }
   }
 
+  /** Real bug found by live user testing: the previous "Open symbol"/
+   * "Open footprint" buttons called `open()` fire-and-forget -- no
+   * await, no error handling -- so a failure (e.g. no OS file
+   * association for .kicad_sym/.kicad_mod, very likely on a machine
+   * without KiCad's file associations set up) silently did nothing,
+   * with no visible sign the click was even registered. Mirrors
+   * `handleOpenCitation`'s own real await/try/catch shape. */
+  async function handleOpenSymbol() {
+    if (!exportedPath) return
+    setExportError(null)
+    try {
+      await open(exportedPath)
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleOpenFootprint() {
+    if (!exportedFootprintPath) return
+    setExportFootprintError(null)
+    try {
+      await open(exportedFootprintPath)
+    } catch (err) {
+      setExportFootprintError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function handleGetGuidance() {
     if (!savedPart) return
     setLoadingGuidance(true)
@@ -510,7 +537,7 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
               <button
                 type="button"
                 className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
-                onClick={() => open(exportedPath)}
+                onClick={() => void handleOpenSymbol()}
               >
                 Open symbol
               </button>
@@ -647,7 +674,7 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
                                     disabled={openingCitationPage !== null}
                                     title="Open the datasheet at this page"
                                   >
-                                    {openingCitationPage === item.page ? '…' : `p${item.page}`}
+                                    {openingCitationPage === item.page ? '…' : `Page ${item.page}`}
                                   </button>
                                   <span>{item.quote}</span>
                                 </li>
@@ -690,7 +717,7 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
                   <button
                     type="button"
                     className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
-                    onClick={() => open(exportedFootprintPath)}
+                    onClick={() => void handleOpenFootprint()}
                   >
                     Open footprint
                   </button>
