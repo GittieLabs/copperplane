@@ -316,7 +316,7 @@ plain deep link; and design/application guidance (decoupling, pull-ups, protecti
 its own new spec, [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md),
 below.
 
-#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md) done, more planned) 2026-08-20
+#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress, Class B usable end-to-end ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md), [CTX-205.4](apps/tauri-ui/context/CTX-205.4-design-requirements-ui.md) done, Class A/C planned) 2026-08-20
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-105, SPEC-202, SPEC-304, SPEC-306, SPEC-307
 
@@ -368,6 +368,18 @@ backfills as `None`, not `{}`, keeping "never generated" and "generated, found n
 distinguishable. Real `cancel_event` support added, matching the FreeCAD routes' own pattern.
 Verified end-to-end through `handle_request` with a real HTTP server and a real Anthropic call.
 Class A, Class C, and the UI panel remain real, open work.
+
+`CTX-205.4` (2026-08-20) shipped the UI panel -- a real "Design Requirements" section on Part
+Detail, grouped by category, each cited item with a citation button that opens the cached
+datasheet at that page (not verified working through the real packaged webview in this session,
+named honestly). Available as soon as a Part exists, not gated on a footprint. Only Class B (cited
+prose) exists on the backend, so this renders exactly that -- real category-by-category empty
+states, not fabricated Class A/C placeholders. A real, pre-existing inconsistency was caught and
+fixed while typing the frontend interface: `save_part` only backfilled `design_guidance` via
+`load_part`, never on its own real return value. **SPEC-205's Class B slice is now usable
+end-to-end** (generate -> persist -> view -> open citation); Class A (typed facts), Class C
+(general practice), and the fuller `SPEC-205 §5` grouping (which needs pin association and a
+Class marker the backend doesn't produce yet) remain real, open work.
 
 #### [SPEC-204](services/python-daemon/specs/SPEC-204-agent-tool-registry.md) — Agent Tool Registry — ✅ Completed ([CTX-204.1](services/python-daemon/context/CTX-204.1-agent-tool-registry.md)) 2026-08-14
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-102
