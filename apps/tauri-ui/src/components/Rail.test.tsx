@@ -9,6 +9,8 @@ function renderRail(overrides: Partial<Parameters<typeof Rail>[0]> = {}) {
     onSelectProject: vi.fn(),
     onCreateProject: vi.fn(),
     libraryCount: 3,
+    librarySelected: false,
+    onSelectLibrary: vi.fn(),
     settingsSelected: false,
     onSelectSettings: vi.fn(),
     ...overrides,
@@ -57,6 +59,12 @@ describe('Rail', () => {
 
     fireEvent.change(screen.getByPlaceholderText('project name'), { target: { value: '   ' } })
     expect(addButton.disabled).toBe(true)
+  })
+
+  it('clicking the library count calls onSelectLibrary', () => {
+    const props = renderRail()
+    fireEvent.click(screen.getByText('3 parts'))
+    expect(props.onSelectLibrary).toHaveBeenCalledTimes(1)
   })
 
   it('clicking Settings calls onSelectSettings', () => {

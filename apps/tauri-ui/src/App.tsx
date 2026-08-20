@@ -17,6 +17,7 @@ import {
 import { BoardAdvisor } from './components/BoardAdvisor'
 import { ComponentDiscovery } from './components/ComponentDiscovery'
 import { EnclosurePanel, type EnclosureExportSuccessEvent } from './components/EnclosurePanel'
+import { LibraryArea } from './components/LibraryArea'
 import { OverviewDashboard } from './components/OverviewDashboard'
 import { Rail } from './components/Rail'
 import { SchematicAdvisor } from './components/SchematicAdvisor'
@@ -56,7 +57,7 @@ const AREAS: { key: Area; label: string }[] = [
   { key: 'enclosure', label: 'Enclosure' },
 ]
 
-type View = { kind: 'settings' } | { kind: 'project'; name: string; area: Area } | null
+type View = { kind: 'settings' } | { kind: 'library' } | { kind: 'project'; name: string; area: Area } | null
 
 function App() {
   const [projects, setProjects] = useState<string[]>([])
@@ -268,6 +269,8 @@ function App() {
         onSelectProject={handleSelectProject}
         onCreateProject={handleCreateProject}
         libraryCount={libraryCount}
+        librarySelected={view?.kind === 'library'}
+        onSelectLibrary={() => setView({ kind: 'library' })}
         settingsSelected={view?.kind === 'settings'}
         onSelectSettings={() => setView({ kind: 'settings' })}
       />
@@ -279,6 +282,8 @@ function App() {
         )}
 
         {view?.kind === 'settings' && <Settings />}
+
+        {view?.kind === 'library' && <LibraryArea />}
 
         {view?.kind === 'project' && (
           <>
