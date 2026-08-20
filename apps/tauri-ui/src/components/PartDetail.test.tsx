@@ -15,6 +15,8 @@ const importCommunityFootprintMock = vi.fn()
 const attachCommunityFootprintToPartMock = vi.fn()
 const listLibrariesMock = vi.fn()
 const tagObjectMock = vi.fn()
+const generateDesignGuidanceMock = vi.fn()
+const cacheDatasheetMock = vi.fn()
 
 vi.mock('../lib/library', () => ({
   listLibraries: (...args: unknown[]) => listLibrariesMock(...args),
@@ -26,6 +28,11 @@ vi.mock('../lib/partDetail', () => ({
   saveConfirmedPart: (...args: unknown[]) => saveConfirmedPartMock(...args),
   exportSymbol: (...args: unknown[]) => exportSymbolMock(...args),
   getConnectionGuidance: (...args: unknown[]) => getConnectionGuidanceMock(...args),
+  generateDesignGuidance: (...args: unknown[]) => generateDesignGuidanceMock(...args),
+}))
+
+vi.mock('../lib/components', () => ({
+  cacheDatasheet: (...args: unknown[]) => cacheDatasheetMock(...args),
 }))
 
 vi.mock('../lib/footprints', () => ({
@@ -68,6 +75,8 @@ beforeEach(() => {
   attachCommunityFootprintToPartMock.mockReset()
   listLibrariesMock.mockReset()
   tagObjectMock.mockReset()
+  generateDesignGuidanceMock.mockReset()
+  cacheDatasheetMock.mockReset()
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -497,5 +506,96 @@ describe('PartDetail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Get Connection Guidance' }))
 
     await waitFor(() => screen.getByText('No pin-specific guidance for this part.'))
+  })
+
+  const DESIGN_GUIDANCE = {
+    generated_at: '2026-08-20T00:00:00+00:00',
+    content_hash: 'abc123',
+    document_revision: null,
+    categories: {
+      absolute_maximum_ratings: [],
+      recommended_operating_conditions: [],
+      power: [],
+      decoupling: [
+        { quote: 'A 100 nF decoupling capacitor should be placed close to VCC.', page: 4, category: 'decoupling' },
+      ],
+      reset: [],
+      clock_oscillator: [],
+      layout: [],
+      typical_application: [],
+    },
+  }
+
+  it('CTX-205.4: Generate Design Requirements calls generateDesignGuidance and renders real cited guidance', async () => {
+    generateDesignGuidanceMock.mockResolvedValueOnce({ ...SAVED_PART_NO_FOOTPRINT, design_guidance: DESIGN_GUIDANCE })
+    await saveAndReachFootprintSection()
+    await waitFor(() => screen.getByRole('button', { name: 'Generate Design Requirements' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
+
+    await waitFor(() => screen.getByText(/A 100 nF decoupling capacitor/))
+    expect(generateDesignGuidanceMock).toHaveBeenCalledWith('ATtiny85')
+    screen.getByText('Decoupling')
+    screen.getByRole('button', { name: 'p4' })
+  })
+
+  it('CTX-205.4: a category with no real items renders an honest empty state, not an omitted section', async () => {
+    generateDesignGuidanceMock.mockResolvedValueOnce({ ...SAVED_PART_NO_FOOTPRINT, design_guidance: DESIGN_GUIDANCE })
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
+    await waitFor(() => screen.getByText(/A 100 nF decoupling capacitor/))
+
+    screen.getByText('Reset')
+    const noGuidanceMessages = screen.getAllByText('No guidance found for this category.')
+    expect(noGuidanceMessages.length).toBeGreaterThan(0)
+  })
+
+  it('CTX-205.4: a generate failure shows the real error, not a crash', async () => {
+    generateDesignGuidanceMock.mockRejectedValueOnce(new Error('Could not read the cached datasheet.'))
+    await saveAndReachFootprintSection()
+    await waitFor(() => screen.getByRole('button', { name: 'Generate Design Requirements' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
+
+    await waitFor(() => screen.getByText(/Could not read the cached datasheet/))
+  })
+
+  it('CTX-205.4: once generated, Regenerate calls generateDesignGuidance again', async () => {
+    generateDesignGuidanceMock.mockResolvedValueOnce({ ...SAVED_PART_NO_FOOTPRINT, design_guidance: DESIGN_GUIDANCE })
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
+    await waitFor(() => screen.getByText(/A 100 nF decoupling capacitor/))
+
+    generateDesignGuidanceMock.mockResolvedValueOnce({ ...SAVED_PART_NO_FOOTPRINT, design_guidance: DESIGN_GUIDANCE })
+    fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }))
+
+    await waitFor(() => expect(generateDesignGuidanceMock).toHaveBeenCalledTimes(2))
+  })
+
+  it('CTX-205.4: clicking a citation chip resolves the real cached datasheet path and opens it at that page', async () => {
+    generateDesignGuidanceMock.mockResolvedValueOnce({ ...SAVED_PART_NO_FOOTPRINT, design_guidance: DESIGN_GUIDANCE })
+    cacheDatasheetMock.mockResolvedValueOnce('/real/library/datasheets/ATtiny85.pdf')
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
+    await waitFor(() => screen.getByText(/A 100 nF decoupling capacitor/))
+
+    fireEvent.click(screen.getByRole('button', { name: 'p4' }))
+
+    await waitFor(() =>
+      expect(cacheDatasheetMock).toHaveBeenCalledWith('ATtiny85', 'https://example.com/attiny85.pdf'),
+    )
+    await waitFor(() => expect(openMock).toHaveBeenCalledWith('/real/library/datasheets/ATtiny85.pdf#page=4'))
+  })
+
+  it('CTX-205.4: a citation-open failure shows the real error, not a crash', async () => {
+    generateDesignGuidanceMock.mockResolvedValueOnce({ ...SAVED_PART_NO_FOOTPRINT, design_guidance: DESIGN_GUIDANCE })
+    cacheDatasheetMock.mockRejectedValueOnce(new Error('Datasheet fetch failed.'))
+    await saveAndReachFootprintSection()
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Design Requirements' }))
+    await waitFor(() => screen.getByText(/A 100 nF decoupling capacitor/))
+
+    fireEvent.click(screen.getByRole('button', { name: 'p4' }))
+
+    await waitFor(() => screen.getByText(/Datasheet fetch failed/))
   })
 })

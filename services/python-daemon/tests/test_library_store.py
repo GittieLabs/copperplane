@@ -1066,6 +1066,16 @@ class TestDesignGuidanceStorage(LibraryStoreTestCase):
 
         self.assertIsNone(loaded["design_guidance"])
 
+    def test_001b_save_part_itself_returns_a_real_backfilled_design_guidance_key(self):
+        # CTX-205.4: a real inconsistency found while typing this field on
+        # the frontend -- library.save_confirmed_part's own real response
+        # is save_part's return value directly, never routed through
+        # load_part first, so save_part must backfill this key itself too.
+        record = store.save_part(self._valid_part())
+
+        self.assertIn("design_guidance", record)
+        self.assertIsNone(record["design_guidance"])
+
     def test_002_save_part_accepts_a_real_valid_design_guidance(self):
         store.save_part(self._valid_part(design_guidance=_VALID_DESIGN_GUIDANCE))
 

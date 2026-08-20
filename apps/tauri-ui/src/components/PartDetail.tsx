@@ -1,6 +1,6 @@
 import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
-import type { ComponentCandidate } from '../lib/components'
+import { cacheDatasheet, type ComponentCandidate } from '../lib/components'
 import {
   attachCommunityFootprintToPart,
   attachFootprintToPart,
@@ -14,7 +14,37 @@ import {
   type FootprintCandidate,
 } from '../lib/footprints'
 import { listLibraries, tagObject, type LibrarySummary } from '../lib/library'
-import { exportSymbol, extractPartDetail, getConnectionGuidance, saveConfirmedPart, type ConnectionGuidance, type ExtractedSchema, type SavedPart, type SavedSymbol } from '../lib/partDetail'
+import {
+  exportSymbol,
+  extractPartDetail,
+  generateDesignGuidance,
+  getConnectionGuidance,
+  saveConfirmedPart,
+  type ConnectionGuidance,
+  type DesignGuidanceItem,
+  type ExtractedSchema,
+  type SavedPart,
+  type SavedSymbol,
+} from '../lib/partDetail'
+
+/** SPEC-205 §2.2's own real structure-pass category keys
+ * (`datasheet_structure.CATEGORY_PATTERNS`) -- not `SPEC-205 §5`'s own
+ * friendly Power/Decoupling/Reset-Boot/Clock/Protection/Layout grouping,
+ * which doesn't map 1:1 onto what the real backend produces today
+ * (`reset` exists, `reset/boot` and `protection` don't). A real,
+ * honest label per real key, not a guess at the eventual fuller
+ * grouping -- named explicitly as future work in this context's own
+ * Plan Drift. */
+const DESIGN_GUIDANCE_CATEGORY_LABELS: Record<string, string> = {
+  absolute_maximum_ratings: 'Absolute Maximum Ratings',
+  recommended_operating_conditions: 'Recommended Operating Conditions',
+  power: 'Power',
+  decoupling: 'Decoupling',
+  reset: 'Reset',
+  clock_oscillator: 'Clock / Oscillator',
+  layout: 'Layout',
+  typical_application: 'Typical Application',
+}
 
 type Status = 'extracting' | 'ready' | 'error'
 type FootprintSearchStatus = 'idle' | 'searching' | 'error'
@@ -103,6 +133,16 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
   const [loadingGuidance, setLoadingGuidance] = useState(false)
   const [guidanceError, setGuidanceError] = useState<string | null>(null)
 
+  // CTX-205.4: SPEC-205's real Design Requirements panel -- the result
+  // itself lives on savedPart.design_guidance (the route persists onto
+  // and returns the whole Part, matching attachFootprintToPart's own
+  // "re-save returns the fresh whole record" shape), so no separate
+  // result state var is needed here, only the real in-flight/error state.
+  const [generatingDesignGuidance, setGeneratingDesignGuidance] = useState(false)
+  const [designGuidanceError, setDesignGuidanceError] = useState<string | null>(null)
+  const [openingCitationPage, setOpeningCitationPage] = useState<number | null>(null)
+  const [citationOpenError, setCitationOpenError] = useState<string | null>(null)
+
   useEffect(() => {
     let cancelled = false
     setStatus('extracting')
@@ -131,6 +171,10 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     setGuidance(null)
     setLoadingGuidance(false)
     setGuidanceError(null)
+    setGeneratingDesignGuidance(false)
+    setDesignGuidanceError(null)
+    setOpeningCitationPage(null)
+    setCitationOpenError(null)
     setLibraryPickerOpen(false)
     setAvailableLibraries(null)
     setSelectedLibraryIds([])
@@ -344,6 +388,46 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
     }
   }
 
+  /** SPEC-205: available as soon as a Part is real, not gated on a
+   * footprint the way Connection Guidance is -- design requirements
+   * (decoupling, reset, layout…) are useful before any footprint
+   * exists. */
+  async function handleGenerateDesignGuidance() {
+    if (!savedPart) return
+    setGeneratingDesignGuidance(true)
+    setDesignGuidanceError(null)
+    try {
+      const updated = await generateDesignGuidance(savedPart.part_id)
+      setSavedPart(updated)
+    } catch (err) {
+      setDesignGuidanceError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setGeneratingDesignGuidance(false)
+    }
+  }
+
+  /** SPEC-205 §5: "opens the datasheet at that page" -- resolves the
+   * real local cached PDF path (reusing cacheDatasheet, the same real
+   * function ComponentDiscovery's own "Open" button already calls;
+   * datasheet.generate_guidance's own response never returns a path,
+   * only a content_hash) and opens it with a `#page=N` fragment. No
+   * existing precedent in this repo for whether the OS's default PDF
+   * viewer actually honors that fragment via plugin-shell's open() --
+   * a real, named, not-yet-verified assumption, not a proven feature. */
+  async function handleOpenCitation(item: DesignGuidanceItem) {
+    if (!savedPart) return
+    setOpeningCitationPage(item.page)
+    setCitationOpenError(null)
+    try {
+      const path = await cacheDatasheet(savedPart.part_id, savedPart.datasheet_url)
+      await open(`${path}#page=${item.page}`)
+    } catch (err) {
+      setCitationOpenError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setOpeningCitationPage(null)
+    }
+  }
+
   async function handleExport() {
     if (!savedSymbol) return
     setExporting(true)
@@ -491,6 +575,74 @@ export function PartDetail({ candidate }: { candidate: ComponentCandidate }) {
             )}
             {libraryTagError && <p className="text-sm text-red-400">{libraryTagError}</p>}
             {libraryTagMessage && <p className="text-sm text-emerald-400">{libraryTagMessage}</p>}
+          </div>
+
+          {/* CTX-205.3/.4, SPEC-205: real, cited (Class B) design
+              requirements grouped by category -- available as soon as a
+              Part is real, not gated on a footprint the way Connection
+              Guidance below is (decoupling/reset/layout guidance is
+              useful before any footprint exists). Only Class B (cited
+              datasheet prose) exists today; Class A (typed facts) and
+              Class C (general practice) are real, deferred backend
+              work, not shown as an empty placeholder section. */}
+          <div className="flex flex-col gap-2 border-b border-neutral-800 pb-2">
+            <div className="flex items-center gap-2">
+              <p className="flex-1 text-xs font-medium uppercase text-neutral-500">Design Requirements</p>
+              {savedPart.design_guidance && (
+                <button
+                  type="button"
+                  className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                  onClick={() => void handleGenerateDesignGuidance()}
+                  disabled={generatingDesignGuidance}
+                >
+                  {generatingDesignGuidance ? 'Regenerating…' : 'Regenerate'}
+                </button>
+              )}
+            </div>
+
+            {!savedPart.design_guidance ? (
+              <button
+                type="button"
+                className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                onClick={() => void handleGenerateDesignGuidance()}
+                disabled={generatingDesignGuidance}
+              >
+                {generatingDesignGuidance ? 'Generating…' : 'Generate Design Requirements'}
+              </button>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {Object.entries(DESIGN_GUIDANCE_CATEGORY_LABELS).map(([key, label]) => {
+                  const items = savedPart.design_guidance?.categories[key] ?? []
+                  return (
+                    <div key={key} className="flex flex-col gap-1">
+                      <p className="text-xs font-medium text-neutral-300">{label}</p>
+                      {items.length === 0 ? (
+                        <p className="text-xs text-neutral-500">No guidance found for this category.</p>
+                      ) : (
+                        <ul className="flex flex-col gap-1">
+                          {items.map((item, i) => (
+                            <li key={i} className="flex items-start gap-2 text-xs text-neutral-300">
+                              <button
+                                type="button"
+                                className="shrink-0 rounded border border-neutral-700 px-2 py-0.5 text-xs font-medium text-neutral-300 disabled:opacity-50"
+                                onClick={() => void handleOpenCitation(item)}
+                                disabled={openingCitationPage !== null}
+                                title="Open the datasheet at this page"
+                              >
+                                {openingCitationPage === item.page ? '…' : `p${item.page}`}
+                              </button>
+                              <span>{item.quote}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            {designGuidanceError && <p className="text-sm text-red-400">{designGuidanceError}</p>}
+            {citationOpenError && <p className="text-sm text-red-400">{citationOpenError}</p>}
           </div>
 
           {savedPart.footprint_id ? (

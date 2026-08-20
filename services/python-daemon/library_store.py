@@ -250,6 +250,13 @@ def save_part(part: dict, library_ids: list | None = None) -> dict:
         _validate_design_guidance(part["design_guidance"])
 
     record = {**part, "schema_version": 1, "library_ids": _resolve_library_ids(part, library_ids)}
+    # CTX-205.4: a real inconsistency caught while typing this field on the
+    # frontend -- `load_part` already backfills `design_guidance`, but
+    # `save_part`'s own returned record didn't, so `library.save_confirmed_part`'s
+    # real response (the very first save, before any `load_part` round trip)
+    # could omit the key entirely rather than carrying a real `None`. Every
+    # caller of `save_part` now gets the same real shape `load_part` does.
+    _backfill_design_guidance(record)
     _write_json(os.path.join(_parts_dir(), f"{part_id}.part.json"), record)
     return record
 
