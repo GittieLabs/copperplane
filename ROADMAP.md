@@ -316,7 +316,7 @@ plain deep link; and design/application guidance (decoupling, pull-ups, protecti
 its own new spec, [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md),
 below.
 
-#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress, Class B usable end-to-end ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md), [CTX-205.4](apps/tauri-ui/context/CTX-205.4-design-requirements-ui.md) done, Class A/C planned) 2026-08-20
+#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress, Class B usable end-to-end ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md), [CTX-205.4](apps/tauri-ui/context/CTX-205.4-design-requirements-ui.md), [CTX-205.5](services/python-daemon/context/CTX-205.5-structure-pass-heading-detection.md) done, Class A/C planned) 2026-08-20
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-105, SPEC-202, SPEC-304, SPEC-306, SPEC-307
 
@@ -380,6 +380,22 @@ fixed while typing the frontend interface: `save_part` only backfilled `design_g
 end-to-end** (generate -> persist -> view -> open citation); Class A (typed facts), Class C
 (general practice), and the fuller `SPEC-205 §5` grouping (which needs pin association and a
 Class marker the backend doesn't produce yet) remain real, open work.
+
+`CTX-205.5` (2026-08-20) fixed a real, serious bug found by live user testing of `CTX-205.4`'s
+just-shipped UI against a real 234-page ATtiny85 datasheet, never exercised by `CTX-205.1`'s own
+small synthetic fixture: the structure pass's whole-page keyword search matched `reset` on 84/234
+real pages and `clock`/`oscillator` on 141/234 -- both words appear constantly in ordinary
+register/peripheral prose, not just the real dedicated sections -- and handing that many pages to
+one LLM call produced a response long enough to hit `max_tokens` mid-string, surfacing as
+`Extraction did not return valid JSON: Unterminated string...` in the real running app. Fixed by
+replacing whole-page keyword matching with heading-based detection: a real numbered section-heading
+line bounds each category's candidate pages (capped at 4), falling back to the original keyword
+search only when no heading matches anywhere. Verified against the real ATtiny85 PDF: `reset`
+dropped from 84 to 9 candidate pages, `clock_oscillator` from 141 to 18, full pipeline completed
+end-to-end with zero JSON errors. A second, unrelated real bug found in the same live-testing
+session is recorded in this context's own Plan Drift, not repeated here: the dev-mode daemon's
+Python interpreter (separate from this repo's own `.venv`) was missing `pdfplumber` -- a real,
+local-environment gap, not a code change.
 
 #### [SPEC-204](services/python-daemon/specs/SPEC-204-agent-tool-registry.md) — Agent Tool Registry — ✅ Completed ([CTX-204.1](services/python-daemon/context/CTX-204.1-agent-tool-registry.md)) 2026-08-14
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-102
