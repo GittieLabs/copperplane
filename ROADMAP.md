@@ -585,6 +585,22 @@ no reachability check; and a real "Extraction did not return valid JSON" failure
 from ever reaching Part Detail at all, which looked like a missing UI from the outside but was an
 upstream extraction bug.
 
+#### [SPEC-316](apps/tauri-ui/specs/SPEC-316-native-menu-command-surface.md) — Native Menu Command Surface — Draft
+
+*Module:* `apps/tauri-ui` + `core/tauri-rust` · *Depends on:* SPEC-312, SPEC-315
+
+Scoped 2026-08-20 after `CTX-312.3`'s minimal `File`/`Edit`/`View`/`Help` menu shipped and Keith
+live-tested a standalone `.app` build of it (surfacing, separately, that the menu bar's total
+absence in every prior build was a Rosetta/x86_64-toolchain issue on this dev machine, not a code
+bug -- fixed by installing and defaulting to the native `aarch64-apple-darwin` Rust toolchain, not
+by this spec). Grows that minimal shell into the app's real command surface: a `Library` top-level
+menu mirroring `Rail.tsx`'s existing Projects/Library/Settings peer relationship (`SPEC-315`'s
+Default-plus-custom-libraries model), one grouped `Design` menu holding `Schematic`/`PCB`/
+`Enclosure` submenus of each area's already-real actions (chosen over three separate top-level
+menus specifically so the top-level bar doesn't grow unbounded as each area's action count grows),
+and moving Settings/About/Quit into the native macOS app-name menu. Confirmed directly with Keith
+via two explicit choices rather than assumed.
+
 ### 3.4 `4xx` — Distribution & operations
 
 #### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — ✅ Completed ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md), [CTX-401.2](context/CTX-401.2-tauri-sidecar-wiring.md)) 2026-08-14
