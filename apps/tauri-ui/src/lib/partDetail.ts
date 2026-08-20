@@ -31,6 +31,30 @@ export interface SavedPart {
    * here until CTX-308.2 needed to round-trip it through a re-save
    * (attaching a footprint_id) without silently dropping it. */
   provenance: Record<string, unknown>
+  /** CTX-205.3/.4: `null` until a user has ever run "Generate Design
+   * Requirements" -- kept distinct from "generated, every category
+   * came back empty" (SPEC-205 §5's own "silence must not be readable
+   * as no requirements" principle, mirrored on the frontend the same
+   * way `library_store._backfill_design_guidance` keeps it on the
+   * backend). */
+  design_guidance: DesignGuidance | null
+}
+
+/** Mirrors library_store.save_part_design_guidance's real, persisted
+ * shape (CTX-205.3). `document_revision` is always `null` today -- no
+ * extraction step for a human-readable revision string exists yet;
+ * left honestly unset rather than a fabricated placeholder. */
+export interface DesignGuidanceItem {
+  quote: string
+  page: number
+  category: string
+}
+
+export interface DesignGuidance {
+  generated_at: string
+  content_hash: string
+  document_revision: string | null
+  categories: Record<string, DesignGuidanceItem[]>
 }
 
 export interface SavedSymbol {
@@ -82,5 +106,17 @@ export async function exportSymbol(symbolId: string): Promise<string> {
  * submitJob -- matching extractPartDetail's own precedent. */
 export async function getConnectionGuidance(partId: string): Promise<ConnectionGuidance> {
   const handle = await submitJob<ConnectionGuidance>('kicad.generate_connection_guidance', { part_id: partId })
+  return handle.result
+}
+
+/** CTX-205.3/.4: SPEC-205's real datasheet-guidance pipeline -- a real,
+ * multi-category LLM run (~20-30s+ observed for a real 8-category
+ * document), so submitJob like every other real LLM route here.
+ * Returns the whole updated Part (datasheet.generate_guidance's own
+ * real route persists onto the Part record and returns it, not just
+ * the new field), matching attachFootprintToPart/generateFootprintFromPart's
+ * own "re-save returns the fresh whole record" shape in footprints.ts. */
+export async function generateDesignGuidance(partId: string): Promise<SavedPart> {
+  const handle = await submitJob<SavedPart>('datasheet.generate_guidance', { part_id: partId })
   return handle.result
 }

@@ -8,7 +8,7 @@ vi.mock('./ipc', () => ({
   dispatch: (...args: unknown[]) => dispatchMock(...args),
 }))
 
-const { extractPartDetail, saveConfirmedPart, exportSymbol } = await import('./partDetail')
+const { extractPartDetail, saveConfirmedPart, exportSymbol, generateDesignGuidance } = await import('./partDetail')
 
 function fakeJobHandle<T>(result: Promise<T>) {
   result.catch(() => {})
@@ -70,5 +70,23 @@ describe('exportSymbol', () => {
 
     await expect(exportSymbol('SOIC-8_8pin')).resolves.toBe('/storage/library/symbols/SOIC-8_8pin.kicad_sym')
     expect(dispatchMock).toHaveBeenCalledWith('library.export_symbol', { symbol_id: 'SOIC-8_8pin' })
+  })
+})
+
+describe('generateDesignGuidance', () => {
+  it('CTX-205.4: submits datasheet.generate_guidance and returns the real, whole updated Part', async () => {
+    const updatedPart = {
+      part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8', pins: [],
+      datasheet_url: 'https://example.com/x.pdf', symbol_id: 'SOIC-8_0pin', footprint_id: null,
+      provenance: {},
+      design_guidance: {
+        generated_at: '2026-08-20T00:00:00+00:00', content_hash: 'abc123', document_revision: null,
+        categories: { decoupling: [{ quote: 'x', page: 4, category: 'decoupling' }] },
+      },
+    }
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(updatedPart)))
+
+    await expect(generateDesignGuidance('ATtiny85')).resolves.toEqual(updatedPart)
+    expect(submitJobMock).toHaveBeenCalledWith('datasheet.generate_guidance', { part_id: 'ATtiny85' })
   })
 })
