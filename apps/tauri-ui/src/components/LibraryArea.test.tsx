@@ -9,6 +9,7 @@ const listFootprintsMock = vi.fn()
 const loadPartMock = vi.fn()
 const loadSymbolMock = vi.fn()
 const loadFootprintMock = vi.fn()
+const syncLibraryMenuMock = vi.fn()
 
 vi.mock('../lib/library', () => ({
   listLibraries: (...args: unknown[]) => listLibrariesMock(...args),
@@ -19,6 +20,10 @@ vi.mock('../lib/library', () => ({
   loadPart: (...args: unknown[]) => loadPartMock(...args),
   loadSymbol: (...args: unknown[]) => loadSymbolMock(...args),
   loadFootprint: (...args: unknown[]) => loadFootprintMock(...args),
+}))
+
+vi.mock('../lib/menu', () => ({
+  syncLibraryMenu: (...args: unknown[]) => syncLibraryMenuMock(...args),
 }))
 
 const { LibraryArea } = await import('./LibraryArea')
@@ -32,6 +37,7 @@ beforeEach(() => {
   loadPartMock.mockReset()
   loadSymbolMock.mockReset()
   loadFootprintMock.mockReset()
+  syncLibraryMenuMock.mockReset().mockResolvedValue(undefined)
 })
 
 const DEFAULT_ONLY = [
@@ -147,5 +153,34 @@ describe('LibraryArea: SPEC-316 initialLibraryId deep link', () => {
 
     await waitFor(() => screen.getByRole('button', { name: '+ New library' }))
     expect(listPartsMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('LibraryArea: SPEC-316 native menu sync', () => {
+  it('CTX-316.2 TEST-011: refreshLibraries calls the real syncLibraryMenu after a successful list load', async () => {
+    listLibrariesMock.mockResolvedValueOnce(DEFAULT_ONLY)
+
+    render(<LibraryArea />)
+
+    await waitFor(() => expect(syncLibraryMenuMock).toHaveBeenCalledWith(DEFAULT_ONLY))
+  })
+
+  it('CTX-316.2: creating a library re-syncs the native menu with the fresh list', async () => {
+    listLibrariesMock.mockResolvedValueOnce(DEFAULT_ONLY)
+    createLibraryMock.mockResolvedValueOnce({ id: 'esp32-boards', name: 'ESP32 Boards' })
+    const updatedList = [
+      ...DEFAULT_ONLY,
+      { id: 'esp32-boards', name: 'ESP32 Boards', part_count: 0, symbol_count: 0, footprint_count: 0 },
+    ]
+    listLibrariesMock.mockResolvedValueOnce(updatedList)
+
+    render(<LibraryArea />)
+    await waitFor(() => screen.getByText('Default'))
+    syncLibraryMenuMock.mockClear()
+
+    fireEvent.change(screen.getByPlaceholderText('new library name'), { target: { value: 'ESP32 Boards' } })
+    fireEvent.click(screen.getByRole('button', { name: '+ New library' }))
+
+    await waitFor(() => expect(syncLibraryMenuMock).toHaveBeenCalledWith(updatedList))
   })
 })
