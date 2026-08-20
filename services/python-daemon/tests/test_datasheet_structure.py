@@ -65,20 +65,19 @@ class TestLocateCandidateSections(unittest.TestCase):
         self.assertIn(4, self.candidates["power"])
         self.assertIn(4, self.candidates["decoupling"])
 
-    def test_009_reset_is_found_on_its_real_page(self):
-        # Real cross-reference, not a false positive: page 2's Absolute
-        # Maximum Ratings table also says "Voltage on any Pin except
-        # RESET", and page 8's Typical Application text mentions "reset
-        # circuit" -- a candidate match legitimately isn't exclusive to
-        # one page, matching this function's own "candidates," not
-        # "final assignment," contract.
-        self.assertIn(5, self.candidates["reset"])
+    def test_009_reset_is_found_on_its_real_page_only(self):
+        # CTX-205.5: previously a real cross-reference on page 2/8 also
+        # matched (whole-page keyword search), asserted with assertIn.
+        # Now that detection is heading-based (real "10. Reset Circuit"
+        # heading found only on page 5), incidental mentions of the
+        # word "reset" elsewhere no longer pollute this category at
+        # all -- exactly the real fix a real 234-page datasheet needed
+        # (see CTX-205.5's own Plan Drift).
+        self.assertEqual(self.candidates["reset"], [5])
 
-    def test_010_clock_oscillator_is_found_on_its_real_page(self):
-        # Same real-cross-reference reasoning as test_009: page 1's
-        # feature list says "Oscillator", page 7's Layout section
-        # mentions "crystal"/"oscillator" pins too.
-        self.assertIn(6, self.candidates["clock_oscillator"])
+    def test_010_clock_oscillator_is_found_on_its_real_page_only(self):
+        # CTX-205.5: same real fix as test_009.
+        self.assertEqual(self.candidates["clock_oscillator"], [6])
 
     def test_011_layout_is_found_on_its_real_page(self):
         self.assertEqual(self.candidates["layout"], [7])
@@ -92,6 +91,96 @@ class TestLocateCandidateSections(unittest.TestCase):
 
         self.assertEqual(candidates["reset"], [])
         self.assertIn("reset", candidates)
+
+
+class TestFindHeadings(unittest.TestCase):
+    """CTX-205.5: a real, serious bug found by testing against a real
+    234-page ATtiny85 datasheet, not this module's own small synthetic
+    fixture -- the original whole-page keyword search matched "reset"
+    on 84 of 234 real pages and "clock"/"oscillator" on 141, since both
+    words appear constantly in real register/peripheral descriptions,
+    not just the real Reset/Clock sections. Heading-based detection
+    fixes this; these tests cover the real, genuine false positive
+    that surfaced while building the fix itself (a wrapped line
+    starting with a number, indistinguishable from a real heading
+    number by position alone)."""
+
+    def test_014_a_real_numbered_heading_is_found(self):
+        pages = [{"page": 1, "text": "8.2 Reset Sources\nThe RESET pin has an internal pull-up."}]
+
+        headings = ds._find_headings(pages)
+
+        self.assertEqual(headings, [{"page": 1, "title": "Reset Sources"}])
+
+    def test_015_a_table_of_contents_dotted_leader_line_is_not_a_real_heading(self):
+        pages = [{
+            "page": 1,
+            "text": "4.8 Reset and Interrupt Handling ...........................................................................12",
+        }]
+
+        self.assertEqual(ds._find_headings(pages), [])
+
+    def test_016_a_wrapped_line_that_happens_to_start_with_a_number_is_not_a_real_heading(self):
+        # The real false positive found while building this fix: real
+        # prose wrapped across a line boundary can itself start with a
+        # number ("...an external\n10 kOhm pull-up resistor to VCC
+        # should be added...") -- indistinguishable from a real heading
+        # number by position alone. Real headings in both this
+        # datasheet and this module's own fixture are a handful of
+        # words; this fake one runs to 13.
+        pages = [{
+            "page": 1,
+            "text": "10 kOhm pull-up resistor to VCC should be added to the RESET pin to prevent spurious resets.",
+        }]
+
+        self.assertEqual(ds._find_headings(pages), [])
+
+    def test_017_a_real_short_heading_at_the_word_cap_boundary_still_counts(self):
+        # Exactly _MAX_HEADING_WORDS (8) real words -- must still count
+        # as a real heading, not be rejected by an off-by-one in the cap.
+        pages = [{"page": 1, "text": "1 One Two Three Four Five Six Seven"}]
+
+        headings = ds._find_headings(pages)
+
+        self.assertEqual(len(headings), 1)
+
+
+class TestLocateCandidateSectionsHeadingBased(unittest.TestCase):
+    """CTX-205.5: the real section-boundary logic (a category's section
+    extends from its own real heading up to, but not including, the
+    next real heading anywhere in the document, capped at
+    `_MAX_SECTION_PAGES`), isolated from the real fixture PDF above so
+    boundary behavior is exercised directly and precisely."""
+
+    def test_018_a_section_extends_to_but_not_past_the_next_real_heading(self):
+        pages = [
+            {"page": 1, "text": "8 Reset\nSome real reset guidance here."},
+            {"page": 2, "text": "More real reset guidance, still no new heading."},
+            {"page": 3, "text": "9 Clock\nSome real clock guidance here."},
+        ]
+
+        candidates = ds.locate_candidate_sections(pages)
+
+        self.assertEqual(candidates["reset"], [1, 2])
+        self.assertEqual(candidates["clock_oscillator"], [3])
+
+    def test_019_a_real_section_with_no_further_heading_runs_to_the_cap_not_the_document_end(self):
+        pages = [{"page": n, "text": "irrelevant body text, no new heading here"} for n in range(1, 11)]
+        pages[0] = {"page": 1, "text": "8 Reset\nSome real reset guidance here."}
+
+        candidates = ds.locate_candidate_sections(pages)
+
+        self.assertEqual(candidates["reset"], [1, 2, 3, 4])  # capped at _MAX_SECTION_PAGES, not all 10 pages
+
+    def test_020_a_category_with_no_real_heading_anywhere_falls_back_to_the_real_keyword_search(self):
+        pages = [
+            {"page": 1, "text": "No numbered heading on this page, but it does mention reset in passing."},
+            {"page": 2, "text": "Also just mentions reset here, still no real heading anywhere."},
+        ]
+
+        candidates = ds.locate_candidate_sections(pages)
+
+        self.assertEqual(candidates["reset"], [1, 2])
 
 
 if __name__ == "__main__":
