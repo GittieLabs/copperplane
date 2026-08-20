@@ -316,7 +316,7 @@ plain deep link; and design/application guidance (decoupling, pull-ups, protecti
 its own new spec, [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md),
 below.
 
-#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md) done, more planned) 2026-08-20
+#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md) done, more planned) 2026-08-20
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-105, SPEC-202, SPEC-304, SPEC-306, SPEC-307
 
@@ -347,6 +347,16 @@ pipeline, proven against a real, committed 8-page synthetic datasheet fixture. D
 narrow (no LLM call, no AgentFlow workflow, no daemon route, no storage, no UI yet), mirroring how
 `SPEC-308`/`SPEC-311` shipped across many small contexts rather than one big-bang implementation --
 every extraction class and the UI panel remain real, open work for `CTX-205.2`+.
+
+`CTX-205.2` (2026-08-20) shipped the first real extraction class -- Class B (cited datasheet
+prose) -- via a real AgentFlow `extract -> validate` DAG mirroring `component_pipeline.py`'s own
+`component_intelligence` shape. A real AgentFlow constraint found by reading the vendored source
+directly: a handler node can't see the workflow's own `initial_message` past the entry node, so
+citation validation (which needs the real page texts) is wired via a closure-bound handler built
+per call, not AgentFlow's own node-output references -- the DAG itself stays 100% real AgentFlow.
+Citation contract implemented literally: an item whose page or quote doesn't check out is dropped,
+not repaired. Verified end-to-end with real Anthropic calls against `CTX-205.1`'s own fixture PDF.
+Class A, Class C, the daemon route, Part-record storage, and the UI panel remain real, open work.
 
 #### [SPEC-204](services/python-daemon/specs/SPEC-204-agent-tool-registry.md) — Agent Tool Registry — ✅ Completed ([CTX-204.1](services/python-daemon/context/CTX-204.1-agent-tool-registry.md)) 2026-08-14
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-102
