@@ -564,7 +564,7 @@ UI -- including a real, two-step browse-then-import flow for `.kicad_sym` files,
 to be genuine multi-symbol libraries (73 real symbols in one file, verified directly), not one
 symbol per file the way this app's own hand-built symbol files are.
 
-#### [SPEC-315](apps/tauri-ui/specs/SPEC-315-library-browsing-and-organization.md) — Library Browsing & Organization — Draft
+#### [SPEC-315](apps/tauri-ui/specs/SPEC-315-library-browsing-and-organization.md) — Library Browsing & Organization — ✅ done ([CTX-315.1](apps/tauri-ui/context/CTX-315.1-library-storage-schema.md), [CTX-315.2](apps/tauri-ui/context/CTX-315.2-library-area-ui.md)) 2026-08-19
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-304, SPEC-305, SPEC-314
 
