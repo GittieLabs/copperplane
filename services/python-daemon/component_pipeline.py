@@ -313,17 +313,32 @@ def generate_connection_guidance(
     standalone agent call, like search_components -- no deterministic
     validate DAG step, since the one real safety check here (every
     referenced pin_number is real) is cheap enough to run inline rather
-    than warranting a separate handler node."""
+    than warranting a separate handler node.
+
+    CTX-206.1: the returned dict carries a `provenance` key
+    (`{"provider": str, "model": str}`) alongside the validated
+    response, read from `executor.config` -- the real, resolved
+    provider/model after `_build_agent_executor`'s own override logic
+    (Settings vs. the prompt file's own default), not just whatever the
+    caller happened to pass in, which may be `None`. `AgentExecutor.config`
+    is a real public property, confirmed by reading the installed
+    `agentflow/agent/runtime.py` before relying on it. daemon.py's route
+    persists this alongside the rest via `library_store
+    .save_part_connection_guidance`, closing SPEC-206 §2.4's prerequisite
+    gap; this key was not part of this function's return shape before."""
     secrets = secrets or {}
 
     loader = ConfigLoader(_AGENTFLOW_DIR)
     loader.load()
     executor, provider_client = _build_agent_executor("connection_guidance", loader, secrets, provider, model)
+    resolved_provenance = {"provider": executor.config.provider, "model": executor.config.model}
 
     message = json.dumps({"part_number": part_number, "package": package, "pins": pins})
     text = asyncio.run(_run_agent_and_close(executor, message, provider_client))
     response = _extract_json(text)
-    return _validate_connection_guidance(response, pins)
+    validated = _validate_connection_guidance(response, pins)
+    validated["provenance"] = resolved_provenance
+    return validated
 
 
 # How many violations go into a single explain-and-suggest LLM call.

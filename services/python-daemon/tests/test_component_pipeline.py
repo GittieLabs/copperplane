@@ -398,6 +398,46 @@ class TestValidateConnectionGuidance(unittest.TestCase):
         self.assertEqual(cp._validate_connection_guidance(response, _ATTINY85_PINS)["pin_guidance"], [])
 
 
+class TestGenerateConnectionGuidance(unittest.TestCase):
+    """CTX-206.1: mocked coverage of the provenance attachment -- the
+    real end-to-end path is TestRealGenerateConnectionGuidance below,
+    which skips itself with no credential, so this is what actually runs
+    in CI."""
+
+    @patch('component_pipeline._build_agent_executor')
+    @patch('component_pipeline._run_agent_and_close')
+    def test_001_attaches_the_real_resolved_provider_and_model_as_provenance(self, mock_run, mock_build):
+        mock_executor = MagicMock()
+        mock_executor.config.provider = "anthropic"
+        mock_executor.config.model = "claude-sonnet-5"
+        mock_build.return_value = (mock_executor, MagicMock())
+        mock_run.return_value = json.dumps({"pin_guidance": [], "general_notes": "n"})
+
+        result = cp.generate_connection_guidance("ATtiny85", "SOIC-8", _ATTINY85_PINS)
+
+        self.assertEqual(result["provenance"], {"provider": "anthropic", "model": "claude-sonnet-5"})
+
+    @patch('component_pipeline._build_agent_executor')
+    @patch('component_pipeline._run_agent_and_close')
+    def test_002_provenance_reflects_the_resolved_config_not_the_callers_raw_arguments(self, mock_run, mock_build):
+        """`provider`/`model` args of `None` (a fresh install with
+        nothing set in Settings yet) must not leak `None` into the
+        stored provenance -- `executor.config` already carries whatever
+        `_build_agent_executor` actually resolved (the prompt file's own
+        default), which is what gets recorded."""
+        mock_executor = MagicMock()
+        mock_executor.config.provider = "anthropic"
+        mock_executor.config.model = "claude-haiku-4-5"
+        mock_build.return_value = (mock_executor, MagicMock())
+        mock_run.return_value = json.dumps({"pin_guidance": [], "general_notes": "n"})
+
+        result = cp.generate_connection_guidance(
+            "ATtiny85", "SOIC-8", _ATTINY85_PINS, provider=None, model=None,
+        )
+
+        self.assertEqual(result["provenance"], {"provider": "anthropic", "model": "claude-haiku-4-5"})
+
+
 class TestRealGenerateConnectionGuidance(unittest.TestCase):
     """Real, non-mocked calls against the actual prompt file -- CLAUDE.md's
     'verify for real' norm. Skips itself cleanly when no real credential
@@ -414,6 +454,8 @@ class TestRealGenerateConnectionGuidance(unittest.TestCase):
 
         self.assertIn("pin_guidance", result)
         self.assertIn("general_notes", result)
+        self.assertEqual(result["provenance"]["provider"], "anthropic")
+        self.assertTrue(result["provenance"]["model"])
         real_pin_numbers = {p["number"] for p in _ATTINY85_PINS}
         for entry in result["pin_guidance"]:
             self.assertIn(entry["pin_number"], real_pin_numbers)

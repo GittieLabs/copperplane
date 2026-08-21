@@ -23,6 +23,7 @@ child_specs:
   - "SPEC-315-library-browsing-and-organization.md"
   - "SPEC-316-native-menu-command-surface.md"
   - "SPEC-317-theme-system.md"
+  - "SPEC-318-in-context-agent-chat-and-review.md"
 user_facing: true
 ---
 
@@ -102,14 +103,23 @@ user_facing: true
         improved (`PRODUCT-PLAN.md` §3.2, §7).
     *   **A fixed boundary on what the AI is allowed to do**, so every child spec inherits the same
         answer instead of re-deciding it per surface: the AI searches/ranks/extracts/explains/asks
-        for clarification/converses (in Overview only); the AI never decides which screen the user
-        is on, never silently corrects input, never writes to a board without explicit confirmation,
-        and never returns prose where a typed result is expected outside Overview. Two disciplines
-        follow directly: every AI step inside a deterministic flow returns a typed result, not
-        prose; and ambiguity surfaces as a structured choice (a *did you mean* card with a
-        datasheet link and a confidence note that the user confirms) rather than a silent
+        for clarification/converses on any conversation surface; the AI never decides which screen
+        the user is on, never silently corrects input, never writes to a board without explicit
+        confirmation, and never returns prose where a typed result is expected outside a conversation
+        surface — and a conversation surface itself can only ever produce an answer, never advance a
+        stage, mutate a record, dispatch a flow step, or change which screen the user is on. Two
+        disciplines follow directly: every AI step inside a deterministic flow returns a typed
+        result, not prose; and ambiguity surfaces as a structured choice (a *did you mean* card with
+        a datasheet link and a confidence note that the user confirms) rather than a silent
         substitution — the exact failure mode from `PRODUCT-PLAN.md` §1 ("generate atiny85" silently
         producing a correct ATtiny85 by luck, with nothing surfacing that a correction occurred).
+
+        > **Amendment (2026-08-21):** this originally read "converses (in Overview only)" and "never
+        > returns prose where a typed result is expected outside Overview." `SPEC-318` gives every
+        > area its own scoped conversation surface and argues, at its §2.1, that the load-bearing
+        > half of the old rule was never *where* prose lived but *what a conversation surface is
+        > permitted to do* — the text above states that replacement invariant directly.
+        > `PRODUCT-PLAN.md` §3.3 carries the same amendment.
     *   **Settings gets a fixed home in the rail, resolved 2026-08-11.** `SPEC-303` named this as an
         open question rather than deciding it unilaterally: the rail already has exactly one other
         thing that isn't project-scoped (the Library), so Settings anchors beside it — a persistent

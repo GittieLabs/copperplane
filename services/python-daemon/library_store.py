@@ -255,6 +255,69 @@ def _backfill_design_guidance(record: dict) -> dict:
     return record
 
 
+_CONNECTION_GUIDANCE_REQUIRED_FIELDS = (
+    "generated_at", "pins_hash", "pin_guidance", "general_notes", "provenance",
+)
+
+
+def _validate_connection_guidance_record(value: dict) -> None:
+    """CTX-206.1 (SPEC-206 §2.4): a real, minimal shape check on the
+    *stored* record, mirroring `_validate_design_guidance`'s own role --
+    defense in depth against a malformed record reaching disk, not a
+    duplicate of `component_pipeline._validate_connection_guidance`'s
+    already-real pin-number check, which runs once at generation time
+    and stays there (SPEC-206 §2.4: 'that difference is correct and must
+    not be harmonised'). Named `..._record`, not `_validate_connection_guidance`,
+    specifically so it never collides in a grep with that other, already
+    real, differently-scoped function of nearly the same name."""
+    if not isinstance(value, dict):
+        raise SchemaValidationError("Part.connection_guidance must be a dict.")
+    missing = [f for f in _CONNECTION_GUIDANCE_REQUIRED_FIELDS if f not in value]
+    if missing:
+        raise SchemaValidationError(
+            f"Part.connection_guidance is missing required field(s): {', '.join(missing)}."
+        )
+    if not isinstance(value["pin_guidance"], list):
+        raise SchemaValidationError("Part.connection_guidance.pin_guidance must be a list.")
+    for entry in value["pin_guidance"]:
+        entry_missing = [f for f in ("pin_number", "guidance") if f not in entry]
+        if entry_missing:
+            raise SchemaValidationError(
+                f"Part.connection_guidance.pin_guidance entry is missing required field(s): "
+                f"{', '.join(entry_missing)}."
+            )
+    if not isinstance(value["general_notes"], str):
+        raise SchemaValidationError("Part.connection_guidance.general_notes must be a string.")
+    provenance = value["provenance"]
+    if not isinstance(provenance, dict) or "provider" not in provenance or "model" not in provenance:
+        raise SchemaValidationError(
+            "Part.connection_guidance.provenance must be a dict with 'provider' and 'model'."
+        )
+
+
+def _backfill_connection_guidance(record: dict) -> dict:
+    """A record saved before CTX-206.1 shipped -- or a real Part whose
+    connection guidance has genuinely never been generated -- has no
+    `connection_guidance` key at all. Backfilled as `None`, the same
+    `setdefault`-only, no-`schema_version`-bump convention
+    `_backfill_design_guidance` already established for this exact
+    situation (this repo's own read-time-backfill norm, `SPEC-206` §1
+    Non-Goals)."""
+    record.setdefault("connection_guidance", None)
+    return record
+
+
+def compute_pins_hash(pins: list) -> str:
+    """SPEC-206 §2.4: sha256 over the canonical (sorted-key) JSON of a
+    Part's real `pins` list -- the same invalidation role `content_hash`
+    already plays for `design_guidance` (CTX-205.3), applied here so a
+    stored `connection_guidance` can be marked stale if the Part's pins
+    are later re-extracted. `sort_keys=True` matches this file's own
+    existing canonical-JSON convention (`_write_json`,
+    `append_conversation_turn`), not a new one."""
+    return hashlib.sha256(json.dumps(pins, sort_keys=True).encode("utf-8")).hexdigest()
+
+
 def save_part(part: dict, library_ids: list | None = None) -> dict:
     """Writes a Part record to library/parts/<part_id>.part.json.
     `footprint_id` may be `None` -- a Part with pins and a datasheet is
@@ -270,6 +333,8 @@ def save_part(part: dict, library_ids: list | None = None) -> dict:
     _validate_part_provenance(part)
     if part.get("design_guidance") is not None:
         _validate_design_guidance(part["design_guidance"])
+    if part.get("connection_guidance") is not None:
+        _validate_connection_guidance_record(part["connection_guidance"])
 
     record = {**part, "schema_version": 1, "library_ids": _resolve_library_ids(part, library_ids)}
     # CTX-205.4: a real inconsistency caught while typing this field on the
@@ -279,14 +344,15 @@ def save_part(part: dict, library_ids: list | None = None) -> dict:
     # could omit the key entirely rather than carrying a real `None`. Every
     # caller of `save_part` now gets the same real shape `load_part` does.
     _backfill_design_guidance(record)
+    _backfill_connection_guidance(record)
     _write_json(os.path.join(_parts_dir(), f"{part_id}.part.json"), record)
     return record
 
 
 def load_part(part_id: str) -> dict:
-    return _backfill_design_guidance(
+    return _backfill_connection_guidance(_backfill_design_guidance(
         _backfill_library_ids(_read_json(os.path.join(_parts_dir(), f"{part_id}.part.json")))
-    )
+    ))
 
 
 def save_part_design_guidance(
@@ -317,6 +383,41 @@ def save_part_design_guidance(
         "document_revision": None,
         "categories": categories,
         "category_summaries": category_summaries or {},
+    }
+    return save_part(part)
+
+
+def save_part_connection_guidance(
+    part_id: str, pin_guidance: list, general_notes: str, provenance: dict,
+) -> dict:
+    """CTX-206.1 (SPEC-206 §2.4): persists a real, already-validated
+    `component_pipeline.generate_connection_guidance(...)` result onto
+    `part_id`'s own real, current record -- the prerequisite this
+    context exists to close: `kicad.generate_connection_guidance`
+    previously returned its result and the daemon discarded it,
+    `PartDetail.tsx` held it in `useState` and lost it on unmount, and
+    nothing in `SPEC-318` can be verified end-to-end until this is a
+    record. Mirrors `save_part_design_guidance`'s exact shape -- loads
+    the part fresh first, never blind-overwrites a stale caller-held
+    copy, so a concurrent edit to any other field survives.
+
+    `pins_hash` is computed here, from this freshly-loaded part's own
+    real `pins`, not accepted as a caller-supplied argument -- the one
+    real difference from `content_hash`, which the caller *does* supply
+    (it's a hash of external PDF bytes this function has no access to).
+    A pin_number in `pin_guidance` referencing a pin outside this exact
+    `pins` list is already impossible to reach here: `component_pipeline
+    ._validate_connection_guidance` is fail-closed against the same
+    `pins` list at generation time (SPEC-206 §2.4 -- 'that difference is
+    correct and must not be harmonised'), so this function trusts that
+    check already ran rather than repeating it."""
+    part = load_part(part_id)
+    part["connection_guidance"] = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "pins_hash": compute_pins_hash(part["pins"]),
+        "pin_guidance": pin_guidance,
+        "general_notes": general_notes,
+        "provenance": provenance,
     }
     return save_part(part)
 

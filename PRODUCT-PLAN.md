@@ -51,7 +51,15 @@ Persisted as files, per the storage decision in §4.
 | **Symbol** | The schematic representation of a part. Mirrors a KiCad symbol (`.kicad_sym`). | Global |
 | **Footprint** | The PCB land pattern. Mirrors a KiCad footprint (`.kicad_mod`). **Many parts share one footprint.** | Global |
 | **Artifact** | A generated file bound to a project and a stage: `.glb`, `.stl`, `.step`, an advisor report. | Per project |
-| **Conversation** | Per-project chat history. | Per project |
+| **Conversation** | Per-project chat history. | Follows the scope of its subject |
+
+> **Amendment (2026-08-21):** Conversation's lifetime column widened from "Per project" to "follows
+> the scope of its subject." `SPEC-318` scopes chat to five areas, one of which — Components — is
+> keyed to a Part, not a project: a Part is a global object (below), and a Footprint is shared across
+> many Parts, so a conversation about an ATtiny85's brown-out behaviour is a fact about the ATtiny85
+> and follows it into every project, the same way `SPEC-315` already refused to make library
+> membership project-scoped. Project-scoped chats (Overview, Schematic, PCB, Enclosure) are unchanged.
+> See `SPEC-318` §2.1 and `SPEC-206` §2.2 for the storage split.
 
 **Symbols and footprints are separate libraries, exactly as KiCad models them, and we follow that
 split rather than inventing a mapping.** This is not a storage detail — it's the correct cardinality.
@@ -145,9 +153,21 @@ is deleted, not improved.
 | Converse, in Overview | Apply a change the user didn't see first |
 
 Two disciplines follow. **Every AI step inside a deterministic flow returns a typed result**, not
-prose — prose is confined to Overview. And **ambiguity surfaces as a structured choice**: "atiny85"
-produces a *did you mean* card listing ATtiny85 with its datasheet link and a confidence note, which
-the user confirms. It does not produce a silent substitution.
+prose — prose is confined to conversation surfaces, and a conversation surface can only ever produce
+an answer: it cannot advance a stage, mutate a record, dispatch a flow step, or change which screen
+the user is on. Every action it proposes becomes a separate, explicitly confirmed step. And
+**ambiguity surfaces as a structured choice**: "atiny85" produces a *did you mean* card listing
+ATtiny85 with its datasheet link and a confidence note, which the user confirms. It does not produce
+a silent substitution.
+
+> **Amendment (2026-08-21):** the location half of the first discipline — "prose is confined to
+> Overview" — is replaced by the invariant above. What made the original text box dangerous was
+> never that it emitted prose; it was that prose was *consumed*, with a parser choosing between
+> unrelated functions. Confining prose to one screen was the cheapest way to contain that while the
+> product had no other structure. `SPEC-318` gives every area its own scoped chat and argues the
+> replacement invariant in full at §2.1 — narrower than the old location rule, and it holds
+> regardless of which screen a conversation surface happens to live on. The typed-result half is
+> unchanged.
 
 ---
 
@@ -293,6 +313,14 @@ itself -- the implementing context must pick a model and say why.
 | Daemon routes, 1xx/2xx backend | Keep. Right capability layer, wrong surface. |
 
 Nothing in the daemon gets rewritten. This is a re-housing, not a rebuild.
+
+> **Amendment (2026-08-21):** `lib/commands.ts` (`parseCommand`) is still not deleted. `CTX-305.1`
+> moved the chat half into Overview and recorded the deletion itself as inherited, unresolved debt;
+> `App.tsx` still imports `parseCommand` and still string-matches into `generate`/`inject`/plain
+> chat. `SPEC-318` §2.6 is what finally does it, and names what has to be rehomed first —
+> `kicad.generate_component` into the Components area, `SPEC-108`'s inject flow into a real,
+> confirmed action — since deleting the parser without rehoming them would silently remove a shipped
+> capability, not just clean up debt.
 
 ---
 
