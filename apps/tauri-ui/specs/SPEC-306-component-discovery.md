@@ -28,11 +28,13 @@ user_facing: true
     `PRODUCT-PLAN.md` §6 M2 names this spec directly as "the flow whose absence produced the
     reported bug."
 *   **Non-Goals:**
-    *   **Not real supplier-database search.** `SPEC-203` (Supplier API Integration) is still
-        unspecced. Candidate ranking here is the LLM's own knowledge of part numbers and packages,
-        the same kind of inference `SPEC-202`'s extraction agent already does — not a live query
-        against Octopart/DigiKey/etc. The confidence signal this spec requires is exactly what makes
-        that honest rather than a query result dressed up as one.
+    *   **Not real supplier-database search.** `SPEC-203` (Supplier API Integration) was explored
+        and retired 2026-08-18 — see its tombstone; distributor APIs don't return pin/identity data
+        at all, so this was never going to be a source of ground truth here. Candidate ranking here
+        is the LLM's own knowledge of part numbers and packages, the same kind of inference
+        `SPEC-202`'s extraction agent already does — not a live query against Octopart/DigiKey/etc.
+        The confidence signal this spec requires is exactly what makes that honest rather than a
+        query result dressed up as one.
     *   **Not Part Detail, pin display, or library persistence.** `SPEC-307` (Part Detail & Library
         Export) owns the pin table, per-pin guidance, and the actual `library.save_part` call. This
         spec stops at a *confirmed candidate* — a part number, manufacturer, package, and datasheet
@@ -110,9 +112,10 @@ user_facing: true
 
 *   **Known Issues / Technical Debt:**
     *   **No real ground truth for part identity.** Ranking is LLM inference over its own training
-        knowledge, not a live distributor lookup. `SPEC-203` is the eventual, still-unspecced
-        replacement or supplement; this spec's confidence field is what keeps that honest in the
-        meantime rather than presenting a guess as a lookup result.
+        knowledge, not a live distributor lookup. `SPEC-203` (Supplier API Integration) was explored
+        and retired 2026-08-18 — no vendor returns pin/identity data anyway, so there was never a
+        real replacement waiting there. This spec's confidence field is what keeps the LLM's own
+        guess honest, permanently, not as a stopgap for a future integration.
 *   **Gotchas & Hazards:**
     *   **A failed datasheet fetch must fail closed with a clean, specific error, not a silent skip.**
         Matching the existing bridge-module convention (`kicad_bridge`/`freecad_bridge`): a

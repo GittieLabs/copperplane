@@ -907,8 +907,9 @@ signing and updates, SPEC-903/403 verification on Windows and Linux. This is the
 the `.app` works on a machine that has never seen the repo.
 
 ### M3 — `v0.3.0` "It's an agent"
-SPEC-204 tool-calling, SPEC-203 supplier data, SPEC-109 enclosures derived from real board
-geometry, SPEC-304 workspace model. The point where "Hardware Agent Studio" earns the middle word.
+SPEC-204 tool-calling, SPEC-109 enclosures derived from real board geometry, SPEC-304 workspace
+model. The point where "Hardware Agent Studio" earns the middle word. (SPEC-203 supplier data,
+originally listed here, was explored and retired 2026-08-18 — see its tombstone.)
 
 </details>
 

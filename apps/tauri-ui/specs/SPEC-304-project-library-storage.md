@@ -34,9 +34,11 @@ user_facing: false
     *   **Not board-outline/mounting-hole extraction.** `SPEC-109` reads geometry out of a KiCad
         board; this spec only defines where the resulting `Artifact` gets stored, not how it's
         produced.
-    *   **Not supplier API caching.** `SPEC-203` (not written) is a distinct, out-of-scope cache for
-        supplier-sourced data; this spec's `datasheets/` cache is for a Part's own datasheet PDF
-        only, not a general HTTP response cache.
+    *   **Not supplier API caching.** `SPEC-203` (Supplier API Integration) was explored and retired
+        2026-08-18 — see its tombstone; §4's own standing rules forbid persisting any distributor
+        API response at all, so there is no "supplier-sourced data cache" to be out-of-scope of in
+        the first place. This spec's `datasheets/` cache is for a Part's own datasheet PDF only, not
+        a general HTTP response cache.
     *   **Not resolving where the project root lives on disk.** `PRODUCT-PLAN.md` §8's open question
         (user-chosen on first run vs. a fixed default under the app data dir) is named in §3 as an
         open question this spec inherits, not one it decides unilaterally — it affects `SPEC-106`

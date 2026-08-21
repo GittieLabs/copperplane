@@ -32,9 +32,10 @@ user_facing: false
         from M1, and M1's own critical-path diagram goes straight from `SPEC-201` to this spec with
         no `SPEC-203` node at all — a real contradiction in the roadmap, not a nuance. Resolved here:
         this spec's M1-scoped pipeline is **LLM-only extraction**, permanently, not a "degraded mode"
-        of a supplier-augmented pipeline that doesn't exist yet. `SPEC-203`, once written, becomes an
-        optional future enhancement this pipeline could consume — never a hard prerequisite for what
-        this spec builds now.
+        of a supplier-augmented pipeline. `SPEC-203` was subsequently explored and retired
+        2026-08-18 (see its tombstone) — its own §2.1 finding confirms distributor APIs don't return
+        pin assignments from any vendor, so there was never a real enhancement this pipeline could
+        have consumed there. LLM-only extraction is the permanent design, not a placeholder for one.
     *   **Not KiCad injection.** `SPEC-108` is what actually writes the validated schema into a live
         board/schematic. This spec's own contract ends at "a validated structured component," the
         same boundary `ROADMAP.md` already draws.
