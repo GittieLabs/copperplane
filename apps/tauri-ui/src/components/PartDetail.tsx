@@ -19,6 +19,7 @@ import {
   extractPartDetail,
   generateDesignGuidance,
   getConnectionGuidance,
+  loadPart,
   saveConfirmedPart,
   type ConnectionGuidance,
   type DesignGuidanceItem,
@@ -221,17 +222,41 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
     }
 
     setStatus('extracting')
-    extractPartDetail(candidate.part_number)
-      .then((schema) => {
+    const confirmedCandidate = candidate
+
+    // CTX-306.3: a candidate confirmed from search may already be a real,
+    // saved Part (SPEC-306's own confidence-based matching doesn't know
+    // about the library) -- try the cheap, real hydration path first
+    // rather than always re-running SPEC-202's LLM extraction on
+    // something already confirmed and saved once before. A miss here
+    // (genuinely new part) is the expected, common case and falls
+    // straight through to extraction, unchanged.
+    async function loadOrExtract() {
+      try {
+        const saved = await loadPart(confirmedCandidate.part_number)
+        if (cancelled) return
+        setExtraction(initialPartToExtraction(saved))
+        setSavedPart(saved)
+        setSavedSymbol(initialPartToSymbol(saved))
+        setStatus('ready')
+        return
+      } catch {
+        // Not saved yet -- fall through to real extraction below.
+      }
+
+      try {
+        const schema = await extractPartDetail(confirmedCandidate.part_number)
         if (cancelled) return
         setExtraction(schema)
         setStatus('ready')
-      })
-      .catch((err) => {
+      } catch (err) {
         if (cancelled) return
         setError(err instanceof Error ? err.message : String(err))
         setStatus('error')
-      })
+      }
+    }
+
+    void loadOrExtract()
 
     return () => {
       cancelled = true

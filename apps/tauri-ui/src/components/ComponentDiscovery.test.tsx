@@ -5,10 +5,15 @@ const searchComponentsMock = vi.fn()
 const cacheDatasheetMock = vi.fn()
 const writeTextMock = vi.fn()
 const openMock = vi.fn()
+const listPartsMock = vi.fn()
 
 vi.mock('../lib/components', () => ({
   searchComponents: (...args: unknown[]) => searchComponentsMock(...args),
   cacheDatasheet: (...args: unknown[]) => cacheDatasheetMock(...args),
+}))
+
+vi.mock('../lib/library', () => ({
+  listParts: (...args: unknown[]) => listPartsMock(...args),
 }))
 
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
@@ -40,6 +45,7 @@ beforeEach(() => {
   cacheDatasheetMock.mockReset()
   writeTextMock.mockReset()
   openMock.mockReset()
+  listPartsMock.mockReset().mockResolvedValue([])
 })
 
 describe('ComponentDiscovery', () => {
@@ -240,5 +246,53 @@ describe('ComponentDiscovery', () => {
 
     expect(screen.queryByText(/Confirmed: ATtiny85/)).toBeNull()
     screen.getByPlaceholderText(/search for a part/)
+  })
+
+  it('CTX-306.3: a candidate already saved to the library gets an "Already in your library" badge', async () => {
+    searchComponentsMock.mockResolvedValueOnce([
+      {
+        part_number: 'ATtiny85', manufacturer: 'Microchip', package: 'DIP-8',
+        datasheet_url: 'https://example.com/attiny85.pdf', confidence: 'high', rationale: 'Exact match.',
+      },
+    ])
+    listPartsMock.mockResolvedValueOnce(['ATtiny85'])
+
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('atiny85')
+
+    await waitFor(() => screen.getByText('Already in your library'))
+    expect(listPartsMock).toHaveBeenCalled()
+  })
+
+  it('CTX-306.3: a genuinely new candidate gets no badge', async () => {
+    searchComponentsMock.mockResolvedValueOnce([
+      {
+        part_number: 'ATtiny85', manufacturer: 'Microchip', package: 'DIP-8',
+        datasheet_url: 'https://example.com/attiny85.pdf', confidence: 'high', rationale: 'Exact match.',
+      },
+    ])
+    listPartsMock.mockResolvedValueOnce(['SomeOtherPart'])
+
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('atiny85')
+
+    await waitFor(() => screen.getByRole('button', { name: 'This one' }))
+    expect(screen.queryByText('Already in your library')).toBeNull()
+  })
+
+  it('CTX-306.3: a listParts failure is silent -- no badge, but results still render', async () => {
+    searchComponentsMock.mockResolvedValueOnce([
+      {
+        part_number: 'ATtiny85', manufacturer: 'Microchip', package: 'DIP-8',
+        datasheet_url: 'https://example.com/attiny85.pdf', confidence: 'high', rationale: 'Exact match.',
+      },
+    ])
+    listPartsMock.mockRejectedValueOnce(new Error('boom'))
+
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('atiny85')
+
+    await waitFor(() => screen.getByRole('button', { name: 'This one' }))
+    expect(screen.queryByText('Already in your library')).toBeNull()
   })
 })

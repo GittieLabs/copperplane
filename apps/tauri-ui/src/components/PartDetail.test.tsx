@@ -17,6 +17,7 @@ const listLibrariesMock = vi.fn()
 const tagObjectMock = vi.fn()
 const generateDesignGuidanceMock = vi.fn()
 const cacheDatasheetMock = vi.fn()
+const loadPartMock = vi.fn()
 
 vi.mock('../lib/library', () => ({
   listLibraries: (...args: unknown[]) => listLibrariesMock(...args),
@@ -29,6 +30,7 @@ vi.mock('../lib/partDetail', () => ({
   exportSymbol: (...args: unknown[]) => exportSymbolMock(...args),
   getConnectionGuidance: (...args: unknown[]) => getConnectionGuidanceMock(...args),
   generateDesignGuidance: (...args: unknown[]) => generateDesignGuidanceMock(...args),
+  loadPart: (...args: unknown[]) => loadPartMock(...args),
 }))
 
 vi.mock('../lib/components', () => ({
@@ -77,6 +79,10 @@ beforeEach(() => {
   tagObjectMock.mockReset()
   generateDesignGuidanceMock.mockReset()
   cacheDatasheetMock.mockReset()
+  // CTX-306.3: default to "not saved yet" so every pre-existing test in
+  // this file (none of which knows loadPart exists) still falls through
+  // to real extraction exactly as before.
+  loadPartMock.mockReset().mockRejectedValue(new Error('No Part found.'))
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -128,6 +134,27 @@ describe('PartDetail', () => {
     render(<PartDetail candidate={CANDIDATE} />)
 
     await waitFor(() => screen.getByText("Package 'X' is not in the known reference table."))
+  })
+
+  it('CTX-306.3: a candidate already saved to the library hydrates directly and never re-extracts', async () => {
+    loadPartMock.mockResolvedValueOnce(SAVED_PART_NO_FOOTPRINT)
+
+    render(<PartDetail candidate={CANDIDATE} />)
+
+    await waitFor(() => screen.getByText('Find Footprint'))
+    expect(loadPartMock).toHaveBeenCalledWith('ATtiny85')
+    expect(extractPartDetailMock).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Save to Library' })).toBeNull()
+  })
+
+  it('CTX-306.3: a genuinely new candidate still extracts and shows Save to Library', async () => {
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
+
+    render(<PartDetail candidate={CANDIDATE} />)
+
+    await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
+    expect(loadPartMock).toHaveBeenCalledWith('ATtiny85')
+    expect(extractPartDetailMock).toHaveBeenCalledWith('ATtiny85')
   })
 
   it('Save to Library calls saveConfirmedPart with the candidate and extraction, then reveals Export Symbol', async () => {
