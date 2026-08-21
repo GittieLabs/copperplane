@@ -1,0 +1,20 @@
+/* Accent drawn from the project's own world -- the deep green of a PCB
+   soldermask, desaturated so it works as UI rather than as decoration.
+   Starlight derives its dark-mode ramp from these automatically. */
+:root {
+  --sl-color-accent-low: #12332c;
+  --sl-color-accent: #1c6a5b;
+  --sl-color-accent-high: #b9ded3;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d8eae4;
+  --sl-color-accent: #17594c;
+  --sl-color-accent-high: #0d332b;
+}
+
+/* Screenshots of a desktop app need a visible edge or they bleed into the
+   page background in whichever theme has the same tone. */
+.sl-markdown-content img {
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 4px;
+}

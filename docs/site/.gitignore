@@ -1,0 +1,7 @@
+dist/
+.astro/
+node_modules/
+
+# Astro telemetry is disabled via ASTRO_TELEMETRY_DISABLED=1 in the build
+# workflow and in .env below -- see docs/site/README.md
+.env

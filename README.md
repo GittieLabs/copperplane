@@ -15,6 +15,9 @@ your machine: your parts library, your API keys, your board files.
 > you want to help shape it before it is, this is a good time to jump in — see
 > [Contributing](#-contributing).
 
+📚 **[Full documentation](https://gittielabs.github.io/hardware-agent-studio/)** — install guide,
+architecture, and how every feature got built.
+
 ---
 
 ## ✨ What it does today

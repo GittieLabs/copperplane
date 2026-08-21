@@ -1,0 +1,75 @@
+---
+title: Hardware Agent Studio
+description: A local-first desktop assistant that bridges KiCad and FreeCAD. It reads the datasheet and shows you the page it got that from.
+template: splash
+hero:
+  tagline: One workspace across KiCad and FreeCAD, with an AI layer that cites its sources. Your parts, your keys, your board files — all on your machine.
+  actions:
+    - text: Why this exists
+      link: /hardware-agent-studio/why/
+      icon: right-arrow
+    - text: Install
+      link: /hardware-agent-studio/install/
+      variant: minimal
+    - text: View on GitHub
+      link: https://github.com/GittieLabs/hardware-agent-studio
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, Aside } from '@astrojs/starlight/components'
+
+<Aside type="caution" title="Early, and honest about it">
+The current release is **v0.1.1**, and it publishes **one macOS build, for Apple
+Silicon only**. There is no published Intel macOS, Windows or Linux build yet —
+those are working CI targets that have not been attached to a release. Every
+live test against real KiCad and FreeCAD has run on exactly one machine. If you
+try it on Windows or Linux, [telling us what happened](https://github.com/GittieLabs/hardware-agent-studio/issues/new?template=platform_report.yml)
+is the single most useful thing you can do for this project right now.
+</Aside>
+
+## What it does
+
+<CardGrid>
+  <Card title="Reads the datasheet, and shows you where">
+    Ask what a part needs around it — supply range, decoupling, reset, crystal
+    load capacitance, layout constraints — and get a plain-language answer with
+    the datasheet page it came from, one click away. If it cannot cite it, it
+    does not say it.
+  </Card>
+  <Card title="Finds footprints you already have">
+    Searches every KiCad footprint library installed on your machine, including
+    the 150-odd that ship with KiCad itself, plus your own saved library and
+    curated community libraries — merged into one ranked result set.
+  </Card>
+  <Card title="Explains what the checker is telling you">
+    Runs ERC and DRC through KiCad's own `kicad-cli` and translates the result
+    into plain language with suggested fixes. It reads your board; it does not
+    edit it.
+  </Card>
+  <Card title="Builds an enclosure from the real board">
+    Takes your board's actual outline and mounting-hole positions and generates
+    a printable enclosure with standoffs and an optional lid, previewed in 3D
+    and exportable to STEP.
+  </Card>
+</CardGrid>
+
+## What it is not
+
+It is an **advisor with hands, not a replacement CAD tool**. It does not draw
+your schematic, place your components, or route your board, and none of that is
+planned. [The full boundary is written down](/hardware-agent-studio/what-it-is/)
+— worth two minutes before you install anything.
+
+## Where your data goes
+
+Your parts library is readable JSON on your own disk. Your API keys are in the
+operating system keychain, never in a config file. The only thing that leaves
+your machine is the prompt you send to the model provider you chose — and you
+can choose a local one. [The specifics](/hardware-agent-studio/privacy/).
+
+## Built on
+
+KiCad and FreeCAD do the actual engineering. This app talks to KiCad over its
+own IPC API and drives FreeCAD headlessly — it bundles neither and replaces
+neither. [How that works, and what we owe them](/hardware-agent-studio/built-on/).
