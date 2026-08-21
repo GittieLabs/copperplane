@@ -1,7 +1,7 @@
 ---
 id: SPEC-000
 title: "Feature / Architecture Title"
-status: Draft | Approved | In-Progress | Deprecated
+status: Draft | Approved | In-Progress | Completed | Deprecated
 type: System | Module | Feature
 created: YYYY-MM-DD
 last_updated: YYYY-MM-DD

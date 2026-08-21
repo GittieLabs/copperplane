@@ -1,0 +1,120 @@
+name: Bug report
+description: Something in the app behaves incorrectly, crashes, or fails silently.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **If you just have a question, or you are not sure whether something is a bug**, please
+        start a [Discussion](https://github.com/GittieLabs/hardware-agent-studio/discussions)
+        instead — it is a better place for it and you will get a faster answer.
+
+        **If you think you have found a security vulnerability**, do not file it here. Use
+        [private vulnerability reporting](https://github.com/GittieLabs/hardware-agent-studio/security/advisories/new)
+        instead. See [SECURITY.md](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/SECURITY.md).
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        **The app can generate this for you.** Open **Settings**, scroll to the bottom, and click
+        **Copy Diagnostics** — then paste here. It collects the app, Python and KiCad versions,
+        which capabilities the daemon detected, and the path to the real log file. It contains no
+        API keys and no board data.
+
+        If the app will not start at all, say so here and describe your OS and how you installed it.
+      placeholder: Paste the output of Settings → Copy Diagnostics
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see? If there was an error message, quote it exactly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Number them. Include the part number, board file or footprint involved if the bug depends
+        on specific input — "search for a part" and "search for ATtiny85" are very different reports.
+      placeholder: |
+        1. Open a project and go to the Components tab
+        2. Search for "ATtiny85"
+        3. Confirm the first candidate
+        4. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where in the app does this happen?
+      options:
+        - "Not sure"
+        - "Startup / the app will not launch"
+        - "Components — search, disambiguation, part detail"
+        - "Design requirements / datasheet guidance"
+        - "Footprints — search, generation, export"
+        - "Schematic — ERC, connection guidance"
+        - "PCB — DRC, injecting into a board"
+        - "Enclosure — generation, 3D viewer, export"
+        - "Library — browsing, organising, community import"
+        - "Settings, providers or API keys"
+        - "Projects — saving, opening, linking a folder"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: cad-running
+    attributes:
+      label: Was KiCad running at the time?
+      description: Several features talk to a live KiCad instance over its IPC API and need it open.
+      options:
+        - "Not relevant to this bug"
+        - "Yes, KiCad was open"
+        - "No, KiCad was not open"
+        - "I do not have KiCad installed"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: |
+        Optional but very helpful. The diagnostics above include the log file path — open it and
+        paste anything from around the time of the failure.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots are welcome — drag them in. Please crop out anything confidential.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this has not already been reported.
+          required: true
+        - label: I am on the latest release, or I have said which version I am on above.
+          required: true

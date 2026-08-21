@@ -1,0 +1,79 @@
+name: Feature request
+description: Suggest something the app should be able to do.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before writing, two things worth knowing — they will save you time:
+
+        - **[PRODUCT-PLAN.md](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/PRODUCT-PLAN.md)**
+          describes what this app is trying to be. It is an *advisor with hands*, not a replacement
+          CAD tool: it explains what a datasheet requires and shows you where it says so. Automatic
+          placement and routing are explicitly out of scope, and schematic and PCB *editing* are not
+          planned.
+        - **[ROADMAP.md](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/ROADMAP.md)**
+          lists what is already specced or built. Your idea may already be in there.
+
+        A request that is out of scope is not a wasted request — say it anyway. Knowing what people
+        want is useful even when the answer is no.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: |
+        Describe the actual task, not the feature. "I want to check whether my decoupling matches
+        what the datasheet asks for" tells us far more than "add a decoupling checker" — and often
+        leads somewhere better than the feature you had in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: How do you do it today?
+      description: What is the manual workflow, in KiCad, FreeCAD, a PDF reader, or on paper?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like the app to do?
+      description: Optional. If you have a specific idea for the surface or behaviour, describe it.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app would this belong to?
+      options:
+        - "Not sure"
+        - "Components — search, part detail, design requirements"
+        - "Footprints and symbols"
+        - "Schematic"
+        - "PCB"
+        - "Enclosure"
+        - "Library"
+        - "Projects, settings or the app shell"
+        - "Packaging, installation or platform support"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this has not already been requested.
+          required: true
+        - label: I skimmed PRODUCT-PLAN.md and this is not something it explicitly rules out — or it is, and I have said why it should be reconsidered.
+          required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **If you want to see this built, react to your own issue with 👍 after you file it.** Feature
+        requests are prioritised partly by reactions, so that is the vote.

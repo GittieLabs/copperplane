@@ -1,7 +1,7 @@
 ---
 id: SPEC-304
 title: "Project & Library Storage"
-status: Draft
+status: Completed
 type: Module
 created: 2026-08-12
 last_updated: 2026-08-12

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question, or not sure if it is a bug
+    url: https://github.com/GittieLabs/hardware-agent-studio/discussions
+    about: Ask in Discussions. If it turns out to be a defect we will convert it into an issue for you.
+  - name: Security vulnerability
+    url: https://github.com/GittieLabs/hardware-agent-studio/security/advisories/new
+    about: Report privately. Please do not open a public issue for anything security-related.
+  - name: Wrong or misleading engineering advice
+    url: https://github.com/GittieLabs/hardware-agent-studio/issues/new?template=bug_report.yml
+    about: File it as a bug, and include the part and the citation it gave you. Incorrect advice is the most serious class of defect in this project.

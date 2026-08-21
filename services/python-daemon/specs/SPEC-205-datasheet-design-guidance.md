@@ -1,7 +1,7 @@
 ---
 id: SPEC-205
 title: "Datasheet-Driven Design Guidance"
-status: Draft
+status: In-Progress
 type: Module
 user_facing: true
 created: 2026-08-18

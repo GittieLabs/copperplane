@@ -1,7 +1,7 @@
 ---
 id: SPEC-901
 title: "Agent Operating Manual & Context Generation Protocol"
-status: Draft
+status: Completed
 type: System
 created: 2026-08-08
 last_updated: 2026-08-08

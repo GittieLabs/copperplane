@@ -1,7 +1,7 @@
 ---
 id: SPEC-108
 title: "KiCad Write Path: Footprint & Symbol Injection"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-09
 last_updated: 2026-08-14

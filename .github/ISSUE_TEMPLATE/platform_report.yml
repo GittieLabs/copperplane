@@ -1,0 +1,97 @@
+name: Platform report (Windows / Linux)
+description: Tell us how the app behaved on Windows or Linux — working or broken, both are useful.
+title: "[Platform]: "
+labels: ["platform", "help wanted"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **This is the single most useful thing anyone can give this project right now.**
+
+        Every live test against real KiCad and FreeCAD has run on exactly one machine: the
+        maintainer's Mac. The Windows and Linux builds are real and they compile and launch in CI on
+        all three platforms — but nobody has ever confirmed that the CAD integration actually works
+        there. Until someone does, "cross-platform" is a claim rather than a fact.
+
+        **Reports that everything worked are just as valuable as bug reports.** A confirmed
+        working path is what moves these builds out of pre-release.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - "Windows 11"
+        - "Windows 10"
+        - "Linux — Debian / Ubuntu (.deb)"
+        - "Linux — other distro (.AppImage)"
+    validations:
+      required: true
+
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and version
+      description: For Linux. e.g. "Ubuntu 24.04", "Fedora 42", "Arch". Skip if on Windows.
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        **Settings → Copy Diagnostics**, then paste here. If the app will not start far enough to
+        reach Settings, say so and describe what happened instead.
+      render: text
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: worked
+    attributes:
+      label: What did you get working?
+      description: Tick everything you actually tried and that worked. Leave unticked anything you did not try.
+      options:
+        - label: The app installed and launched
+        - label: I configured an LLM provider and key in Settings
+        - label: Searching for a part returned candidates
+        - label: Part detail showed a pin table
+        - label: Design requirements generated from a datasheet
+        - label: Footprint search found footprints in my installed KiCad libraries
+        - label: The app connected to a running KiCad instance
+        - label: Injecting a footprint into an open board worked
+        - label: ERC or DRC ran and was explained
+        - label: An enclosure generated and rendered in the 3D viewer
+        - label: Exporting a file worked
+
+  - type: textarea
+    id: broke
+    attributes:
+      label: What broke, and where
+      description: |
+        For each thing that failed, say what you did and what happened. Exact error text helps
+        enormously. If nothing broke, please say that explicitly — it is a real result.
+    validations:
+      required: true
+
+  - type: textarea
+    id: cad-versions
+    attributes:
+      label: KiCad and FreeCAD versions, and how you installed them
+      description: |
+        This matters more than usual on Windows and Linux, where install locations vary a lot.
+        e.g. "KiCad 9.0.2 from the .msi, default location", "FreeCAD 1.1 from Flatpak".
+
+  - type: textarea
+    id: paths
+    attributes:
+      label: Did you have to override any paths in Settings?
+      description: |
+        If the app could not find KiCad or FreeCAD on its own and you pointed it at them manually,
+        tell us the path that worked. Path resolution on these platforms is largely untested and
+        this is exactly the kind of detail that fixes it for everyone else.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots very welcome — drag them in.

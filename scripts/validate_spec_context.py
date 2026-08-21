@@ -19,7 +19,16 @@ CODE_EXTENSIONS = ('.rs', '.ts', '.tsx', '.js', '.jsx', '.py', '.toml', '.json')
 # code, no matter how deep in the tree they appear -- root-level AND
 # module-level specs/context/.github dirs all count (SPEC-902: the original
 # bare `str.startswith(...)` check only ever exempted root-level paths).
-EXCLUDE_DIR_NAMES = {'.github', 'specs', 'context'}
+#
+# CTX-902.3: 'docs' exempts a real, planned documentation site (Astro,
+# bringing its own package.json/tsconfig.json -- both in CODE_EXTENSIONS)
+# under docs/ at the repo root. Same "any depth" caveat as every other
+# entry here applies: a directory literally named `docs` *anywhere* in the
+# tree is exempted, not just the root one. Confirmed acceptable for this
+# repo specifically -- no other directory named `docs` exists anywhere in
+# the tree today (checked directly, not assumed) -- but this is a real,
+# deliberate trade-off to record, not an accident.
+EXCLUDE_DIR_NAMES = {'.github', 'specs', 'context', 'docs'}
 
 # Exact root-relative paths exempted regardless of extension.
 EXCLUDE_EXACT_PATHS = {'LICENSE'}
@@ -34,6 +43,17 @@ REQUIRED_CTX_FRONTMATTER = ['id', 'spec_ref', 'status', 'branch', 'commit_hashes
 # 'user_facing' is required repo-wide (CTX-901.2) -- checked for every SPEC-*.md
 # on every run via validate_spec_graph(), not just files changed in this diff.
 REQUIRED_SPEC_FRONTMATTER = ['id', 'title', 'status', 'location', 'user_facing']
+
+# CTX-902.3: the required key existed since SPEC-901, but its *value* was
+# never checked -- 35 of 40 real spec files said `status: Draft`, including
+# specs shipped months ago, because nothing ever validated it. Matches
+# SPEC-TEMPLATE.md's own placeholder enum. Checked repo-wide via
+# validate_spec_graph(), same as the other structural spec checks --
+# SPEC-TEMPLATE.md itself needs no explicit exemption here: its real path
+# is the repo root, not any specs/ directory, so find_all_spec_files()'s
+# own glob never includes it in the first place (confirmed directly, not
+# assumed).
+ALLOWED_SPEC_STATUSES = {'Draft', 'Approved', 'In-Progress', 'Completed', 'Deprecated'}
 
 # Specs deliberately not children of SPEC-000 (framework/meta specs, not
 # product architecture) -- excluded from the "orphan root spec" info note.
@@ -314,6 +334,13 @@ def validate_spec_graph():
             if field not in fm or fm[field] is None:
                 errors.append(f"MISSING SPEC FRONTMATTER FIELD: {path} is missing required key '{field}'.")
 
+        status = fm.get('status')
+        if status is not None and status not in ALLOWED_SPEC_STATUSES:
+            errors.append(
+                f"INVALID SPEC STATUS: {path} declares status '{status}', which is not one of "
+                f"{sorted(ALLOWED_SPEC_STATUSES)}."
+            )
+
         spec_id = fm.get('id')
         if spec_id:
             if spec_id in specs_by_id:
@@ -389,7 +416,16 @@ def validate_spec_graph():
     return errors, info
 
 
-def validate_pr(base_branch):
+def validate_pr(base_branch, labels=None):
+    """CTX-902.3: `labels` is the real PR label set (from the workflow's own
+    `github.event.pull_request.labels`, passed in as `--labels`, never
+    fetched here via the GitHub API -- this script stays runnable offline
+    and unit-testable without any real network/token). `trivial-fix`
+    bypasses exactly RULE 1 below (the missing-context-file check) and
+    nothing else: the spec-graph checks, the Testing Matrix/commit-hash
+    checks on any context file this PR *did* touch, and the test/lint jobs
+    in the other workflows all still run unconditionally."""
+    labels = labels or set()
     print(f"🔍 Analyzing diff against {base_branch}...")
 
     # Get list of changed files in this PR
@@ -419,12 +455,26 @@ def validate_pr(base_branch):
 
     errors = []
 
-    # RULE 1: Code changes require at least one Context file change
+    # RULE 1: Code changes require at least one Context file change --
+    # bypassed, and only this rule, when the PR carries 'trivial-fix'
+    # (CTX-902.3). A silent bypass is how this becomes a hole nobody
+    # notices, so it prints a real, visible line every time it fires.
     if code_changed and not context_files_changed:
-        errors.append(
-            "CRITICAL: Application code was modified, but no CTX-*.md context file was updated in this PR.\n"
-            "   -> You must update or create a CTX file under the corresponding module's context/ directory."
-        )
+        if 'trivial-fix' in labels:
+            print(
+                "\n⚠️  SKIPPED: code changed with no context file, but this PR carries the "
+                "'trivial-fix' label -- the context-file requirement is bypassed for this check "
+                "only. Tests and lint still ran normally in their own workflows; nothing else "
+                "about this validation (spec graph, commit hashes, Testing Matrix) was skipped."
+            )
+        else:
+            errors.append(
+                "CRITICAL: Application code was modified, but no CTX-*.md context file was updated in this PR.\n"
+                "   -> You must update or create a CTX file under the corresponding module's context/ directory.\n"
+                "   -> If this is a small, self-contained fix (a typo, a broken link, an obvious "
+                "one-liner), a maintainer can add the 'trivial-fix' label instead of requiring a "
+                "context file."
+            )
 
     # RULE 2 & 3: Validate YAML Frontmatter & Testing Matrix on modified Context files
     for ctx_file in context_files_changed:
@@ -493,6 +543,13 @@ def validate_pr(base_branch):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Validate SPEC and CONTEXT file updates in PRs.")
     parser.add_argument('--base', required=True, help="Base branch/commit to compare against (e.g. origin/develop)")
+    parser.add_argument(
+        '--labels', default='',
+        help="Comma-separated PR label names (e.g. from GitHub Actions' "
+             "${{ join(github.event.pull_request.labels.*.name, ',') }}). "
+             "'trivial-fix' bypasses the missing-context-file check only.",
+    )
     args = parser.parse_args()
 
-    validate_pr(args.base)
+    labels = {label.strip() for label in args.labels.split(',') if label.strip()}
+    validate_pr(args.base, labels)

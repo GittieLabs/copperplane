@@ -1,7 +1,7 @@
 ---
 id: SPEC-305
 title: "App Shell & Navigation"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-12
 last_updated: 2026-08-12
