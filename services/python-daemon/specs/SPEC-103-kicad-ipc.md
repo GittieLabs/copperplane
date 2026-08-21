@@ -1,7 +1,7 @@
 ---
 id: SPEC-103
 title: "KiCad IPC Bridge"
-status: Draft
+status: Completed
 type: Module
 created: 2026-08-07
 last_updated: 2026-08-07

@@ -35,6 +35,14 @@ class TestPathExclusionMatcher(unittest.TestCase):
         # A non-lockfile .json config is still code-like and must NOT be exempted.
         self.assertFalse(vsc.is_excluded_from_code('core/tauri-rust/tauri.conf.json'))
 
+    def test_006_docs_dir_is_excluded_at_any_depth(self):
+        """CTX-902.3: a real, planned Astro docs site under docs/ brings its
+        own package.json/tsconfig.json -- exempted the same way specs/
+        context/.github already are, at any depth, not just the root."""
+        self.assertTrue(vsc.is_excluded_from_code('docs/package.json'))
+        self.assertTrue(vsc.is_excluded_from_code('docs/astro.config.ts'))
+        self.assertTrue(vsc.is_excluded_from_code('apps/tauri-ui/docs/tsconfig.json'))
+
 
 class SpecGraphFixtureTestCase(unittest.TestCase):
     """Base class: builds fixture SPEC-*.md files in a throwaway temp
@@ -51,14 +59,14 @@ class SpecGraphFixtureTestCase(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def write_spec(self, relpath, spec_id, location=None, parent_spec=None, child_specs=None,
-                    user_facing=False):
+                    user_facing=False, status='Draft'):
         full = os.path.join(self.tmpdir, relpath)
         os.makedirs(os.path.dirname(full), exist_ok=True)
         lines = [
             '---',
             f'id: {spec_id}',
             'title: "Test Spec"',
-            'status: Draft',
+            f'status: {status}',
             f'location: "{location if location is not None else relpath}"',
             f'user_facing: {"true" if user_facing else "false"}',
         ]
@@ -162,6 +170,33 @@ class TestUserFacingFieldRequired(SpecGraphFixtureTestCase):
         self.write_spec('specs/SPEC-100-x.md', 'SPEC-100', user_facing=False)
         errors, _info = vsc.validate_spec_graph()
         self.assertFalse(any('user_facing' in e for e in errors), errors)
+
+
+class TestSpecStatusValue(SpecGraphFixtureTestCase):
+    """CTX-902.3: `status` was required to exist (SPEC-901) but its value
+    was never checked -- 35 of 40 real spec files said `Draft`, including
+    specs shipped months ago. This is the check that would have caught it."""
+
+    def test_001_each_allowed_status_value_passes(self):
+        for i, status in enumerate(sorted(vsc.ALLOWED_SPEC_STATUSES)):
+            with self.subTest(status=status):
+                self.write_spec(f'specs/SPEC-{100 + i}-x.md', f'SPEC-{100 + i}', status=status)
+        errors, _info = vsc.validate_spec_graph()
+        self.assertFalse(any('INVALID SPEC STATUS' in e for e in errors), errors)
+
+    def test_002_an_unrecognized_status_value_is_a_hard_error(self):
+        self.write_spec('specs/SPEC-100-x.md', 'SPEC-100', status='InReview')
+        errors, _info = vsc.validate_spec_graph()
+        self.assertTrue(
+            any('INVALID SPEC STATUS' in e and "'InReview'" in e for e in errors), errors,
+        )
+
+    def test_003_a_typo_of_a_real_status_is_still_caught(self):
+        # The real, motivating bug -- a plausible-looking value is not the
+        # same as a checked one.
+        self.write_spec('specs/SPEC-100-x.md', 'SPEC-100', status='completed')
+        errors, _info = vsc.validate_spec_graph()
+        self.assertTrue(any('INVALID SPEC STATUS' in e for e in errors), errors)
 
 
 class TestUserFacingSectionCheck(SpecGraphFixtureTestCase):
@@ -400,6 +435,122 @@ class TestEndToEndCLI(unittest.TestCase):
             cwd=self.tmpdir, capture_output=True, text=True, encoding='utf-8',
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+
+class TestTrivialFixLabelBypass(unittest.TestCase):
+    """CTX-902.3: the change that makes outside contribution possible --
+    'trivial-fix' skips RULE 1 (the missing-context-file check) only.
+    Real CLI, via subprocess against a real git repo, same pattern
+    TestEndToEndCLI already established -- not just a helper function's
+    return value."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.script_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), '..', 'validate_spec_context.py')
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _git(self, *args):
+        subprocess.run(['git', *args], cwd=self.tmpdir, check=True, capture_output=True, text=True)
+
+    def _write(self, relpath, content):
+        full = os.path.join(self.tmpdir, relpath)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, 'w') as f:
+            f.write(content)
+
+    def _make_code_change_with_no_context(self):
+        self._git('init', '-q')
+        self._git('config', 'user.email', 'test@example.com')
+        self._git('config', 'user.name', 'Test')
+        self._write(
+            'specs/SPEC-100-base.md',
+            '---\nid: SPEC-100\ntitle: "Base"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: false\n---\n# base\n',
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'base')
+        self._git('branch', '-q', '-m', 'develop')
+
+        self._git('checkout', '-q', '-b', 'fix/typo')
+        self._write('apps/tauri-ui/src/App.tsx', "// fixed a typo\n")
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'fix a typo, no context file')
+
+    def _run_validator(self, labels=''):
+        return subprocess.run(
+            [sys.executable, self.script_path, '--base', 'develop', '--labels', labels],
+            cwd=self.tmpdir, capture_output=True, text=True, encoding='utf-8',
+        )
+
+    def test_001_without_the_label_the_missing_context_error_still_fires(self):
+        self._make_code_change_with_no_context()
+
+        result = self._run_validator(labels='')
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn('CRITICAL', result.stdout)
+
+    def test_002_with_the_label_the_missing_context_error_is_not_raised(self):
+        self._make_code_change_with_no_context()
+
+        result = self._run_validator(labels='trivial-fix')
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertNotIn('CRITICAL', result.stdout)
+
+    def test_003_the_bypass_prints_a_real_visible_skip_message(self):
+        # A silent bypass is how this becomes a hole nobody notices.
+        self._make_code_change_with_no_context()
+
+        result = self._run_validator(labels='trivial-fix')
+
+        self.assertIn('SKIPPED', result.stdout)
+        self.assertIn('trivial-fix', result.stdout)
+
+    def test_004_an_unrelated_label_does_not_bypass_anything(self):
+        self._make_code_change_with_no_context()
+
+        result = self._run_validator(labels='needs-triage,good-first-issue')
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn('CRITICAL', result.stdout)
+
+    def test_005_the_label_never_bypasses_a_real_dangling_spec_ref(self):
+        # The bypass is scoped to RULE 1 only -- a genuinely broken spec
+        # graph must still fail even with the label present.
+        self._git('init', '-q')
+        self._git('config', 'user.email', 'test@example.com')
+        self._git('config', 'user.name', 'Test')
+        self._write(
+            'specs/SPEC-100-base.md',
+            '---\nid: SPEC-100\ntitle: "Base"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: false\n---\n# base\n',
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'base')
+        self._git('branch', '-q', '-m', 'develop')
+
+        self._git('checkout', '-q', '-b', 'feature')
+        self._write(
+            'specs/SPEC-101-child.md',
+            '---\nid: SPEC-101\ntitle: "Child"\nstatus: Draft\n'
+            'location: "specs/SPEC-101-child.md"\n'
+            'parent_spec: "SPEC-999-nonexistent.md"\nchild_specs: []\n'
+            'user_facing: false\n---\n# child\n',
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'add child with dangling parent')
+
+        result = self._run_validator(labels='trivial-fix')
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn('DANGLING parent_spec', result.stdout)
 
 
 class TestCommitHashesAreReal(unittest.TestCase):

@@ -27,5 +27,6 @@ jobs:
       - name: Run Spec & Context Validator
         env:
           BASE_REF: ${{ github.base_ref }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
-          python scripts/validate_spec_context.py --base origin/$BASE_REF
+          python scripts/validate_spec_context.py --base origin/$BASE_REF --labels "$PR_LABELS"

@@ -1,7 +1,7 @@
 ---
 id: SPEC-106
 title: "Configuration & Secrets Store"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-09
 last_updated: 2026-08-09

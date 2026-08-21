@@ -1,7 +1,7 @@
 ---
 id: SPEC-312
 title: "Application Shell, Project Portability & Persistence Model"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-19
 last_updated: 2026-08-19

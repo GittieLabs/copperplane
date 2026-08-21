@@ -1,7 +1,7 @@
 ---
 id: SPEC-402
 title: "Release, Signing & Auto-Update"
-status: Draft
+status: Completed
 type: Module
 created: 2026-08-16
 last_updated: 2026-08-17

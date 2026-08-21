@@ -1,7 +1,7 @@
 ---
 id: SPEC-301
 title: "3D Viewer"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-09
 last_updated: 2026-08-09

@@ -1,7 +1,7 @@
 ---
 id: SPEC-316
 title: "Native Menu Command Surface: Library, Design Actions & Settings Access"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-20
 last_updated: 2026-08-20

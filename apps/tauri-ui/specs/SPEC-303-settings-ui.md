@@ -1,7 +1,7 @@
 ---
 id: SPEC-303
 title: "Settings UI"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-11
 last_updated: 2026-08-11

@@ -1,7 +1,7 @@
 ---
 id: SPEC-902
 title: "Spec Graph Validator v2"
-status: Draft
+status: Completed
 type: System
 created: 2026-08-08
 last_updated: 2026-08-08

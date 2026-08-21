@@ -1,7 +1,7 @@
 ---
 id: SPEC-105
 title: "Daemon Async Job & Progress Protocol"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-08
 last_updated: 2026-08-08

@@ -3,3 +3,45 @@ Copyright 2026 GittieLabs
 
 This product includes software developed by GittieLabs
 (https://gittielabs.com).
+
+Licensed under the Apache License, Version 2.0. A copy of the License is
+included in the LICENSE file at the root of this distribution.
+
+--------------------------------------------------------------------------
+Third-party notices
+--------------------------------------------------------------------------
+
+Distributed builds of Hardware Agent Studio bundle a frozen Python runtime
+containing the dependencies of services/python-daemon. The notices below are
+reproduced as required by Apache License 2.0 section 4(d).
+
+--- AgentFlow (gittielabs-agentflow) -- Apache License 2.0 -----------------
+
+AgentFlow
+Copyright 2026 GittieLabs
+
+This product includes software developed by GittieLabs
+(https://gittielabs.com).
+
+--- Requests -- Apache License 2.0 ----------------------------------------
+
+Requests
+Copyright 2019 Kenneth Reitz
+
+--------------------------------------------------------------------------
+
+Other bundled dependencies are distributed under permissive licenses that
+carry no NOTICE-propagation requirement, including the MIT, BSD 2-Clause,
+BSD 3-Clause, ISC, MPL-2.0 and Apache-2.0 licenses. certifi is distributed
+under the Mozilla Public License 2.0 and is bundled unmodified; its source
+is available at https://github.com/certifi/python-certifi.
+
+Hardware Agent Studio interoperates with KiCad and FreeCAD as separate
+programs, over KiCad's IPC API and by invoking FreeCAD headlessly. Neither
+is bundled or linked. KiCad and FreeCAD are trademarks of their respective
+owners; this project is not affiliated with or endorsed by either project.
+
+Component data obtained through the application -- KiCad's own symbol and
+footprint libraries, and community libraries the user chooses to import --
+remains under its original license. See the attribution documentation for
+the terms that apply to each source.

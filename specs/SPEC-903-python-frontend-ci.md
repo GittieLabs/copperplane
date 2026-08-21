@@ -1,7 +1,7 @@
 ---
 id: SPEC-903
 title: "Python & Frontend CI"
-status: Draft
+status: Completed
 type: System
 created: 2026-08-08
 last_updated: 2026-08-08
