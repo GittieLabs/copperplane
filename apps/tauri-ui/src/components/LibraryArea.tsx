@@ -125,18 +125,18 @@ export function LibraryArea({
 
   if (view.kind === 'detail') {
     return (
-      <div className="flex w-full max-w-4xl flex-col gap-4 text-neutral-100">
+      <div className="flex w-full max-w-4xl flex-col gap-4 text-fg">
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="text-xs text-neutral-500 hover:text-neutral-300"
+            className="text-xs text-fg-muted hover:text-fg-secondary"
             onClick={() => setView({ kind: 'list' })}
           >
             ← Libraries
           </button>
         </div>
         <h2 className="text-lg font-medium">{view.library.name}</h2>
-        {detailError && <p className="text-sm text-red-400">{detailError}</p>}
+        {detailError && <p className="text-sm text-danger">{detailError}</p>}
 
         {/* Real bug found by live user testing: Parts and Symbols were
             rendered as siblings under one combined "Datasheets / Pins"
@@ -152,23 +152,23 @@ export function LibraryArea({
             either. Split into two real, separately-labeled sections,
             matching Footprints' own already-correct precedent below. */}
         <section className="flex flex-col gap-2">
-          <h3 className="text-sm font-medium text-neutral-400">Parts ({parts?.length ?? 0})</h3>
-          {parts === null && !detailError && <p className="text-xs text-neutral-500">Loading…</p>}
+          <h3 className="text-sm font-medium text-fg-tertiary">Parts ({parts?.length ?? 0})</h3>
+          {parts === null && !detailError && <p className="text-xs text-fg-muted">Loading…</p>}
           {parts !== null && parts.length === 0 && (
-            <p className="text-xs text-neutral-500">No parts in this library yet.</p>
+            <p className="text-xs text-fg-muted">No parts in this library yet.</p>
           )}
           {parts?.map((p) =>
             onSelectPart ? (
               <button
                 key={p.part_id}
                 type="button"
-                className="rounded border border-neutral-800 p-2 text-left text-xs text-neutral-300 hover:bg-neutral-900"
+                className="rounded border border-line-subtle p-2 text-left text-xs text-fg-secondary hover:bg-surface"
                 onClick={() => onSelectPart(p.part_id)}
               >
                 {[p.part_id, p.manufacturer, p.package].filter(Boolean).join(' · ')}
               </button>
             ) : (
-              <div key={p.part_id} className="rounded border border-neutral-800 p-2 text-xs text-neutral-300">
+              <div key={p.part_id} className="rounded border border-line-subtle p-2 text-xs text-fg-secondary">
                 {[p.part_id, p.manufacturer, p.package].filter(Boolean).join(' · ')}
               </div>
             ),
@@ -176,26 +176,26 @@ export function LibraryArea({
         </section>
 
         <section className="flex flex-col gap-2">
-          <h3 className="text-sm font-medium text-neutral-400">Symbols ({symbols?.length ?? 0})</h3>
-          {symbols === null && !detailError && <p className="text-xs text-neutral-500">Loading…</p>}
+          <h3 className="text-sm font-medium text-fg-tertiary">Symbols ({symbols?.length ?? 0})</h3>
+          {symbols === null && !detailError && <p className="text-xs text-fg-muted">Loading…</p>}
           {symbols !== null && symbols.length === 0 && (
-            <p className="text-xs text-neutral-500">No symbols in this library yet.</p>
+            <p className="text-xs text-fg-muted">No symbols in this library yet.</p>
           )}
           {symbols?.map((s) => (
-            <div key={s.symbol_id} className="rounded border border-neutral-800 p-2 text-xs text-neutral-300">
+            <div key={s.symbol_id} className="rounded border border-line-subtle p-2 text-xs text-fg-secondary">
               {s.symbol_name ?? s.symbol_id}
             </div>
           ))}
         </section>
 
         <section className="flex flex-col gap-2">
-          <h3 className="text-sm font-medium text-neutral-400">Footprints ({footprints?.length ?? 0})</h3>
-          {footprints === null && !detailError && <p className="text-xs text-neutral-500">Loading…</p>}
+          <h3 className="text-sm font-medium text-fg-tertiary">Footprints ({footprints?.length ?? 0})</h3>
+          {footprints === null && !detailError && <p className="text-xs text-fg-muted">Loading…</p>}
           {footprints !== null && footprints.length === 0 && (
-            <p className="text-xs text-neutral-500">No footprints in this library yet.</p>
+            <p className="text-xs text-fg-muted">No footprints in this library yet.</p>
           )}
           {footprints?.map((f) => (
-            <div key={f.footprint_id} className="rounded border border-neutral-800 p-2 text-xs text-neutral-300">
+            <div key={f.footprint_id} className="rounded border border-line-subtle p-2 text-xs text-fg-secondary">
               {[f.footprint_name ?? f.footprint_id, f.provenance?.license].filter(Boolean).join(' · ')}
             </div>
           ))}
@@ -205,12 +205,12 @@ export function LibraryArea({
   }
 
   return (
-    <div className="flex w-full max-w-4xl flex-col gap-4 text-neutral-100">
+    <div className="flex w-full max-w-4xl flex-col gap-4 text-fg">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-medium">Libraries</h2>
         <div className="flex items-center gap-2">
           <input
-            className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs"
+            className="rounded border border-line bg-surface px-2 py-1 text-xs"
             placeholder="new library name"
             value={newLibraryName}
             onChange={(e) => setNewLibraryName(e.target.value)}
@@ -220,7 +220,7 @@ export function LibraryArea({
           />
           <button
             type="button"
-            className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+            className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
             onClick={() => void handleCreateLibrary()}
             disabled={!newLibraryName.trim() || creating}
           >
@@ -229,20 +229,20 @@ export function LibraryArea({
         </div>
       </div>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-danger">{error}</p>}
 
-      {libraries === null && !error && <p className="text-sm text-neutral-500">Loading…</p>}
+      {libraries === null && !error && <p className="text-sm text-fg-muted">Loading…</p>}
 
       <div className="flex flex-col gap-2">
         {libraries?.map((library) => (
           <button
             key={library.id}
             type="button"
-            className="flex items-center justify-between rounded border border-neutral-800 p-3 text-left hover:bg-neutral-900"
+            className="flex items-center justify-between rounded border border-line-subtle p-3 text-left hover:bg-surface"
             onClick={() => setView({ kind: 'detail', library })}
           >
             <span className="text-sm font-medium">{library.name}</span>
-            <span className="text-xs text-neutral-500">
+            <span className="text-xs text-fg-muted">
               {library.part_count} parts, {library.symbol_count} symbols, {library.footprint_count} footprints
             </span>
           </button>

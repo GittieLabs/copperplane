@@ -8,10 +8,10 @@ export function NotBuiltPlaceholder({ specId, title, description }: {
   description: string
 }) {
   return (
-    <div className="flex w-full max-w-md flex-col items-center gap-2 rounded border border-dashed border-neutral-700 p-8 text-center">
-      <p className="text-sm font-medium text-neutral-300">{title} — not built yet</p>
-      <p className="text-xs text-neutral-500">{description}</p>
-      <p className="text-xs text-neutral-600">Coming in {specId}</p>
+    <div className="flex w-full max-w-md flex-col items-center gap-2 rounded border border-dashed border-line p-8 text-center">
+      <p className="text-sm font-medium text-fg-secondary">{title} — not built yet</p>
+      <p className="text-xs text-fg-muted">{description}</p>
+      <p className="text-xs text-fg-faint">Coming in {specId}</p>
     </div>
   )
 }

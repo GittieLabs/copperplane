@@ -104,39 +104,39 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
 
   if (confirmed) {
     return (
-      <div className="flex w-full max-w-4xl flex-col gap-2 rounded border border-neutral-700 p-4">
-        <p className="text-sm font-medium text-neutral-100">
+      <div className="flex w-full max-w-4xl flex-col gap-2 rounded border border-line p-4">
+        <p className="text-sm font-medium text-fg">
           Confirmed: {confirmed.candidate.part_number} ({confirmed.candidate.manufacturer}, {confirmed.candidate.package})
         </p>
         {confirmed.datasheetPath ? (
           <div className="flex flex-col gap-1">
-            <p className="text-xs text-neutral-500">Datasheet cached: {confirmed.datasheetPath}</p>
+            <p className="text-xs text-fg-muted">Datasheet cached: {confirmed.datasheetPath}</p>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
+                className="self-start rounded border border-line px-2 py-0.5 text-xs"
                 onClick={() => handleOpen(confirmed.datasheetPath as string)}
               >
                 Open datasheet
               </button>
               <button
                 type="button"
-                className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
+                className="self-start rounded border border-line px-2 py-0.5 text-xs"
                 onClick={() => handleCopyPath(confirmed.datasheetPath as string)}
               >
                 Copy local path
               </button>
-              {pathCopied && <span className="text-xs text-emerald-400">Copied.</span>}
+              {pathCopied && <span className="text-xs text-success">Copied.</span>}
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-1">
-            <p className="text-xs text-amber-400">
+            <p className="text-xs text-warning">
               Datasheet couldn't be cached automatically ({confirmed.cacheError}).
             </p>
             <button
               type="button"
-              className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
+              className="self-start rounded border border-line px-2 py-0.5 text-xs"
               onClick={() => handleOpen(confirmed.candidate.datasheet_url)}
             >
               Open datasheet externally
@@ -145,13 +145,13 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
         )}
         <button
           type="button"
-          className="mt-2 self-start rounded border border-neutral-700 px-3 py-1 text-xs"
+          className="mt-2 self-start rounded border border-line px-3 py-1 text-xs"
           onClick={() => setConfirmed(null)}
         >
           Back to results
         </button>
 
-        <div className="mt-2 border-t border-neutral-800 pt-3">
+        <div className="mt-2 border-t border-line-subtle pt-3">
           <PartDetail candidate={confirmed.candidate} />
         </div>
       </div>
@@ -162,7 +162,7 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
     <div className="flex w-full max-w-4xl flex-col gap-3">
       <div className="flex gap-2">
         <input
-          className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+          className="flex-1 rounded border border-line bg-surface px-3 py-2 text-sm"
           placeholder="search for a part, e.g. atiny85"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -172,7 +172,7 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
         />
         <button
           type="button"
-          className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
+          className="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-50"
           onClick={handleSearch}
           disabled={query.trim().length === 0 || status === 'searching'}
         >
@@ -180,26 +180,26 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
         </button>
       </div>
 
-      {status === 'error' && error && <p className="text-sm text-red-400">{error}</p>}
+      {status === 'error' && error && <p className="text-sm text-danger">{error}</p>}
 
       {candidates.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-xs font-medium uppercase text-neutral-500">Did you mean:</p>
+          <p className="text-xs font-medium uppercase text-fg-muted">Did you mean:</p>
           {candidates.map((candidate) => (
             <div
               key={candidate.part_number}
-              className="flex items-center justify-between gap-3 rounded border border-neutral-700 p-3"
+              className="flex items-center justify-between gap-3 rounded border border-line p-3"
             >
               <div className="flex flex-col gap-1">
-                <p className="text-sm text-neutral-100">
-                  {candidate.part_number} <span className="text-neutral-500">{candidate.manufacturer}</span>
+                <p className="text-sm text-fg">
+                  {candidate.part_number} <span className="text-fg-muted">{candidate.manufacturer}</span>
                 </p>
-                <p className="text-xs text-neutral-500">
+                <p className="text-xs text-fg-muted">
                   {candidate.package} · confidence: {candidate.confidence}
                 </p>
                 <button
                   type="button"
-                  className="self-start text-xs text-neutral-400 underline"
+                  className="self-start text-xs text-fg-tertiary underline"
                   onClick={() => handleOpen(candidate.datasheet_url)}
                 >
                   view datasheet
@@ -207,7 +207,7 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
               </div>
               <button
                 type="button"
-                className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
                 onClick={() => handleConfirm(candidate)}
                 disabled={confirmingPartNumber !== null}
               >

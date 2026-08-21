@@ -1,5 +1,19 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+
+/** jsdom doesn't implement `matchMedia` -- `useThemePreference` (SPEC-317)
+ * calls it on every render, so every test in this file needs a stub, not
+ * just the theme-specific ones below. */
+function stubMatchMedia(matches: boolean) {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => ({
+      matches,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  )
+}
 
 const getCapabilitiesMock = vi.fn()
 const getConfigMock = vi.fn()
@@ -53,6 +67,9 @@ const EMPTY_CAPABILITIES = {
 const EMPTY_CONFIG = { llm_provider: null, llm_model: null }
 
 beforeEach(() => {
+  localStorage.clear()
+  document.documentElement.removeAttribute('data-theme')
+  stubMatchMedia(false)
   getCapabilitiesMock.mockReset().mockResolvedValue(EMPTY_CAPABILITIES)
   copyDiagnosticsMock.mockReset().mockResolvedValue(undefined)
   getConfigMock.mockReset().mockResolvedValue(EMPTY_CONFIG)
@@ -65,6 +82,45 @@ beforeEach(() => {
   restartAppMock.mockReset().mockResolvedValue(undefined)
   checkForUpdatesMock.mockReset()
   installUpdateAndRelaunchMock.mockReset().mockResolvedValue(undefined)
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('Settings: Appearance (SPEC-317)', () => {
+  it('defaults to System, with no resolved-theme note when the OS reads light', () => {
+    render(<Settings />)
+
+    const systemButton = screen.getByRole('radio', { name: 'System' })
+    expect(systemButton.getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByText(/Currently resolves to Light/)).toBeTruthy()
+  })
+
+  it('shows the resolved theme when the OS reads dark', () => {
+    stubMatchMedia(true)
+    render(<Settings />)
+
+    expect(screen.getByText(/Currently resolves to Dark/)).toBeTruthy()
+  })
+
+  it('selecting Light persists the choice, applies data-theme, and hides the System note', () => {
+    render(<Settings />)
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Light' }))
+
+    expect(screen.getByRole('radio', { name: 'Light' }).getAttribute('aria-checked')).toBe('true')
+    expect(localStorage.getItem('theme-preference')).toBe('light')
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light')
+    expect(screen.queryByText(/Currently resolves to/)).toBeNull()
+  })
+
+  it('a previously stored preference is reflected on mount', () => {
+    localStorage.setItem('theme-preference', 'dark')
+    render(<Settings />)
+
+    expect(screen.getByRole('radio', { name: 'Dark' }).getAttribute('aria-checked')).toBe('true')
+  })
 })
 
 describe('Settings: Tier 1 (provider/model/keys)', () => {

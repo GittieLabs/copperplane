@@ -24,13 +24,13 @@ export function OverviewDashboard({
           <div
             key={status.area}
             data-testid={`status-card-${status.area}`}
-            className="rounded border border-neutral-700 bg-neutral-900 px-3 py-2"
+            className="rounded border border-line bg-surface px-3 py-2"
           >
-            <p className="text-xs font-medium text-neutral-300">{STATUS_AREA_LABELS[status.area]}</p>
+            <p className="text-xs font-medium text-fg-secondary">{STATUS_AREA_LABELS[status.area]}</p>
             {status.checked ? (
-              <p className="text-xs text-emerald-400">{status.summary ?? 'Checked'}</p>
+              <p className="text-xs text-success">{status.summary ?? 'Checked'}</p>
             ) : (
-              <p className="text-xs text-neutral-500">Not yet checked this session</p>
+              <p className="text-xs text-fg-muted">Not yet checked this session</p>
             )}
           </div>
         ))}
@@ -38,10 +38,10 @@ export function OverviewDashboard({
 
       {feed.length > 0 && (
         <div className="flex flex-col gap-1">
-          <p className="text-xs font-medium text-neutral-300">Activity</p>
+          <p className="text-xs font-medium text-fg-secondary">Activity</p>
           <ul className="flex flex-col gap-1" data-testid="activity-feed">
             {feed.map((item, index) => (
-              <li key={index} className="text-xs text-neutral-400">
+              <li key={index} className="text-xs text-fg-tertiary">
                 {item.summary}
               </li>
             ))}
