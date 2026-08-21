@@ -462,6 +462,24 @@ streaming, bespoke UI rendering). That decision is about the *wire protocol*; Ag
 schema shape (`name`/`description`/`input_schema`) already resembles MCP's tool-description
 conventions closely enough that no separate borrowing decision is needed here.
 
+#### [SPEC-206](services/python-daemon/specs/SPEC-206-agent-context-store.md) — Agent Context Store, Retrieval & Conversation Persistence — 🔲 not started 2026-08-21
+
+*Module:* `services/python-daemon` · *Depends on:* SPEC-205, SPEC-204, SPEC-304, SPEC-105, SPEC-201
+· *Parent:* [SPEC-318](apps/tauri-ui/specs/SPEC-318-in-context-agent-chat-and-review.md) (3xx, not
+SPEC-000 — a deliberate deviation named in its own §3, since this spec exists solely to serve
+SPEC-318 and has no independent architectural meaning)
+
+The daemon-side layer SPEC-318's five per-area agents stand on: a durable JSONL conversation store
+the app fully owns (project-scoped and Part-scoped threads, replacing AgentFlow's in-memory,
+tool-call-blind `MultiUserHistory`), a validated `SourceRef` model extending SPEC-205's
+drop-not-repair citation contract to chat, a rebuildable FTS5 retrieval index over
+`PRODUCT-PLAN.md` §4's long-unbuilt `.index/` (with a `LikeScanRetriever` fallback and no vector
+store — see its own §2.6 for the argument), a promotion path from resolved conversation to durable
+cited note, and router-based agent dispatch with no LLM on the routing path. Also closes a real
+prerequisite gap: SPEC-308's connection guidance is generated today and discarded
+(`kicad.generate_connection_guidance` returns its result; nothing persists it) — persisting it is
+`CTX-206.1`, the first slice.
+
 #### Open questions for this layer — both resolved by `SPEC-201`/`CTX-201.1`
 
 *   **Where does AgentFlow's `context/` tree live inside `services/python-daemon`?** AgentFlow
@@ -722,6 +740,24 @@ than solved with new plumbing this app has never needed before), and the `Design
 whenever no project is open. One deliberate, one-off break from `CTX-316.1`'s own
 one-const-per-action event convention: a custom library's identity can't be a compile-time const,
 so `menu://open-library` carries a real payload instead.
+
+#### [SPEC-318](apps/tauri-ui/specs/SPEC-318-in-context-agent-chat-and-review.md) — In-Context Agent Chat, Project Intent & AI Review — 🔲 not started 2026-08-21
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` (via SPEC-206) · *Depends on:* SPEC-206,
+SPEC-205, SPEC-308, SPEC-309, SPEC-313, SPEC-204
+
+Gives every working area (Overview, Components, Schematic, PCB, Enclosure) its own scoped agent
+chat, grounded in what that area actually knows -- SPEC-205's cited guidance, SPEC-308's connection
+guidance (once SPEC-206 persists it), SPEC-309's ERC/DRC findings -- selected deterministically by
+the tab, never by a model (`PRODUCT-PLAN.md` §3.2 unchanged). Adds an optional project-intent field
+every agent reads as the user's stated goal, never a verified fact. Every answer carries validated
+source chips or is marked general-practice; nothing is described as "verified." Also finally
+deletes `parseCommand` (§2.6), rehoming the two capabilities it currently gates -- component
+generation and `SPEC-108`'s inject flow -- into real homes rather than dropping them silently.
+Deliberately amends `PRODUCT-PLAN.md` §3.3/§2.1 and `SPEC-300` §2 (see its own §2.1 for the full
+argument) and deliberately does not ship the AI Review buttons yet -- it defines the seam (a typed
+`ReviewFinding[]`, the same agent/tools/scope as chat) so building them later is additive, not a
+rewrite.
 
 ### 3.4 `4xx` — Distribution & operations
 
