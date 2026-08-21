@@ -10,13 +10,21 @@ import { dispatch } from './ipc'
  * since an unlinked project (today's only real kind) has nowhere real
  * to point at yet. `last_results`/`export_history` are the real Save
  * Project manifest fields `library_store.py`'s `save_project` now
- * persists verbatim, keyed by area tab (`"enclosure"` today). */
+ * persists verbatim, keyed by area tab (`"enclosure"` today).
+ *
+ * CTX-304.3: `parts` is `SPEC-304` §2's own long-described but never-built
+ * "component refs" -- real Part-level references into the global Library
+ * (many-to-many, never a copy). Optional/absent on a project saved before
+ * this context; `library_store.py`'s own `load_project` backfills it to
+ * `[]` server-side, but the type stays optional here since a bare
+ * `{name}` object (e.g. right after `project.list`) never carries it. */
 export interface Project {
   name: string
   schema_version?: number
   directory?: string
   last_results?: Record<string, unknown>
   export_history?: ExportHistoryEntry[]
+  parts?: string[]
 }
 
 /** One real, permanent record of an actual `freecad.export_enclosure`
@@ -109,4 +117,17 @@ export async function appendConversationTurn(
     turn,
   })
   unwrap(response)
+}
+
+/** CTX-304.3: adds a real Part-level reference from a Project onto a
+ * Library Part -- idempotent server-side (`library_store.py`'s
+ * `add_project_part_reference`), so calling this twice for the same
+ * part is always safe. Returns the updated Project record. */
+export async function addProjectPartReference(
+  projectName: string,
+  partId: string,
+): Promise<Project> {
+  return unwrap(
+    await dispatch('project.add_part_reference', { project_name: projectName, part_id: partId }),
+  )
 }

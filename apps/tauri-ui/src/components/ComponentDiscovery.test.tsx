@@ -28,8 +28,17 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
 // ComponentDiscovery's tests stay focused on search/confirm/cache and
 // don't need to mock PartDetail's own real extraction call.
 vi.mock('./PartDetail', () => ({
-  PartDetail: ({ candidate }: { candidate: { part_number: string } }) => (
-    <p>PartDetail stub for {candidate.part_number}</p>
+  PartDetail: ({
+    candidate,
+    currentProject,
+  }: {
+    candidate: { part_number: string }
+    currentProject?: { name: string } | null
+  }) => (
+    <p>
+      PartDetail stub for {candidate.part_number}
+      {currentProject && ` (project: ${currentProject.name})`}
+    </p>
   ),
 }))
 
@@ -246,6 +255,23 @@ describe('ComponentDiscovery', () => {
 
     expect(screen.queryByText(/Confirmed: ATtiny85/)).toBeNull()
     screen.getByPlaceholderText(/search for a part/)
+  })
+
+  it('CTX-304.3: forwards currentProject through to PartDetail unchanged', async () => {
+    searchComponentsMock.mockResolvedValueOnce([
+      {
+        part_number: 'ATtiny85', manufacturer: 'Microchip', package: 'DIP-8',
+        datasheet_url: 'https://example.com/attiny85.pdf', confidence: 'high', rationale: 'Exact match.',
+      },
+    ])
+    cacheDatasheetMock.mockResolvedValueOnce('/storage/library/datasheets/ATtiny85.pdf')
+
+    render(<ComponentDiscovery projectName="test-project" currentProject={{ name: 'weather-pcb' }} />)
+    search('atiny85')
+    await waitFor(() => screen.getByRole('button', { name: 'This one' }))
+    fireEvent.click(screen.getByRole('button', { name: 'This one' }))
+
+    await waitFor(() => screen.getByText('PartDetail stub for ATtiny85 (project: weather-pcb)'))
   })
 
   it('CTX-306.3: a candidate already saved to the library gets an "Already in your library" badge', async () => {

@@ -1809,6 +1809,33 @@ class TestProjectSetIntentRoute(unittest.TestCase):
         self.assertNotIn("project.set_intent", daemon.ASYNC_ROUTES)
 
 
+class TestProjectAddPartReferenceRoute(unittest.TestCase):
+    """CTX-304.3 (SPEC-304 §2): the same thin-wrapper shape as
+    TestProjectSetIntentRoute above, applied to project.add_part_reference."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_persists_the_real_reference_onto_the_project(self):
+        daemon.library_store.save_project({"name": "weather-pcb"})
+
+        result = daemon.project_add_part_reference("weather-pcb", "ATtiny85")
+
+        self.assertEqual(result["parts"], ["ATtiny85"])
+        reloaded = daemon.library_store.load_project("weather-pcb")
+        self.assertEqual(reloaded["parts"], ["ATtiny85"])
+
+    def test_002_registered_as_a_project_route_not_an_async_one(self):
+        routes = daemon._build_routes()
+        self.assertIn("project.add_part_reference", routes)
+        self.assertNotIn("project.add_part_reference", daemon.ASYNC_ROUTES)
+
+
 class TestChatThreadRoutes(unittest.TestCase):
     """CTX-206.3 (SPEC-206 §2.2): the two read routes this slice ships --
     chat.send (SPEC-206 §2.5) is a later, separate slice."""
