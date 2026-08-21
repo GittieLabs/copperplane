@@ -3,7 +3,7 @@ import json
 import os
 import sys
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -135,6 +135,106 @@ class TestValidateSchema(unittest.TestCase):
         schema["package"] = "PDIP-8"
         schema["package_dimensions"]["pitch_mm"] = 2.54
         cp.validate_schema(schema)  # must not raise
+
+    def test_008_qfn_56_is_a_real_recognized_package(self):
+        """CTX-202.2: a real, live ESP32-S3 (QFN-56) extraction failed
+        closed here because this table didn't have it yet. 56 pins --
+        the package's own nominal lead count, no separately-enumerated
+        thermal pad."""
+        schema = copy.deepcopy(_VALID_SOIC8_SCHEMA)
+        schema["package"] = "QFN-56"
+        schema["pins"] = [
+            {"number": str(i), "name": f"P{i}", "electrical_type": "bidirectional"} for i in range(1, 57)
+        ]
+        schema["package_dimensions"]["pitch_mm"] = 0.4
+        cp.validate_schema(schema)  # must not raise
+
+    def test_009_qfn_56_with_a_real_exposed_thermal_pad_also_validates(self):
+        """CTX-202.2: a second real, live extraction found the model
+        correctly reporting a real 57th pin, "GND_PAD" -- the ESP32-S3's
+        own datasheet numbers its exposed thermal/ground pad as a real
+        electrical contact, not a hallucination. 56 leads + 1 pad = 57
+        must validate too, not just the bare 56."""
+        schema = copy.deepcopy(_VALID_SOIC8_SCHEMA)
+        schema["package"] = "QFN-56"
+        schema["pins"] = [
+            {"number": str(i), "name": f"P{i}", "electrical_type": "bidirectional"} for i in range(1, 57)
+        ] + [{"number": "57", "name": "GND_PAD", "electrical_type": "ground"}]
+        schema["package_dimensions"]["pitch_mm"] = 0.4
+        cp.validate_schema(schema)  # must not raise
+
+    def test_010_qfn_56_still_rejects_a_count_that_is_neither_56_nor_57(self):
+        """The widening is specific to the documented thermal-pad case,
+        not a general loosening -- 58 (or any other count) must still
+        fail closed."""
+        schema = copy.deepcopy(_VALID_SOIC8_SCHEMA)
+        schema["package"] = "QFN-56"
+        schema["pins"] = [
+            {"number": str(i), "name": f"P{i}", "electrical_type": "bidirectional"} for i in range(1, 59)
+        ]
+        schema["package_dimensions"]["pitch_mm"] = 0.4
+        with self.assertRaises(cp.ComponentValidationError) as ctx:
+            cp.validate_schema(schema)
+        self.assertIn("expects 56 or 57 pins, got 58", str(ctx.exception))
+
+
+class TestGenerateComponentRetry(unittest.TestCase):
+    """CTX-202.2: a real, live ESP32-S3 extraction intermittently failed
+    with "Extraction did not return valid JSON." Three fresh, direct
+    calls to the real extraction agent all succeeded well under
+    max_tokens, ruling out truncation-at-the-limit as the cause -- the
+    real fix is a retry on that specific failure class, not a bigger
+    budget. These mock only the LLM boundary (_build_agent_executor,
+    same pattern TestExplainViolations already established); the real
+    validate_component_schema handler and its real _extract_json/
+    validate_schema checks run for real against the fake extract text."""
+
+    def _executor_returning(self, *raw_texts):
+        executor = MagicMock()
+        executor.run = AsyncMock(side_effect=[
+            cp.NodeOutput(node_id="extract", agent_id="component_extraction", text=text)
+            for text in raw_texts
+        ])
+        # _client=None makes _close_provider_client's own real cleanup
+        # return immediately -- a bare MagicMock() auto-creates a truthy
+        # `_client.aio.aclose` chain that isn't a real coroutine, which
+        # `await`s to a real TypeError.
+        return executor, MagicMock(_client=None)
+
+    @patch('component_pipeline._build_agent_executor')
+    def test_001_retries_once_on_malformed_json_then_succeeds(self, mock_build):
+        mock_build.return_value = self._executor_returning(
+            "not valid json {{{", json.dumps(_VALID_SOIC8_SCHEMA),
+        )
+
+        schema = cp.generate_component("TEST123")
+
+        self.assertEqual(schema["package"], "SOIC-8")
+        self.assertEqual(mock_build.call_count, 2)
+
+    @patch('component_pipeline._build_agent_executor')
+    def test_002_a_deterministic_validation_failure_never_retries(self, mock_build):
+        bad_schema = copy.deepcopy(_VALID_SOIC8_SCHEMA)
+        bad_schema["package"] = "NOT-A-REAL-PACKAGE"
+        mock_build.return_value = self._executor_returning(json.dumps(bad_schema))
+
+        with self.assertRaises(cp.ComponentValidationError) as ctx:
+            cp.generate_component("TEST123")
+
+        self.assertIn("not in the known reference table", str(ctx.exception))
+        self.assertEqual(mock_build.call_count, 1)
+
+    @patch('component_pipeline._build_agent_executor')
+    def test_003_exhausting_every_retry_on_repeated_malformed_json_still_raises(self, mock_build):
+        mock_build.return_value = self._executor_returning(
+            "not valid json {{{", "still not valid }}}",
+        )
+
+        with self.assertRaises(cp.ComponentValidationError) as ctx:
+            cp.generate_component("TEST123")
+
+        self.assertIn("Extraction did not return valid JSON", str(ctx.exception))
+        self.assertEqual(mock_build.call_count, cp._MAX_EXTRACTION_ATTEMPTS)
 
 
 class TestBuildAgentExecutorProviderOverride(unittest.TestCase):
