@@ -19,6 +19,7 @@ const generateDesignGuidanceMock = vi.fn()
 const cacheDatasheetMock = vi.fn()
 const loadPartMock = vi.fn()
 const addProjectPartReferenceMock = vi.fn()
+const listProjectsMock = vi.fn()
 
 vi.mock('../lib/library', () => ({
   listLibraries: (...args: unknown[]) => listLibrariesMock(...args),
@@ -27,6 +28,7 @@ vi.mock('../lib/library', () => ({
 
 vi.mock('../lib/projects', () => ({
   addProjectPartReference: (...args: unknown[]) => addProjectPartReferenceMock(...args),
+  listProjects: (...args: unknown[]) => listProjectsMock(...args),
 }))
 
 vi.mock('../lib/partDetail', () => ({
@@ -89,6 +91,7 @@ beforeEach(() => {
   // to real extraction exactly as before.
   loadPartMock.mockReset().mockRejectedValue(new Error('No Part found.'))
   addProjectPartReferenceMock.mockReset()
+  listProjectsMock.mockReset().mockResolvedValue([])
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -450,6 +453,51 @@ describe('PartDetail', () => {
 
     await waitFor(() => expect(tagObjectMock).toHaveBeenCalledWith('part', 'ATtiny85', ['esp32-boards']))
     await waitFor(() => screen.getByText('Added to library.'))
+  })
+
+  it('CTX-306.4: Add to project… opens a real picker and calls addProjectPartReference for each chosen project', async () => {
+    listProjectsMock.mockResolvedValueOnce(['weather-pcb', 'doorbell'])
+    addProjectPartReferenceMock.mockResolvedValue({ name: 'weather-pcb', parts: ['ATtiny85'] })
+    await saveAndReachFootprintSection()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to project…' }))
+
+    await waitFor(() => screen.getByText('doorbell'))
+    fireEvent.click(screen.getByLabelText('weather-pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => expect(addProjectPartReferenceMock).toHaveBeenCalledWith('weather-pcb', 'ATtiny85'))
+    expect(addProjectPartReferenceMock).not.toHaveBeenCalledWith('doorbell', 'ATtiny85')
+    await waitFor(() => screen.getByText('Added to project.'))
+  })
+
+  it('CTX-306.4: a failed project link shows which project failed without crashing', async () => {
+    listProjectsMock.mockResolvedValueOnce(['weather-pcb'])
+    addProjectPartReferenceMock.mockRejectedValueOnce(new Error("Project 'weather-pcb' not found."))
+    await saveAndReachFootprintSection()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to project…' }))
+    await waitFor(() => screen.getByText('weather-pcb'))
+    fireEvent.click(screen.getByLabelText('weather-pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => screen.getByText("Couldn't add to: weather-pcb."))
+  })
+
+  it('CTX-306.4: "Add to project..." works from a reopened, already-saved Part the same as a freshly-saved one', async () => {
+    loadPartMock.mockResolvedValueOnce(SAVED_PART_NO_FOOTPRINT)
+    listProjectsMock.mockResolvedValueOnce(['weather-pcb'])
+    addProjectPartReferenceMock.mockResolvedValueOnce({ name: 'weather-pcb', parts: ['ATtiny85'] })
+
+    render(<PartDetail candidate={CANDIDATE} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Add to project…' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add to project…' }))
+    await waitFor(() => screen.getByText('weather-pcb'))
+    fireEvent.click(screen.getByLabelText('weather-pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => expect(addProjectPartReferenceMock).toHaveBeenCalledWith('weather-pcb', 'ATtiny85'))
   })
 
   it('CTX-308.5: Generate from datasheet dimensions calls generateFootprintFromPart and shows an unverified badge', async () => {

@@ -14,7 +14,7 @@ import {
   type FootprintCandidate,
 } from '../lib/footprints'
 import { listLibraries, tagObject, type LibrarySummary } from '../lib/library'
-import { addProjectPartReference, type Project } from '../lib/projects'
+import { addProjectPartReference, listProjects, type Project } from '../lib/projects'
 import {
   exportSymbol,
   extractPartDetail,
@@ -99,6 +99,25 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
   // either way; only the project-linkage step can fail independently,
   // and it must never look like the save itself failed.
   const [projectLinkWarning, setProjectLinkWarning] = useState<string | null>(null)
+
+  // CTX-306.4: the manual counterpart to CTX-304.3's auto-link-on-save --
+  // an already-saved Part (opened via `initialPart` from the Library, or
+  // hydrated via CTX-306.3's loadPart-first shortcut) never goes through
+  // handleSave, so there's no save event to hook a linkage call onto.
+  // Mirrors CTX-315.2's own "Add to library..." picker shape exactly
+  // (same multi-select-then-Confirm interaction), since this is the
+  // same kind of problem -- picking 0+ real targets to tag a saved
+  // object into -- already solved once in this file. Deliberately not
+  // gated on `currentProject`: the Library view (`initialPart`) has no
+  // such prop at all (App.tsx resets it to null the instant `view.kind`
+  // leaves `'project'`), so a real picker over every project, not a
+  // single current one, is the only way this works there too.
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false)
+  const [availableProjects, setAvailableProjects] = useState<string[] | null>(null)
+  const [selectedProjectNames, setSelectedProjectNames] = useState<string[]>([])
+  const [addingToProjects, setAddingToProjects] = useState(false)
+  const [projectTagError, setProjectTagError] = useState<string | null>(null)
+  const [projectTagMessage, setProjectTagMessage] = useState<string | null>(null)
   const [exportedPath, setExportedPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -187,6 +206,12 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     setExportedPath(null)
     setSaveError(null)
     setProjectLinkWarning(null)
+    setProjectPickerOpen(false)
+    setAvailableProjects(null)
+    setSelectedProjectNames([])
+    setAddingToProjects(false)
+    setProjectTagError(null)
+    setProjectTagMessage(null)
     setExportError(null)
     setFootprintQuery('')
     setFootprintStatus('idle')
@@ -303,6 +328,46 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
+    }
+  }
+
+  /** CTX-306.4: mirrors handleOpenLibraryPicker's own shape exactly. */
+  async function handleOpenProjectPicker() {
+    if (!savedPart) return
+    setProjectTagError(null)
+    setProjectTagMessage(null)
+    setProjectPickerOpen(true)
+    try {
+      setAvailableProjects(await listProjects())
+    } catch (err) {
+      setProjectTagError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  function handleToggleProjectSelection(name: string) {
+    setSelectedProjectNames((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+    )
+  }
+
+  async function handleConfirmAddToProjects() {
+    if (!savedPart) return
+    setAddingToProjects(true)
+    setProjectTagError(null)
+    const failed: string[] = []
+    for (const name of selectedProjectNames) {
+      try {
+        await addProjectPartReference(name, savedPart.part_id)
+      } catch {
+        failed.push(name)
+      }
+    }
+    setAddingToProjects(false)
+    if (failed.length === 0) {
+      setProjectTagMessage('Added to project.')
+      setProjectPickerOpen(false)
+    } else {
+      setProjectTagError(`Couldn't add to: ${failed.join(', ')}.`)
     }
   }
 
@@ -699,6 +764,61 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
             )}
             {libraryTagError && <p className="text-sm text-danger">{libraryTagError}</p>}
             {libraryTagMessage && <p className="text-sm text-success">{libraryTagMessage}</p>}
+          </div>
+
+          {/* CTX-306.4: a real, separate action from "Add to library…"
+              above -- Projects and Libraries are different real objects
+              (SPEC-304 §2's Part-level project reference vs. SPEC-315's
+              library membership), so this is its own picker, not folded
+              into the one above. */}
+          <div className="flex flex-col gap-2 border-b border-line-subtle pb-2">
+            {!projectPickerOpen ? (
+              <button
+                type="button"
+                className="self-start rounded border border-line px-3 py-1 text-xs font-medium"
+                onClick={() => void handleOpenProjectPicker()}
+              >
+                Add to project…
+              </button>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {availableProjects === null && !projectTagError && (
+                  <p className="text-xs text-fg-muted">Loading projects…</p>
+                )}
+                {availableProjects !== null && availableProjects.length === 0 && (
+                  <p className="text-xs text-fg-muted">No projects yet.</p>
+                )}
+                {availableProjects?.map((name) => (
+                  <label key={name} className="flex items-center gap-2 text-xs text-fg-secondary">
+                    <input
+                      type="checkbox"
+                      checked={selectedProjectNames.includes(name)}
+                      onChange={() => handleToggleProjectSelection(name)}
+                    />
+                    {name}
+                  </label>
+                ))}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="self-start rounded bg-accent px-3 py-1 text-xs font-medium text-accent-fg disabled:opacity-50"
+                    onClick={() => void handleConfirmAddToProjects()}
+                    disabled={addingToProjects || selectedProjectNames.length === 0}
+                  >
+                    {addingToProjects ? 'Adding…' : 'Confirm'}
+                  </button>
+                  <button
+                    type="button"
+                    className="self-start rounded border border-line px-3 py-1 text-xs"
+                    onClick={() => setProjectPickerOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {projectTagError && <p className="text-sm text-danger">{projectTagError}</p>}
+            {projectTagMessage && <p className="text-sm text-success">{projectTagMessage}</p>}
           </div>
 
           {/* CTX-205.3/.4/.7, SPEC-205: real, cited (Class B) design
