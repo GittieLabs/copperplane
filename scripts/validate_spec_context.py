@@ -132,6 +132,119 @@ def validate_testing_matrix(file_path):
     return errors
 
 
+_COMMIT_HASH_TOKEN = re.compile(r'[0-9a-f]{7,40}')
+
+
+def extract_hash_token(entry):
+    """Pulls the leading hex commit hash out of a commit_hashes entry --
+    either a bare hash or this repo's own established "<hash> -
+    <description>" format (both real, already in use across existing
+    context files). Returns None if the entry doesn't start with
+    something hash-shaped at all (SPEC-902's own severity split treats
+    that as unambiguously a bug, same as a dangling link, not an
+    in-progress state)."""
+    if not isinstance(entry, str):
+        return None
+    token = entry.split(' - ', 1)[0].strip()
+    return token if _COMMIT_HASH_TOKEN.fullmatch(token) else None
+
+
+def git_commit_is_reachable(commit_hash):
+    """True if `commit_hash` is a real ancestor of (or equal to) the
+    current `HEAD` -- real *reachability*, not mere object existence.
+    `git cat-file -e <hash>` was tried first and rejected: a commit
+    discarded by `git commit --amend` remains a real, loose object in
+    the local `.git/objects/` store until garbage collection eventually
+    runs (confirmed directly -- `cat-file -e` reports it present right
+    after the amend that orphaned it), so that check alone would have
+    missed the exact real bug this validator exists to catch.
+    `git merge-base --is-ancestor` answers the real question: will this
+    hash still resolve to anything once history moves on, the same way
+    a citation must resolve to a real page, not just exist as bytes
+    somewhere. Deliberately never attempts a network fetch -- a hash
+    that isn't already reachable in the current checkout is exactly
+    the class of bug this check exists to catch, not something to
+    paper over by reaching out to origin."""
+    result = subprocess.run(
+        ['git', 'merge-base', '--is-ancestor', commit_hash, 'HEAD'],
+        capture_output=True, text=True,
+    )
+    return result.returncode == 0
+
+
+def validate_commit_hashes_are_real(ctx_file, base_branch, frontmatter):
+    """A real bug this check exists to catch, found and fixed across ten
+    context files in this repo's own history: a commit_hashes entry can
+    look entirely valid -- correct hex format, matches this repo's own
+    "<hash> - <description>" convention -- while referring to a commit
+    that was never actually pushed anywhere. The concrete, real cause:
+    `git commit --amend` used to fold the hash into the very commit it
+    describes rewrites history, silently discarding the original,
+    pre-amend commit the moment it's amended, before it's ever pushed.
+    `scripts/validate_spec_context.py` never caught this, because the
+    existing check only verifies the field is non-empty, never that a
+    recorded hash actually resolves to something real.
+
+    Deliberately scoped to hashes NEWLY ADDED in this diff (this
+    file's own commit_hashes as of `base_branch`, versus its current
+    value), not every hash the file has ever recorded. An older,
+    already-merged context file can legitimately cite a real commit
+    from a since-squashed, since-deleted feature branch (this repo's
+    own established convention -- e.g. CTX-315.2's own precedent,
+    confirmed directly: `git fetch <url> <that-hash>` against a fresh
+    clone fails once the branch is gone, even though the commit was
+    completely real and verifiable at the time it was recorded, and
+    remains visible forever on the merged PR's own GitHub page). That
+    older hash is not fetchable in an unrelated, later PR's own scoped
+    checkout through no fault of its own -- re-validating it there
+    would be a real, false failure, not a caught bug. A hash someone is
+    adding to this file *right now*, in *this* diff, is different: it
+    must already be part of the current branch's own history (this
+    repo's own real workflow -- `/close-context` collects commits via
+    `git log $(git merge-base HEAD origin/develop)..HEAD`, all of which
+    are, by construction, reachable right now), so it's safe and
+    correct to demand it resolve for real, while it still can."""
+    errors = []
+    new_hashes = frontmatter.get('commit_hashes') or []
+    if not isinstance(new_hashes, list):
+        return errors
+
+    old_hashes = []
+    show = subprocess.run(
+        ['git', 'show', f'{base_branch}:{ctx_file}'], capture_output=True, text=True,
+    )
+    if show.returncode == 0:
+        match = re.match(r'^---\s*\n(.*?)\n---\s*\n', show.stdout, re.DOTALL)
+        if match:
+            try:
+                old_fm = yaml.safe_load(match.group(1)) or {}
+            except yaml.YAMLError:
+                old_fm = {}
+            old_hashes = old_fm.get('commit_hashes') or []
+
+    added_hashes = [h for h in new_hashes if h not in old_hashes]
+
+    for entry in added_hashes:
+        commit_hash = extract_hash_token(entry)
+        if commit_hash is None:
+            errors.append(
+                f"MALFORMED COMMIT HASH: {ctx_file}'s commit_hashes entry {entry!r} doesn't start "
+                f"with a real-looking hex commit hash (7-40 hex characters)."
+            )
+            continue
+        if not git_commit_is_reachable(commit_hash):
+            errors.append(
+                f"DANGLING COMMIT HASH: {ctx_file} records '{commit_hash}' under commit_hashes, but "
+                f"no commit with that hash exists in this checkout's own history. A real, common "
+                f"cause: `git commit --amend` was used to fold the hash into the very commit it "
+                f"describes, which rewrites the commit to a new hash and silently discards the one "
+                f"just recorded, before it's ever pushed -- record the commit's real, final hash "
+                f"(the one that's actually pushed), not one from before an amend rewrote it."
+            )
+
+    return errors
+
+
 def validate_user_facing_section(file_path):
     """CTX-901.2: a SPEC-*.md declaring user_facing: true must have a
     '## 5. User & Interaction' section. Structural presence only, not
@@ -329,6 +442,8 @@ def validate_pr(base_branch):
         hashes = frontmatter.get('commit_hashes', [])
         if not hashes:
             errors.append(f"EMPTY COMMIT HASHES: {ctx_file} must list at least one commit hash under 'commit_hashes'.")
+        else:
+            errors.extend(validate_commit_hashes_are_real(ctx_file, base_branch, frontmatter))
 
         # spec_ref must point at a real file, not just be present (SPEC-902)
         spec_ref = frontmatter.get('spec_ref')
