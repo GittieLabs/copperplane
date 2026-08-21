@@ -634,6 +634,169 @@ class TestConversation(LibraryStoreTestCase):
         self.assertTrue(after_second.startswith(after_first))
 
 
+class TestChatThreads(LibraryStoreTestCase):
+    """CTX-206.3 (SPEC-206 §2.2): thread storage -- scope resolution,
+    real path construction, real round trips. `append_turn`/`chat.send`
+    (SPEC-206 §2.5) are a later, separate slice needing the agent layer;
+    tests here write via the private `_write_thread_turns` helper
+    directly, the same way `TestConversation` above reaches into
+    `_conversation_path`."""
+
+    def setUp(self):
+        super().setUp()
+        store.save_project({"name": "weather-pcb"})
+
+    def test_001_load_thread_is_empty_before_any_turn_exists(self):
+        self.assertEqual(store.load_thread("project", "weather-pcb:overview"), [])
+
+    def test_002_load_thread_rejects_an_unknown_project_scoped_area(self):
+        with self.assertRaises(store.SchemaValidationError):
+            store.load_thread("project", "weather-pcb:not-a-real-area")
+
+    def test_003_load_thread_rejects_a_malformed_scope_id_with_no_area(self):
+        with self.assertRaises(store.SchemaValidationError):
+            store.load_thread("project", "weather-pcb")
+
+    def test_004_load_thread_rejects_an_unknown_scope(self):
+        with self.assertRaises(store.SchemaValidationError):
+            store.load_thread("not-a-real-scope", "weather-pcb:overview")
+
+    def test_005_a_real_turn_written_via_the_real_path_helper_round_trips(self):
+        path = store._project_thread_path("weather-pcb", "schematic")
+        store._write_thread_turns(path, [
+            {"turn_id": "t1", "role": "user", "content": "what's pin 8 for?"},
+        ])
+
+        turns = store.load_thread("project", "weather-pcb:schematic")
+
+        self.assertEqual(turns[0]["content"], "what's pin 8 for?")
+
+    def test_006_a_part_scoped_thread_lives_under_the_real_global_library_path(self):
+        path = store._part_thread_path("ATtiny85")
+        store._write_thread_turns(path, [{"turn_id": "t1", "role": "user", "content": "hi"}])
+
+        turns = store.load_thread("part", "ATtiny85")
+
+        self.assertEqual(len(turns), 1)
+        self.assertTrue(path.endswith(os.path.join("library", "chats", "parts", "ATtiny85.jsonl")))
+
+
+class TestChatThreadDirectoryLinkFix(LibraryStoreTestCase):
+    """SPEC-206 §2.2's own named real bug: `_conversation_path` never
+    followed `CTX-312.1`'s directory link, so a linked project's history
+    was stripped when handed to another machine. This is the fix,
+    verified directly against a real linked directory."""
+
+    def setUp(self):
+        super().setUp()
+        self._real_dir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._real_dir.cleanup()
+        super().tearDown()
+
+    def test_001_a_linked_projects_thread_lives_inside_its_own_real_directory(self):
+        store.save_project({"name": "weather-pcb", "directory": self._real_dir.name})
+
+        path = store._project_thread_path("weather-pcb", "overview")
+
+        self.assertTrue(path.startswith(self._real_dir.name))
+        self.assertIn(store._PROJECT_STATE_SUBDIR, path)
+
+    def test_002_a_turn_written_to_a_linked_project_thread_travels_with_the_folder(self):
+        store.save_project({"name": "weather-pcb", "directory": self._real_dir.name})
+        path = store._project_thread_path("weather-pcb", "overview")
+        store._write_thread_turns(path, [{"turn_id": "t1", "role": "user", "content": "hi"}])
+
+        turns = store.load_thread("project", "weather-pcb:overview")
+
+        self.assertEqual(len(turns), 1)
+        self.assertTrue(os.path.isfile(
+            os.path.join(self._real_dir.name, store._PROJECT_STATE_SUBDIR, "chats", "overview.jsonl")
+        ))
+
+
+class TestChatThreadMigration(LibraryStoreTestCase):
+    """SPEC-206 §2.2: a project's legacy `conversation.jsonl` (pre-
+    CTX-206.3) is upconverted on first read of its `overview` thread,
+    and left in place, never deleted."""
+
+    def setUp(self):
+        super().setUp()
+        store.save_project({"name": "weather-pcb"})
+
+    def test_001_migrates_a_real_legacy_conversation_on_first_overview_read(self):
+        store.append_conversation_turn(
+            "weather-pcb", {"role": "user", "content": "hello", "timestamp": "2026-01-01T00:00:00Z"},
+        )
+        store.append_conversation_turn("weather-pcb", {"role": "assistant", "content": "hi there"})
+
+        turns = store.load_thread("project", "weather-pcb:overview")
+
+        self.assertEqual(len(turns), 2)
+        self.assertEqual(turns[0]["content"], "hello")
+        self.assertEqual(turns[0]["timestamp"], "2026-01-01T00:00:00Z")
+        self.assertIsNone(turns[1]["timestamp"])
+        self.assertTrue(turns[0]["turn_id"])
+
+    def test_002_migration_marks_general_practice_true_on_assistant_turns_only(self):
+        store.append_conversation_turn("weather-pcb", {"role": "user", "content": "hello"})
+        store.append_conversation_turn("weather-pcb", {"role": "assistant", "content": "hi"})
+
+        turns = store.load_thread("project", "weather-pcb:overview")
+
+        self.assertFalse(turns[0]["general_practice"])
+        self.assertTrue(turns[1]["general_practice"])
+
+    def test_003_migrated_from_lands_only_on_the_first_record(self):
+        store.append_conversation_turn("weather-pcb", {"role": "user", "content": "one"})
+        store.append_conversation_turn("weather-pcb", {"role": "user", "content": "two"})
+
+        turns = store.load_thread("project", "weather-pcb:overview")
+
+        self.assertIn("migrated_from", turns[0])
+        self.assertNotIn("migrated_from", turns[1])
+        self.assertEqual(turns[0]["migrated_from"], store._conversation_path("weather-pcb"))
+
+    def test_004_the_legacy_file_is_left_in_place_not_deleted(self):
+        store.append_conversation_turn("weather-pcb", {"role": "user", "content": "hello"})
+
+        store.load_thread("project", "weather-pcb:overview")
+
+        self.assertTrue(os.path.isfile(store._conversation_path("weather-pcb")))
+
+    def test_005_migration_only_runs_once_a_second_read_uses_the_real_new_file(self):
+        store.append_conversation_turn("weather-pcb", {"role": "user", "content": "hello"})
+        first = store.load_thread("project", "weather-pcb:overview")
+
+        # A legacy turn appended after migration must NOT retroactively
+        # reappear -- the new file is now the real source of truth.
+        store.append_conversation_turn("weather-pcb", {"role": "user", "content": "too late"})
+        second = store.load_thread("project", "weather-pcb:overview")
+
+        self.assertEqual(first, second)
+
+    def test_006_a_project_with_no_legacy_conversation_migrates_nothing(self):
+        turns = store.load_thread("project", "weather-pcb:overview")
+
+        self.assertEqual(turns, [])
+        self.assertFalse(os.path.isfile(store._project_thread_path("weather-pcb", "overview")))
+
+    def test_007_list_threads_reports_an_unmigrated_legacy_overview_thread(self):
+        store.append_conversation_turn("weather-pcb", {"role": "user", "content": "hello"})
+
+        self.assertEqual(store.list_threads("weather-pcb"), ["overview"])
+
+    def test_008_list_threads_reports_real_new_format_threads_too(self):
+        path = store._project_thread_path("weather-pcb", "schematic")
+        store._write_thread_turns(path, [{"turn_id": "t1", "role": "user", "content": "hi"}])
+
+        self.assertEqual(store.list_threads("weather-pcb"), ["schematic"])
+
+    def test_009_list_threads_is_empty_for_a_project_with_no_chat_history(self):
+        self.assertEqual(store.list_threads("weather-pcb"), [])
+
+
 class _OneShotServer:
     """A real, local HTTP server for cache_datasheet's tests -- a genuine
     socket round trip and a genuine urllib fetch, per CLAUDE.md's 'verify
