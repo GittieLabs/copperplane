@@ -147,6 +147,12 @@ except Exception:
     logger.exception("datasheet_guidance failed to import -- datasheet.generate_guidance will be unavailable")
     datasheet_guidance = None
 
+try:
+    import datasheet_structure
+except Exception:
+    logger.exception("datasheet_structure failed to import -- datasheet.read_pages will be unavailable")
+    datasheet_structure = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -963,6 +969,25 @@ def datasheet_generate_guidance(part_id: str, cancel_event=None) -> dict:
     )
 
 
+def datasheet_read_pages(part_id: str, pages: list) -> dict:
+    """The datasheet.read_pages route (SPEC-206 SS2.5): a real chat-agent
+    tool -- lets an agent check a specific page itself rather than only
+    trusting already-generated guidance. Reuses ensure_datasheet_cached
+    rather than re-fetching; datasheet_structure.extract_pages has no
+    page selector of its own (it always extracts the whole document), so
+    this route is the filter. Registered async for the same reason
+    component_cache_datasheet is -- ensure_datasheet_cached can still be a
+    real, first-time network fetch."""
+    part = library_store.load_part(part_id)
+    pdf_path = library_store.ensure_datasheet_cached(part["part_id"], part["datasheet_url"])
+    wanted = {int(p) for p in pages}
+    all_pages = datasheet_structure.extract_pages(pdf_path)
+    return {
+        "content_hash": library_store.content_hash_of_file(pdf_path),
+        "pages": [p for p in all_pages if p["page"] in wanted],
+    }
+
+
 def kicad_list_open_boards() -> dict:
     """The kicad.list_open_boards route (CTX-309.4): a real, cheap,
     read-only lookup of every board currently open in KiCad, decoupled
@@ -1264,6 +1289,8 @@ def _build_routes() -> dict:
         routes["kicad.generate_connection_guidance"] = kicad_generate_connection_guidance
     if datasheet_guidance is not None and library_store is not None:
         routes["datasheet.generate_guidance"] = datasheet_generate_guidance
+    if datasheet_structure is not None and library_store is not None:
+        routes["datasheet.read_pages"] = datasheet_read_pages
     if kicad_bridge is not None:
         routes["kicad.list_open_boards"] = kicad_list_open_boards
         routes["kicad.list_project_schematics"] = kicad_list_project_schematics
@@ -1289,6 +1316,7 @@ ASYNC_ROUTES = {
     "kicad.inject_component", "component.search", "component.cache_datasheet",
     "kicad.generate_connection_guidance", "kicad.check_board", "kicad.check_schematic",
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
+    "datasheet.read_pages",
     # CTX-314.2: both make real GitHub network calls (community_libraries.py's
     # own _github_request/fetch_raw_content) -- a real bug in CTX-314.1's own
     # shipped code (search_community_footprints was never added here) meant

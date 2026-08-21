@@ -90,6 +90,58 @@ class TestExceptionPropagation(unittest.IsolatedAsyncioTestCase):
             await registry.dispatch("kicad.inject_component", {"confirmed": True})
 
 
+class TestChatAgentToolDefinitions(unittest.TestCase):
+    """CTX-206.5 (SPEC-206 SS2.5): the real tool set every SPEC-318 chat
+    agent's own `tools:` frontmatter references -- verified against the
+    real .prompt.md files below, not just this dict in isolation."""
+
+    def test_001_every_tool_named_by_a_real_agent_prompt_is_registered_and_available(self):
+        import glob
+
+        agents_dir = os.path.join(os.path.dirname(__file__), "..", "agentflow", "agents")
+        prompt_files = glob.glob(os.path.join(agents_dir, "chat_*.prompt.md"))
+        self.assertTrue(prompt_files, "expected at least one chat_*.prompt.md to exist")
+
+        referenced_tools = set()
+        for path in prompt_files:
+            with open(path, encoding="utf-8") as f:
+                in_tools_block = False
+                for line in f:
+                    if line.startswith("tools:"):
+                        in_tools_block = True
+                        continue
+                    if in_tools_block:
+                        if line.startswith("  - "):
+                            referenced_tools.add(line.strip()[2:])
+                        else:
+                            in_tools_block = False
+
+        # context.search is a real, named exception -- CTX-206.5 deliberately
+        # defers it until SPEC-206 SS2.6's retrieval index exists.
+        referenced_tools.discard("context.search")
+
+        for tool_name in referenced_tools:
+            self.assertIn(tool_name, tool_registry.TOOL_DEFINITIONS, f"{tool_name} has no TOOL_DEFINITIONS entry")
+            self.assertIn(tool_name, daemon.ROUTES, f"{tool_name} is not a real, registered daemon route")
+
+    def test_002_datasheet_read_pages_requires_part_id_and_pages(self):
+        schema = tool_registry.TOOL_DEFINITIONS["datasheet.read_pages"]["input_schema"]
+        self.assertEqual(set(schema["required"]), {"part_id", "pages"})
+
+    def test_003_library_load_part_requires_part_id(self):
+        schema = tool_registry.TOOL_DEFINITIONS["library.load_part"]["input_schema"]
+        self.assertEqual(schema["required"], ["part_id"])
+
+    def test_004_library_list_parts_has_no_required_fields(self):
+        schema = tool_registry.TOOL_DEFINITIONS["library.list_parts"]["input_schema"]
+        self.assertEqual(schema["required"], [])
+
+    def test_005_kicad_get_component_heights_takes_no_arguments(self):
+        schema = tool_registry.TOOL_DEFINITIONS["kicad.get_component_heights"]["input_schema"]
+        self.assertEqual(schema["properties"], {})
+        self.assertEqual(schema["required"], [])
+
+
 class TestAgentDispatchToolEndToEnd(unittest.TestCase):
     """TEST-005: drives daemon.py's real JSON-RPC surface end to end through
     the agent.dispatch_tool route (CTX-204.1 Phase 2) -- not the wrapped
