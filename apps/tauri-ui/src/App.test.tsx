@@ -683,6 +683,28 @@ describe('App: Enclosure tab persists across area switches', () => {
     await waitFor(() => expect(openKicadMock).toHaveBeenCalled())
   })
 
+  it('CTX-305.4: every area wrapper stretches full width when active, not just visible', async () => {
+    // Real regression: these wrappers previously had no width class at
+    // all when active (just `undefined`), which silently shrank them to
+    // content width under <main>'s `flex-col items-center` -- the exact
+    // class of bug CTX-305.2 already fixed once, reintroduced here by
+    // CTX-306.2's own always-mounted wrapper divs. `not.toContain('hidden')`
+    // alone (as the test above checks) would not have caught this --
+    // asserting the real class value does.
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+
+    for (const [label, testId] of [
+      ['Components', 'components-area'],
+      ['Schematic', 'schematic-area'],
+      ['PCB', 'pcb-area'],
+      ['Enclosure', 'enclosure-area'],
+    ] as const) {
+      fireEvent.click(screen.getByRole('button', { name: label }))
+      await waitFor(() => expect(screen.getByTestId(testId).className).toBe('w-full'))
+    }
+  })
+
   it('CTX-316.1: a Design menu event with no project open is a real, silent no-op', async () => {
     listProjectsMock.mockResolvedValueOnce([])
     // openKicadMock isn't reset by this describe's own beforeEach --
