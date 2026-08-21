@@ -29,7 +29,7 @@ answers three questions:
 | [SPEC-104](services/python-daemon/specs/SPEC-104-freecad-headless.md) | `services/python-daemon` | [CTX-104.1](services/python-daemon/context/CTX-104.1-freecad-headless-bridge.md) | ✅ Completed | `freecadcmd` path resolution, temp-script handoff, STL → GLB via `trimesh`, verified live against FreeCAD 1.1.1 |
 | [SPEC-901](specs/SPEC-901-agent-operating-manual.md) | repo-wide (`.claude/`) | [CTX-901.1](context/CTX-901.1-agent-operating-manual.md) | ✅ Completed | `CLAUDE.md`, four slash commands (`/spec-status`, `/new-spec`, `/new-context`, `/close-context`), bloat guard test |
 | [SPEC-903](specs/SPEC-903-python-frontend-ci.md) | `.github/workflows/` | [CTX-903.1](context/CTX-903.1-python-frontend-ci.md) | ✅ Completed | `python-ci.yml`, `frontend-ci.yml`, three-OS matrix, expected-skip verification |
-| [SPEC-902](specs/SPEC-902-spec-graph-validator-v2.md) | `scripts/` | [CTX-902.1](context/CTX-902.1-spec-graph-validator-v2.md) | ✅ Completed | `validate_spec_context.py` upgraded to a full graph validator (id/location/link integrity across every `SPEC-*.md`), path-exclusion matcher fixed, 22-test suite green on all three OSes |
+| [SPEC-902](specs/SPEC-902-spec-graph-validator-v2.md) | `scripts/` | [CTX-902.1](context/CTX-902.1-spec-graph-validator-v2.md), [CTX-902.2](context/CTX-902.2-verify-commit-hashes-are-real.md) | ✅ Completed | `validate_spec_context.py` upgraded to a full graph validator (id/location/link integrity across every `SPEC-*.md`), path-exclusion matcher fixed; `CTX-902.2` added real, reachability-checked `commit_hashes` verification, 31-test suite green on all three OSes |
 | [SPEC-105](specs/SPEC-105-daemon-async-job-progress-protocol.md) | `services/python-daemon` + `core/tauri-rust` + `apps/tauri-ui` | [CTX-105.1](context/CTX-105.1-daemon-async-job-protocol.md), [CTX-105.2](apps/tauri-ui/context/CTX-105.2-frontend-job-progress-client.md) | ✅ Completed | Async job dispatch + atomic `stdout` notifications + real cancellation (daemon side); frontend `JobHandle` client replacing the CTX-101.1 single-in-flight guard |
 | [SPEC-106](specs/SPEC-106-configuration-secrets-store.md) | `core/tauri-rust` + `services/python-daemon` | [CTX-106.1](context/CTX-106.1-config-secrets-store.md) | ✅ Completed | Non-secret config injected as a spawn-time env var, secrets via the OS keychain handed over as the daemon's first `stdin` line; wired into `freecadcmd` path override and `kicad_bridge` connection settings |
 | [SPEC-107](specs/SPEC-107-structured-logging-diagnostics.md) | `services/python-daemon` + `core/tauri-rust` | [CTX-107.1](context/CTX-107.1-structured-logging-diagnostics.md) | ✅ Completed | `stderr`/rotating-file logging, capability-aware bridge imports, `daemon.ready` startup handshake, `daemon.heartbeat` closing `CTX-101.1`'s deferred macOS crash-shield heartbeat |
@@ -809,6 +809,21 @@ a context linter into a graph validator: parses `SPEC-*.md` frontmatter too, ver
 `location:` matches the file's actual path. Every one of the §1.3 breakages is now mechanically
 detectable. Also fixed the `.json`-lockfile exclusion bug noted there (the `README.md` claim turned
 out not to reflect a live bug — see CTX-902.1's Plan Drift).
+
+[CTX-902.2](context/CTX-902.2-verify-commit-hashes-are-real.md) (2026-08-20) closed a real gap found
+by reviewing a merged PR's own close-out, then confirmed against ten of the same session's own
+context files: the existing `EMPTY COMMIT HASHES` check never verified a recorded hash actually
+resolves to a real commit, so a commit hash discarded by `git commit --amend` (a real, then-common
+mistake — history rewritten, the original pre-amend commit never pushed) sailed through silently
+every time. Real design constraint found while building the fix: `git cat-file -e` isn't sufficient,
+since an amended-away commit remains a real, loose object until eventual garbage collection —
+`git merge-base --is-ancestor <hash> HEAD` checks real reachability instead (caught by this
+context's own test suite on the first implementation attempt, recorded honestly in its Plan Drift).
+Deliberately scoped to hashes newly added in the current diff, not every hash a file has ever
+recorded — an older, already-merged file can legitimately cite a real commit from a since-deleted
+feature branch (`CTX-315.2`'s own precedent, confirmed genuinely unfetchable in a fresh clone once
+the branch is gone), and re-checking that on every unrelated future edit would be a false failure,
+not a caught bug.
 
 #### SPEC-903 — Python & Frontend CI
 *Module:* `.github/workflows/` · *Depends on:* nothing
