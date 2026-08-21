@@ -2,6 +2,7 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import { cacheDatasheet, searchComponents, type ComponentCandidate } from '../lib/components'
+import { listParts } from '../lib/library'
 import { PartDetail } from './PartDetail'
 
 type Status = 'idle' | 'searching' | 'error'
@@ -37,6 +38,9 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
   } | null>(null)
   const [confirmingPartNumber, setConfirmingPartNumber] = useState<string | null>(null)
   const [pathCopied, setPathCopied] = useState(false)
+  // CTX-306.3: best-effort -- a listing failure shouldn't block search
+  // results from rendering, it just means no candidate gets a badge.
+  const [savedPartIds, setSavedPartIds] = useState<Set<string> | null>(null)
 
   useEffect(() => {
     setQuery('')
@@ -46,6 +50,7 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
     setConfirmed(null)
     setConfirmingPartNumber(null)
     setPathCopied(false)
+    setSavedPartIds(null)
   }, [projectName])
 
   async function handleCopyPath(path: string) {
@@ -78,6 +83,18 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
       setCandidates([])
       setError(err instanceof Error ? err.message : String(err))
       setStatus('error')
+      return
+    }
+
+    // CTX-306.3: real user feedback found parts already in the library
+    // showing up in search results indistinguishable from brand-new ones,
+    // with no signal that confirming would just re-run extraction on
+    // something already saved. Best-effort, not a gate on search itself.
+    try {
+      const ids = await listParts()
+      setSavedPartIds(new Set(ids))
+    } catch {
+      setSavedPartIds(null)
     }
   }
 
@@ -193,6 +210,11 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
               <div className="flex flex-col gap-1">
                 <p className="text-sm text-fg">
                   {candidate.part_number} <span className="text-fg-muted">{candidate.manufacturer}</span>
+                  {savedPartIds?.has(candidate.part_number) && (
+                    <span className="ml-2 rounded border border-line-strong px-1.5 py-0.5 text-xs font-medium text-success">
+                      Already in your library
+                    </span>
+                  )}
                 </p>
                 <p className="text-xs text-fg-muted">
                   {candidate.package} · confidence: {candidate.confidence}
