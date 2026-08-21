@@ -69,16 +69,17 @@ commit hashes, test results, and honestly-recorded mistakes.
 
 ### Download a prebuilt build (macOS)
 
-Grab the latest release from [Releases](../../releases). As of `v0.1.2`, each release ships **two**
-macOS `.dmg` files — pick the one matching your Mac:
+Grab the latest release from [Releases](../../releases). **`v0.1.1` is the current release, and it
+ships one macOS `.dmg`, for Apple Silicon (M-series Macs) only** — filename ends in `_aarch64.dmg`.
+This is almost certainly your Mac if you bought it 2020 or later; check via **Menu → About This
+Mac**. There is no Intel (`x86_64`) build published yet, and no Windows or Linux build published
+yet either — both are real, working CI targets (`SPEC-402`), just not yet attached to a published
+release. If you need one of those platforms today, see "Build from source" below, or open an issue
+so we know there's demand.
 
-*   **Apple Silicon (M-series Macs)** — filename ends in `_aarch64.dmg`. This is almost certainly
-    your Mac if you bought it 2020 or later; check via  **Menu → About This Mac**.
-*   **Intel Macs** — filename ends in `_x86_64.dmg`.
-
-As of `v0.1.1`, builds are **signed and notarized** under a real GittieLabs, LLC Apple Developer
-identity (both architectures, as of `v0.1.2`) — open the `.dmg` and drag **Hardware Agent Studio**
-into `/Applications`; it should launch normally with no Gatekeeper warning.
+As of `v0.1.1`, the macOS build is **signed and notarized** under a real GittieLabs, LLC Apple
+Developer identity — open the `.dmg` and drag **Hardware Agent Studio** into `/Applications`; it
+should launch normally with no Gatekeeper warning.
 
 **`v0.1.0` was unsigned** (see `SPEC-402` for the reasoning that shipped it that way first). If
 you're on that specific release, macOS will refuse to open it with a normal double-click:
@@ -95,26 +96,6 @@ right-click-Open steps above:
 ```bash
 xattr -cr /Applications/Hardware\ Agent\ Studio.app
 ```
-
-### Download a prebuilt build (Windows / Linux) — pre-release, needs testers
-
-As of `v0.1.3`, each release also ships real Windows and Linux builds. **These are pre-release**:
-real, working builds you can install and try, but — unlike the macOS build — not yet backed by the
-same depth of real, day-to-day usage on those platforms. **If you try one, we'd genuinely like to
-hear how it goes** (open an issue, good or bad) — that's what turns "pre-release" into a fully
-supported build.
-
-**Windows** — grab either the `.msi` or the `-setup.exe` from [Releases](../../releases). **The
-build is currently unsigned** (no Windows code-signing certificate exists yet — the cost/process for
-one is still being worked out), so Windows SmartScreen will show a "Windows protected your PC"
-warning on first launch:
-
-1. Click **More info** on the SmartScreen dialog.
-2. Click **Run anyway**.
-
-**Linux** — grab the `.deb` (Debian/Ubuntu: `sudo dpkg -i *.deb`) or the `.AppImage` (any distro:
-`chmod +x *.AppImage && ./*.AppImage`) from [Releases](../../releases). No OS-level signing/warning
-concept applies to either format the way Gatekeeper/SmartScreen do on macOS/Windows.
 
 ### Build from source
 
