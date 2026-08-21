@@ -1151,6 +1151,15 @@ def _datasheets_dir() -> str:
     return _ensure_dir("library", "datasheets")
 
 
+def datasheet_cache_path(part_number: str) -> str:
+    """The real, deterministic local cache path for `part_number`'s
+    datasheet PDF -- a pure path computation, no filesystem check, no
+    network. `CTX-206.4` (SPEC-206 §2.3) needs this to resolve a
+    `datasheet_page` `SourceRef` without re-fetching or re-parsing
+    anything."""
+    return os.path.join(_datasheets_dir(), f"{part_number}.pdf")
+
+
 def cache_datasheet(part_number: str, datasheet_url: str) -> str:
     """Fetches `datasheet_url` and writes it to
     library/datasheets/<part_number>.pdf, returning that real local path.
@@ -1183,7 +1192,7 @@ def cache_datasheet(part_number: str, datasheet_url: str) -> str:
         # OSError instead, which URLError alone does not catch.
         raise DatasheetFetchError(f"Datasheet fetch for '{part_number}' failed: {e}") from e
 
-    path = os.path.join(_datasheets_dir(), f"{part_number}.pdf")
+    path = datasheet_cache_path(part_number)
     with open(path, "wb") as f:
         f.write(content)
     return path
@@ -1202,7 +1211,7 @@ def ensure_datasheet_cached(part_number: str, datasheet_url: str) -> str:
     genuinely different real code path from raising mid-fetch there."""
     if not part_number or "/" in part_number or "\\" in part_number or ".." in part_number:
         raise DatasheetFetchError(f"'{part_number}' is not a safe part_number for a cache filename.")
-    path = os.path.join(_datasheets_dir(), f"{part_number}.pdf")
+    path = datasheet_cache_path(part_number)
     if os.path.exists(path):
         return path
     return cache_datasheet(part_number, datasheet_url)
