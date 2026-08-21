@@ -449,16 +449,16 @@ function App() {
              * layout as a mismatch, not SPEC-308's own still-unbuilt
              * footprint/connection-guidance work, which will eventually
              * join SchematicAdvisor here. */}
-            <div data-testid="components-area" className={view.area === 'components' ? undefined : 'hidden'}>
+            <div data-testid="components-area" className={view.area === 'components' ? 'w-full' : 'hidden'}>
               <ComponentDiscovery projectName={view.name} />
             </div>
-            <div data-testid="schematic-area" className={view.area === 'schematic' ? undefined : 'hidden'}>
+            <div data-testid="schematic-area" className={view.area === 'schematic' ? 'w-full' : 'hidden'}>
               <SchematicAdvisor projectName={view.name} menuCommand={menuCommand} />
             </div>
-            <div data-testid="pcb-area" className={view.area === 'pcb' ? undefined : 'hidden'}>
+            <div data-testid="pcb-area" className={view.area === 'pcb' ? 'w-full' : 'hidden'}>
               <BoardAdvisor projectName={view.name} menuCommand={menuCommand} />
             </div>
-            <div data-testid="enclosure-area" className={view.area === 'enclosure' ? undefined : 'hidden'}>
+            <div data-testid="enclosure-area" className={view.area === 'enclosure' ? 'w-full' : 'hidden'}>
               <EnclosurePanel projectName={view.name} onExportSuccess={handleExportSuccess} menuCommand={menuCommand} />
             </div>
           </>
