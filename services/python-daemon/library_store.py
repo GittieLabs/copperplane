@@ -958,8 +958,16 @@ def _backfill_project_intent(record: dict) -> dict:
     rather than `{}`. `None` means never set; `""` means the user
     explicitly cleared it. A project saved before this field existed
     gets `None`, read as "never asked", never a fabricated empty
-    string."""
+    string.
+
+    CTX-304.3: also backfills `parts` -- unlike `intent`, an absent
+    `parts` key and an explicitly-empty one mean the same real thing (no
+    Parts referenced yet), so this always defaults to `[]`, never
+    `None`, keeping every caller's list-handling code (`part_id in
+    parts`, `.map()` on the frontend) uniform regardless of whether the
+    project predates this field."""
     record.setdefault("intent", None)
+    record.setdefault("parts", [])
     return record
 
 
@@ -1048,6 +1056,28 @@ def set_project_intent(name: str, intent: str) -> dict:
     the folder automatically, same as every other real field."""
     project = load_project(name)
     project["intent"] = intent
+    return save_project(project)
+
+
+def add_project_part_reference(project_name: str, part_id: str) -> dict:
+    """CTX-304.3 (SPEC-304 §2): a Project holds real *references* to
+    Library Parts, not copies -- `SPEC-304`'s own directory diagram
+    already named this field (`project.json # ... component refs`), never
+    built until now. Round-trips through `load_project`/`save_project`
+    for the same reason `set_project_intent` above does -- CTX-312.1's
+    pointer/manifest routing comes free rather than being re-derived.
+
+    Idempotent: re-adding a `part_id` already present leaves the list
+    unchanged rather than duplicating the entry, since a user re-saving
+    the same part while a project stays open is the expected, common
+    case, not an error. Deliberately Part-level only -- Symbols and
+    Footprints stay global (SPEC-300 §2.1/SPEC-308's own already-decided
+    "many parts share one footprint" design), so this never touches
+    them."""
+    project = load_project(project_name)
+    parts = project["parts"]
+    if part_id not in parts:
+        project["parts"] = [*parts, part_id]
     return save_project(project)
 
 

@@ -18,10 +18,15 @@ const tagObjectMock = vi.fn()
 const generateDesignGuidanceMock = vi.fn()
 const cacheDatasheetMock = vi.fn()
 const loadPartMock = vi.fn()
+const addProjectPartReferenceMock = vi.fn()
 
 vi.mock('../lib/library', () => ({
   listLibraries: (...args: unknown[]) => listLibrariesMock(...args),
   tagObject: (...args: unknown[]) => tagObjectMock(...args),
+}))
+
+vi.mock('../lib/projects', () => ({
+  addProjectPartReference: (...args: unknown[]) => addProjectPartReferenceMock(...args),
 }))
 
 vi.mock('../lib/partDetail', () => ({
@@ -83,6 +88,7 @@ beforeEach(() => {
   // this file (none of which knows loadPart exists) still falls through
   // to real extraction exactly as before.
   loadPartMock.mockReset().mockRejectedValue(new Error('No Part found.'))
+  addProjectPartReferenceMock.mockReset()
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -178,6 +184,57 @@ describe('PartDetail', () => {
       CANDIDATE,
       { part_number: 'ATtiny85', package: 'SOIC-8', pins: [{ number: '1', name: 'RESET', electrical_type: 'bidirectional' }] },
     )
+    screen.getByRole('button', { name: 'Export Symbol (.kicad_sym)' })
+  })
+
+  it('CTX-304.3: a successful save with a project open also links the part to the project', async () => {
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
+    saveConfirmedPartMock.mockResolvedValueOnce({
+      part: { part_id: 'ATtiny85' },
+      symbol: { symbol_id: 'SOIC-8_0pin', reference_prefix: 'U', pins: [] },
+    })
+    addProjectPartReferenceMock.mockResolvedValueOnce({ name: 'weather-pcb', parts: ['ATtiny85'] })
+
+    render(<PartDetail candidate={CANDIDATE} currentProject={{ name: 'weather-pcb' }} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+
+    await waitFor(() => screen.getByText('Saved to library.'))
+    expect(addProjectPartReferenceMock).toHaveBeenCalledWith('weather-pcb', 'ATtiny85')
+    expect(screen.queryByText(/couldn't link it/)).toBeNull()
+  })
+
+  it("CTX-304.3: with no project open, save behaves exactly as before -- no linkage call, no warning", async () => {
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
+    saveConfirmedPartMock.mockResolvedValueOnce({
+      part: { part_id: 'ATtiny85' },
+      symbol: { symbol_id: 'SOIC-8_0pin', reference_prefix: 'U', pins: [] },
+    })
+
+    render(<PartDetail candidate={CANDIDATE} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+
+    await waitFor(() => screen.getByText('Saved to library.'))
+    expect(addProjectPartReferenceMock).not.toHaveBeenCalled()
+    expect(screen.queryByText(/couldn't link it/)).toBeNull()
+  })
+
+  it('CTX-304.3: a linkage failure shows a real, non-blocking warning without hiding the already-succeeded save', async () => {
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
+    saveConfirmedPartMock.mockResolvedValueOnce({
+      part: { part_id: 'ATtiny85' },
+      symbol: { symbol_id: 'SOIC-8_0pin', reference_prefix: 'U', pins: [] },
+    })
+    addProjectPartReferenceMock.mockRejectedValueOnce(new Error("Project 'weather-pcb' not found."))
+
+    render(<PartDetail candidate={CANDIDATE} currentProject={{ name: 'weather-pcb' }} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+
+    await waitFor(() => screen.getByText('Saved to library.'))
+    await waitFor(() => screen.getByText(/couldn't link it to project "weather-pcb"/))
+    screen.getByText(/Project 'weather-pcb' not found\./)
     screen.getByRole('button', { name: 'Export Symbol (.kicad_sym)' })
   })
 

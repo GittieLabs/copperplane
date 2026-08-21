@@ -450,7 +450,7 @@ function App() {
              * footprint/connection-guidance work, which will eventually
              * join SchematicAdvisor here. */}
             <div data-testid="components-area" className={view.area === 'components' ? 'w-full' : 'hidden'}>
-              <ComponentDiscovery projectName={view.name} />
+              <ComponentDiscovery projectName={view.name} currentProject={currentProject} />
             </div>
             <div data-testid="schematic-area" className={view.area === 'schematic' ? 'w-full' : 'hidden'}>
               <SchematicAdvisor projectName={view.name} menuCommand={menuCommand} />

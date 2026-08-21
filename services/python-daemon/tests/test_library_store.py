@@ -423,6 +423,52 @@ class TestProjectIntent(LibraryStoreTestCase):
         self.assertEqual(reloaded["intent"], "A macropad from scratch.")
 
 
+class TestProjectPartReferences(LibraryStoreTestCase):
+    """CTX-304.3 (SPEC-304 §2): a Project holds real references to
+    Library Parts (many-to-many, Part-level only) -- the same
+    backfill-and-persist shape as TestProjectIntent above, applied to a
+    list instead of a free-text field."""
+
+    def test_001_load_project_backfills_parts_as_an_empty_list_not_none(self):
+        store.save_project({"name": "weather-pcb"})
+
+        loaded = store.load_project("weather-pcb")
+
+        self.assertEqual(loaded["parts"], [])
+
+    def test_002_add_project_part_reference_appends_and_persists(self):
+        store.save_project({"name": "weather-pcb"})
+
+        updated = store.add_project_part_reference("weather-pcb", "ATtiny85")
+
+        self.assertEqual(updated["parts"], ["ATtiny85"])
+        reloaded = store.load_project("weather-pcb")
+        self.assertEqual(reloaded["parts"], ["ATtiny85"])
+
+    def test_003_adding_the_same_part_twice_is_idempotent(self):
+        store.save_project({"name": "weather-pcb"})
+
+        store.add_project_part_reference("weather-pcb", "ATtiny85")
+        updated = store.add_project_part_reference("weather-pcb", "ATtiny85")
+
+        self.assertEqual(updated["parts"], ["ATtiny85"])
+
+    def test_004_a_second_distinct_part_is_appended_alongside_the_first(self):
+        store.save_project({"name": "weather-pcb"})
+
+        store.add_project_part_reference("weather-pcb", "ATtiny85")
+        updated = store.add_project_part_reference("weather-pcb", "ESP32-S3")
+
+        self.assertEqual(updated["parts"], ["ATtiny85", "ESP32-S3"])
+
+    def test_005_preserves_the_record_s_other_real_fields(self):
+        store.save_project({"name": "weather-pcb", "intent": "A weatherproof outdoor PCB."})
+
+        updated = store.add_project_part_reference("weather-pcb", "ATtiny85")
+
+        self.assertEqual(updated["intent"], "A weatherproof outdoor PCB.")
+
+
 class TestProjectDirectoryLink(LibraryStoreTestCase):
     """CTX-312.1: SPEC-304 §2.1 already described a Project as holding "a
     link to a KiCad project directory on disk" -- these tests cover the
@@ -462,11 +508,18 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
 
         loaded = store.load_project("weather-pcb")
 
-        # CTX-206.1: `intent` is now real, backfilled `None` state -- part
-        # of "exactly as before" now that the field exists at all.
+        # CTX-206.1/CTX-304.3: `intent` and `parts` are now real,
+        # backfilled state -- part of "exactly as before" now that both
+        # fields exist at all.
         self.assertEqual(
             loaded,
-            {"name": "weather-pcb", "schema_version": 1, "component_refs": [], "intent": None},
+            {
+                "name": "weather-pcb",
+                "schema_version": 1,
+                "component_refs": [],
+                "intent": None,
+                "parts": [],
+            },
         )
         self.assertNotIn("directory", loaded)
 

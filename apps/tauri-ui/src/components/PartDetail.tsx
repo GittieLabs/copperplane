@@ -14,6 +14,7 @@ import {
   type FootprintCandidate,
 } from '../lib/footprints'
 import { listLibraries, tagObject, type LibrarySummary } from '../lib/library'
+import { addProjectPartReference, type Project } from '../lib/projects'
 import {
   exportSymbol,
   extractPartDetail,
@@ -61,9 +62,15 @@ type FootprintSearchStatus = 'idle' | 'searching' | 'error'
  * view) already has its full saved record -- `initialPart` skips
  * `candidate`'s LLM re-extraction entirely rather than re-running
  * SPEC-202's pipeline on a part that's already confirmed and saved. */
-type PartDetailProps =
-  | { candidate: ComponentCandidate; initialPart?: never }
-  | { candidate?: never; initialPart: SavedPart }
+type PartDetailProps = {
+  /** CTX-304.3: the currently open project, if any -- threaded through
+   * so a successful "Save to Library" (the `candidate` path only; a
+   * part opened via `initialPart` is already saved) can also add a
+   * real Project→Part reference. `null`/omitted means "no project
+   * open" -- Save to Library behaves exactly as before, global save
+   * only, no reference added, no error. */
+  currentProject?: Project | null
+} & ({ candidate: ComponentCandidate; initialPart?: never } | { candidate?: never; initialPart: SavedPart })
 
 // CTX-315.4: derives the initialPart entry point's own starting
 // extraction/symbol shape once, reused by both the lazy `useState`
@@ -76,7 +83,7 @@ function initialPartToSymbol(part: SavedPart): SavedSymbol {
   return { symbol_id: part.symbol_id, reference_prefix: '', pins: part.pins }
 }
 
-export function PartDetail({ candidate, initialPart }: PartDetailProps) {
+export function PartDetail({ candidate, initialPart, currentProject }: PartDetailProps) {
   const [status, setStatus] = useState<Status>(initialPart ? 'ready' : 'extracting')
   const [error, setError] = useState<string | null>(null)
   const [extraction, setExtraction] = useState<ExtractedSchema | null>(() =>
@@ -88,6 +95,10 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
   const [savedPart, setSavedPart] = useState<SavedPart | null>(initialPart ?? null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // CTX-304.3: separate from `saveError` -- the Part is genuinely saved
+  // either way; only the project-linkage step can fail independently,
+  // and it must never look like the save itself failed.
+  const [projectLinkWarning, setProjectLinkWarning] = useState<string | null>(null)
   const [exportedPath, setExportedPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -175,6 +186,7 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
     setSavedPart(null)
     setExportedPath(null)
     setSaveError(null)
+    setProjectLinkWarning(null)
     setExportError(null)
     setFootprintQuery('')
     setFootprintStatus('idle')
@@ -267,10 +279,26 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
     if (!extraction || !candidate) return
     setSaving(true)
     setSaveError(null)
+    setProjectLinkWarning(null)
     try {
       const saved = await saveConfirmedPart(candidate, extraction)
       setSavedSymbol(saved.symbol)
       setSavedPart(saved.part)
+
+      // CTX-304.3: a real, separate step from the save above -- a
+      // failure here never rolls back or hides the already-succeeded
+      // save, it's only ever surfaced as its own, non-blocking warning.
+      if (currentProject) {
+        try {
+          await addProjectPartReference(currentProject.name, saved.part.part_id)
+        } catch (err) {
+          setProjectLinkWarning(
+            `Saved, but couldn't link it to project "${currentProject.name}": ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          )
+        }
+      }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -590,6 +618,7 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
       ) : (
         <div className="flex flex-col gap-2 rounded border border-line p-3">
           <p className="text-sm text-success">Saved to library.</p>
+          {projectLinkWarning && <p className="text-xs text-warning">{projectLinkWarning}</p>}
           {!exportedPath ? (
             <button
               type="button"

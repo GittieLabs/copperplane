@@ -692,6 +692,13 @@ def project_set_intent(name: str, intent: str) -> dict:
     return library_store.set_project_intent(name, intent)
 
 
+def project_add_part_reference(project_name: str, part_id: str) -> dict:
+    """CTX-304.3 (SPEC-304 §2): thin wrapper, matching `project_save_artifact`'s
+    own `project_name`-first-argument shape. Synchronous, fast local file
+    I/O -- no LLM call."""
+    return library_store.add_project_part_reference(project_name, part_id)
+
+
 def chat_load_thread(scope: str, scope_id: str) -> list:
     """CTX-206.3 (SPEC-206 §2.2): synchronous, real local file I/O
     (including a lazy, transparent migration of a legacy
@@ -1241,6 +1248,7 @@ def _build_routes() -> dict:
         routes["project.get_directory"] = project_get_directory
         routes["project.open_from_directory"] = project_open_from_directory
         routes["project.set_intent"] = project_set_intent
+        routes["project.add_part_reference"] = project_add_part_reference
         routes["chat.load_thread"] = chat_load_thread
         routes["chat.list_threads"] = chat_list_threads
     if community_libraries is not None:

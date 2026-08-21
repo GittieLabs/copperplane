@@ -3,6 +3,7 @@ import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import { cacheDatasheet, searchComponents, type ComponentCandidate } from '../lib/components'
 import { listParts } from '../lib/library'
+import type { Project } from '../lib/projects'
 import { PartDetail } from './PartDetail'
 
 type Status = 'idle' | 'searching' | 'error'
@@ -26,7 +27,19 @@ type Status = 'idle' | 'searching' | 'error'
  * unmounting it), same as SchematicAdvisor/BoardAdvisor/EnclosurePanel
  * and for the same reason. `projectName` only resets state on a
  * genuine project switch, mirroring their own established pattern. */
-export function ComponentDiscovery({ projectName }: { projectName: string }) {
+export function ComponentDiscovery({
+  projectName,
+  currentProject,
+}: {
+  projectName: string
+  /** CTX-304.3: threaded straight through to `PartDetail`, matching
+   * `Overview`'s own existing `project={currentProject}` pattern in
+   * `App.tsx` -- so a successful "Save to Library" can also add a real
+   * Project→Part reference. Optional/omitted (rather than required)
+   * so every pre-existing test rendering this component doesn't need
+   * updating just to pass a prop it doesn't exercise. */
+  currentProject?: Project | null
+}) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -169,7 +182,7 @@ export function ComponentDiscovery({ projectName }: { projectName: string }) {
         </button>
 
         <div className="mt-2 border-t border-line-subtle pt-3">
-          <PartDetail candidate={confirmed.candidate} />
+          <PartDetail candidate={confirmed.candidate} currentProject={currentProject} />
         </div>
       </div>
     )
