@@ -402,6 +402,176 @@ class TestEndToEndCLI(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
 
+class TestCommitHashesAreReal(unittest.TestCase):
+    """A real bug found and fixed across ten of this repo's own context
+    files: a commit_hashes entry can look entirely valid (correct hex
+    format, matches this repo's own "<hash> - <description>"
+    convention) while referring to a commit that was never actually
+    pushed -- the real, concrete cause being `git commit --amend` used
+    to fold the hash into the very commit it describes, which discards
+    the original pre-amend commit. These tests reproduce that exact
+    real mechanism (commit, then amend), not a synthetic fake hash --
+    the same real CLI-via-subprocess pattern TestEndToEndCLI already
+    established for this file's other checks."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.script_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), '..', 'validate_spec_context.py')
+        )
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _git(self, *args):
+        subprocess.run(['git', *args], cwd=self.tmpdir, check=True, capture_output=True, text=True)
+
+    def _git_hash(self, *args):
+        result = subprocess.run(
+            ['git', *args], cwd=self.tmpdir, check=True, capture_output=True, text=True,
+        )
+        return result.stdout.strip()
+
+    def _write(self, relpath, content):
+        full = os.path.join(self.tmpdir, relpath)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, 'w') as f:
+            f.write(content)
+
+    def _ctx_fixture(self, commit_hashes_yaml):
+        return (
+            '---\nid: CTX-100.1\nspec_ref: "../specs/SPEC-100-base.md"\ntitle: "x"\n'
+            f'status: Planned\nbranch: "feat/CTX-100.1-x"\n{commit_hashes_yaml}\n'
+            '---\n# CTX-100.1\n\n## 2. Testing Requirements Matrix\n\n'
+            '| Test ID | Test Description | Test File Location | Status |\n'
+            '| :--- | :--- | :--- | :--- |\n'
+        )
+
+    def _run_validator(self):
+        return subprocess.run(
+            [sys.executable, self.script_path, '--base', 'develop'],
+            cwd=self.tmpdir, capture_output=True, text=True, encoding='utf-8',
+        )
+
+    def _init_base(self):
+        self._git('init', '-q')
+        self._git('config', 'user.email', 'test@example.com')
+        self._git('config', 'user.name', 'Test')
+        self._write(
+            'specs/SPEC-100-base.md',
+            '---\nid: SPEC-100\ntitle: "Base"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: false\n---\n# base\n',
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'base')
+        self._git('branch', '-q', '-m', 'develop')
+        self._git('checkout', '-q', '-b', 'feature')
+
+    def test_001_real_cli_detects_a_hash_discarded_by_git_commit_amend(self):
+        # The exact real mechanism, not a synthetic fake hash: commit,
+        # capture that real commit's own hash, record it in the
+        # context file, then amend -- which rewrites the commit to a
+        # new hash and discards the one just recorded, before it's
+        # ever pushed.
+        self._init_base()
+        self._write('daemon.py', 'x = 1\n')
+        self._write('context/CTX-100.1-base.md', self._ctx_fixture('commit_hashes:\n  - "placeholder"'))
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'add feature')
+        real_hash = self._git_hash('rev-parse', 'HEAD')
+
+        self._write(
+            'context/CTX-100.1-base.md',
+            self._ctx_fixture(f'commit_hashes:\n  - "{real_hash} - add feature"'),
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '--amend', '-m', 'add feature (amended)')
+
+        result = self._run_validator()
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn('DANGLING COMMIT HASH', result.stdout)
+        self.assertIn(real_hash, result.stdout)
+
+    def test_002_real_cli_passes_when_the_recorded_hash_is_real_and_reachable(self):
+        # The real, correct close-context flow this repo's own
+        # convention describes: an implementation commit, then a
+        # separate commit recording that real, already-pushed commit's
+        # own hash -- never amended, so the recorded hash stays real.
+        self._init_base()
+        self._write('daemon.py', 'x = 1\n')
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'add feature')
+        real_hash = self._git_hash('rev-parse', 'HEAD')
+
+        self._write(
+            'context/CTX-100.1-base.md',
+            self._ctx_fixture(f'commit_hashes:\n  - "{real_hash} - add feature"'),
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'record commit hash')
+
+        result = self._run_validator()
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_003_real_cli_does_not_reflag_an_old_unchanged_hash_it_cannot_verify(self):
+        # This repo's own established, legitimate convention (e.g.
+        # CTX-315.2's own precedent): an older, already-merged context
+        # file can cite a real commit from a since-deleted feature
+        # branch that is genuinely not fetchable in an unrelated,
+        # later PR's own scoped checkout -- through no fault of its
+        # own. A PR that edits the file for an unrelated reason,
+        # without touching commit_hashes, must not be blocked by a
+        # hash it was never asked to re-verify.
+        self._git('init', '-q')
+        self._git('config', 'user.email', 'test@example.com')
+        self._git('config', 'user.name', 'Test')
+        self._write(
+            'specs/SPEC-100-base.md',
+            '---\nid: SPEC-100\ntitle: "Base"\nstatus: Draft\n'
+            'location: "specs/SPEC-100-base.md"\nparent_spec: null\nchild_specs: []\n'
+            'user_facing: false\n---\n# base\n',
+        )
+        old_hash = 'deadbeef00112233445566778899aabbccddeef'  # well-formed, never a real object here
+        self._write(
+            'context/CTX-100.1-base.md',
+            self._ctx_fixture(f'commit_hashes:\n  - "{old_hash} - some earlier, now-unreachable work"'),
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'base, already closed out')
+        self._git('branch', '-q', '-m', 'develop')
+
+        self._git('checkout', '-q', '-b', 'feature')
+        self._write(
+            'context/CTX-100.1-base.md',
+            self._ctx_fixture(f'commit_hashes:\n  - "{old_hash} - some earlier, now-unreachable work"')
+            .replace('# CTX-100.1\n', '# CTX-100.1\n\nAn unrelated Plan Drift correction.\n'),
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'unrelated edit, commit_hashes untouched')
+
+        result = self._run_validator()
+
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_004_real_cli_flags_a_malformed_commit_hash_entry(self):
+        self._init_base()
+        self._write('daemon.py', 'x = 1\n')
+        self._write(
+            'context/CTX-100.1-base.md',
+            self._ctx_fixture('commit_hashes:\n  - "not-a-real-hash-at-all"'),
+        )
+        self._git('add', '.')
+        self._git('commit', '-q', '-m', 'add feature with a garbled hash entry')
+
+        result = self._run_validator()
+
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn('MALFORMED COMMIT HASH', result.stdout)
+
+
 class TestAgainstRealRepo(unittest.TestCase):
     """TEST-006: the upgraded validator, run against this repo's own real,
     current SPEC-*.md/CTX-*.md state, must report zero hard errors -- this
