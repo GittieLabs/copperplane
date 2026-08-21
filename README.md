@@ -184,8 +184,8 @@ and what went wrong along the way — including the honest mistakes, not just th
     turning that from a hope into a checked fact.
 3.  **React/Three.js developers** to keep building out the project shell and 3D viewer as the
     product model in `PRODUCT-PLAN.md` fills in.
-4.  **Python developers** interested in the LLM tool-calling layer (`SPEC-204`) or supplier-API
-    integration (`SPEC-203`, not yet started).
+4.  **Python developers** interested in the LLM tool-calling layer (`SPEC-204`). (Supplier-API
+    integration, `SPEC-203`, was explored and retired 2026-08-18 — see its tombstone for why.)
 
 Run [`/spec-status`](CONTRIBUTING.md) (or read `ROADMAP.md` directly) to see exactly what's
 specced, what's mid-implementation, and what's still an open idea before picking something up.

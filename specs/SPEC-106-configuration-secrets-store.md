@@ -23,10 +23,11 @@ user_facing: false
     command-line argument, where they'd be visible to any user via `ps`.
 *   **Business / Technical Value:** Every one of `SPEC-103`/`SPEC-104`'s hard-coded assumptions
     (search `PATH` and a handful of standard install locations; connect to whatever KiCad happens
-    to be running) works for exactly one dev machine. `SPEC-201`'s LLM provider selection and
-    `SPEC-203`'s supplier API keys can't be built at all without a place to put credentials that
-    isn't `git`-tracked. This spec is the platform primitive that unblocks a real Settings UI
-    (`SPEC-303`) and the intelligence layer (`SPEC-201`/`202`/`203`).
+    to be running) works for exactly one dev machine. `SPEC-201`'s LLM provider selection can't be
+    built at all without a place to put credentials that isn't `git`-tracked. This spec is the
+    platform primitive that unblocks a real Settings UI (`SPEC-303`) and the intelligence layer
+    (`SPEC-201`/`202`). (`SPEC-203`, supplier API keys, was explored and retired 2026-08-18 — see
+    its tombstone; if its one surviving option is ever revived, it uses this exact same store.)
 *   **Non-Goals:**
     *   Not the Settings UI itself (`SPEC-303`) — this spec defines the storage format and the
         injection mechanism; a human-facing form to edit these values is a separate, later spec.

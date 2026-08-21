@@ -33,8 +33,11 @@ user_facing: true
     *   **Not a redesign of `SPEC-106`'s storage mechanism.** `config.json` for non-secrets, OS
         keychain for secrets, injected at daemon spawn — unchanged. This spec adds the write path
         and the UI on top of that, not a new storage model.
-    *   **Not supplier API keys.** `SPEC-203` (Supplier API Integration) doesn't exist yet; there is
-        no key name to manage.
+    *   **Not supplier API keys.** `SPEC-203` (Supplier API Integration) was explored and retired
+        2026-08-18 — see its tombstone; no distributor integration is planned, so there is no key
+        name to manage. If `SPEC-203` §2.3's one surviving option (a TME-only integration) is ever
+        revived, it adds its own key here under the same bring-your-own-key model this spec already
+        establishes.
     *   **Not Ollama's endpoint, FreeCAD's build timeout, or the heartbeat/crash-detection
         intervals.** All three are currently hardcoded constants with no live pain point driving
         exposing them — deferred, not forgotten (see §3).
