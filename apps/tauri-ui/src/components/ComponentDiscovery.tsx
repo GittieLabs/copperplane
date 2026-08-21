@@ -3,6 +3,7 @@ import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import { cacheDatasheet, searchComponents, type ComponentCandidate } from '../lib/components'
 import { listParts } from '../lib/library'
+import { loadPart, type SavedPart } from '../lib/partDetail'
 import type { Project } from '../lib/projects'
 import { PartDetail } from './PartDetail'
 
@@ -55,6 +56,22 @@ export function ComponentDiscovery({
   // results from rendering, it just means no candidate gets a badge.
   const [savedPartIds, setSavedPartIds] = useState<Set<string> | null>(null)
 
+  // CTX-306.4: real user feedback -- after saving a part and navigating
+  // away, Components showed only the last-viewed candidate or nothing
+  // at all, with no persistent record of what this project actually
+  // references. `projectParts` hydrates `currentProject.parts`' bare
+  // id list (CTX-304.3) into real, displayable records; `openedPartId`
+  // is a separate, real "detail view with back navigation" state from
+  // `confirmed` above -- opening an already-saved part from this list
+  // needs no datasheet-caching UI or re-confirmation, just a straight
+  // reopen (mirroring `App.tsx`'s own `PartDetailView`/`initialPart`
+  // shape, but kept local here rather than routed through `App`'s view
+  // state, so it stays inside the Components tab the user is already in).
+  const [projectParts, setProjectParts] = useState<SavedPart[] | null>(null)
+  const [openedPartId, setOpenedPartId] = useState<string | null>(null)
+  const [openedPart, setOpenedPart] = useState<SavedPart | null>(null)
+  const [openedPartError, setOpenedPartError] = useState<string | null>(null)
+
   useEffect(() => {
     setQuery('')
     setStatus('idle')
@@ -64,7 +81,56 @@ export function ComponentDiscovery({
     setConfirmingPartNumber(null)
     setPathCopied(false)
     setSavedPartIds(null)
+    setOpenedPartId(null)
   }, [projectName])
+
+  const projectPartIds = currentProject?.parts?.join(',') ?? ''
+
+  useEffect(() => {
+    let cancelled = false
+    const ids = currentProject?.parts ?? []
+    if (ids.length === 0) {
+      setProjectParts([])
+      return
+    }
+    setProjectParts(null)
+    Promise.allSettled(ids.map((id) => loadPart(id))).then((results) => {
+      if (cancelled) return
+      // Best-effort, same as savedPartIds above -- a part_id referenced
+      // by the project but no longer loadable (e.g. deleted from the
+      // Library outside this app) is silently omitted, not an error
+      // that blocks the rest of the list from rendering.
+      setProjectParts(
+        results
+          .filter((r): r is PromiseFulfilledResult<SavedPart> => r.status === 'fulfilled')
+          .map((r) => r.value),
+      )
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [projectName, projectPartIds])
+
+  useEffect(() => {
+    if (!openedPartId) {
+      setOpenedPart(null)
+      setOpenedPartError(null)
+      return
+    }
+    let cancelled = false
+    setOpenedPart(null)
+    setOpenedPartError(null)
+    loadPart(openedPartId)
+      .then((part) => {
+        if (!cancelled) setOpenedPart(part)
+      })
+      .catch((err) => {
+        if (!cancelled) setOpenedPartError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [openedPartId])
 
   async function handleCopyPath(path: string) {
     await writeText(path)
@@ -111,7 +177,13 @@ export function ComponentDiscovery({
     }
   }
 
+  function handleOpenProjectPart(partId: string) {
+    setConfirmed(null)
+    setOpenedPartId(partId)
+  }
+
   async function handleConfirm(candidate: ComponentCandidate) {
+    setOpenedPartId(null)
     setConfirmingPartNumber(candidate.part_number)
     setPathCopied(false)
 
@@ -130,6 +202,27 @@ export function ComponentDiscovery({
     } finally {
       setConfirmingPartNumber(null)
     }
+  }
+
+  if (openedPartId) {
+    return (
+      <div className="flex w-full max-w-4xl flex-col gap-2 rounded border border-line p-4">
+        <button
+          type="button"
+          className="self-start rounded border border-line px-3 py-1 text-xs"
+          onClick={() => setOpenedPartId(null)}
+        >
+          ← Back to project parts
+        </button>
+        {openedPartError && <p className="text-sm text-danger">{openedPartError}</p>}
+        {!openedPartError && !openedPart && <p className="text-sm text-fg-muted">Loading…</p>}
+        {openedPart && (
+          <div className="mt-2 border-t border-line-subtle pt-3">
+            <PartDetail initialPart={openedPart} />
+          </div>
+        )}
+      </div>
+    )
   }
 
   if (confirmed) {
@@ -211,6 +304,33 @@ export function ComponentDiscovery({
       </div>
 
       {status === 'error' && error && <p className="text-sm text-danger">{error}</p>}
+
+      {candidates.length === 0 && (currentProject?.parts?.length ?? 0) > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium uppercase text-fg-muted">Project Parts</p>
+          {projectParts === null && <p className="text-xs text-fg-muted">Loading…</p>}
+          {projectParts?.map((part) => (
+            <div
+              key={part.part_id}
+              className="flex items-center justify-between gap-3 rounded border border-line p-3"
+            >
+              <div className="flex flex-col gap-1">
+                <p className="text-sm text-fg">
+                  {part.part_id} <span className="text-fg-muted">{part.manufacturer}</span>
+                </p>
+                <p className="text-xs text-fg-muted">{part.package}</p>
+              </div>
+              <button
+                type="button"
+                className="rounded border border-line px-3 py-1 text-xs font-medium"
+                onClick={() => handleOpenProjectPart(part.part_id)}
+              >
+                Open
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {candidates.length > 0 && (
         <div className="flex flex-col gap-2">

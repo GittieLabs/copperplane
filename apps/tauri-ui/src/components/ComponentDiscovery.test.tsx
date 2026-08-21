@@ -6,6 +6,7 @@ const cacheDatasheetMock = vi.fn()
 const writeTextMock = vi.fn()
 const openMock = vi.fn()
 const listPartsMock = vi.fn()
+const loadPartMock = vi.fn()
 
 vi.mock('../lib/components', () => ({
   searchComponents: (...args: unknown[]) => searchComponentsMock(...args),
@@ -14,6 +15,10 @@ vi.mock('../lib/components', () => ({
 
 vi.mock('../lib/library', () => ({
   listParts: (...args: unknown[]) => listPartsMock(...args),
+}))
+
+vi.mock('../lib/partDetail', () => ({
+  loadPart: (...args: unknown[]) => loadPartMock(...args),
 }))
 
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
@@ -30,13 +35,15 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
 vi.mock('./PartDetail', () => ({
   PartDetail: ({
     candidate,
+    initialPart,
     currentProject,
   }: {
-    candidate: { part_number: string }
+    candidate?: { part_number: string }
+    initialPart?: { part_id: string }
     currentProject?: { name: string } | null
   }) => (
     <p>
-      PartDetail stub for {candidate.part_number}
+      PartDetail stub for {candidate?.part_number ?? initialPart?.part_id}
       {currentProject && ` (project: ${currentProject.name})`}
     </p>
   ),
@@ -55,6 +62,7 @@ beforeEach(() => {
   writeTextMock.mockReset()
   openMock.mockReset()
   listPartsMock.mockReset().mockResolvedValue([])
+  loadPartMock.mockReset()
 })
 
 describe('ComponentDiscovery', () => {
@@ -320,5 +328,71 @@ describe('ComponentDiscovery', () => {
 
     await waitFor(() => screen.getByRole('button', { name: 'This one' }))
     expect(screen.queryByText('Already in your library')).toBeNull()
+  })
+
+  it('CTX-306.4: shows a real, persistent Project Parts list from currentProject.parts', async () => {
+    loadPartMock.mockImplementation((partId: string) =>
+      Promise.resolve({ part_id: partId, manufacturer: 'Microchip', package: 'DIP-8' }),
+    )
+
+    render(
+      <ComponentDiscovery
+        projectName="test-project"
+        currentProject={{ name: 'test-project', parts: ['ATtiny85', 'ESP32-S3'] }}
+      />,
+    )
+
+    await waitFor(() => screen.getByText('Project Parts'))
+    await waitFor(() => screen.getByText('ATtiny85', { exact: false }))
+    screen.getByText('ESP32-S3', { exact: false })
+    expect(loadPartMock).toHaveBeenCalledWith('ATtiny85')
+    expect(loadPartMock).toHaveBeenCalledWith('ESP32-S3')
+  })
+
+  it('CTX-306.4: a part referenced by the project but no longer loadable is silently omitted, not an error', async () => {
+    loadPartMock.mockImplementation((partId: string) =>
+      partId === 'ATtiny85'
+        ? Promise.resolve({ part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'DIP-8' })
+        : Promise.reject(new Error('No Part found.')),
+    )
+
+    render(
+      <ComponentDiscovery
+        projectName="test-project"
+        currentProject={{ name: 'test-project', parts: ['ATtiny85', 'deleted-part'] }}
+      />,
+    )
+
+    await waitFor(() => screen.getByText('ATtiny85', { exact: false }))
+    expect(screen.queryByText('deleted-part', { exact: false })).toBeNull()
+  })
+
+  it('CTX-306.4: no Project Parts section at all when the project has no real parts yet', async () => {
+    render(<ComponentDiscovery projectName="test-project" currentProject={{ name: 'test-project', parts: [] }} />)
+
+    expect(screen.queryByText('Project Parts')).toBeNull()
+    expect(loadPartMock).not.toHaveBeenCalled()
+  })
+
+  it('CTX-306.4: opening a project part shows its detail with a real back-navigation to the list', async () => {
+    loadPartMock.mockResolvedValue({ part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'DIP-8' })
+
+    render(
+      <ComponentDiscovery
+        projectName="test-project"
+        currentProject={{ name: 'test-project', parts: ['ATtiny85'] }}
+      />,
+    )
+
+    await waitFor(() => screen.getByRole('button', { name: 'Open' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }))
+
+    await waitFor(() => screen.getByText('PartDetail stub for ATtiny85'))
+    screen.getByRole('button', { name: '← Back to project parts' })
+
+    fireEvent.click(screen.getByRole('button', { name: '← Back to project parts' }))
+
+    await waitFor(() => screen.getByText('Project Parts'))
+    expect(screen.queryByText('PartDetail stub for ATtiny85')).toBeNull()
   })
 })
