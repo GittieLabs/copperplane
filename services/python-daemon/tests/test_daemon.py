@@ -1781,6 +1781,34 @@ class TestProjectGetDirectoryRoute(unittest.TestCase):
         self.assertTrue(os.path.isdir(result["path"]))
 
 
+class TestProjectSetIntentRoute(unittest.TestCase):
+    """CTX-206.1 (SPEC-206 §2.1): synchronous, fast local file I/O --
+    registered outside ASYNC_ROUTES, matching project.save/project.load's
+    own convention, unlike SPEC-206's later chat.send route."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_persists_the_real_intent_onto_the_project(self):
+        daemon.library_store.save_project({"name": "weather-pcb"})
+
+        result = daemon.project_set_intent("weather-pcb", "A weatherproof outdoor PCB.")
+
+        self.assertEqual(result["intent"], "A weatherproof outdoor PCB.")
+        reloaded = daemon.library_store.load_project("weather-pcb")
+        self.assertEqual(reloaded["intent"], "A weatherproof outdoor PCB.")
+
+    def test_002_registered_as_a_project_route_not_an_async_one(self):
+        routes = daemon._build_routes()
+        self.assertIn("project.set_intent", routes)
+        self.assertNotIn("project.set_intent", daemon.ASYNC_ROUTES)
+
+
 class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
     """CTX-310.1: the file-based mode SPEC-310 adds -- composes
     kicad_pcb_import's file-based outline/hole extraction the same way
