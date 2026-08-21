@@ -1183,5 +1183,105 @@ class TestDesignGuidanceStorage(LibraryStoreTestCase):
         self.assertIsNone(loaded["design_guidance"]["category_summaries"]["layout"])
 
 
+_VALID_CONNECTION_GUIDANCE = {
+    "generated_at": "2026-08-21T00:00:00+00:00",
+    "pins_hash": "irrelevant-for-the-shape-check",
+    "pin_guidance": [{"pin_number": "8", "guidance": "Add a 100nF decoupling capacitor."}],
+    "general_notes": "Tie unused pins to a known state.",
+    "provenance": {"provider": "anthropic", "model": "claude-sonnet-5"},
+}
+
+
+class TestConnectionGuidanceStorage(LibraryStoreTestCase):
+    """CTX-206.1 (SPEC-206 §2.4): persisting `kicad.generate_connection_guidance`'s
+    result onto the Part record, the prerequisite SPEC-318's Components
+    agent needs. Mirrors TestDesignGuidanceStorage's own shape --
+    real backfill-to-None, real shape validation, real persist-and-reload."""
+
+    def _valid_part(self, **overrides):
+        provenance = {field: {"source": "datasheet_pdf"} for field in store.PART_PROVENANCE_REQUIRED_FIELDS}
+        part = {
+            "part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8", "pins": _ATTINY85_PINS,
+            "datasheet_url": "https://example.com/x.pdf", "package_dimensions": {}, "courtyard": {},
+            "provenance": provenance,
+        }
+        part.update(overrides)
+        return part
+
+    def test_001_load_part_backfills_connection_guidance_as_none_not_an_empty_dict(self):
+        store.save_part(self._valid_part())
+
+        loaded = store.load_part("ATtiny85")
+
+        self.assertIsNone(loaded["connection_guidance"])
+
+    def test_001b_save_part_itself_returns_a_real_backfilled_connection_guidance_key(self):
+        record = store.save_part(self._valid_part())
+
+        self.assertIn("connection_guidance", record)
+        self.assertIsNone(record["connection_guidance"])
+
+    def test_002_save_part_accepts_a_real_valid_connection_guidance(self):
+        store.save_part(self._valid_part(connection_guidance=_VALID_CONNECTION_GUIDANCE))
+
+        loaded = store.load_part("ATtiny85")
+
+        self.assertEqual(loaded["connection_guidance"]["general_notes"], "Tie unused pins to a known state.")
+
+    def test_003_save_part_rejects_connection_guidance_missing_a_required_field(self):
+        malformed = {k: v for k, v in _VALID_CONNECTION_GUIDANCE.items() if k != "pins_hash"}
+        with self.assertRaises(store.SchemaValidationError):
+            store.save_part(self._valid_part(connection_guidance=malformed))
+
+    def test_004_save_part_rejects_a_pin_guidance_entry_missing_guidance(self):
+        malformed = {**_VALID_CONNECTION_GUIDANCE, "pin_guidance": [{"pin_number": "8"}]}
+        with self.assertRaises(store.SchemaValidationError):
+            store.save_part(self._valid_part(connection_guidance=malformed))
+
+    def test_004b_save_part_rejects_a_non_dict_provenance(self):
+        malformed = {**_VALID_CONNECTION_GUIDANCE, "provenance": "anthropic"}
+        with self.assertRaises(store.SchemaValidationError):
+            store.save_part(self._valid_part(connection_guidance=malformed))
+
+    def test_005_save_part_connection_guidance_persists_onto_the_real_current_record(self):
+        store.save_part(self._valid_part())
+
+        updated = store.save_part_connection_guidance(
+            "ATtiny85",
+            pin_guidance=[{"pin_number": "8", "guidance": "Decouple with 100nF."}],
+            general_notes="notes",
+            provenance={"provider": "anthropic", "model": "claude-sonnet-5"},
+        )
+
+        self.assertEqual(updated["connection_guidance"]["general_notes"], "notes")
+        reloaded = store.load_part("ATtiny85")
+        self.assertEqual(reloaded["connection_guidance"]["pin_guidance"][0]["pin_number"], "8")
+
+    def test_006_save_part_connection_guidance_preserves_the_real_records_other_fields(self):
+        store.save_part(self._valid_part())
+
+        updated = store.save_part_connection_guidance(
+            "ATtiny85", pin_guidance=[], general_notes="", provenance={"provider": "p", "model": "m"},
+        )
+
+        self.assertEqual(updated["manufacturer"], "Microchip")
+
+    def test_007_save_part_connection_guidance_computes_pins_hash_from_the_real_current_pins(self):
+        store.save_part(self._valid_part())
+
+        updated = store.save_part_connection_guidance(
+            "ATtiny85", pin_guidance=[], general_notes="", provenance={"provider": "p", "model": "m"},
+        )
+
+        self.assertEqual(updated["connection_guidance"]["pins_hash"], store.compute_pins_hash(_ATTINY85_PINS))
+
+    def test_008_compute_pins_hash_is_deterministic_and_content_sensitive(self):
+        same_again = list(_ATTINY85_PINS)
+        different = _ATTINY85_PINS + [{"number": "1", "name": "RESET", "electrical_type": "bidirectional"}]
+
+        self.assertEqual(store.compute_pins_hash(_ATTINY85_PINS), store.compute_pins_hash(same_again))
+        self.assertNotEqual(store.compute_pins_hash(_ATTINY85_PINS), store.compute_pins_hash(different))
+
+
 if __name__ == '__main__':
     unittest.main()

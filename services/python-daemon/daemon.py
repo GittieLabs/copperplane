@@ -876,14 +876,31 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
     kicad_generate_component/component_search already do, for the same
     reason: a fresh install with nothing configured in Settings yet must
     still use whichever provider IS configured, not a hardcoded default
-    baked into connection_guidance.prompt.md."""
+    baked into connection_guidance.prompt.md.
+
+    CTX-206.1 (SPEC-206 §2.4): previously returned this result and
+    nothing else -- the caller (`PartDetail.tsx`) held it in `useState`
+    and lost it on unmount, and it was gone the next time this Part was
+    opened. Now persists it onto the real Part record via
+    `library_store.save_part_connection_guidance` before returning, so
+    it's a durable record `SPEC-318`'s Components agent (and any future
+    caller) can read without re-generating it. The wire response to the
+    frontend is unchanged -- same dict, same keys -- this route just
+    also writes it to disk now."""
     part = library_store.load_part(part_id)
-    return component_pipeline.generate_connection_guidance(
+    result = component_pipeline.generate_connection_guidance(
         part["part_id"], part["package"], part["pins"],
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
     )
+    library_store.save_part_connection_guidance(
+        part_id,
+        pin_guidance=result["pin_guidance"],
+        general_notes=result["general_notes"],
+        provenance=result["provenance"],
+    )
+    return result
 
 
 def datasheet_generate_guidance(part_id: str, cancel_event=None) -> dict:

@@ -1260,15 +1260,50 @@ class TestKicadGenerateConnectionGuidanceRoute(unittest.TestCase):
         daemon.CONFIG['llm_provider'] = "google"
         daemon.CONFIG['llm_model'] = "gemini-flash"
         daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
-        mock_guidance.return_value = {"pin_guidance": [], "general_notes": ""}
+        mock_guidance.return_value = {
+            "pin_guidance": [{"pin_number": "8", "guidance": "Decouple with 100nF."}],
+            "general_notes": "n",
+            "provenance": {"provider": "google", "model": "gemini-flash"},
+        }
 
-        daemon.kicad_generate_connection_guidance("ATtiny85")
+        result = daemon.kicad_generate_connection_guidance("ATtiny85")
 
         args, kwargs = mock_guidance.call_args
         self.assertEqual(args, ("ATtiny85", "SOIC-8", pins))
         self.assertEqual(kwargs['provider'], "google")
         self.assertEqual(kwargs['model'], "gemini-flash")
         self.assertEqual(kwargs['secrets'], {"google_api_key": "fake"})
+        # CTX-206.1: the wire response is unchanged (the mocked pipeline
+        # result, verbatim) -- persistence is a side effect this route
+        # now also performs, checked separately below.
+        self.assertEqual(result, mock_guidance.return_value)
+
+    @patch('daemon.component_pipeline.generate_connection_guidance')
+    def test_001b_persists_the_result_onto_the_real_part_record(self, mock_guidance):
+        """CTX-206.1 (SPEC-206 §2.4): the prerequisite this context
+        exists to close -- before this, the route returned its result
+        and the daemon discarded it."""
+        pins = [{"number": "8", "name": "VCC", "electrical_type": "power"}]
+        daemon.library_store.save_part({
+            "part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8", "pins": pins,
+            "datasheet_url": "https://example.com/x.pdf", "package_dimensions": {}, "courtyard": {},
+            "provenance": {f: {"source": "test"} for f in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS},
+        })
+        mock_guidance.return_value = {
+            "pin_guidance": [{"pin_number": "8", "guidance": "Decouple with 100nF."}],
+            "general_notes": "Tie unused pins to a known state.",
+            "provenance": {"provider": "anthropic", "model": "claude-sonnet-5"},
+        }
+
+        daemon.kicad_generate_connection_guidance("ATtiny85")
+
+        reloaded = daemon.library_store.load_part("ATtiny85")
+        stored = reloaded["connection_guidance"]
+        self.assertEqual(stored["pin_guidance"], mock_guidance.return_value["pin_guidance"])
+        self.assertEqual(stored["general_notes"], "Tie unused pins to a known state.")
+        self.assertEqual(stored["provenance"], {"provider": "anthropic", "model": "claude-sonnet-5"})
+        self.assertEqual(stored["pins_hash"], daemon.library_store.compute_pins_hash(pins))
+        self.assertTrue(stored["generated_at"])
 
     def test_002_build_routes_omits_it_when_component_pipeline_import_failed(self):
         original = daemon.component_pipeline
