@@ -1809,6 +1809,44 @@ class TestProjectSetIntentRoute(unittest.TestCase):
         self.assertNotIn("project.set_intent", daemon.ASYNC_ROUTES)
 
 
+class TestChatThreadRoutes(unittest.TestCase):
+    """CTX-206.3 (SPEC-206 §2.2): the two read routes this slice ships --
+    chat.send (SPEC-206 §2.5) is a later, separate slice."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_chat_load_thread_migrates_and_returns_the_real_thread(self):
+        daemon.library_store.save_project({"name": "weather-pcb"})
+        daemon.library_store.append_conversation_turn(
+            "weather-pcb", {"role": "user", "content": "hello"},
+        )
+
+        turns = daemon.chat_load_thread("project", "weather-pcb:overview")
+
+        self.assertEqual(turns[0]["content"], "hello")
+
+    def test_002_chat_list_threads_reports_the_real_areas_with_history(self):
+        daemon.library_store.save_project({"name": "weather-pcb"})
+        daemon.library_store.append_conversation_turn(
+            "weather-pcb", {"role": "user", "content": "hello"},
+        )
+
+        self.assertEqual(daemon.chat_list_threads("weather-pcb"), ["overview"])
+
+    def test_003_both_registered_as_synchronous_project_routes(self):
+        routes = daemon._build_routes()
+        self.assertIn("chat.load_thread", routes)
+        self.assertIn("chat.list_threads", routes)
+        self.assertNotIn("chat.load_thread", daemon.ASYNC_ROUTES)
+        self.assertNotIn("chat.list_threads", daemon.ASYNC_ROUTES)
+
+
 class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
     """CTX-310.1: the file-based mode SPEC-310 adds -- composes
     kicad_pcb_import's file-based outline/hole extraction the same way

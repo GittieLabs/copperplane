@@ -31,6 +31,7 @@ import re
 import ssl
 import urllib.error
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 
 import certifi
@@ -1235,3 +1236,135 @@ def load_conversation(project_name: str) -> list:
         return []
     with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
+
+
+# --- Chat threads (CTX-206.3, SPEC-206 §2.2) -----------------------------
+# Threads, not one conversation per project -- scope + scope_id identify
+# a thread. "project" threads are per-area (overview/schematic/pcb/
+# enclosure -- "components" is Part-scoped, not project-scoped, per the
+# table below); "part" threads are global, because a Part is a global
+# SPEC-304 object (SPEC-318 §2.1 carries the reasoning; PRODUCT-PLAN.md
+# §2.1's own amendment records the same decision). Supersedes
+# `_conversation_path` above, which SPEC-206 §2.2 names as a real,
+# already-shipped bug: it hardcodes `<storage_root>/projects/<name>/`
+# and therefore never follows `CTX-312.1`'s directory link, so a linked
+# project's history doesn't travel with its folder. The legacy
+# functions above are untouched -- still real, still used by today's
+# Overview chat -- and superseded only once `SPEC-318` replaces that
+# chat's own wiring, not by this context.
+_PROJECT_CHAT_AREAS = ("overview", "schematic", "pcb", "enclosure")
+
+
+def _project_thread_path(project_name: str, area: str) -> str:
+    if area not in _PROJECT_CHAT_AREAS:
+        raise SchemaValidationError(
+            f"'{area}' is not a real project-scoped chat area ({', '.join(_PROJECT_CHAT_AREAS)})."
+        )
+    pointer_path = _project_pointer_path(project_name)
+    pointer = _read_json(pointer_path) if os.path.isfile(pointer_path) else {}
+    directory = pointer.get("directory")
+    if directory:
+        return os.path.join(directory, _PROJECT_STATE_SUBDIR, "chats", f"{area}.jsonl")
+    return os.path.join(_project_dir(project_name), "chats", f"{area}.jsonl")
+
+
+def _part_thread_path(part_id: str) -> str:
+    return os.path.join(_ensure_dir("library", "chats", "parts"), f"{part_id}.jsonl")
+
+
+def _thread_path(scope: str, scope_id: str) -> str:
+    if scope == "project":
+        project_name, _, area = scope_id.partition(":")
+        if not area:
+            raise SchemaValidationError(
+                f"A project-scoped chat scope_id must be '<project_name>:<area>', got '{scope_id}'."
+            )
+        return _project_thread_path(project_name, area)
+    if scope == "part":
+        return _part_thread_path(scope_id)
+    raise SchemaValidationError(f"'{scope}' is not a real chat scope ('project' or 'part').")
+
+
+def _read_thread_turns(path: str) -> list:
+    if not os.path.isfile(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def _write_thread_turns(path: str, turns: list) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        for turn in turns:
+            f.write(json.dumps(turn, sort_keys=True) + "\n")
+
+
+def _upconvert_legacy_turn(legacy: dict) -> dict:
+    """A pre-CTX-206.3 `ConversationTurn` (`role`, `content`, an optional
+    client-stamped `timestamp`) upconverted into the real, richer turn
+    shape SPEC-206 §2.2 defines. `timestamp` is preserved as whatever the
+    legacy record carried (even `None`) -- never re-stamped with the
+    current time, which would fabricate an ordering fact this function
+    has no way to know (matching the spec's own explicit instruction).
+    `general_practice` is `True` for an upconverted assistant turn -- it
+    genuinely was never grounded in a cited record; the old Overview
+    chat had no source-citation mechanism at all."""
+    role = legacy.get("role")
+    return {
+        "turn_id": str(uuid.uuid4()),
+        "role": role,
+        "content": legacy.get("content", ""),
+        "timestamp": legacy.get("timestamp"),
+        "agent": None,
+        "sources": [],
+        "sources_dropped": 0,
+        "general_practice": role == "assistant",
+        "tool_calls": [],
+        "provenance": None,
+        "promoted_note_id": None,
+    }
+
+
+def _migrate_legacy_conversation(project_name: str, new_path: str) -> list:
+    """SPEC-206 §2.2: on first read of a project's `overview` thread, if
+    no `chats/overview.jsonl` exists yet but a legacy `conversation.jsonl`
+    does, its turns are upconverted and written to the new path. The
+    legacy file is left in place, never deleted -- this repo's own
+    non-destructive read-time-backfill convention, and cheap insurance
+    against a migration bug. A `migrated_from` key lands on the *first*
+    new record only, not every record, matching the spec's own exact
+    wording."""
+    legacy_path = _conversation_path(project_name)
+    if not os.path.isfile(legacy_path):
+        return []
+    upconverted = [_upconvert_legacy_turn(t) for t in load_conversation(project_name)]
+    if upconverted:
+        upconverted[0]["migrated_from"] = legacy_path
+    _write_thread_turns(new_path, upconverted)
+    return upconverted
+
+
+def load_thread(scope: str, scope_id: str) -> list:
+    path = _thread_path(scope, scope_id)
+    if scope == "project":
+        project_name, _, area = scope_id.partition(":")
+        if area == "overview" and not os.path.isfile(path):
+            return _migrate_legacy_conversation(project_name, path)
+    return _read_thread_turns(path)
+
+
+def list_threads(project_name: str) -> list:
+    """SPEC-206 §2.2: which of this project's areas have any real chat
+    history -- a Part's own thread is never listed here (part threads
+    are global, discovered by opening that Part, not by scanning a
+    project). Includes an as-yet-unmigrated legacy `overview` thread, so
+    a caller sees it exists before `load_thread`'s own lazy migration
+    ever runs."""
+    areas = []
+    for area in _PROJECT_CHAT_AREAS:
+        path = _project_thread_path(project_name, area)
+        if os.path.isfile(path):
+            areas.append(area)
+        elif area == "overview" and os.path.isfile(_conversation_path(project_name)):
+            areas.append(area)
+    return areas

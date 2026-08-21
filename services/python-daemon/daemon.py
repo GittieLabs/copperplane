@@ -692,6 +692,19 @@ def project_set_intent(name: str, intent: str) -> dict:
     return library_store.set_project_intent(name, intent)
 
 
+def chat_load_thread(scope: str, scope_id: str) -> list:
+    """CTX-206.3 (SPEC-206 §2.2): synchronous, real local file I/O
+    (including a lazy, transparent migration of a legacy
+    `conversation.jsonl` on a project's first `overview` read) -- no LLM
+    call, unlike `chat.send`, a separate, later slice this route does
+    not attempt to build."""
+    return library_store.load_thread(scope, scope_id)
+
+
+def chat_list_threads(project_name: str) -> list:
+    return library_store.list_threads(project_name)
+
+
 class InvalidParamsError(Exception):
     """Raised when a request's params don't match the route's real signature."""
 
@@ -1228,6 +1241,8 @@ def _build_routes() -> dict:
         routes["project.get_directory"] = project_get_directory
         routes["project.open_from_directory"] = project_open_from_directory
         routes["project.set_intent"] = project_set_intent
+        routes["chat.load_thread"] = chat_load_thread
+        routes["chat.list_threads"] = chat_list_threads
     if community_libraries is not None:
         routes["library.search_community_footprints"] = library_search_community_footprints
         routes["library.import_community_footprint"] = library_import_community_footprint
