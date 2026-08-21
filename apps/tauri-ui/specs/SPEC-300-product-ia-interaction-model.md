@@ -23,6 +23,7 @@ child_specs:
   - "SPEC-315-library-browsing-and-organization.md"
   - "SPEC-316-native-menu-command-surface.md"
   - "SPEC-317-theme-system.md"
+  - "SPEC-318-in-context-agent-chat-and-review.md"
 user_facing: true
 ---
 
