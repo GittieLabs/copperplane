@@ -23,12 +23,15 @@ daemon-owned global.
 """
 import asyncio
 import json
+import logging
 import os
 
 from agentflow import AgentExecutor, ConfigLoader, NodeOutput, WorkflowExecutor
 from agentflow.workflow.node import NodeRunner
 
 import llm_providers
+
+logger = logging.getLogger(__name__)
 
 
 class ComponentValidationError(Exception):
@@ -53,6 +56,20 @@ PACKAGE_REFERENCE = {
     "TQFP-44": {"pin_count": 44, "pitch_range_mm": (0.70, 0.90)},
     "QFN-16": {"pin_count": 16, "pitch_range_mm": (0.40, 0.60)},
     "QFN-24": {"pin_count": 24, "pitch_range_mm": (0.40, 0.60)},
+    # CTX-202.2: a real, live extraction of the ESP32-S3 (QFN-56, 7x7mm)
+    # failed closed here -- not a bug in the fail-closed design itself
+    # (SPEC-202 §3's own explicit choice), just a real, common package
+    # this table hadn't been given yet. Same pitch range as the other
+    # QFN entries above -- this table has no finer-grained real source
+    # for QFN-56 specifically to narrow it further. `exposed_pad: True`:
+    # a second real, live extraction found the model correctly reporting
+    # a real 57th pin, "GND_PAD" -- the ESP32-S3's own datasheet numbers
+    # its exposed thermal/ground pad as a real electrical contact, not a
+    # hallucination. QFN-16/QFN-24 above are NOT marked this way --
+    # plausibly the same real characteristic, but not verified against a
+    # real datasheet, so left as a named, deliberate non-change rather
+    # than a guess.
+    "QFN-56": {"pin_count": 56, "pitch_range_mm": (0.40, 0.60), "exposed_pad": True},
     "DIP-8": {"pin_count": 8, "pitch_range_mm": (2.44, 2.64)},
     "DIP-14": {"pin_count": 14, "pitch_range_mm": (2.44, 2.64)},
     "SOT-23": {"pin_count": 3, "pitch_range_mm": (0.85, 1.05)},
@@ -113,9 +130,20 @@ def validate_schema(schema: dict) -> None:
         )
 
     pins = schema.get("pins", [])
-    if len(pins) != reference["pin_count"]:
+    # CTX-202.2: a package with a real, documented exposed thermal/ground
+    # pad (confirmed live for QFN-56 -- the ESP32-S3's own datasheet
+    # numbers it as a real pin, "GND_PAD") may legitimately report either
+    # the package's nominal lead count or that count plus one for the
+    # pad itself. Every other package keeps the original exact-match
+    # check -- this widening is real and specific to that documented
+    # exception, not a general loosening.
+    expected_counts = {reference["pin_count"]}
+    if reference.get("exposed_pad"):
+        expected_counts.add(reference["pin_count"] + 1)
+    if len(pins) not in expected_counts:
+        expected_desc = " or ".join(str(n) for n in sorted(expected_counts))
         raise ComponentValidationError(
-            f"Package '{package}' expects {reference['pin_count']} pins, got {len(pins)}."
+            f"Package '{package}' expects {expected_desc} pins, got {len(pins)}."
         )
 
     pitch_range = reference["pitch_range_mm"]
@@ -467,6 +495,23 @@ async def _run_workflow_and_close(executor: WorkflowExecutor, part_number: str, 
             await llm_providers._close_provider_client(provider_client)
 
 
+# CTX-202.2: a real, live ESP32-S3 extraction failed with "Extraction did
+# not return valid JSON" -- reproduced against the real Anthropic API,
+# not assumed. Three fresh, direct calls to the extraction agent alone
+# all succeeded (valid JSON, ~4400 chars, well under max_tokens), which
+# ruled out truncation-at-the-token-limit as the cause: the reported
+# failure was at character 2216, roughly half a complete response's real
+# length, not near any token ceiling. That points at an occasional,
+# non-deterministic malformed-JSON generation, not a parameter to tune --
+# the real mitigation is a retry, not a bigger budget. Only retried for
+# this specific failure class (the JSON-parse error `_extract_json`
+# raises); any other validation failure (unrecognized package, hallucinated
+# pin, missing field) is a real, deterministic problem a retry would not
+# fix, and fails immediately, matching SPEC-202's own fail-closed design.
+_MAX_EXTRACTION_ATTEMPTS = 2
+_JSON_PARSE_ERROR_PREFIX = "Extraction did not return valid JSON"
+
+
 def generate_component(part_number: str, secrets: dict = None, provider: str = None, model: str = None) -> dict:
     """The kicad.generate_component route (SPEC-202): runs the real
     extract -> validate DAG and returns the validated schema, or raises
@@ -484,24 +529,33 @@ def generate_component(part_number: str, secrets: dict = None, provider: str = N
     loader.load()
     config, _ = loader.get_workflow("component_intelligence")
 
-    provider_clients = []
+    for attempt in range(1, _MAX_EXTRACTION_ATTEMPTS + 1):
+        provider_clients = []
 
-    def runner_factory(node_id: str) -> NodeRunner:
-        node = next(n for n in config.nodes if n.id == node_id)
-        executor, provider_client = _build_agent_executor(node.agent, loader, secrets, provider, model)
-        provider_clients.append(provider_client)
-        return NodeRunner(node, executor)
+        def runner_factory(node_id: str) -> NodeRunner:
+            node = next(n for n in config.nodes if n.id == node_id)
+            executor, provider_client = _build_agent_executor(node.agent, loader, secrets, provider, model)
+            provider_clients.append(provider_client)
+            return NodeRunner(node, executor)
 
-    workflow_executor = WorkflowExecutor(
-        config=config,
-        runner_factory=runner_factory,
-        handlers={"validate_component_schema": validate_component_schema},
-    )
+        workflow_executor = WorkflowExecutor(
+            config=config,
+            runner_factory=runner_factory,
+            handlers={"validate_component_schema": validate_component_schema},
+        )
 
-    outputs = asyncio.run(_run_workflow_and_close(workflow_executor, part_number, provider_clients))
+        outputs = asyncio.run(_run_workflow_and_close(workflow_executor, part_number, provider_clients))
 
-    validate_output = outputs["validate"]
-    if validate_output.metadata.get("error"):
-        raise ComponentValidationError(validate_output.text.removeprefix("Error: "))
+        validate_output = outputs["validate"]
+        if not validate_output.metadata.get("error"):
+            return validate_output.artifacts["schema"]
 
-    return validate_output.artifacts["schema"]
+        error_text = validate_output.text.removeprefix("Error: ")
+        if attempt < _MAX_EXTRACTION_ATTEMPTS and error_text.startswith(_JSON_PARSE_ERROR_PREFIX):
+            logger.warning(
+                "generate_component(%r): attempt %d/%d got malformed JSON, retrying: %s",
+                part_number, attempt, _MAX_EXTRACTION_ATTEMPTS, error_text,
+            )
+            continue
+
+        raise ComponentValidationError(error_text)
