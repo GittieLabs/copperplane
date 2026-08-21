@@ -941,6 +941,27 @@ def _project_state_path(directory: str) -> str:
     return os.path.join(directory, _PROJECT_STATE_SUBDIR, "project.json")
 
 
+def _validate_project_intent(project: dict) -> None:
+    """CTX-206.1 (SPEC-206 §2.1): a real, minimal type check -- `intent`
+    is a plain free-text field, no structured shape to validate the way
+    `design_guidance`/`connection_guidance` need, but a non-string,
+    non-null value reaching disk would still be a malformed record."""
+    intent = project.get("intent")
+    if intent is not None and not isinstance(intent, str):
+        raise SchemaValidationError("Project.intent must be a string or null.")
+
+
+def _backfill_project_intent(record: dict) -> dict:
+    """SPEC-206 §2.1: `None` and `""` must stay distinguishable -- the
+    same reason `CTX-205.3` backfilled `design_guidance` as `None`
+    rather than `{}`. `None` means never set; `""` means the user
+    explicitly cleared it. A project saved before this field existed
+    gets `None`, read as "never asked", never a fabricated empty
+    string."""
+    record.setdefault("intent", None)
+    return record
+
+
 def save_project(project: dict) -> dict:
     """CTX-312.1: real, project-directory-aware routing. A storage-root
     pointer record (`{name, directory, schema_version}`, never the full
@@ -954,8 +975,9 @@ def save_project(project: dict) -> dict:
     name = project.get("name")
     if not name:
         raise SchemaValidationError("Project.name is required.")
+    _validate_project_intent(project)
     directory = project.get("directory")
-    record = {**project, "schema_version": 1}
+    record = _backfill_project_intent({**project, "schema_version": 1})
 
     if directory:
         _write_json(
@@ -998,7 +1020,7 @@ def load_project(name: str) -> dict:
     directory = pointer.get("directory")
     if not directory:
         pointer["name"] = name
-        return pointer
+        return _backfill_project_intent(pointer)
 
     state_path = _project_state_path(directory)
     if not os.path.isfile(state_path):
@@ -1009,7 +1031,23 @@ def load_project(name: str) -> dict:
     record = _read_json(state_path)
     record["name"] = name
     record["directory"] = directory
-    return record
+    return _backfill_project_intent(record)
+
+
+def set_project_intent(name: str, intent: str) -> dict:
+    """CTX-206.1 (SPEC-206 §2.1): `project.set_intent` -- round-trips
+    through `load_project`/`save_project` rather than writing directly,
+    so it inherits `save_project`'s own real pointer/manifest routing
+    (CTX-312.1) for free instead of re-deriving it. No special handling
+    is needed to keep `intent` out of the storage-root pointer record
+    for a *linked* project -- `save_project`'s pointer branch already
+    hard-codes exactly `{name, directory, schema_version}`, so a linked
+    project's intent lands only in the real manifest at
+    `<directory>/.hardware-agent-studio/project.json` and travels with
+    the folder automatically, same as every other real field."""
+    project = load_project(name)
+    project["intent"] = intent
+    return save_project(project)
 
 
 def list_projects() -> list:

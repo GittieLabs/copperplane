@@ -377,6 +377,52 @@ class TestProject(LibraryStoreTestCase):
         self.assertEqual(loaded["component_refs"], [])
 
 
+class TestProjectIntent(LibraryStoreTestCase):
+    """CTX-206.1 (SPEC-206 §2.1): the project-level counterpart to
+    Part.connection_guidance's backfill-and-persist shape, applied to a
+    plain optional free-text field instead of a generated record."""
+
+    def test_001_load_project_backfills_intent_as_none_not_an_empty_string(self):
+        store.save_project({"name": "weather-pcb"})
+
+        loaded = store.load_project("weather-pcb")
+
+        self.assertIsNone(loaded["intent"])
+
+    def test_002_save_project_accepts_a_real_intent_string(self):
+        store.save_project({"name": "weather-pcb", "intent": "A weatherproof outdoor PCB."})
+
+        loaded = store.load_project("weather-pcb")
+
+        self.assertEqual(loaded["intent"], "A weatherproof outdoor PCB.")
+
+    def test_003_save_project_rejects_a_non_string_non_null_intent(self):
+        with self.assertRaises(store.SchemaValidationError):
+            store.save_project({"name": "weather-pcb", "intent": 42})
+
+    def test_004_an_empty_string_intent_stays_distinguishable_from_never_set(self):
+        # SPEC-206 §2.1: "never asked" and "asked, answered nothing" (the
+        # user deliberately cleared it) are different states.
+        store.save_project({"name": "weather-pcb", "intent": ""})
+
+        loaded = store.load_project("weather-pcb")
+
+        self.assertEqual(loaded["intent"], "")
+        self.assertIsNotNone(loaded["intent"])
+
+    def test_005_set_project_intent_persists_onto_the_real_current_record(self):
+        store.save_project({"name": "weather-pcb", "component_refs": ["ATtiny85"]})
+
+        updated = store.set_project_intent("weather-pcb", "A macropad from scratch.")
+
+        self.assertEqual(updated["intent"], "A macropad from scratch.")
+        # Preserves the record's other real fields, matching
+        # save_part_design_guidance's own load-fresh-then-save shape.
+        self.assertEqual(updated["component_refs"], ["ATtiny85"])
+        reloaded = store.load_project("weather-pcb")
+        self.assertEqual(reloaded["intent"], "A macropad from scratch.")
+
+
 class TestProjectDirectoryLink(LibraryStoreTestCase):
     """CTX-312.1: SPEC-304 §2.1 already described a Project as holding "a
     link to a KiCad project directory on disk" -- these tests cover the
@@ -416,7 +462,12 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
 
         loaded = store.load_project("weather-pcb")
 
-        self.assertEqual(loaded, {"name": "weather-pcb", "schema_version": 1, "component_refs": []})
+        # CTX-206.1: `intent` is now real, backfilled `None` state -- part
+        # of "exactly as before" now that the field exists at all.
+        self.assertEqual(
+            loaded,
+            {"name": "weather-pcb", "schema_version": 1, "component_refs": [], "intent": None},
+        )
         self.assertNotIn("directory", loaded)
 
     def test_004_a_moved_or_deleted_linked_directory_raises_a_clean_error_not_a_bare_one(self):
@@ -442,6 +493,22 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
         store.save_project({"name": "weather-pcb", "directory": self._real_dir.name})
 
         self.assertEqual(store.list_projects(), ["weather-pcb"])
+
+    def test_008_set_project_intent_on_a_linked_project_lands_in_the_real_manifest_not_the_pointer(self):
+        # CTX-206.1: `intent` must travel with the portable folder, the
+        # same as every other real field -- never stranded in the
+        # storage-root pointer, which save_project's own linked branch
+        # deliberately keeps to exactly {name, directory, schema_version}.
+        store.save_project({"name": "weather-pcb", "directory": self._real_dir.name})
+
+        store.set_project_intent("weather-pcb", "A macropad from scratch.")
+
+        state_path = os.path.join(self._real_dir.name, store._PROJECT_STATE_SUBDIR, "project.json")
+        with open(state_path) as f:
+            manifest = json.load(f)
+        self.assertEqual(manifest["intent"], "A macropad from scratch.")
+        reloaded = store.load_project("weather-pcb")
+        self.assertEqual(reloaded["intent"], "A macropad from scratch.")
 
 
 class TestOpenProjectFromDirectory(LibraryStoreTestCase):

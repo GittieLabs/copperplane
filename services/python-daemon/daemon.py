@@ -684,6 +684,14 @@ def project_load_conversation(project_name: str) -> list:
     return library_store.load_conversation(project_name)
 
 
+def project_set_intent(name: str, intent: str) -> dict:
+    """CTX-206.1 (SPEC-206 §2.1): thin wrapper, matching every other
+    `project.*` route's own convention. Synchronous, fast local file
+    I/O -- no LLM call, unlike the chat routes SPEC-206's later slices
+    add."""
+    return library_store.set_project_intent(name, intent)
+
+
 class InvalidParamsError(Exception):
     """Raised when a request's params don't match the route's real signature."""
 
@@ -1219,6 +1227,7 @@ def _build_routes() -> dict:
         routes["project.load_conversation"] = project_load_conversation
         routes["project.get_directory"] = project_get_directory
         routes["project.open_from_directory"] = project_open_from_directory
+        routes["project.set_intent"] = project_set_intent
     if community_libraries is not None:
         routes["library.search_community_footprints"] = library_search_community_footprints
         routes["library.import_community_footprint"] = library_import_community_footprint
