@@ -99,6 +99,53 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
             "required": ["query"],
         },
     },
+    # SPEC-206 SS2.5: added for the SPEC-318 chat agents (CTX-206.5) --
+    # every one of the five chat_*.prompt.md files' own `tools:` lists was
+    # checked directly against this dict rather than adding every route
+    # SPEC-206 SS2.5's own table lists; kicad.check_schematic/check_board and
+    # library.save_confirmed_part are deliberately absent because no real
+    # agent prompt references them.
+    "datasheet.read_pages": {
+        "description": (
+            "Reads the exact text of specific pages from a Part's own cached datasheet PDF, "
+            "fetching and caching it first if it was never cached before."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "part_id": {"type": "string"},
+                "pages": {"type": "array", "items": {"type": "integer"}, "description": "1-indexed page numbers."},
+            },
+            "required": ["part_id", "pages"],
+        },
+    },
+    "library.load_part": {
+        "description": "Loads the full saved record for a Part already in the library, by its exact part_id.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"part_id": {"type": "string"}},
+            "required": ["part_id"],
+        },
+    },
+    "library.list_parts": {
+        "description": (
+            "Lists every Part id in the user's whole library (optionally filtered to one custom "
+            "library) -- not scoped to any one project."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"library_id": {"type": "string"}},
+            "required": [],
+        },
+    },
+    "kicad.get_component_heights": {
+        "description": (
+            "Real, measured per-component heights for whatever board is currently connected -- a "
+            "`known` list with real heights and an `unknown` list of components with no usable 3D "
+            "model. Takes no arguments."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
 }
 
 # The only tool here that mutates a document the user didn't ask this app

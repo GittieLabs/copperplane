@@ -2293,5 +2293,97 @@ class TestDatasheetGenerateGuidanceRoute(unittest.TestCase):
         self.assertEqual(reloaded["design_guidance"]["category_summaries"]["reset"], "A real plain-language summary.")
 
 
+class TestDatasheetReadPagesRoute(unittest.TestCase):
+    """CTX-206.5 (SPEC-206 SS2.5): a real chat-agent tool -- filters
+    datasheet_structure.extract_pages' own whole-document result down to
+    the requested pages, reusing ensure_datasheet_cached rather than
+    re-fetching."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def _save_real_part(self, part_id="ATtiny85", datasheet_url="https://example.com/x.pdf"):
+        provenance = {f: {"source": "test"} for f in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS}
+        daemon.library_store.save_part({
+            "part_id": part_id, "manufacturer": "Microchip", "package": "SOIC-8", "pins": [],
+            "datasheet_url": datasheet_url, "package_dimensions": {}, "courtyard": {}, "provenance": provenance,
+        })
+
+    def test_001_route_is_registered_only_with_both_real_dependencies(self):
+        original_ds, original_ls = daemon.datasheet_structure, daemon.library_store
+        try:
+            daemon.datasheet_structure = None
+            self.assertNotIn("datasheet.read_pages", daemon._build_routes())
+
+            daemon.datasheet_structure = MagicMock()
+            daemon.library_store = None
+            self.assertNotIn("datasheet.read_pages", daemon._build_routes())
+
+            daemon.library_store = original_ls
+            self.assertIn("datasheet.read_pages", daemon._build_routes())
+        finally:
+            daemon.datasheet_structure, daemon.library_store = original_ds, original_ls
+
+    def test_002_route_is_registered_as_async(self):
+        self.assertIn("datasheet.read_pages", daemon.ASYNC_ROUTES)
+
+    @patch('daemon.datasheet_structure.extract_pages')
+    @patch('daemon.library_store.ensure_datasheet_cached')
+    def test_003_filters_the_whole_document_result_to_only_the_requested_pages(self, mock_ensure_cached, mock_extract):
+        self._save_real_part()
+        fake_pdf_path = os.path.join(self._tmpdir.name, "fake.pdf")
+        with open(fake_pdf_path, "wb") as f:
+            f.write(b"%PDF-1.4 fake")
+        mock_ensure_cached.return_value = fake_pdf_path
+        mock_extract.return_value = [
+            {"page": 1, "text": "cover page"},
+            {"page": 161, "text": "absolute maximum ratings"},
+            {"page": 162, "text": "recommended operating conditions"},
+        ]
+
+        result = daemon.datasheet_read_pages("ATtiny85", [161])
+
+        mock_ensure_cached.assert_called_once_with("ATtiny85", "https://example.com/x.pdf")
+        self.assertEqual(result["pages"], [{"page": 161, "text": "absolute maximum ratings"}])
+        self.assertEqual(result["content_hash"], daemon.library_store.content_hash_of_file(fake_pdf_path))
+
+    @patch('daemon.datasheet_structure.extract_pages')
+    @patch('daemon.library_store.ensure_datasheet_cached')
+    def test_004_multiple_requested_pages_are_all_returned_in_document_order(self, mock_ensure_cached, mock_extract):
+        self._save_real_part()
+        fake_pdf_path = os.path.join(self._tmpdir.name, "fake.pdf")
+        with open(fake_pdf_path, "wb") as f:
+            f.write(b"%PDF-1.4 fake")
+        mock_ensure_cached.return_value = fake_pdf_path
+        mock_extract.return_value = [
+            {"page": 1, "text": "cover"},
+            {"page": 2, "text": "two"},
+            {"page": 3, "text": "three"},
+        ]
+
+        result = daemon.datasheet_read_pages("ATtiny85", [3, 1])
+
+        self.assertEqual([p["page"] for p in result["pages"]], [1, 3])
+
+    @patch('daemon.datasheet_structure.extract_pages')
+    @patch('daemon.library_store.ensure_datasheet_cached')
+    def test_005_a_requested_page_that_does_not_exist_is_silently_absent_not_an_error(self, mock_ensure_cached, mock_extract):
+        self._save_real_part()
+        fake_pdf_path = os.path.join(self._tmpdir.name, "fake.pdf")
+        with open(fake_pdf_path, "wb") as f:
+            f.write(b"%PDF-1.4 fake")
+        mock_ensure_cached.return_value = fake_pdf_path
+        mock_extract.return_value = [{"page": 1, "text": "cover"}]
+
+        result = daemon.datasheet_read_pages("ATtiny85", [999])
+
+        self.assertEqual(result["pages"], [])
+
+
 if __name__ == '__main__':
     unittest.main()
