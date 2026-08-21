@@ -349,7 +349,7 @@ function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-neutral-950 text-neutral-100">
+    <div className="flex min-h-screen bg-base text-fg">
       <Rail
         projects={projects}
         selectedProject={view?.kind === 'project' ? view.name : null}
@@ -362,10 +362,10 @@ function App() {
         onSelectSettings={() => setView({ kind: 'settings' })}
       />
       <main className="flex flex-1 flex-col items-center gap-6 overflow-auto p-8">
-        {loadError && <p className="w-full max-w-4xl text-sm text-red-400">{loadError}</p>}
+        {loadError && <p className="w-full max-w-4xl text-sm text-danger">{loadError}</p>}
 
         {view === null && (
-          <p className="text-sm text-neutral-500">Create a project on the left to get started.</p>
+          <p className="text-sm text-fg-muted">Create a project on the left to get started.</p>
         )}
 
         {view?.kind === 'settings' && <Settings />}
@@ -392,7 +392,7 @@ function App() {
             <div className="flex w-full max-w-4xl items-center justify-between gap-2 text-xs">
               <button
                 type="button"
-                className="truncate text-left text-neutral-400 hover:text-neutral-200"
+                className="truncate text-left text-fg-tertiary hover:text-fg-bright"
                 onClick={() => void handleLinkDirectory()}
                 disabled={!currentProject}
                 title={currentProject?.directory ?? undefined}
@@ -401,7 +401,7 @@ function App() {
               </button>
               <button
                 type="button"
-                className="shrink-0 rounded border border-neutral-700 px-2 py-1 font-medium text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
+                className="shrink-0 rounded border border-line px-2 py-1 font-medium text-fg-bright hover:bg-surface-alt disabled:opacity-50"
                 onClick={() => void handleSaveProject()}
                 disabled={!currentProject || savingProject}
               >
@@ -409,21 +409,21 @@ function App() {
               </button>
             </div>
             {projectActionError && (
-              <p className="w-full max-w-4xl text-xs text-red-400">{projectActionError}</p>
+              <p className="w-full max-w-4xl text-xs text-danger">{projectActionError}</p>
             )}
             {!projectActionError && projectActionMessage && (
-              <p className="w-full max-w-4xl truncate text-xs text-green-400">{projectActionMessage}</p>
+              <p className="w-full max-w-4xl truncate text-xs text-success">{projectActionMessage}</p>
             )}
 
-            <div className="flex w-full max-w-4xl gap-1 border-b border-neutral-800 pb-2">
+            <div className="flex w-full max-w-4xl gap-1 border-b border-line-subtle pb-2">
               {AREAS.map(({ key, label }) => (
                 <button
                   key={key}
                   type="button"
                   className={`rounded px-3 py-1 text-sm ${
                     view.area === key
-                      ? 'bg-neutral-800 text-neutral-100'
-                      : 'text-neutral-400 hover:bg-neutral-900'
+                      ? 'bg-surface-alt text-fg'
+                      : 'text-fg-tertiary hover:bg-surface'
                   }`}
                   onClick={() => handleSelectArea(key)}
                 >
@@ -500,13 +500,13 @@ function PartDetailView({ partId, onBack }: { partId: string; onBack: () => void
     <div className="flex w-full max-w-4xl flex-col gap-4">
       <button
         type="button"
-        className="self-start text-xs text-neutral-500 hover:text-neutral-300"
+        className="self-start text-xs text-fg-muted hover:text-fg-secondary"
         onClick={onBack}
       >
         ← Library
       </button>
-      {loadError && <p className="text-sm text-red-400">{loadError}</p>}
-      {!loadError && !part && <p className="text-sm text-neutral-500">Loading…</p>}
+      {loadError && <p className="text-sm text-danger">{loadError}</p>}
+      {!loadError && !part && <p className="text-sm text-fg-muted">Loading…</p>}
       {part && <PartDetail initialPart={part} />}
     </div>
   )
@@ -704,12 +704,12 @@ function Overview({ projectName, project }: { projectName: string; project: Proj
   }
 
   if (!loaded) {
-    return <p className="text-sm text-neutral-500">Loading conversation…</p>
+    return <p className="text-sm text-fg-muted">Loading conversation…</p>
   }
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-3">
-      {loadError && <p className="text-sm text-red-400">{loadError}</p>}
+      {loadError && <p className="text-sm text-danger">{loadError}</p>}
       <OverviewDashboard project={project} chatHistory={chatHistory} />
       <div className="flex flex-col gap-2">
         {messages.map((message) => (
@@ -723,7 +723,7 @@ function Overview({ projectName, project }: { projectName: string; project: Proj
       </div>
       <div className="flex gap-2">
         <input
-          className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+          className="flex-1 rounded border border-line bg-surface px-3 py-2 text-sm"
           placeholder="generate ATtiny85, inject, or just ask a question"
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -733,7 +733,7 @@ function Overview({ projectName, project }: { projectName: string; project: Proj
         />
         <button
           type="button"
-          className="rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
+          className="rounded bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-50"
           onClick={handleSend}
           disabled={input.trim().length === 0}
         >
@@ -763,19 +763,19 @@ function ChatMessageView({
   onCancelInject: (id: string) => void
 }) {
   if (message.kind === 'user') {
-    return <p className="text-sm text-neutral-100">{'> '}{message.text}</p>
+    return <p className="text-sm text-fg">{'> '}{message.text}</p>
   }
 
   if (message.kind === 'generate') {
     if (message.status === 'pending') {
-      return <p className="text-sm text-neutral-400">Generating {message.partNumber}…</p>
+      return <p className="text-sm text-fg-tertiary">Generating {message.partNumber}…</p>
     }
     if (message.status === 'error') {
-      return <p className="text-sm text-red-400">{message.error}</p>
+      return <p className="text-sm text-danger">{message.error}</p>
     }
     return (
-      <div className="flex flex-col gap-1 rounded bg-neutral-900 p-3">
-        <p className="text-sm text-neutral-300">
+      <div className="flex flex-col gap-1 rounded bg-surface p-3">
+        <p className="text-sm text-fg-secondary">
           Generated {String(message.schema?.part_number ?? message.partNumber)}
           {message.schema?.package ? ` (${String(message.schema.package)})` : ''}
         </p>
@@ -785,24 +785,24 @@ function ChatMessageView({
   }
 
   if (message.kind === 'inject') {
-    if (message.status === 'pending') return <p className="text-sm text-neutral-400">Injecting…</p>
+    if (message.status === 'pending') return <p className="text-sm text-fg-tertiary">Injecting…</p>
     if (message.status === 'awaiting_confirmation') {
       return (
-        <div className="flex flex-col gap-2 rounded border border-amber-700 bg-neutral-900 p-3">
-          <p className="text-sm text-amber-400">
+        <div className="flex flex-col gap-2 rounded border border-warning-line bg-surface p-3">
+          <p className="text-sm text-warning">
             This will write into the board KiCad currently has open. Confirm?
           </p>
           <div className="flex gap-2">
             <button
               type="button"
-              className="rounded bg-amber-500 px-3 py-1 text-xs font-medium text-neutral-950"
+              className="rounded bg-warning-accent px-3 py-1 text-xs font-medium text-accent-fg"
               onClick={() => onConfirmInject(message.id)}
             >
               Confirm
             </button>
             <button
               type="button"
-              className="rounded bg-neutral-800 px-3 py-1 text-xs font-medium text-neutral-200"
+              className="rounded bg-surface-alt px-3 py-1 text-xs font-medium text-fg-bright"
               onClick={() => onCancelInject(message.id)}
             >
               Cancel
@@ -811,14 +811,14 @@ function ChatMessageView({
         </div>
       )
     }
-    if (message.status === 'error') return <p className="text-sm text-red-400">{message.error}</p>
-    return <p className="text-sm text-emerald-400">Injected into the open board.</p>
+    if (message.status === 'error') return <p className="text-sm text-danger">{message.error}</p>
+    return <p className="text-sm text-success">Injected into the open board.</p>
   }
 
   // message.kind === 'chat'
-  if (message.status === 'pending') return <p className="text-sm text-neutral-400">Thinking…</p>
-  if (message.status === 'error') return <p className="text-sm text-red-400">{message.error}</p>
-  return <p className="text-sm text-neutral-200">{message.text}</p>
+  if (message.status === 'pending') return <p className="text-sm text-fg-tertiary">Thinking…</p>
+  if (message.status === 'error') return <p className="text-sm text-danger">{message.error}</p>
+  return <p className="text-sm text-fg-bright">{message.text}</p>
 }
 
 export default App

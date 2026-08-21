@@ -509,11 +509,11 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
   }
 
   if (status === 'extracting') {
-    return <p className="text-sm text-neutral-500">Extracting pin data for {candidate?.part_number}…</p>
+    return <p className="text-sm text-fg-muted">Extracting pin data for {candidate?.part_number}…</p>
   }
 
   if (status === 'error') {
-    return <p className="text-sm text-red-400">{error}</p>
+    return <p className="text-sm text-danger">{error}</p>
   }
 
   const schema = extraction as ExtractedSchema
@@ -524,14 +524,14 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-3">
-      <p className="text-sm font-medium text-neutral-100">
-        {schema.part_number} <span className="text-neutral-500">{manufacturer}</span>{' '}
-        <span className="text-neutral-500">{schema.package}</span>
+      <p className="text-sm font-medium text-fg">
+        {schema.part_number} <span className="text-fg-muted">{manufacturer}</span>{' '}
+        <span className="text-fg-muted">{schema.package}</span>
       </p>
 
       <table className="w-full text-left text-xs">
         <thead>
-          <tr className="text-neutral-500">
+          <tr className="text-fg-muted">
             <th className="pr-2 font-medium">#</th>
             <th className="pr-2 font-medium">Name</th>
             <th className="pr-2 font-medium">Type</th>
@@ -540,11 +540,11 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
         </thead>
         <tbody>
           {schema.pins.map((pin) => (
-            <tr key={pin.number} className="text-neutral-300">
+            <tr key={pin.number} className="text-fg-secondary">
               <td className="pr-2">{pin.number}</td>
               <td className="pr-2">{pin.name}</td>
               <td className="pr-2">{pin.electrical_type}</td>
-              <td className="text-neutral-500">llm_extraction</td>
+              <td className="text-fg-muted">llm_extraction</td>
             </tr>
           ))}
         </tbody>
@@ -554,21 +554,21 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
         <div className="flex flex-col gap-1">
           <button
             type="button"
-            className="self-start rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
+            className="self-start rounded bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-50"
             onClick={handleSave}
             disabled={saving}
           >
             {saving ? 'Saving…' : 'Save to Library'}
           </button>
-          {saveError && <p className="text-sm text-red-400">{saveError}</p>}
+          {saveError && <p className="text-sm text-danger">{saveError}</p>}
         </div>
       ) : (
-        <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
-          <p className="text-sm text-emerald-400">Saved to library.</p>
+        <div className="flex flex-col gap-2 rounded border border-line p-3">
+          <p className="text-sm text-success">Saved to library.</p>
           {!exportedPath ? (
             <button
               type="button"
-              className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+              className="self-start rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
               onClick={handleExport}
               disabled={exporting}
             >
@@ -576,30 +576,30 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
             </button>
           ) : (
             <div className="flex flex-col gap-1">
-              <p className="text-xs text-neutral-500">Exported: {exportedPath}</p>
+              <p className="text-xs text-fg-muted">Exported: {exportedPath}</p>
               <button
                 type="button"
-                className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
+                className="self-start rounded border border-line px-2 py-0.5 text-xs"
                 onClick={() => void handleOpenSymbol()}
               >
                 Open symbol
               </button>
             </div>
           )}
-          {exportError && <p className="text-sm text-red-400">{exportError}</p>}
+          {exportError && <p className="text-sm text-danger">{exportError}</p>}
         </div>
       )}
 
       {savedPart && (
-        <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
+        <div className="flex flex-col gap-2 rounded border border-line p-3">
           {/* CTX-315.2/SPEC-315 §5: real, separate from "Save to Library"
               -- always saves to Default already; this tags into 0+
               additional custom libraries. */}
-          <div className="flex flex-col gap-2 border-b border-neutral-800 pb-2">
+          <div className="flex flex-col gap-2 border-b border-line-subtle pb-2">
             {!libraryPickerOpen ? (
               <button
                 type="button"
-                className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium"
+                className="self-start rounded border border-line px-3 py-1 text-xs font-medium"
                 onClick={() => void handleOpenLibraryPicker()}
               >
                 Add to library…
@@ -607,15 +607,15 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
             ) : (
               <div className="flex flex-col gap-2">
                 {availableLibraries === null && !libraryTagError && (
-                  <p className="text-xs text-neutral-500">Loading libraries…</p>
+                  <p className="text-xs text-fg-muted">Loading libraries…</p>
                 )}
                 {availableLibraries !== null && availableLibraries.length === 0 && (
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-xs text-fg-muted">
                     No custom libraries yet. Create one from the Library area.
                   </p>
                 )}
                 {availableLibraries?.map((library) => (
-                  <label key={library.id} className="flex items-center gap-2 text-xs text-neutral-300">
+                  <label key={library.id} className="flex items-center gap-2 text-xs text-fg-secondary">
                     <input
                       type="checkbox"
                       checked={selectedLibraryIds.includes(library.id)}
@@ -627,7 +627,7 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    className="self-start rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+                    className="self-start rounded bg-accent px-3 py-1 text-xs font-medium text-accent-fg disabled:opacity-50"
                     onClick={() => void handleConfirmAddToLibrary()}
                     disabled={taggingLibraries || selectedLibraryIds.length === 0}
                   >
@@ -635,7 +635,7 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                   </button>
                   <button
                     type="button"
-                    className="self-start rounded border border-neutral-700 px-3 py-1 text-xs"
+                    className="self-start rounded border border-line px-3 py-1 text-xs"
                     onClick={() => setLibraryPickerOpen(false)}
                   >
                     Cancel
@@ -643,8 +643,8 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                 </div>
               </div>
             )}
-            {libraryTagError && <p className="text-sm text-red-400">{libraryTagError}</p>}
-            {libraryTagMessage && <p className="text-sm text-emerald-400">{libraryTagMessage}</p>}
+            {libraryTagError && <p className="text-sm text-danger">{libraryTagError}</p>}
+            {libraryTagMessage && <p className="text-sm text-success">{libraryTagMessage}</p>}
           </div>
 
           {/* CTX-205.3/.4/.7, SPEC-205: real, cited (Class B) design
@@ -664,13 +664,13 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
               synthesis genuinely produced nothing) falls back to
               showing its citations directly, open by default, since
               there's nothing else to lead with. */}
-          <div className="flex flex-col gap-2 border-b border-neutral-800 pb-2">
+          <div className="flex flex-col gap-2 border-b border-line-subtle pb-2">
             <div className="flex items-center gap-2">
-              <p className="flex-1 text-xs font-medium uppercase text-neutral-500">Design Requirements</p>
+              <p className="flex-1 text-xs font-medium uppercase text-fg-muted">Design Requirements</p>
               {savedPart.design_guidance && (
                 <button
                   type="button"
-                  className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                  className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
                   onClick={() => void handleGenerateDesignGuidance()}
                   disabled={generatingDesignGuidance}
                 >
@@ -682,7 +682,7 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
             {!savedPart.design_guidance ? (
               <button
                 type="button"
-                className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                className="self-start rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
                 onClick={() => void handleGenerateDesignGuidance()}
                 disabled={generatingDesignGuidance}
               >
@@ -695,24 +695,24 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                   const summary = savedPart.design_guidance?.category_summaries[key] ?? null
                   return (
                     <div key={key} className="flex flex-col gap-1">
-                      <p className="text-xs font-medium text-neutral-300">{label}</p>
+                      <p className="text-xs font-medium text-fg-secondary">{label}</p>
                       {items.length === 0 ? (
-                        <p className="text-xs text-neutral-500">No guidance found for this category.</p>
+                        <p className="text-xs text-fg-muted">No guidance found for this category.</p>
                       ) : (
                         <>
-                          {summary && <p className="text-xs text-neutral-300">{summary}</p>}
+                          {summary && <p className="text-xs text-fg-secondary">{summary}</p>}
                           <details open={!summary}>
-                            <summary className="cursor-pointer text-xs font-medium text-neutral-500">
+                            <summary className="cursor-pointer text-xs font-medium text-fg-muted">
                               {summary
                                 ? `${items.length} citation${items.length === 1 ? '' : 's'}`
                                 : 'Citations'}
                             </summary>
                             <ul className="mt-1 flex flex-col gap-1">
                               {items.map((item, i) => (
-                                <li key={i} className="flex items-start gap-2 text-xs text-neutral-300">
+                                <li key={i} className="flex items-start gap-2 text-xs text-fg-secondary">
                                   <button
                                     type="button"
-                                    className="shrink-0 rounded border border-neutral-700 px-2 py-0.5 text-xs font-medium text-neutral-300 disabled:opacity-50"
+                                    className="shrink-0 rounded border border-line px-2 py-0.5 text-xs font-medium text-fg-secondary disabled:opacity-50"
                                     onClick={() => void handleOpenCitation(item)}
                                     disabled={openingCitationPage !== null}
                                     title="Open the datasheet at this page"
@@ -731,16 +731,16 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                 })}
               </div>
             )}
-            {designGuidanceError && <p className="text-sm text-red-400">{designGuidanceError}</p>}
-            {citationOpenError && <p className="text-sm text-red-400">{citationOpenError}</p>}
+            {designGuidanceError && <p className="text-sm text-danger">{designGuidanceError}</p>}
+            {citationOpenError && <p className="text-sm text-danger">{citationOpenError}</p>}
           </div>
 
           {savedPart.footprint_id ? (
             <>
-              <p className="text-sm text-emerald-400">
+              <p className="text-sm text-success">
                 Footprint linked: {savedPart.footprint_id}
                 {footprintGenerated && (
-                  <span className="ml-2 text-xs font-medium text-amber-400">
+                  <span className="ml-2 text-xs font-medium text-warning">
                     (generated from datasheet dimensions — unverified)
                   </span>
                 )}
@@ -748,7 +748,7 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
               {!exportedFootprintPath ? (
                 <button
                   type="button"
-                  className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                  className="self-start rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
                   onClick={handleExportFootprint}
                   disabled={exportingFootprint}
                 >
@@ -756,25 +756,25 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                 </button>
               ) : (
                 <div className="flex flex-col gap-1">
-                  <p className="text-xs text-neutral-500">Exported: {exportedFootprintPath}</p>
+                  <p className="text-xs text-fg-muted">Exported: {exportedFootprintPath}</p>
                   <button
                     type="button"
-                    className="self-start rounded border border-neutral-700 px-2 py-0.5 text-xs"
+                    className="self-start rounded border border-line px-2 py-0.5 text-xs"
                     onClick={() => void handleOpenFootprint()}
                   >
                     Open footprint
                   </button>
                 </div>
               )}
-              {exportFootprintError && <p className="text-sm text-red-400">{exportFootprintError}</p>}
+              {exportFootprintError && <p className="text-sm text-danger">{exportFootprintError}</p>}
 
               {/* CTX-308.7: SPEC-308's third named concern -- available
                   now that a part and its footprint are both real. */}
-              <div className="flex flex-col gap-2 border-t border-neutral-800 pt-2">
+              <div className="flex flex-col gap-2 border-t border-line-subtle pt-2">
                 {!guidance ? (
                   <button
                     type="button"
-                    className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                    className="self-start rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
                     onClick={handleGetGuidance}
                     disabled={loadingGuidance}
                   >
@@ -782,33 +782,33 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                   </button>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    <p className="text-xs font-medium uppercase text-neutral-500">Connection Guidance</p>
+                    <p className="text-xs font-medium uppercase text-fg-muted">Connection Guidance</p>
                     {guidance.pin_guidance.length === 0 ? (
-                      <p className="text-xs text-neutral-500">No pin-specific guidance for this part.</p>
+                      <p className="text-xs text-fg-muted">No pin-specific guidance for this part.</p>
                     ) : (
                       <ul className="flex flex-col gap-1">
                         {guidance.pin_guidance.map((entry) => (
-                          <li key={entry.pin_number} className="text-xs text-neutral-300">
-                            <span className="font-medium text-neutral-100">Pin {entry.pin_number}:</span>{' '}
+                          <li key={entry.pin_number} className="text-xs text-fg-secondary">
+                            <span className="font-medium text-fg">Pin {entry.pin_number}:</span>{' '}
                             {entry.guidance}
                           </li>
                         ))}
                       </ul>
                     )}
                     {guidance.general_notes && (
-                      <p className="text-xs text-neutral-400">{guidance.general_notes}</p>
+                      <p className="text-xs text-fg-tertiary">{guidance.general_notes}</p>
                     )}
                   </div>
                 )}
-                {guidanceError && <p className="text-sm text-red-400">{guidanceError}</p>}
+                {guidanceError && <p className="text-sm text-danger">{guidanceError}</p>}
               </div>
             </>
           ) : (
             <>
-              <p className="text-xs font-medium uppercase text-neutral-500">Find Footprint</p>
+              <p className="text-xs font-medium uppercase text-fg-muted">Find Footprint</p>
               <div className="flex gap-2">
                 <input
-                  className="flex-1 rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                  className="flex-1 rounded border border-line bg-surface px-3 py-2 text-sm"
                   placeholder="search this machine's own KiCad libraries"
                   value={footprintQuery}
                   onChange={(e) => setFootprintQuery(e.target.value)}
@@ -818,7 +818,7 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                 />
                 <button
                   type="button"
-                  className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                  className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
                   onClick={handleFootprintSearch}
                   disabled={footprintQuery.trim().length === 0 || footprintStatus === 'searching'}
                 >
@@ -827,11 +827,11 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
               </div>
 
               {footprintStatus === 'error' && footprintError && (
-                <p className="text-sm text-red-400">{footprintError}</p>
+                <p className="text-sm text-danger">{footprintError}</p>
               )}
 
               {footprintCandidates !== null && footprintCandidates.length === 0 && (
-                <p className="text-xs text-neutral-500">
+                <p className="text-xs text-fg-muted">
                   No match in this machine's own configured KiCad libraries.
                 </p>
               )}
@@ -841,10 +841,10 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                   search needed. Always available, not gated on a zero-result
                   search -- a user who already knows nothing installed will
                   match shouldn't have to search first. */}
-              <div className="flex items-center gap-2 border-t border-neutral-800 pt-2">
+              <div className="flex items-center gap-2 border-t border-line-subtle pt-2">
                 <button
                   type="button"
-                  className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                  className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
                   onClick={handleGenerateFootprint}
                   disabled={generatingFootprint}
                 >
@@ -857,17 +857,17 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                   {footprintCandidates.map((fp) => (
                     <div
                       key={`${fp.library}:${fp.footprint_name}`}
-                      className="flex items-center justify-between gap-3 rounded border border-neutral-800 p-2"
+                      className="flex items-center justify-between gap-3 rounded border border-line-subtle p-2"
                     >
-                      <p className="text-xs text-neutral-300">
-                        {fp.footprint_name} <span className="text-neutral-500">{fp.library}</span>{' '}
-                        <span className="text-neutral-600">
+                      <p className="text-xs text-fg-secondary">
+                        {fp.footprint_name} <span className="text-fg-muted">{fp.library}</span>{' '}
+                        <span className="text-fg-faint">
                           {fp.source === 'your_library' ? '· previously saved' : '· KiCad library'}
                         </span>
                       </p>
                       <button
                         type="button"
-                        className="rounded border border-neutral-700 px-2 py-0.5 text-xs font-medium disabled:opacity-50"
+                        className="rounded border border-line px-2 py-0.5 text-xs font-medium disabled:opacity-50"
                         onClick={() => handleAttachFootprint(fp)}
                         disabled={attachingFootprint !== null}
                       >
@@ -882,12 +882,12 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                   allowlist of GitHub-hosted community libraries, alongside
                   the installed-library results above. Reuses the same
                   query, its own separate search action/results. */}
-              <div className="flex flex-col gap-2 border-t border-neutral-800 pt-2">
+              <div className="flex flex-col gap-2 border-t border-line-subtle pt-2">
                 <div className="flex items-center gap-2">
-                  <p className="flex-1 text-xs font-medium uppercase text-neutral-500">Community Libraries</p>
+                  <p className="flex-1 text-xs font-medium uppercase text-fg-muted">Community Libraries</p>
                   <button
                     type="button"
-                    className="rounded border border-neutral-700 px-3 py-1 text-xs font-medium disabled:opacity-50"
+                    className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
                     onClick={handleCommunitySearch}
                     disabled={footprintQuery.trim().length === 0 || communityStatus === 'searching'}
                   >
@@ -896,33 +896,33 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                 </div>
 
                 {communityStatus === 'error' && communityError && (
-                  <p className="text-sm text-red-400">{communityError}</p>
+                  <p className="text-sm text-danger">{communityError}</p>
                 )}
 
                 {communityCandidates !== null && communityCandidates.length === 0 && (
-                  <p className="text-xs text-neutral-500">No match in the known community libraries.</p>
+                  <p className="text-xs text-fg-muted">No match in the known community libraries.</p>
                 )}
 
                 {communityImportedSymbolId && (
-                  <p className="text-xs text-emerald-400">
+                  <p className="text-xs text-success">
                     Imported symbol <code>{communityImportedSymbolId}</code> to your library.
                   </p>
                 )}
 
                 {communitySymbolBrowse && (
-                  <div className="flex flex-col gap-2 rounded border border-neutral-800 p-2">
-                    <p className="text-xs text-neutral-400">
+                  <div className="flex flex-col gap-2 rounded border border-line-subtle p-2">
+                    <p className="text-xs text-fg-tertiary">
                       {communitySymbolBrowse.candidate.path} contains {communitySymbolBrowse.symbols.length} real
                       symbols -- choose one to import:
                     </p>
                     {communitySymbolBrowse.symbols.map((s) => (
                       <div key={s.name} className="flex items-center justify-between gap-3">
-                        <p className="text-xs text-neutral-300">
-                          {s.name} <span className="text-neutral-600">· {s.pin_count} pins</span>
+                        <p className="text-xs text-fg-secondary">
+                          {s.name} <span className="text-fg-faint">· {s.pin_count} pins</span>
                         </p>
                         <button
                           type="button"
-                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs font-medium disabled:opacity-50"
+                          className="rounded border border-line px-2 py-0.5 text-xs font-medium disabled:opacity-50"
                           onClick={() => handleImportCommunitySymbol(s.name)}
                           disabled={communityImportingPath !== null}
                         >
@@ -938,20 +938,20 @@ export function PartDetail({ candidate, initialPart }: PartDetailProps) {
                     {communityCandidates.map((c) => (
                       <div
                         key={`${c.owner}/${c.repo}/${c.path}`}
-                        className="flex items-center justify-between gap-3 rounded border border-neutral-800 p-2"
+                        className="flex items-center justify-between gap-3 rounded border border-line-subtle p-2"
                       >
-                        <p className="text-xs text-neutral-300">
+                        <p className="text-xs text-fg-secondary">
                           {c.path.split('/').pop()}{' '}
-                          <span className="text-neutral-500">
+                          <span className="text-fg-muted">
                             {c.owner}/{c.repo}
                           </span>{' '}
-                          <span className="text-neutral-600">
+                          <span className="text-fg-faint">
                             · {c.license} · {c.kind}
                           </span>
                         </p>
                         <button
                           type="button"
-                          className="rounded border border-neutral-700 px-2 py-0.5 text-xs font-medium disabled:opacity-50"
+                          className="rounded border border-line px-2 py-0.5 text-xs font-medium disabled:opacity-50"
                           onClick={() => handleImportCommunityCandidate(c)}
                           disabled={communityImportingPath !== null}
                         >

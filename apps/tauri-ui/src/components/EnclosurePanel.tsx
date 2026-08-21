@@ -404,7 +404,7 @@ export function EnclosurePanel({
           <button
             type="button"
             className={`rounded px-3 py-1 text-sm ${
-              mode === 'board' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
+              mode === 'board' ? 'bg-surface-alt text-fg' : 'text-fg-tertiary hover:bg-surface'
             }`}
             onClick={() => setMode('board')}
             disabled={running}
@@ -414,7 +414,7 @@ export function EnclosurePanel({
           <button
             type="button"
             className={`rounded px-3 py-1 text-sm ${
-              mode === 'manual' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
+              mode === 'manual' ? 'bg-surface-alt text-fg' : 'text-fg-tertiary hover:bg-surface'
             }`}
             onClick={() => setMode('manual')}
             disabled={running}
@@ -442,7 +442,7 @@ export function EnclosurePanel({
 
         {mode === 'board' && (
           <div className="flex flex-col gap-2">
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-fg-muted">
               Enclosures are generated as a rectangular box sized to your board's bounding box --
               non-rectangular board outlines aren't traced precisely yet.
             </p>
@@ -456,21 +456,21 @@ export function EnclosurePanel({
               ] as const
             ).map(([field, label, hint, required]) => (
               <label key={field} className="flex flex-col gap-1 text-xs">
-                <span className="text-neutral-300">
-                  {label} {required ? <span className="text-neutral-500">(required)</span> : <span className="text-neutral-500">(optional)</span>}
+                <span className="text-fg-secondary">
+                  {label} {required ? <span className="text-fg-muted">(required)</span> : <span className="text-fg-muted">(optional)</span>}
                 </span>
                 <input
                   type="number"
-                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                  className="w-full rounded border border-line bg-surface px-3 py-2 text-sm"
                   value={boardParams[field]}
                   onChange={(e) => setBoardParams((prev) => ({ ...prev, [field]: Number(e.target.value) }))}
                   disabled={running}
                 />
-                <span className="text-neutral-500">{hint}</span>
+                <span className="text-fg-muted">{hint}</span>
               </label>
             ))}
 
-            <label className="flex items-center gap-2 text-xs text-neutral-300">
+            <label className="flex items-center gap-2 text-xs text-fg-secondary">
               <input
                 type="checkbox"
                 checked={lid}
@@ -481,12 +481,12 @@ export function EnclosurePanel({
             </label>
             {lid && (
               <label className="flex flex-col gap-1 text-xs">
-                <span className="text-neutral-300">
-                  Lid thickness (mm) <span className="text-neutral-500">(optional -- defaults to wall thickness)</span>
+                <span className="text-fg-secondary">
+                  Lid thickness (mm) <span className="text-fg-muted">(optional -- defaults to wall thickness)</span>
                 </span>
                 <input
                   type="number"
-                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                  className="w-full rounded border border-line bg-surface px-3 py-2 text-sm"
                   value={lidThicknessMm}
                   onChange={(e) => setLidThicknessMm(e.target.value === '' ? '' : Number(e.target.value))}
                   disabled={running}
@@ -498,7 +498,7 @@ export function EnclosurePanel({
 
         {mode === 'manual' && (
           <div className="flex flex-col gap-2">
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-fg-muted">
               A plain rectangular box, not based on any real board -- use Board above when you have a
               .kicad_pcb file available.
             </p>
@@ -510,10 +510,10 @@ export function EnclosurePanel({
               ] as const
             ).map(([dim, label]) => (
               <label key={dim} className="flex flex-col gap-1 text-xs">
-                <span className="text-neutral-300">{label} <span className="text-neutral-500">(required)</span></span>
+                <span className="text-fg-secondary">{label} <span className="text-fg-muted">(required)</span></span>
                 <input
                   type="number"
-                  className="w-full rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm"
+                  className="w-full rounded border border-line bg-surface px-3 py-2 text-sm"
                   value={dims[dim]}
                   onChange={(e) => setDims((prev) => ({ ...prev, [dim]: Number(e.target.value) }))}
                   disabled={running}
@@ -526,7 +526,7 @@ export function EnclosurePanel({
         <div className="flex gap-2">
           <button
             type="button"
-            className="flex-1 rounded bg-neutral-100 px-4 py-2 text-sm font-medium text-neutral-950 disabled:opacity-50"
+            className="flex-1 rounded bg-accent px-4 py-2 text-sm font-medium text-accent-fg disabled:opacity-50"
             onClick={() => void handleGenerate()}
             disabled={running || (mode === 'board' && !pcbPath)}
           >
@@ -535,26 +535,26 @@ export function EnclosurePanel({
           {running && (
             <button
               type="button"
-              className="rounded border border-neutral-700 px-4 py-2 text-sm font-medium disabled:opacity-50"
+              className="rounded border border-line px-4 py-2 text-sm font-medium disabled:opacity-50"
               onClick={() => void handleCancel()}
             >
               Cancel
             </button>
           )}
         </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
       </div>
 
       {result && (
         <div className="flex w-full flex-1 flex-col gap-2">
           {result.unrecognized_holes.length > 0 && (
-            <p className="text-sm text-amber-400">
+            <p className="text-sm text-warning">
               {result.unrecognized_holes.length} hole(s) on this board weren't recognized as mounting
               holes and were skipped -- no standoff was drilled for them.
             </p>
           )}
           {result.no_mounting_holes_found && (
-            <p className="text-sm text-amber-400">
+            <p className="text-sm text-warning">
               No mounting holes were found on this board -- the enclosure has no standoffs. If this
               board really does have mounting holes, confirm they're real NPTH pads in KiCad.
             </p>
@@ -579,7 +579,7 @@ export function EnclosurePanel({
             />
             {resultBoardParams && (
               <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 text-xs text-neutral-300">
+                <label className="flex items-center gap-2 text-xs text-fg-secondary">
                   <input
                     type="checkbox"
                     checked={boardVisible}
@@ -588,11 +588,11 @@ export function EnclosurePanel({
                   />
                   {loadingBoardGlb ? 'Loading board…' : 'Show board (visual fit check)'}
                 </label>
-                {boardGlbError && <p className="text-xs text-red-400">{boardGlbError}</p>}
+                {boardGlbError && <p className="text-xs text-danger">{boardGlbError}</p>}
               </div>
             )}
             {boardVisible && unknownComponentRefs.length > 0 && (
-              <p className="text-xs text-amber-400">
+              <p className="text-xs text-warning">
                 {unknownComponentRefs.join(', ')} {unknownComponentRefs.length === 1 ? 'has' : 'have'} no
                 3D model in KiCad and won't appear above -- fix their footprint's 3D model assignment
                 and regenerate to see them.
@@ -602,23 +602,23 @@ export function EnclosurePanel({
               <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  className="self-start rounded border border-neutral-700 px-3 py-1 text-xs font-medium text-neutral-200 hover:bg-neutral-800"
+                  className="self-start rounded border border-line px-3 py-1 text-xs font-medium text-fg-bright hover:bg-surface-alt"
                   onClick={handleOpenExport}
                 >
                   Export…
                 </button>
                 {exportedPath && (
-                  <p className="truncate text-xs text-neutral-400">Exported to {exportedPath}</p>
+                  <p className="truncate text-xs text-fg-tertiary">Exported to {exportedPath}</p>
                 )}
               </div>
             )}
             {exportOpen && (
-              <div className="flex flex-col gap-2 rounded border border-neutral-700 bg-neutral-900 p-3 text-sm">
+              <div className="flex flex-col gap-2 rounded border border-line bg-surface p-3 text-sm">
                 <label className="flex flex-col gap-1 text-xs">
-                  <span className="text-neutral-300">Format</span>
+                  <span className="text-fg-secondary">Format</span>
                   <select
                     aria-label="Export format"
-                    className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200"
+                    className="rounded border border-line bg-surface px-2 py-1 text-xs text-fg-bright"
                     value={exportFormat}
                     onChange={(e) => setExportFormat(e.target.value as ExportFormat)}
                     disabled={exporting}
@@ -630,16 +630,16 @@ export function EnclosurePanel({
                   </select>
                 </label>
                 {exportFormat === 'fcstd' ? (
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-xs text-fg-muted">
                     FreeCAD export always includes the whole design -- body and lid together, when a
                     lid was generated.
                   </p>
                 ) : (
                   <label className="flex flex-col gap-1 text-xs">
-                    <span className="text-neutral-300">Parts</span>
+                    <span className="text-fg-secondary">Parts</span>
                     <select
                       aria-label="Export parts"
-                      className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200"
+                      className="rounded border border-line bg-surface px-2 py-1 text-xs text-fg-bright"
                       value={exportParts}
                       onChange={(e) => setExportParts(e.target.value as ExportParts)}
                       disabled={exporting}
@@ -653,7 +653,7 @@ export function EnclosurePanel({
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+                    className="rounded bg-accent px-3 py-1 text-xs font-medium text-accent-fg disabled:opacity-50"
                     onClick={() => void handleConfirmExport()}
                     disabled={exporting}
                   >
@@ -661,14 +661,14 @@ export function EnclosurePanel({
                   </button>
                   <button
                     type="button"
-                    className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200 disabled:opacity-50"
+                    className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright disabled:opacity-50"
                     onClick={handleCancelExport}
                     disabled={exporting}
                   >
                     Close
                   </button>
                 </div>
-                {exportError && <p className="text-xs text-red-400">{exportError}</p>}
+                {exportError && <p className="text-xs text-danger">{exportError}</p>}
               </div>
             )}
           </>
@@ -708,34 +708,34 @@ function BoardPickerSection({
   const showGuidance = !loadingList && (listError !== null || listResult?.status === 'no_board_open')
 
   return (
-    <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-3 text-sm">
-      <p className="text-xs text-neutral-500">
+    <div className="flex flex-col gap-2 rounded border border-line-subtle bg-surface p-3 text-sm">
+      <p className="text-xs text-fg-muted">
         Already checked your board on the PCB tab? Use the same file here.
       </p>
 
-      {loadingList && <p className="text-neutral-400">Scanning for boards open in KiCad…</p>}
+      {loadingList && <p className="text-fg-tertiary">Scanning for boards open in KiCad…</p>}
 
       {showGuidance && (
         <div className="flex flex-col gap-2">
-          <p className="text-neutral-200">
+          <p className="text-fg-bright">
             {listError ? "KiCad doesn't appear to be running yet." : 'No board is currently open in KiCad.'}
           </p>
-          {openKicadError && <p className="text-xs text-red-400">{openKicadError}</p>}
+          {openKicadError && <p className="text-xs text-danger">{openKicadError}</p>}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+              className="rounded bg-accent px-3 py-1 text-xs font-medium text-accent-fg disabled:opacity-50"
               onClick={onOpenKicad}
               disabled={openingKicad}
             >
               {openingKicad ? 'Opening…' : 'Open KiCad'}
             </button>
-            <button type="button" className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200" onClick={onRefreshList}>
+            <button type="button" className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright" onClick={onRefreshList}>
               Refresh
             </button>
             <button
               type="button"
-              className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+              className="rounded bg-accent px-3 py-1 text-xs font-medium text-accent-fg disabled:opacity-50"
               onClick={onPickManually}
               disabled={running}
             >
@@ -747,7 +747,7 @@ function BoardPickerSection({
 
       {!loadingList && !showGuidance && listResult?.status === 'boards_found' && (
         <div className="flex flex-col gap-2">
-          <p className="text-neutral-200">
+          <p className="text-fg-bright">
             {listResult.candidates.length === 1 ? 'Board open in KiCad:' : 'Boards open in KiCad — pick one:'}
           </p>
           <ul className="flex flex-col gap-1">
@@ -760,35 +760,35 @@ function BoardPickerSection({
                     aria-pressed={isSelected}
                     className={`w-full rounded border px-3 py-2 text-left text-xs disabled:opacity-50 ${
                       isSelected
-                        ? 'border-neutral-100 bg-neutral-800 text-neutral-100'
-                        : 'border-neutral-700 text-neutral-200 hover:bg-neutral-800'
+                        ? 'border-fg bg-surface-alt text-fg'
+                        : 'border-line text-fg-bright hover:bg-surface-alt'
                     }`}
                     onClick={() => onSelectBoard(candidate)}
                     disabled={running}
                   >
                     <span className="block font-medium">{candidate.label}</span>
-                    <span className="block break-all text-neutral-500">{candidate.path}</span>
+                    <span className="block break-all text-fg-muted">{candidate.path}</span>
                   </button>
                 </li>
               )
             })}
           </ul>
-          {openKicadError && <p className="text-xs text-red-400">{openKicadError}</p>}
+          {openKicadError && <p className="text-xs text-danger">{openKicadError}</p>}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200 disabled:opacity-50"
+              className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright disabled:opacity-50"
               onClick={onOpenKicad}
               disabled={openingKicad}
             >
               {openingKicad ? 'Switching…' : 'Switch to KiCad'}
             </button>
-            <button type="button" className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200" onClick={onRefreshList}>
+            <button type="button" className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright" onClick={onRefreshList}>
               Refresh
             </button>
             <button
               type="button"
-              className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200 disabled:opacity-50"
+              className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright disabled:opacity-50"
               onClick={onPickManually}
               disabled={running}
             >
@@ -799,7 +799,7 @@ function BoardPickerSection({
       )}
 
       {manualPcbPath && (
-        <p className="truncate text-xs text-neutral-400">Manually picked: {manualPcbPath}</p>
+        <p className="truncate text-xs text-fg-tertiary">Manually picked: {manualPcbPath}</p>
       )}
     </div>
   )

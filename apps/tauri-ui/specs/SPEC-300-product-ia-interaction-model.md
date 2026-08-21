@@ -22,6 +22,7 @@ child_specs:
   - "SPEC-314-community-library-discovery.md"
   - "SPEC-315-library-browsing-and-organization.md"
   - "SPEC-316-native-menu-command-surface.md"
+  - "SPEC-317-theme-system.md"
 user_facing: true
 ---
 

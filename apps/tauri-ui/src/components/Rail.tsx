@@ -36,17 +36,17 @@ export function Rail({
   }
 
   return (
-    <nav className="flex h-full w-48 flex-col gap-6 border-r border-neutral-800 p-4 text-sm">
+    <nav className="flex h-full w-48 flex-col gap-6 border-r border-line-subtle p-4 text-sm">
       <div className="flex flex-col gap-1">
-        <h2 className="px-2 text-xs font-medium uppercase text-neutral-500">Projects</h2>
+        <h2 className="px-2 text-xs font-medium uppercase text-fg-muted">Projects</h2>
         {projects.map((name) => (
           <button
             key={name}
             type="button"
             className={`rounded px-2 py-1 text-left ${
               !settingsSelected && selectedProject === name
-                ? 'bg-neutral-800 text-neutral-100'
-                : 'text-neutral-300 hover:bg-neutral-900'
+                ? 'bg-surface-alt text-fg'
+                : 'text-fg-secondary hover:bg-surface'
             }`}
             onClick={() => onSelectProject(name)}
           >
@@ -58,7 +58,7 @@ export function Rail({
           <div className="flex gap-1 px-2 py-1">
             <input
               autoFocus
-              className="w-full rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 text-xs"
+              className="w-full rounded border border-line bg-surface px-1 py-0.5 text-xs"
               placeholder="project name"
               value={newProjectName}
               onChange={(e) => setNewProjectName(e.target.value)}
@@ -69,7 +69,7 @@ export function Rail({
             />
             <button
               type="button"
-              className="rounded bg-neutral-100 px-2 text-xs font-medium text-neutral-950 disabled:opacity-50"
+              className="rounded bg-accent px-2 text-xs font-medium text-accent-fg disabled:opacity-50"
               onClick={handleCreate}
               disabled={!newProjectName.trim()}
             >
@@ -79,7 +79,7 @@ export function Rail({
         ) : (
           <button
             type="button"
-            className="rounded px-2 py-1 text-left text-neutral-500 hover:bg-neutral-900"
+            className="rounded px-2 py-1 text-left text-fg-muted hover:bg-surface"
             onClick={() => setCreating(true)}
           >
             + New…
@@ -88,11 +88,11 @@ export function Rail({
       </div>
 
       <div className="flex flex-col gap-1">
-        <h2 className="px-2 text-xs font-medium uppercase text-neutral-500">Library</h2>
+        <h2 className="px-2 text-xs font-medium uppercase text-fg-muted">Library</h2>
         <button
           type="button"
           className={`rounded px-2 py-1 text-left ${
-            librarySelected ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-400 hover:bg-neutral-900'
+            librarySelected ? 'bg-surface-alt text-fg' : 'text-fg-tertiary hover:bg-surface'
           }`}
           onClick={onSelectLibrary}
         >
@@ -103,7 +103,7 @@ export function Rail({
       <button
         type="button"
         className={`mt-auto rounded px-2 py-1 text-left ${
-          settingsSelected ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-300 hover:bg-neutral-900'
+          settingsSelected ? 'bg-surface-alt text-fg' : 'text-fg-secondary hover:bg-surface'
         }`}
         onClick={onSelectSettings}
       >

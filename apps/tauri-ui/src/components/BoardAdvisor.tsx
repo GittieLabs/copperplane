@@ -188,33 +188,33 @@ function BoardCheckSection({
   const showGuidance = !loadingList && (listError !== null || listResult?.status === 'no_board_open')
 
   return (
-    <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
-      <p className="text-xs font-medium uppercase text-neutral-500">Board (DRC)</p>
+    <div className="flex flex-col gap-2 rounded border border-line p-3">
+      <p className="text-xs font-medium uppercase text-fg-muted">Board (DRC)</p>
 
-      {loadingList && <p className="text-sm text-neutral-400">Scanning for boards open in KiCad…</p>}
+      {loadingList && <p className="text-sm text-fg-tertiary">Scanning for boards open in KiCad…</p>}
 
       {showGuidance && (
-        <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-3 text-sm">
-          <p className="text-neutral-200">
+        <div className="flex flex-col gap-2 rounded border border-line-subtle bg-surface p-3 text-sm">
+          <p className="text-fg-bright">
             {listError ? "KiCad doesn't appear to be running yet." : 'No board is currently open in KiCad.'}
           </p>
-          <ol className="list-decimal space-y-1 pl-4 text-xs text-neutral-400">
-            <li>Click <strong className="text-neutral-300">Open KiCad</strong> below (or open it yourself).</li>
+          <ol className="list-decimal space-y-1 pl-4 text-xs text-fg-tertiary">
+            <li>Click <strong className="text-fg-secondary">Open KiCad</strong> below (or open it yourself).</li>
             <li>
-              Open your project, then open its <strong className="text-neutral-300">PCB Editor</strong> window
+              Open your project, then open its <strong className="text-fg-secondary">PCB Editor</strong> window
               (not just the project manager).
             </li>
             <li>
-              Confirm the IPC API is enabled: <strong className="text-neutral-300">Preferences → Plugins</strong>.
+              Confirm the IPC API is enabled: <strong className="text-fg-secondary">Preferences → Plugins</strong>.
             </li>
-            <li>Click <strong className="text-neutral-300">Refresh</strong> below -- this app doesn't know when
+            <li>Click <strong className="text-fg-secondary">Refresh</strong> below -- this app doesn't know when
               KiCad opens or closes a board on its own.</li>
           </ol>
-          {openKicadError && <p className="text-xs text-red-400">{openKicadError}</p>}
+          {openKicadError && <p className="text-xs text-danger">{openKicadError}</p>}
           <div className="flex gap-2">
             <button
               type="button"
-              className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+              className="rounded bg-accent px-3 py-1 text-xs font-medium text-accent-fg disabled:opacity-50"
               onClick={onOpenKicad}
               disabled={openingKicad}
             >
@@ -222,7 +222,7 @@ function BoardCheckSection({
             </button>
             <button
               type="button"
-              className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+              className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
               onClick={onRefreshList}
             >
               Refresh
@@ -232,8 +232,8 @@ function BoardCheckSection({
       )}
 
       {!loadingList && !showGuidance && listResult?.status === 'boards_found' && (
-        <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-3 text-sm">
-          <p className="text-neutral-200">
+        <div className="flex flex-col gap-2 rounded border border-line-subtle bg-surface p-3 text-sm">
+          <p className="text-fg-bright">
             {listResult.candidates.length === 1
               ? 'Board open in KiCad:'
               : 'Boards open in KiCad — pick one to check:'}
@@ -248,27 +248,27 @@ function BoardCheckSection({
                     aria-pressed={isSelected}
                     className={`w-full rounded border px-3 py-2 text-left text-xs disabled:opacity-50 ${
                       isSelected
-                        ? 'border-neutral-100 bg-neutral-800 text-neutral-100'
-                        : 'border-neutral-700 text-neutral-200 hover:bg-neutral-800'
+                        ? 'border-fg bg-surface-alt text-fg'
+                        : 'border-line text-fg-bright hover:bg-surface-alt'
                     }`}
                     onClick={() => onCheckBoard(candidate)}
                     disabled={checkingBoard}
                   >
                     <span className="block font-medium">{candidate.label}</span>
-                    <span className="block break-all text-neutral-500">{candidate.path}</span>
+                    <span className="block break-all text-fg-muted">{candidate.path}</span>
                   </button>
                 </li>
               )
             })}
           </ul>
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-fg-muted">
             Don't see the board you want? Switch to KiCad and open it there, then click Refresh.
           </p>
-          {openKicadError && <p className="text-xs text-red-400">{openKicadError}</p>}
+          {openKicadError && <p className="text-xs text-danger">{openKicadError}</p>}
           <div className="flex gap-2">
             <button
               type="button"
-              className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+              className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
               onClick={onOpenKicad}
               disabled={openingKicad}
             >
@@ -276,7 +276,7 @@ function BoardCheckSection({
             </button>
             <button
               type="button"
-              className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+              className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
               onClick={onRefreshList}
             >
               Refresh
@@ -286,11 +286,11 @@ function BoardCheckSection({
       )}
 
       {checkingBoard && (
-        <p className="text-sm text-neutral-400">
+        <p className="text-sm text-fg-tertiary">
           Running DRC checks on {selectedBoard?.label ?? 'the selected board'}… this can take a few seconds.
         </p>
       )}
-      {checkError && <p className="text-sm text-red-400">{checkError}</p>}
+      {checkError && <p className="text-sm text-danger">{checkError}</p>}
       {checkResult && <ViolationsList result={checkResult} hideSourcePath />}
     </div>
   )

@@ -128,37 +128,37 @@ export function SchematicAdvisor({
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6">
-      <div className="flex flex-col gap-2 rounded border border-neutral-700 p-3">
-        <p className="text-xs font-medium uppercase text-neutral-500">Schematic (ERC)</p>
+      <div className="flex flex-col gap-2 rounded border border-line p-3">
+        <p className="text-xs font-medium uppercase text-fg-muted">Schematic (ERC)</p>
 
         {loadingList && (
-          <p className="text-sm text-neutral-400">Looking for schematics near the boards open in KiCad…</p>
+          <p className="text-sm text-fg-tertiary">Looking for schematics near the boards open in KiCad…</p>
         )}
 
         {showGuidance && (
-          <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-3 text-sm">
-            <p className="text-neutral-200">
+          <div className="flex flex-col gap-2 rounded border border-line-subtle bg-surface p-3 text-sm">
+            <p className="text-fg-bright">
               {listError
                 ? "KiCad doesn't appear to be running yet."
                 : 'No schematic could be found automatically.'}
             </p>
-            <ol className="list-decimal space-y-1 pl-4 text-xs text-neutral-400">
-              <li>Click <strong className="text-neutral-300">Open KiCad</strong> below (or open it yourself).</li>
+            <ol className="list-decimal space-y-1 pl-4 text-xs text-fg-tertiary">
+              <li>Click <strong className="text-fg-secondary">Open KiCad</strong> below (or open it yourself).</li>
               <li>
-                Open your project, then open its <strong className="text-neutral-300">PCB Editor</strong> window --
+                Open your project, then open its <strong className="text-fg-secondary">PCB Editor</strong> window --
                 the schematic itself can't be listed directly (a real KiCad limitation, not this app's), so it's
                 found via whichever board you have open.
               </li>
-              <li>Click <strong className="text-neutral-300">Refresh</strong> below.</li>
+              <li>Click <strong className="text-fg-secondary">Refresh</strong> below.</li>
             </ol>
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-fg-muted">
               Or, if the schematic you want isn't tied to any board currently open in KiCad, pick it directly.
             </p>
-            {openKicadError && <p className="text-xs text-red-400">{openKicadError}</p>}
+            {openKicadError && <p className="text-xs text-danger">{openKicadError}</p>}
             <div className="flex gap-2">
               <button
                 type="button"
-                className="rounded bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-950 disabled:opacity-50"
+                className="rounded bg-accent px-3 py-1 text-xs font-medium text-accent-fg disabled:opacity-50"
                 onClick={() => void handleOpenKicad()}
                 disabled={openingKicad}
               >
@@ -166,14 +166,14 @@ export function SchematicAdvisor({
               </button>
               <button
                 type="button"
-                className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+                className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
                 onClick={() => void refreshList()}
               >
                 Refresh
               </button>
               <button
                 type="button"
-                className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+                className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
                 onClick={() => void handlePickManually()}
               >
                 Pick file manually…
@@ -183,8 +183,8 @@ export function SchematicAdvisor({
         )}
 
         {!loadingList && !showGuidance && listResult?.status === 'schematics_found' && (
-          <div className="flex flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-3 text-sm">
-            <p className="text-neutral-200">
+          <div className="flex flex-col gap-2 rounded border border-line-subtle bg-surface p-3 text-sm">
+            <p className="text-fg-bright">
               {listResult.candidates.length === 1
                 ? 'Schematic found for the board open in KiCad:'
                 : 'Schematics found for the boards open in KiCad — pick one to check:'}
@@ -199,28 +199,28 @@ export function SchematicAdvisor({
                       aria-pressed={isSelected}
                       className={`w-full rounded border px-3 py-2 text-left text-xs disabled:opacity-50 ${
                         isSelected
-                          ? 'border-neutral-100 bg-neutral-800 text-neutral-100'
-                          : 'border-neutral-700 text-neutral-200 hover:bg-neutral-800'
+                          ? 'border-fg bg-surface-alt text-fg'
+                          : 'border-line text-fg-bright hover:bg-surface-alt'
                       }`}
                       onClick={() => void handleCheck(candidate)}
                       disabled={checking}
                     >
                       <span className="block font-medium">{candidate.label}</span>
-                      <span className="block break-all text-neutral-500">{candidate.path}</span>
+                      <span className="block break-all text-fg-muted">{candidate.path}</span>
                     </button>
                   </li>
                 )
               })}
             </ul>
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-fg-muted">
               Don't see the schematic you want? Switch to KiCad and open its board there, then click Refresh --
               or pick a file directly below.
             </p>
-            {openKicadError && <p className="text-xs text-red-400">{openKicadError}</p>}
+            {openKicadError && <p className="text-xs text-danger">{openKicadError}</p>}
             <div className="flex gap-2">
               <button
                 type="button"
-                className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+                className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
                 onClick={() => void handleOpenKicad()}
                 disabled={openingKicad}
               >
@@ -228,14 +228,14 @@ export function SchematicAdvisor({
               </button>
               <button
                 type="button"
-                className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+                className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
                 onClick={() => void refreshList()}
               >
                 Refresh
               </button>
               <button
                 type="button"
-                className="rounded border border-neutral-600 px-3 py-1 text-xs text-neutral-200"
+                className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
                 onClick={() => void handlePickManually()}
               >
                 Pick file manually…
@@ -245,11 +245,11 @@ export function SchematicAdvisor({
         )}
 
         {checking && (
-          <p className="text-sm text-neutral-400">
+          <p className="text-sm text-fg-tertiary">
             Running ERC checks on {selected?.label ?? 'the selected schematic'}… this can take a few seconds.
           </p>
         )}
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
         {result && <ViolationsList result={result} hideSourcePath={selectedIsListed} />}
       </div>
     </div>

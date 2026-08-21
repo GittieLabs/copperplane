@@ -351,7 +351,7 @@ function CameraPresetControls({
     apply()
   }
 
-  const buttonClass = 'rounded border border-neutral-700 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-800'
+  const buttonClass = 'rounded border border-line px-2 py-1 text-xs text-fg-bright hover:bg-surface-alt'
 
   return (
     <div className="flex gap-1">
@@ -457,10 +457,10 @@ export function EnclosureViewer({
   }, [base.scene, lid.scene])
 
   if (base.status === 'loading') {
-    return <p className="text-sm text-neutral-400">Loading mesh…</p>
+    return <p className="text-sm text-fg-tertiary">Loading mesh…</p>
   }
   if (base.status === 'error') {
-    return <p className="text-sm text-red-400">Failed to load mesh: {base.error}</p>
+    return <p className="text-sm text-danger">Failed to load mesh: {base.error}</p>
   }
 
   const [initialX, initialY, initialZ] = sphericalToCartesian(
@@ -470,7 +470,7 @@ export function EnclosureViewer({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="h-96 w-full overflow-hidden rounded border border-neutral-800">
+      <div className="h-96 w-full overflow-hidden rounded border border-line-subtle">
         <Canvas
           camera={{
             position: [
@@ -531,7 +531,7 @@ export function EnclosureViewer({
         <div className="flex items-center gap-3">
           <CameraPresetControls controlsRef={controlsRef} cameraState={cameraState} />
           {lidGlbPath && onLidVisibleChange && (
-            <label className="flex items-center gap-2 text-xs text-neutral-300">
+            <label className="flex items-center gap-2 text-xs text-fg-secondary">
               <input
                 type="checkbox"
                 checked={lidVisible}
@@ -542,10 +542,10 @@ export function EnclosureViewer({
           )}
         </div>
         {lidGlbPath && lid.status === 'error' && (
-          <p className="text-xs text-red-400">Failed to load lid: {lid.error}</p>
+          <p className="text-xs text-danger">Failed to load lid: {lid.error}</p>
         )}
         {boardGlbPath && board.status === 'error' && (
-          <p className="text-xs text-red-400">Failed to load board: {board.error}</p>
+          <p className="text-xs text-danger">Failed to load board: {board.error}</p>
         )}
       </div>
     </div>
