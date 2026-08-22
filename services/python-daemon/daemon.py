@@ -809,6 +809,15 @@ def context_rebuild_index() -> dict:
     return context_index.rebuild_index()
 
 
+def chat_promote_turn(scope: str, scope_id: str, turn_id: str, target_scope: str, target_id: str) -> dict:
+    """The chat.promote_turn route (CTX-206.8, SPEC-206 §2.7): always
+    user-initiated -- an agent that wrote to the library on its own
+    judgement would be exactly PRODUCT-PLAN.md §3.3's "apply a change
+    the user didn't see first." Synchronous, real local file I/O, no
+    LLM call."""
+    return chat_agents.promote_turn(scope, scope_id, turn_id, target_scope, target_id)
+
+
 class InvalidParamsError(Exception):
     """Raised when a request's params don't match the route's real signature."""
 
@@ -1390,6 +1399,11 @@ def _build_routes() -> dict:
         routes["chat.list_threads"] = chat_list_threads
     if chat_agents is not None and library_store is not None and tool_registry is not None:
         routes["chat.send"] = chat_send
+    if chat_agents is not None and library_store is not None:
+        # CTX-206.8: unlike chat.send, promote_turn never touches the
+        # tool registry at all (it's plain local read/write, no agent
+        # dispatch), so it doesn't need tool_registry to be real.
+        routes["chat.promote_turn"] = chat_promote_turn
     if context_index is not None and library_store is not None:
         routes["context.search"] = context_search
         routes["context.rebuild_index"] = context_rebuild_index

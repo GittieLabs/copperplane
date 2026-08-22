@@ -3,7 +3,7 @@ construction, transcript assembly, and now real dispatch (CTX-206.6) --
 plus the `SourceRef` validation model (§2.3, CTX-206.4), which has no
 dependency on the router/agent layer and every assistant turn needs.
 
-Deliberately does NOT implement two of the eight real `SourceRef` kinds
+Deliberately does NOT implement one of the eight real `SourceRef` kinds
 SPEC-206 §2.3 names:
 
 *   `"check_finding"` -- ERC/DRC results (`kicad.check_schematic`/
@@ -12,16 +12,15 @@ SPEC-206 §2.3 names:
     validated against the SAME `chat.send` call's own fresh tool
     results (SPEC-206 §2.5), not a disk lookup this module can perform
     in isolation.
-*   `"note"` -- `chat.promote_turn` (SPEC-206 §2.7) hasn't shipped yet;
-    there is no note record anywhere to resolve against.
 
-Both are wired into `_RESOLVERS` as real, named gaps (mapped to a
-resolver that always returns `False`) rather than silently omitted --
+Wired into `_RESOLVERS` as a real, named gap (mapped to a resolver that
+always returns `False`) rather than silently omitted --
 `resolve_source_ref` treats an unresolvable-but-well-formed ref and a
 not-yet-supported kind identically, per SPEC-206 §2.3's own contract
-that an unresolved reference is dropped, never repaired. Adding a real
-resolver for either later is a pure addition to `_RESOLVERS`, not a
-rewrite of anything here.
+that an unresolved reference is dropped, never repaired. `"note"` used
+to be deferred the same way, until `promote_turn` (CTX-206.8, SPEC-206
+§2.7) gave it a real note record to resolve against -- `_resolve_note`
+below is that real resolver.
 """
 import asyncio
 import json
@@ -142,6 +141,28 @@ def _resolve_project_intent(ref: dict) -> bool:
     return bool(project.get("intent"))
 
 
+def _resolve_note(ref: dict) -> bool:
+    """CTX-206.8 (SPEC-206 §2.7): a real note only ever lives on a Part
+    or a Project (`promote_turn`'s own two real targets) -- a `scope`
+    outside those two never resolves, the same fail-closed shape every
+    other resolver here uses for a malformed/unsupported input."""
+    scope = ref.get("scope")
+    scope_id = ref.get("scope_id")
+    note_id = ref.get("note_id")
+    if not scope_id or not note_id:
+        return False
+    try:
+        if scope == "part":
+            record = library_store.load_part(scope_id)
+        elif scope == "project":
+            record = library_store.load_project(scope_id)
+        else:
+            return False
+    except (OSError, library_store.ProjectDirectoryMissingError):
+        return False
+    return any(n.get("note_id") == note_id for n in (record.get("notes") or []))
+
+
 def _resolve_deferred(ref: dict) -> bool:
     return False
 
@@ -154,7 +175,7 @@ _RESOLVERS = {
     "chat_turn": _resolve_chat_turn,
     "project_intent": _resolve_project_intent,
     "check_finding": _resolve_deferred,
-    "note": _resolve_deferred,
+    "note": _resolve_note,
 }
 
 
@@ -530,3 +551,71 @@ def send(
     )
     library_store.append_thread_turn(scope, scope_id, assistant_turn)
     return assistant_turn
+
+
+# --- Promotion (CTX-206.8, SPEC-206 §2.7) ---------------------------------
+
+
+class UnknownPromotionTargetError(Exception):
+    """`target_scope` must be `'part'` or `'project'` -- a note only
+    ever lives on one of those two real record types."""
+
+
+class TurnNotFoundError(Exception):
+    """No turn with that `turn_id` exists in the named thread."""
+
+
+class NotAssistantTurnError(Exception):
+    """Only an assistant turn -- a settled answer -- can be promoted to
+    a note; a user's own question isn't a conclusion to promote."""
+
+
+def promote_turn(scope: str, scope_id: str, turn_id: str, target_scope: str, target_id: str) -> dict:
+    """The chat.promote_turn route body (SPEC-206 §2.7): "the actual
+    answer to answer consistency" -- moves a settled conclusion out of
+    a transcript and into a durable record later conversations retrieve
+    as fact (`context_index.py`'s own already-wired `note` chunk
+    extractor picks it up the moment it's real). Copies the turn's own
+    **already-validated** `sources` verbatim -- `chat.send` already ran
+    them through `validate_source_refs` when the turn was first created;
+    this never re-validates them a second time.
+
+    Always user-initiated, never automatic (SPEC-206 §2.7's own explicit
+    requirement) -- this function has no caller anywhere in this
+    codebase except the real `chat.promote_turn` route a human action
+    triggers; no agent code path calls this on its own judgement.
+
+    Deliberately does not block re-promoting an already-promoted turn --
+    a user might legitimately want the same settled answer to become a
+    note on a second target (e.g. a Part and the Project it's used in);
+    the decision of where a conclusion belongs is the user's, not
+    something this function should second-guess by refusing a repeat."""
+    if target_scope not in ("part", "project"):
+        raise UnknownPromotionTargetError(
+            f"'{target_scope}' is not a real promotion target ('part' or 'project')."
+        )
+
+    turns = library_store.load_thread(scope, scope_id)
+    turn = next((t for t in turns if t.get("turn_id") == turn_id), None)
+    if turn is None:
+        raise TurnNotFoundError(f"No turn '{turn_id}' found in thread '{scope}:{scope_id}'.")
+    if turn.get("role") != "assistant":
+        raise NotAssistantTurnError("Only an assistant turn can be promoted to a note.")
+
+    note = {
+        "note_id": str(uuid.uuid4()),
+        "text": turn.get("content", ""),
+        "sources": turn.get("sources", []),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "origin": {"scope": scope, "scope_id": scope_id, "turn_id": turn_id},
+        "provenance": turn.get("provenance"),
+    }
+
+    if target_scope == "part":
+        library_store.add_part_note(target_id, note)
+    else:
+        library_store.add_project_note(target_id, note)
+
+    library_store.update_thread_turn(scope, scope_id, turn_id, {"promoted_note_id": note["note_id"]})
+
+    return note

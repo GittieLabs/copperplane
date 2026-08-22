@@ -178,6 +178,46 @@ class TestNeedsRebuild(ContextIndexTestCase):
         self.assertTrue(chunks)
 
 
+class TestPromotedNoteIndexing(ContextIndexTestCase):
+    """CTX-206.7's own note extractor was wired but inert (no real
+    `notes` field existed anywhere yet). CTX-206.8 (chat.promote_turn)
+    made it real -- this proves the two contexts actually connect, not
+    just that each passes its own isolated tests."""
+
+    def test_001_a_real_promoted_note_on_a_part_indexes_and_resolves(self):
+        self._save_part()
+        store.add_part_note("ATtiny85", {
+            "note_id": "n1", "text": "Add a 100nF ceramic capacitor near VCC.",
+            "sources": [], "created_at": "t", "origin": {}, "provenance": None,
+        })
+
+        ci.rebuild_index()
+
+        chunks = ci.search("100nF ceramic capacitor")
+        note_chunks = [c for c in chunks if c.kind == "note"]
+        self.assertEqual(len(note_chunks), 1)
+        self.assertEqual(note_chunks[0].source_ref, {
+            "kind": "note", "scope": "part", "scope_id": "ATtiny85", "note_id": "n1",
+        })
+        self.assertTrue(chat_agents.resolve_source_ref(note_chunks[0].source_ref))
+
+    def test_002_a_real_promoted_note_on_a_project_indexes_and_resolves(self):
+        store.save_project({"name": "weather-pcb"})
+        store.add_project_note("weather-pcb", {
+            "note_id": "n1", "text": "This board must survive outdoor rain exposure.",
+            "sources": [], "created_at": "t", "origin": {}, "provenance": None,
+        })
+
+        ci.rebuild_index()
+
+        chunks = ci.search("outdoor rain exposure")
+        note_chunks = [c for c in chunks if c.kind == "note"]
+        self.assertEqual(note_chunks[0].source_ref, {
+            "kind": "note", "scope": "project", "scope_id": "weather-pcb", "note_id": "n1",
+        })
+        self.assertTrue(chat_agents.resolve_source_ref(note_chunks[0].source_ref))
+
+
 class TestSearchScoping(ContextIndexTestCase):
 
     def setUp(self):

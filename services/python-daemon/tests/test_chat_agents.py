@@ -253,18 +253,53 @@ class TestResolveProjectIntent(ChatAgentsTestCase):
 
 
 class TestDeferredKinds(ChatAgentsTestCase):
-    """SPEC-206 §2.3 names these two kinds, but neither has real backing
-    state yet -- see this module's own docstring for why. A
-    well-formed ref of either kind never resolves, matching the
-    contract for any other unresolvable reference."""
+    """SPEC-206 §2.3 names this kind, but it has no real backing state
+    yet -- see this module's own docstring for why. A well-formed ref
+    never resolves, matching the contract for any other unresolvable
+    reference. `note` used to be deferred the same way -- CTX-206.8
+    gave it a real resolver, tested for real in TestResolveNote below."""
 
     def test_001_check_finding_never_resolves_yet(self):
         ref = {"kind": "check_finding", "project_name": "weather-pcb", "area": "schematic", "finding_id": "f1"}
 
         self.assertFalse(chat_agents.resolve_source_ref(ref))
 
-    def test_002_note_never_resolves_yet(self):
-        ref = {"kind": "note", "scope": "project", "scope_id": "weather-pcb:overview", "note_id": "n1"}
+
+class TestResolveNote(ChatAgentsTestCase):
+    """CTX-206.8 (SPEC-206 §2.7): a real note only ever lives on a Part
+    or a Project."""
+
+    def test_001_resolves_a_real_note_on_a_part(self):
+        self._save_part(notes=[{"note_id": "n1", "text": "Decouple with 100nF.", "sources": [], "created_at": "t"}])
+        ref = {"kind": "note", "scope": "part", "scope_id": "ATtiny85", "note_id": "n1"}
+
+        self.assertTrue(chat_agents.resolve_source_ref(ref))
+
+    def test_002_resolves_a_real_note_on_a_project(self):
+        store.save_project({"name": "weather-pcb", "notes": [{"note_id": "n1", "text": "x"}]})
+        ref = {"kind": "note", "scope": "project", "scope_id": "weather-pcb", "note_id": "n1"}
+
+        self.assertTrue(chat_agents.resolve_source_ref(ref))
+
+    def test_003_does_not_resolve_a_note_id_that_does_not_exist(self):
+        self._save_part(notes=[{"note_id": "n1", "text": "x"}])
+        ref = {"kind": "note", "scope": "part", "scope_id": "ATtiny85", "note_id": "not-real"}
+
+        self.assertFalse(chat_agents.resolve_source_ref(ref))
+
+    def test_004_does_not_resolve_when_the_part_has_no_notes_at_all(self):
+        self._save_part()
+        ref = {"kind": "note", "scope": "part", "scope_id": "ATtiny85", "note_id": "n1"}
+
+        self.assertFalse(chat_agents.resolve_source_ref(ref))
+
+    def test_005_does_not_resolve_an_unknown_scope(self):
+        ref = {"kind": "note", "scope": "not-a-real-scope", "scope_id": "x", "note_id": "n1"}
+
+        self.assertFalse(chat_agents.resolve_source_ref(ref))
+
+    def test_006_does_not_resolve_when_the_named_part_does_not_exist(self):
+        ref = {"kind": "note", "scope": "part", "scope_id": "does-not-exist", "note_id": "n1"}
 
         self.assertFalse(chat_agents.resolve_source_ref(ref))
 
@@ -613,6 +648,81 @@ class TestSend(ChatAgentsTestCase):
         # second call's own new user message counted twice.
         self.assertEqual(len(history), 2)
         self.assertEqual(history[0].content, "first message")
+
+
+class TestPromoteTurn(ChatAgentsTestCase):
+    """CTX-206.8 (SPEC-206 §2.7): "the actual answer to answer
+    consistency" -- moves a settled assistant turn out of a transcript
+    and into a durable note."""
+
+    def setUp(self):
+        super().setUp()
+        store.save_project({"name": "weather-pcb"})
+        store.append_thread_turn(
+            "project", "weather-pcb:overview",
+            {"turn_id": "t1", "role": "user", "content": "How should I decouple this part?"},
+        )
+        store.append_thread_turn(
+            "project", "weather-pcb:overview",
+            {
+                "turn_id": "t2", "role": "assistant", "content": "Add a 100nF ceramic capacitor near VCC.",
+                "sources": [{"kind": "project_intent", "project_name": "weather-pcb"}],
+                "sources_dropped": 0, "general_practice": False, "tool_calls": [],
+                "provenance": {"provider": "anthropic", "model": "claude-sonnet-5"},
+            },
+        )
+
+    def test_001_promotes_a_real_assistant_turn_onto_a_project(self):
+        note = chat_agents.promote_turn("project", "weather-pcb:overview", "t2", "project", "weather-pcb")
+
+        self.assertEqual(note["text"], "Add a 100nF ceramic capacitor near VCC.")
+        self.assertEqual(note["sources"], [{"kind": "project_intent", "project_name": "weather-pcb"}])
+        self.assertEqual(note["origin"], {"scope": "project", "scope_id": "weather-pcb:overview", "turn_id": "t2"})
+        self.assertEqual(note["provenance"], {"provider": "anthropic", "model": "claude-sonnet-5"})
+        reloaded = store.load_project("weather-pcb")
+        self.assertEqual(reloaded["notes"], [note])
+
+    def test_002_promotes_onto_a_part_instead_when_target_scope_is_part(self):
+        self._save_part()
+
+        note = chat_agents.promote_turn("project", "weather-pcb:overview", "t2", "part", "ATtiny85")
+
+        reloaded = store.load_part("ATtiny85")
+        self.assertEqual(reloaded["notes"], [note])
+
+    def test_003_marks_the_source_turn_with_the_real_new_note_id(self):
+        note = chat_agents.promote_turn("project", "weather-pcb:overview", "t2", "project", "weather-pcb")
+
+        turns = store.load_thread("project", "weather-pcb:overview")
+        promoted_turn = next(t for t in turns if t["turn_id"] == "t2")
+        self.assertEqual(promoted_turn["promoted_note_id"], note["note_id"])
+
+    def test_004_rejects_promoting_a_user_turn(self):
+        with self.assertRaises(chat_agents.NotAssistantTurnError):
+            chat_agents.promote_turn("project", "weather-pcb:overview", "t1", "project", "weather-pcb")
+
+    def test_005_rejects_an_unknown_turn_id(self):
+        with self.assertRaises(chat_agents.TurnNotFoundError):
+            chat_agents.promote_turn("project", "weather-pcb:overview", "not-real", "project", "weather-pcb")
+
+    def test_006_rejects_an_unknown_target_scope(self):
+        with self.assertRaises(chat_agents.UnknownPromotionTargetError):
+            chat_agents.promote_turn("project", "weather-pcb:overview", "t2", "not-a-real-scope", "weather-pcb")
+
+    def test_007_the_promoted_note_resolves_as_a_real_source_ref(self):
+        note = chat_agents.promote_turn("project", "weather-pcb:overview", "t2", "project", "weather-pcb")
+
+        ref = {"kind": "note", "scope": "project", "scope_id": "weather-pcb", "note_id": note["note_id"]}
+        self.assertTrue(chat_agents.resolve_source_ref(ref))
+
+    def test_008_re_promoting_the_same_turn_to_a_second_target_is_allowed(self):
+        self._save_part()
+
+        chat_agents.promote_turn("project", "weather-pcb:overview", "t2", "project", "weather-pcb")
+        chat_agents.promote_turn("project", "weather-pcb:overview", "t2", "part", "ATtiny85")
+
+        self.assertEqual(len(store.load_project("weather-pcb")["notes"]), 1)
+        self.assertEqual(len(store.load_part("ATtiny85")["notes"]), 1)
 
 
 if __name__ == '__main__':
