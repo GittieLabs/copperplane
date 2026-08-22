@@ -274,6 +274,24 @@ export async function attachCommunityFootprintToProjectOverride(
  * + submitJob, matching `searchCommunityFootprints`'s own precedent for
  * "real but not instant." Returns raw SVG markup, safe to render
  * directly -- kicad-cli's own output, never user-supplied text. */
+/** CTX-308.10: real user feedback -- a user searching for a footprint
+ * naturally tries the part's own name/package first, and has no
+ * reliable way to know what else to type if that doesn't match. This
+ * only ever suggests a *search term* to run through `searchFootprints`/
+ * `searchCommunityFootprints` above -- it never asserts a specific
+ * footprint exists or picks one on the user's behalf; the user still
+ * confirms against real results themselves. */
+export interface FootprintQuerySuggestion {
+  query: string
+  alternates: string[]
+  reasoning: string
+}
+
+export async function suggestFootprintQuery(partId: string): Promise<FootprintQuerySuggestion> {
+  const handle = await submitJob<FootprintQuerySuggestion>('kicad.suggest_footprint_query', { part_id: partId })
+  return handle.result
+}
+
 export async function renderSymbolPreview(symbolId: string): Promise<string> {
   const handle = await submitJob<{ svg: string }>('library.render_symbol_preview', { symbol_id: symbolId })
   const result = await handle.result

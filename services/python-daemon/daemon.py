@@ -972,6 +972,22 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
     return result
 
 
+def kicad_suggest_footprint_query(part_id: str) -> dict:
+    """The kicad.suggest_footprint_query route (CTX-308.10): thin
+    wrapper, matching kicad_generate_connection_guidance's own shape and
+    the same CONFIG["llm_provider"]/["llm_model"] threading. Deliberately
+    NOT persisted onto the Part record (unlike connection guidance) --
+    a search-term suggestion has no durable value once the user has run
+    the search; nothing else ever reads it back."""
+    part = library_store.load_part(part_id)
+    return component_pipeline.suggest_footprint_query(
+        part["part_id"], part["manufacturer"], part["package"],
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+    )
+
+
 def datasheet_generate_guidance(part_id: str, cancel_event=None) -> dict:
     """The datasheet.generate_guidance route (SPEC-205, CTX-205.3): loads
     the real Part, ensures its datasheet PDF is really cached locally
@@ -1327,6 +1343,7 @@ def _build_routes() -> dict:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
     if component_pipeline is not None and library_store is not None:
         routes["kicad.generate_connection_guidance"] = kicad_generate_connection_guidance
+        routes["kicad.suggest_footprint_query"] = kicad_suggest_footprint_query
     if datasheet_guidance is not None and library_store is not None:
         routes["datasheet.generate_guidance"] = datasheet_generate_guidance
     if datasheet_structure is not None and library_store is not None:
@@ -1354,7 +1371,7 @@ ROUTES = _build_routes()
 ASYNC_ROUTES = {
     "freecad.generate_enclosure", "freecad.export_enclosure", "llm.chat", "kicad.generate_component",
     "kicad.inject_component", "component.search", "component.cache_datasheet",
-    "kicad.generate_connection_guidance", "kicad.check_board", "kicad.check_schematic",
+    "kicad.generate_connection_guidance", "kicad.suggest_footprint_query", "kicad.check_board", "kicad.check_schematic",
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
     "datasheet.read_pages", "library.render_symbol_preview", "library.render_footprint_preview",
     # CTX-314.2: both make real GitHub network calls (community_libraries.py's

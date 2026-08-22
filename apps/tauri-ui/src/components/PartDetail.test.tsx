@@ -26,6 +26,7 @@ const setProjectFootprintOverrideMock = vi.fn()
 const attachFootprintToProjectOverrideMock = vi.fn()
 const attachCommunityFootprintToProjectOverrideMock = vi.fn()
 const generateFootprintForProjectOverrideMock = vi.fn()
+const suggestFootprintQueryMock = vi.fn()
 
 vi.mock('../lib/library', () => ({
   listLibraries: (...args: unknown[]) => listLibrariesMock(...args),
@@ -65,6 +66,7 @@ vi.mock('../lib/footprints', () => ({
   attachCommunityFootprintToProjectOverride: (...args: unknown[]) =>
     attachCommunityFootprintToProjectOverrideMock(...args),
   generateFootprintForProjectOverride: (...args: unknown[]) => generateFootprintForProjectOverrideMock(...args),
+  suggestFootprintQuery: (...args: unknown[]) => suggestFootprintQueryMock(...args),
 }))
 
 vi.mock('@tauri-apps/plugin-shell', () => ({
@@ -119,6 +121,7 @@ beforeEach(() => {
   attachFootprintToProjectOverrideMock.mockReset()
   attachCommunityFootprintToProjectOverrideMock.mockReset()
   generateFootprintForProjectOverrideMock.mockReset()
+  suggestFootprintQueryMock.mockReset()
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -1111,6 +1114,60 @@ describe('PartDetail: CTX-308.9 per-project footprint override', () => {
     await waitFor(() => screen.getByText('Footprint linked: MyPCBLibs__MP1584EN_5V_Module'))
     expect(setProjectFootprintOverrideMock).toHaveBeenCalledWith('weather-pcb', 'ATtiny85', null)
     expect(screen.queryByText('(this project only)')).toBeNull()
+  })
+})
+
+describe('PartDetail: CTX-308.10 agent-guided footprint search', () => {
+  it('TEST-001: fills the search box with the real suggested query, never runs the search itself', async () => {
+    suggestFootprintQueryMock.mockResolvedValueOnce({
+      query: 'QFN-56',
+      alternates: ['QFN-56-1EP'],
+      reasoning: 'Matches the QFN-56 package.',
+    })
+    await saveAndReachFootprintSection()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest a search term' }))
+
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText(/search by footprint or package name/) as HTMLInputElement).value).toBe(
+        'QFN-56',
+      ),
+    )
+    expect(suggestFootprintQueryMock).toHaveBeenCalledWith('ATtiny85')
+    screen.getByText(/Matches the QFN-56 package\./)
+    screen.getByText(/QFN-56-1EP/)
+    expect(searchFootprintsMock).not.toHaveBeenCalled()
+    expect(searchCommunityFootprintsMock).not.toHaveBeenCalled()
+  })
+
+  it('TEST-002: a suggestion failure shows a non-blocking message, not an error state', async () => {
+    suggestFootprintQueryMock.mockRejectedValueOnce(new Error('ANTHROPIC_API_KEY not set'))
+    await saveAndReachFootprintSection()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest a search term' }))
+
+    await waitFor(() => screen.getByText("Couldn't get a suggestion: ANTHROPIC_API_KEY not set"))
+    screen.getByRole('button', { name: 'Search' })
+  })
+
+  it('TEST-003: clicking Suggest overwrites text the user already typed -- unlike the passive package auto-fill, this is an explicit action', async () => {
+    suggestFootprintQueryMock.mockResolvedValueOnce({ query: 'QFN-56', alternates: [], reasoning: 'n' })
+    await saveAndReachFootprintSection()
+
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), {
+      target: { value: 'my own guess' },
+    })
+    expect((screen.getByPlaceholderText(/search by footprint or package name/) as HTMLInputElement).value).toBe(
+      'my own guess',
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest a search term' }))
+
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText(/search by footprint or package name/) as HTMLInputElement).value).toBe(
+        'QFN-56',
+      ),
+    )
   })
 })
 

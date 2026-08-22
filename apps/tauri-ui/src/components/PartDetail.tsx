@@ -14,9 +14,11 @@ import {
   renderSymbolPreview,
   searchCommunityFootprints,
   searchFootprints,
+  suggestFootprintQuery,
   type CommunityLibraryCandidate,
   type CommunitySymbolOption,
   type FootprintCandidate,
+  type FootprintQuerySuggestion,
 } from '../lib/footprints'
 import { listLibraries, tagObject, type LibrarySummary } from '../lib/library'
 import { addProjectPartReference, listProjects, setProjectFootprintOverride, type Project } from '../lib/projects'
@@ -159,6 +161,15 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
   const [footprintError, setFootprintError] = useState<string | null>(null)
   const [footprintCandidates, setFootprintCandidates] = useState<FootprintCandidate[] | null>(null)
   const [attachingFootprint, setAttachingFootprint] = useState<string | null>(null)
+
+  // CTX-308.10: real user feedback -- a user searching for a footprint
+  // naturally tries the part's own name/package first, and has no
+  // reliable way to know what else to type if that doesn't match. This
+  // only ever suggests a search term to run through the real search
+  // above -- it never picks a footprint on the user's behalf.
+  const [suggestingFootprintQuery, setSuggestingFootprintQuery] = useState(false)
+  const [footprintQuerySuggestion, setFootprintQuerySuggestion] = useState<FootprintQuerySuggestion | null>(null)
+  const [footprintQuerySuggestionError, setFootprintQuerySuggestionError] = useState<string | null>(null)
 
   // CTX-314.2: SPEC-314's third footprint source -- a real, curated
   // allowlist of GitHub-hosted community libraries, alongside the
@@ -610,6 +621,25 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     const trimmed = footprintQuery.trim()
     if (!trimmed) return
     await Promise.all([handleFootprintSearch(), handleCommunitySearch()])
+  }
+
+  /** CTX-308.10: fills the search box with a real, agent-suggested term
+   * -- never runs the search itself or picks a footprint. The user still
+   * reviews the suggestion, can edit it, and confirms by running Search
+   * against real results, same as typing it in by hand. */
+  async function handleSuggestFootprintQuery() {
+    if (!savedPart) return
+    setSuggestingFootprintQuery(true)
+    setFootprintQuerySuggestionError(null)
+    try {
+      const suggestion = await suggestFootprintQuery(savedPart.part_id)
+      setFootprintQuerySuggestion(suggestion)
+      setFootprintQuery(suggestion.query)
+    } catch (err) {
+      setFootprintQuerySuggestionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSuggestingFootprintQuery(false)
+    }
   }
 
   async function handleCommunitySearch() {
@@ -1319,6 +1349,32 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
                 >
                   {footprintStatus === 'searching' || communityStatus === 'searching' ? 'Searching…' : 'Search'}
                 </button>
+              </div>
+              {/* CTX-308.10: real user feedback -- a user naturally tries
+                  the part's own name/package first, and has no reliable
+                  way to know what else to type when that doesn't match.
+                  Only ever suggests a search term for the box above --
+                  never runs the search or picks a footprint itself. */}
+              <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  className="self-start rounded border border-line px-2 py-0.5 text-xs disabled:opacity-50"
+                  onClick={() => void handleSuggestFootprintQuery()}
+                  disabled={suggestingFootprintQuery}
+                >
+                  {suggestingFootprintQuery ? 'Asking…' : 'Suggest a search term'}
+                </button>
+                {footprintQuerySuggestion && (
+                  <p className="text-xs text-fg-muted">
+                    {footprintQuerySuggestion.reasoning}
+                    {footprintQuerySuggestion.alternates.length > 0 && (
+                      <> Other terms worth trying: {footprintQuerySuggestion.alternates.join(', ')}.</>
+                    )}
+                  </p>
+                )}
+                {footprintQuerySuggestionError && (
+                  <p className="text-xs text-danger">Couldn't get a suggestion: {footprintQuerySuggestionError}</p>
+                )}
               </div>
               {/* CTX-306.6: real user feedback -- one search across both
                   real sources (this machine's installed KiCad libraries
