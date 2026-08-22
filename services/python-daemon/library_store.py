@@ -1426,6 +1426,18 @@ def load_thread(scope: str, scope_id: str) -> list:
     return _read_thread_turns(path)
 
 
+def append_thread_turn(scope: str, scope_id: str, turn: dict) -> None:
+    """CTX-206.6 (SPEC-206 §2.5): a real, single-line append -- mirrors
+    `append_conversation_turn`'s own efficient shape rather than
+    `_write_thread_turns`'s read-all-rewrite-all one, since `chat.send`
+    calls this twice per turn (user, then assistant) and a growing
+    thread should never cost O(n) to append one line to it."""
+    path = _thread_path(scope, scope_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(turn, sort_keys=True) + "\n")
+
+
 def list_threads(project_name: str) -> list:
     """SPEC-206 §2.2: which of this project's areas have any real chat
     history -- a Part's own thread is never listed here (part threads

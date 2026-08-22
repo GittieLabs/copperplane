@@ -1964,6 +1964,50 @@ class TestChatThreadRoutes(unittest.TestCase):
         self.assertNotIn("chat.list_threads", daemon.ASYNC_ROUTES)
 
 
+class TestChatSendRoute(unittest.TestCase):
+    """CTX-206.6 (SPEC-206 §2.5): the real thing TestChatThreadRoutes's
+    own docstring named as "a later, separate slice" -- a thin wrapper
+    threading CONFIG's provider/model/secrets through, matching every
+    other real LLM route's own precedent. The real dispatch logic is
+    covered in services/python-daemon/tests/test_chat_agents.py; this
+    only verifies daemon-level wiring."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    @patch('daemon.chat_agents.send')
+    def test_001_threads_config_provider_model_and_secrets_through(self, mock_send):
+        daemon.CONFIG['llm_provider'] = "google"
+        daemon.CONFIG['llm_model'] = "gemini-flash"
+        daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
+        mock_send.return_value = {"turn_id": "t1", "role": "assistant", "content": "hi"}
+
+        result = daemon.chat_send("project", "weather-pcb:overview", "overview", "hello", project_name="weather-pcb")
+
+        mock_send.assert_called_once_with(
+            "project", "weather-pcb:overview", "overview", "hello", project_name="weather-pcb",
+            secrets={"google_api_key": "fake"}, provider="google", model="gemini-flash",
+        )
+        self.assertEqual(result, {"turn_id": "t1", "role": "assistant", "content": "hi"})
+
+    def test_002_registered_only_when_chat_agents_library_store_and_tool_registry_are_all_real(self):
+        original = daemon.chat_agents
+        daemon.chat_agents = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("chat.send", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.chat_agents = original
+
+    def test_003_registered_as_an_async_route(self):
+        self.assertIn("chat.send", daemon.ASYNC_ROUTES)
+
+
 class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
     """CTX-310.1: the file-based mode SPEC-310 adds -- composes
     kicad_pcb_import's file-based outline/hole extraction the same way

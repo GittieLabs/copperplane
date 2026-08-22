@@ -1,8 +1,7 @@
 """SPEC-206 §2.5/§2.8: the agent-dispatch layer -- router config, agent
-construction, transcript assembly -- lives here once it's built
-(CTX-206.5+). This file starts with just the `SourceRef` validation model
-(§2.3), since it has no dependency on the router/agent layer and every
-future assistant turn needs it (CTX-206.4).
+construction, transcript assembly, and now real dispatch (CTX-206.6) --
+plus the `SourceRef` validation model (§2.3, CTX-206.4), which has no
+dependency on the router/agent layer and every assistant turn needs.
 
 Deliberately does NOT implement two of the eight real `SourceRef` kinds
 SPEC-206 §2.3 names:
@@ -24,9 +23,32 @@ that an unresolved reference is dropped, never repaired. Adding a real
 resolver for either later is a pure addition to `_RESOLVERS`, not a
 rewrite of anything here.
 """
+import asyncio
+import json
+import logging
 import os
+import re
+import uuid
+from datetime import datetime, timezone
+
+from agentflow import AgentExecutor, ConfigLoader, RouterEngine
+from agentflow.events import TOOL_RESULT, EventBus
+from agentflow.types import Message, Role
 
 import library_store
+import llm_providers
+import tool_registry
+
+logger = logging.getLogger(__name__)
+
+_AGENTFLOW_DIR = os.path.join(os.path.dirname(__file__), "agentflow")
+
+# SPEC-318 §2.3's own five real areas -- kept as the single source of
+# truth for the "hard error, never an LLM guess" requirement (SPEC-206
+# §2.5), checked here before router.prompt.md is even consulted; its own
+# `llmFallback: false` is the second, belt-and-braces layer of the same
+# guarantee, not the only one.
+_KNOWN_AREAS = ("overview", "components", "schematic", "pcb", "enclosure")
 
 
 def _resolve_datasheet_page(ref: dict) -> bool:
@@ -165,3 +187,346 @@ def validate_source_refs(refs: list) -> tuple:
         return [], 0
     resolved = [ref for ref in refs if resolve_source_ref(ref)]
     return resolved, len(refs) - len(resolved)
+
+
+# --- Agent dispatch (CTX-206.6, SPEC-206 §2.5) ---------------------------
+
+
+class UnknownChatAreaError(Exception):
+    """A hard error for an area outside the five real SPEC-318 areas --
+    never an LLM guess (SPEC-206 §2.5's own explicit requirement).
+    Checked here, before the router is even consulted;
+    `router.prompt.md`'s own `llmFallback: false` enforces the same
+    guarantee at the routing layer as a second, defensive line -- a
+    well-formed caller never reaches it in practice."""
+
+
+def _load_referenced_parts(project: dict) -> list:
+    """Every real Part a Project references, loaded fresh -- skips a
+    part_id that fails to load (e.g. removed from the library after
+    being referenced) rather than failing the whole context assembly
+    over one stale reference."""
+    parts = []
+    for part_id in project.get("parts", []):
+        try:
+            parts.append(library_store.load_part(part_id))
+        except OSError:
+            continue
+    return parts
+
+
+def _part_identity(part: dict) -> dict:
+    return {"part_id": part["part_id"], "manufacturer": part.get("manufacturer"), "package": part.get("package")}
+
+
+def _part_guidance_summary(part: dict) -> dict:
+    """The real, already-generated guidance a chat agent is told it has
+    up front (SPEC-318 §2.3) -- the persisted record as-is, `None`
+    where nothing was ever generated (the same honest absence
+    `_backfill_design_guidance`/`_backfill_connection_guidance` already
+    preserve), never re-derived or re-summarized here."""
+    return {
+        **_part_identity(part),
+        "pins": part.get("pins", []),
+        "provenance": part.get("provenance", {}),
+        "design_guidance": part.get("design_guidance"),
+        "connection_guidance": part.get("connection_guidance"),
+    }
+
+
+_CHECK_AREA_LABELS = {"schematic": "ERC", "pcb": "DRC"}
+
+
+def _check_status_note(project: dict, area: str) -> str:
+    """SPEC-318's `chat_schematic`/`chat_pcb` prompts both explicitly
+    anticipate this exact honesty requirement ("if another area shows
+    nothing, say plainly that it hasn't been checked this session,
+    never that it passed"). A real, named gap this context found but
+    does not fix: today `Project.last_results` is only ever populated
+    for `enclosure` (`EnclosurePanel.tsx`'s own real save call) --
+    SchematicAdvisor/BoardAdvisor hold their own check results in local
+    React state only, never persisted anywhere this route can read.
+    Real ERC/DRC persistence is a separate, later prerequisite (the same
+    category of gap `CTX-206.1` already fixed for connection guidance) --
+    until it exists, this always honestly reports "not checked this
+    session" rather than fabricating or guessing a result."""
+    result = (project.get("last_results") or {}).get(area)
+    if not result:
+        return f"No {_CHECK_AREA_LABELS[area]} check result is available this session."
+    return json.dumps(result, sort_keys=True)
+
+
+def _assemble_context(area: str, scope: str, scope_id: str, project_name: str | None) -> str:
+    """Builds the real, per-area context block SPEC-318 §2.3 describes
+    each chat agent as already having up front -- prepended to the
+    user's own message (not the system prompt, which stays the fixed
+    persona/instructions from the `.prompt.md` body itself) so it is
+    always fresh. `chat.send` is called fresh per turn rather than
+    holding a live session, so re-assembling on every call is correct,
+    not wasteful -- a stored history turn carries only its own raw
+    text, never a copy of the context block that was true when it was
+    asked; only the newest turn needs one."""
+    if area == "components":
+        part = library_store.load_part(scope_id)
+        context = {"part": _part_guidance_summary(part)}
+        if project_name:
+            try:
+                context["project_intent"] = library_store.load_project(project_name).get("intent")
+            except (OSError, library_store.ProjectDirectoryMissingError):
+                pass
+        return json.dumps(context, sort_keys=True, default=str)
+
+    real_project_name, _, _ = scope_id.partition(":")
+    project = library_store.load_project(real_project_name)
+
+    if area == "overview":
+        context = {
+            "project_intent": project.get("intent"),
+            "last_results": project.get("last_results", {}),
+            "export_history": project.get("export_history", []),
+            "parts": [_part_identity(p) for p in _load_referenced_parts(project)],
+        }
+    elif area in _CHECK_AREA_LABELS:
+        context = {
+            "project_intent": project.get("intent"),
+            "check_status": _check_status_note(project, area),
+            "parts": [_part_guidance_summary(p) for p in _load_referenced_parts(project)],
+        }
+    else:  # enclosure
+        context = {
+            "project_intent": project.get("intent"),
+            "enclosure_parameters": (project.get("last_results") or {}).get("enclosure"),
+        }
+    return json.dumps(context, sort_keys=True, default=str)
+
+
+_CITATIONS_PATTERN = re.compile(r"<<<CITATIONS>>>(.*?)<<<END_CITATIONS>>>", re.DOTALL)
+
+
+def _extract_self_reported(text: str) -> tuple:
+    """SPEC-206 §2.3's "both, layered" design (confirmed with the user):
+    the model self-reports every `SourceRef` kind that cites
+    pre-assembled context it was simply given up front
+    (`guidance_item`, `connection_guidance`, `part_field`,
+    `project_intent`) inside a structured trailing block -- chat.send
+    has no other way to know which parts of that context the model
+    actually relied on. `datasheet_page` refs are never self-reported;
+    they're derived mechanically instead (`_mechanical_source_refs`
+    below), the one kind that's a genuine fresh tool call within the
+    turn rather than a citation of context handed over up front.
+
+    Returns `(visible_text, self_reported_sources, general_practice)`.
+    The citation block is always stripped from what the user sees. A
+    missing or malformed block is never a raised error -- this is model
+    output, and "the model forgot to cite" is a different failure from
+    "the daemon is broken" -- it degrades to `general_practice=True`,
+    the conservative, honest default when nothing can be confirmed as
+    grounded."""
+    match = _CITATIONS_PATTERN.search(text)
+    if not match:
+        return text.strip(), [], True
+    visible = (text[: match.start()] + text[match.end() :]).strip()
+    try:
+        payload = json.loads(match.group(1).strip())
+    except (json.JSONDecodeError, TypeError):
+        return visible, [], True
+    if not isinstance(payload, dict):
+        return visible, [], True
+    sources = payload.get("sources")
+    if not isinstance(sources, list):
+        sources = []
+    return visible, sources, bool(payload.get("general_practice", True))
+
+
+def _enrich_source_ref(ref) -> dict:
+    """Fills in the one field the model cannot compute itself --
+    `guidance_item`'s real `content_hash` -- from the Part's own
+    current `design_guidance` record. Every other self-reportable kind
+    (`connection_guidance`, `part_field`, `project_intent`) needs no
+    enrichment; the model already has every field its own `SourceRef`
+    shape requires, straight from the context it was given (SPEC-206
+    §2.3)."""
+    if not isinstance(ref, dict) or ref.get("kind") != "guidance_item":
+        return ref
+    part_id = ref.get("part_id")
+    if not part_id:
+        return ref
+    try:
+        part = library_store.load_part(part_id)
+    except OSError:
+        return ref
+    content_hash = (part.get("design_guidance") or {}).get("content_hash")
+    return {**ref, "content_hash": content_hash} if content_hash else ref
+
+
+def _mechanical_source_refs(tool_events: list) -> list:
+    """SPEC-206 §2.3's `datasheet_page` kind, derived mechanically from
+    real `datasheet.read_pages` `TOOL_RESULT` events -- the one
+    `SourceRef` kind that's a genuine fresh tool call within this turn,
+    not a citation of context assembled up front. Never trusts the
+    model's own account of what it read; only a real, observed tool
+    result produces one of these."""
+    refs = []
+    for event in tool_events:
+        if event.get("tool") != "datasheet.read_pages" or event.get("is_error"):
+            continue
+        raw = event.get("raw_result") or {}
+        content_hash = raw.get("content_hash")
+        part_id = (event.get("input") or {}).get("part_id")
+        if not content_hash or not part_id:
+            continue
+        for page in raw.get("pages", []):
+            page_number = page.get("page")
+            if isinstance(page_number, int):
+                refs.append({
+                    "kind": "datasheet_page", "part_id": part_id,
+                    "page": page_number, "content_hash": content_hash,
+                })
+    return refs
+
+
+class _ToolResultCollector:
+    """A minimal `agentflow.protocols.EventHandler` that accumulates
+    every real `TOOL_RESULT` payload for one `chat.send` call --
+    `AgentExecutor` never surfaces tool calls on its own return value
+    (confirmed directly against the installed `agentflow` source), so
+    this is the only way to see them."""
+
+    def __init__(self):
+        self.events = []
+
+    async def on_event(self, event_type, data):
+        self.events.append(data)
+
+
+def _history_as_messages(scope: str, scope_id: str) -> list:
+    turns = library_store.load_thread(scope, scope_id)
+    return [
+        Message(role=Role.USER if t.get("role") == "user" else Role.ASSISTANT, content=t.get("content", ""))
+        for t in turns
+    ]
+
+
+async def _dispatch(
+    area: str, scope: str, scope_id: str, project_name: str | None, message: str,
+    history: list, secrets: dict, provider: str | None, model: str | None,
+) -> dict:
+    loader = ConfigLoader(_AGENTFLOW_DIR)
+    loader.load()
+    router_config, router_prompt = loader.router
+    router = RouterEngine(router_config, router_prompt=router_prompt)
+    routing = await router.route("", context={"area": area})
+
+    agent_config, prompt_body = loader.get_agent(routing.target)
+    overrides = {}
+    if provider:
+        overrides["provider"] = provider
+    if model:
+        overrides["model"] = model
+    elif provider:
+        overrides["model"] = llm_providers._DEFAULT_MODELS.get(provider, agent_config.model)
+    if overrides:
+        agent_config = agent_config.model_copy(update=overrides)
+
+    api_key = secrets.get(f"{agent_config.provider}_api_key", "")
+    provider_client = llm_providers._build_provider(agent_config.provider, api_key, agent_config.model)
+
+    collector = _ToolResultCollector()
+    events = EventBus()
+    events.on(TOOL_RESULT, collector)
+    executor = AgentExecutor(
+        config=agent_config, prompt_body=prompt_body, llm=provider_client,
+        tools=tool_registry.build_tool_registry(), event_bus=events,
+    )
+
+    context_block = _assemble_context(area, scope, scope_id, project_name)
+    full_message = f"Context:\n{context_block}\n\nUser message:\n{message}"
+
+    try:
+        output = await executor.run(message=full_message, history=history)
+    finally:
+        await llm_providers._close_provider_client(provider_client)
+
+    visible_text, self_reported, general_practice = _extract_self_reported(output.text)
+    enriched = [_enrich_source_ref(ref) for ref in self_reported]
+    resolved, dropped = validate_source_refs(_mechanical_source_refs(collector.events) + enriched)
+
+    tool_calls = [
+        {"name": e.get("tool"), "input": e.get("input", {}), "result_digest": (e.get("result") or "")[:200]}
+        for e in collector.events
+    ]
+
+    return {
+        "agent": routing.target,
+        "text": visible_text,
+        "sources": resolved,
+        "sources_dropped": dropped,
+        "general_practice": general_practice,
+        "tool_calls": tool_calls,
+        "provenance": {"provider": agent_config.provider, "model": agent_config.model},
+    }
+
+
+def _make_turn(
+    role: str, content: str, agent: str | None = None, sources: list | None = None,
+    sources_dropped: int = 0, general_practice: bool = False, tool_calls: list | None = None,
+    provenance: dict | None = None,
+) -> dict:
+    return {
+        "turn_id": str(uuid.uuid4()),
+        "role": role,
+        "content": content,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "agent": agent,
+        "sources": sources or [],
+        "sources_dropped": sources_dropped,
+        "general_practice": general_practice,
+        "tool_calls": tool_calls or [],
+        "provenance": provenance,
+        "promoted_note_id": None,
+    }
+
+
+def send(
+    scope: str, scope_id: str, area: str, message: str, project_name: str | None = None,
+    secrets: dict | None = None, provider: str | None = None, model: str | None = None,
+) -> dict:
+    """The real `chat.send` route body (SPEC-206 §2.5): appends the
+    user turn, dispatches to the routed agent with this thread's real
+    prior history, validates every source the turn claims (mechanical +
+    self-reported, per this module's own citation functions above),
+    appends the assistant turn, and returns it. Synchronous wrapper
+    around the real async dispatch, matching `component_pipeline.py`'s
+    own `asyncio.run(...)` precedent for every single-shot agent call
+    already in this codebase.
+
+    Deliberately does not thread a `cancel_event` through, despite
+    SPEC-206 §2.5's own text naming it -- verified directly against
+    every other single-shot agent-call route already in `daemon.py`
+    (`kicad.generate_connection_guidance`, `kicad.suggest_footprint_
+    query`, `kicad.generate_component`): none of them do either, only
+    the genuinely multi-call routes (`datasheet.generate_guidance`,
+    `freecad.generate_enclosure`) do, since those have a real, natural
+    per-item checkpoint a single agent turn's own internal tool-loop
+    does not."""
+    if area not in _KNOWN_AREAS:
+        raise UnknownChatAreaError(f"'{area}' is not a real chat area. Expected one of {', '.join(_KNOWN_AREAS)}.")
+    secrets = secrets or {}
+
+    history = _history_as_messages(scope, scope_id)
+
+    user_turn = _make_turn(role="user", content=message)
+    library_store.append_thread_turn(scope, scope_id, user_turn)
+
+    result = asyncio.run(
+        _dispatch(area, scope, scope_id, project_name, message, history, secrets, provider, model)
+    )
+
+    assistant_turn = _make_turn(
+        role="assistant", content=result["text"], agent=result["agent"],
+        sources=result["sources"], sources_dropped=result["sources_dropped"],
+        general_practice=result["general_practice"], tool_calls=result["tool_calls"],
+        provenance=result["provenance"],
+    )
+    library_store.append_thread_turn(scope, scope_id, assistant_turn)
+    return assistant_turn

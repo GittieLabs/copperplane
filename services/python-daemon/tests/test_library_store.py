@@ -799,6 +799,42 @@ class TestChatThreads(LibraryStoreTestCase):
         self.assertTrue(path.endswith(os.path.join("library", "chats", "parts", "ATtiny85.jsonl")))
 
 
+class TestAppendThreadTurn(LibraryStoreTestCase):
+    """CTX-206.6 (SPEC-206 §2.5): `chat.send` calls this twice per turn
+    (user, then assistant) -- a real, single-line append, not a
+    read-all-rewrite-all like `_write_thread_turns`."""
+
+    def setUp(self):
+        super().setUp()
+        store.save_project({"name": "weather-pcb"})
+
+    def test_001_appends_and_persists_a_real_turn(self):
+        store.append_thread_turn("project", "weather-pcb:overview", {"turn_id": "t1", "role": "user", "content": "hi"})
+
+        turns = store.load_thread("project", "weather-pcb:overview")
+
+        self.assertEqual(turns, [{"turn_id": "t1", "role": "user", "content": "hi"}])
+
+    def test_002_a_second_append_lands_after_the_first_not_over_it(self):
+        store.append_thread_turn("project", "weather-pcb:overview", {"turn_id": "t1", "role": "user", "content": "hi"})
+        store.append_thread_turn("project", "weather-pcb:overview", {"turn_id": "t2", "role": "assistant", "content": "hello"})
+
+        turns = store.load_thread("project", "weather-pcb:overview")
+
+        self.assertEqual([t["turn_id"] for t in turns], ["t1", "t2"])
+
+    def test_003_works_for_a_part_scoped_thread_too(self):
+        store.append_thread_turn("part", "ATtiny85", {"turn_id": "t1", "role": "user", "content": "hi"})
+
+        turns = store.load_thread("part", "ATtiny85")
+
+        self.assertEqual(len(turns), 1)
+
+    def test_004_rejects_an_unknown_scope_the_same_way_load_thread_does(self):
+        with self.assertRaises(store.SchemaValidationError):
+            store.append_thread_turn("not-a-real-scope", "weather-pcb:overview", {"turn_id": "t1"})
+
+
 class TestChatThreadDirectoryLinkFix(LibraryStoreTestCase):
     """SPEC-206 §2.2's own named real bug: `_conversation_path` never
     followed `CTX-312.1`'s directory link, so a linked project's history
