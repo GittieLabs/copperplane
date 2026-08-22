@@ -1836,6 +1836,42 @@ class TestProjectAddPartReferenceRoute(unittest.TestCase):
         self.assertNotIn("project.add_part_reference", daemon.ASYNC_ROUTES)
 
 
+class TestProjectSetFootprintOverrideRoute(unittest.TestCase):
+    """CTX-308.9 (SPEC-308): the same thin-wrapper shape as
+    TestProjectAddPartReferenceRoute above, applied to
+    project.set_footprint_override."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_persists_the_real_override_onto_the_project(self):
+        daemon.library_store.save_project({"name": "weather-pcb"})
+
+        result = daemon.project_set_footprint_override("weather-pcb", "ATtiny85", "SOIC-8")
+
+        self.assertEqual(result["footprint_overrides"], {"ATtiny85": "SOIC-8"})
+        reloaded = daemon.library_store.load_project("weather-pcb")
+        self.assertEqual(reloaded["footprint_overrides"], {"ATtiny85": "SOIC-8"})
+
+    def test_002_a_none_footprint_id_clears_the_override(self):
+        daemon.library_store.save_project({"name": "weather-pcb"})
+        daemon.project_set_footprint_override("weather-pcb", "ATtiny85", "SOIC-8")
+
+        result = daemon.project_set_footprint_override("weather-pcb", "ATtiny85", None)
+
+        self.assertEqual(result["footprint_overrides"], {})
+
+    def test_003_registered_as_a_project_route_not_an_async_one(self):
+        routes = daemon._build_routes()
+        self.assertIn("project.set_footprint_override", routes)
+        self.assertNotIn("project.set_footprint_override", daemon.ASYNC_ROUTES)
+
+
 class TestChatThreadRoutes(unittest.TestCase):
     """CTX-206.3 (SPEC-206 §2.2): the two read routes this slice ships --
     chat.send (SPEC-206 §2.5) is a later, separate slice."""

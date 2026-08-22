@@ -61,6 +61,17 @@ Persisted as files, per the storage decision in §4.
 > membership project-scoped. Project-scoped chats (Overview, Schematic, PCB, Enclosure) are unchanged.
 > See `SPEC-318` §2.1 and `SPEC-206` §2.2 for the storage split.
 
+> **Amendment (2026-08-22):** Part's own row ("References one symbol and one footprint") now names
+> the Part's *default* footprint reference, overridable per-Project. Real user testing found the
+> original single, global reference too rigid: the same Part can legitimately need a different real,
+> already-existing footprint in a different project (a different package variant sourced for that
+> board, for instance). This does **not** touch Footprint's own row above — a Footprint stays exactly
+> what it always was, one global library object referenced by many Parts, never duplicated per
+> project. The override (`Project.footprint_overrides`, keyed by `part_id`) only ever stores a
+> foreign-key pointer to an existing Footprint record; setting one for a Part in one Project leaves
+> that Part's own global `footprint_id` — and every other Project's view of it — untouched. See
+> `SPEC-308` (`CTX-308.9`) for the real implementation.
+
 **Symbols and footprints are separate libraries, exactly as KiCad models them, and we follow that
 split rather than inventing a mapping.** This is not a storage detail — it's the correct cardinality.
 SOIC-8 is one footprint shared by hundreds of unrelated parts; a part is one symbol plus a

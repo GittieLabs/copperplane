@@ -9,6 +9,9 @@ const {
   searchCommunityFootprints,
   importCommunityFootprint,
   attachCommunityFootprintToPart,
+  attachFootprintToProjectOverride,
+  attachCommunityFootprintToProjectOverride,
+  generateFootprintForProjectOverride,
   renderSymbolPreview,
   renderFootprintPreview,
 } = await import('./footprints')
@@ -116,5 +119,83 @@ describe('renderFootprintPreview', () => {
     expect(submitJobMock).toHaveBeenCalledWith('library.render_footprint_preview', {
       footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
     })
+  })
+})
+
+describe('attachFootprintToProjectOverride', () => {
+  it('saves the real footprint record, then records it as this project\'s own override -- never re-saves the Part', async () => {
+    dispatchMock.mockResolvedValueOnce({ result: {} }) // library.save_footprint
+    dispatchMock.mockResolvedValueOnce({ result: { name: 'weather-pcb', footprint_overrides: { ATtiny85: 'MyPCBLibs__MP1584EN_5V_Module' } } }) // project.set_footprint_override (via setProjectFootprintOverride -> dispatch)
+    const project = { name: 'weather-pcb' }
+    const part = { part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8', pins: [] }
+
+    const footprintId = await attachFootprintToProjectOverride(project as never, part as never, 'MyPCBLibs', 'MP1584EN_5V_Module')
+
+    expect(footprintId).toBe('MyPCBLibs__MP1584EN_5V_Module')
+    expect(dispatchMock).toHaveBeenCalledWith('library.save_footprint', {
+      footprint: { footprint_id: 'MyPCBLibs__MP1584EN_5V_Module', library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module' },
+    })
+    expect(dispatchMock).toHaveBeenCalledWith('project.set_footprint_override', {
+      project_name: 'weather-pcb',
+      part_id: 'ATtiny85',
+      footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
+    })
+    // Real bug this guards against: the global Part must never be re-saved by this path.
+    expect(dispatchMock).not.toHaveBeenCalledWith('library.save_part', expect.anything())
+  })
+})
+
+describe('attachCommunityFootprintToProjectOverride', () => {
+  it('records the already-imported footprint as this project\'s own override', async () => {
+    dispatchMock.mockResolvedValueOnce({ result: { name: 'weather-pcb', footprint_overrides: { ATtiny85: 'sparkfun__SparkFun-KiCad-Libraries__y' } } })
+    const project = { name: 'weather-pcb' }
+    const part = { part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8', pins: [] }
+    const record = { footprint_id: 'sparkfun__SparkFun-KiCad-Libraries__y', pad_count: 4, provenance: {} as never }
+
+    const footprintId = await attachCommunityFootprintToProjectOverride(project as never, part as never, record)
+
+    expect(footprintId).toBe('sparkfun__SparkFun-KiCad-Libraries__y')
+    expect(dispatchMock).toHaveBeenCalledWith('project.set_footprint_override', {
+      project_name: 'weather-pcb',
+      part_id: 'ATtiny85',
+      footprint_id: 'sparkfun__SparkFun-KiCad-Libraries__y',
+    })
+    expect(dispatchMock).not.toHaveBeenCalledWith('library.save_part', expect.anything())
+  })
+
+  it('rejects a symbol record -- only a footprint can be attached this way', async () => {
+    const project = { name: 'weather-pcb' }
+    const part = { part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8', pins: [] }
+    const record = { symbol_id: 'x__y__C', pin_count: 2, provenance: {} as never }
+
+    await expect(
+      attachCommunityFootprintToProjectOverride(project as never, part as never, record),
+    ).rejects.toThrow(/Only a footprint/)
+  })
+})
+
+describe('generateFootprintForProjectOverride', () => {
+  it('generates the real footprint, then records it as this project\'s own override -- never re-saves the Part', async () => {
+    dispatchMock.mockResolvedValueOnce({
+      result: {
+        footprint_id: 'generated__ATtiny85',
+        footprint_name: 'generated__ATtiny85',
+        provenance: { source: 'generated_from_datasheet', generated_from_part_id: 'ATtiny85', verified: false },
+      },
+    }) // kicad.generate_footprint_from_part
+    dispatchMock.mockResolvedValueOnce({ result: { name: 'weather-pcb', footprint_overrides: { ATtiny85: 'generated__ATtiny85' } } }) // project.set_footprint_override
+    const project = { name: 'weather-pcb' }
+    const part = { part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8', pins: [] }
+
+    const footprintId = await generateFootprintForProjectOverride(project as never, part as never)
+
+    expect(footprintId).toBe('generated__ATtiny85')
+    expect(dispatchMock).toHaveBeenCalledWith('kicad.generate_footprint_from_part', { part_id: 'ATtiny85' })
+    expect(dispatchMock).toHaveBeenCalledWith('project.set_footprint_override', {
+      project_name: 'weather-pcb',
+      part_id: 'ATtiny85',
+      footprint_id: 'generated__ATtiny85',
+    })
+    expect(dispatchMock).not.toHaveBeenCalledWith('library.save_part', expect.anything())
   })
 })

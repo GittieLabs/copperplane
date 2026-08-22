@@ -15,6 +15,7 @@ const {
   listLibraryParts,
   loadConversation,
   appendConversationTurn,
+  setProjectFootprintOverride,
 } = await import('./projects')
 
 beforeEach(() => {
@@ -130,5 +131,32 @@ describe('loadConversation / appendConversationTurn', () => {
     await expect(
       appendConversationTurn('weather-pcb', { role: 'user', content: 'x' }),
     ).rejects.toThrow('some validation failure')
+  })
+})
+
+describe('setProjectFootprintOverride', () => {
+  it('dispatches project.set_footprint_override with the real project/part/footprint ids', async () => {
+    dispatchMock.mockResolvedValueOnce(ok({ name: 'weather-pcb', footprint_overrides: { ATtiny85: 'SOIC-8' } }))
+
+    const result = await setProjectFootprintOverride('weather-pcb', 'ATtiny85', 'SOIC-8')
+
+    expect(result.footprint_overrides).toEqual({ ATtiny85: 'SOIC-8' })
+    expect(dispatchMock).toHaveBeenCalledWith('project.set_footprint_override', {
+      project_name: 'weather-pcb',
+      part_id: 'ATtiny85',
+      footprint_id: 'SOIC-8',
+    })
+  })
+
+  it('passes footprint_id: null through to clear an existing override', async () => {
+    dispatchMock.mockResolvedValueOnce(ok({ name: 'weather-pcb', footprint_overrides: {} }))
+
+    await setProjectFootprintOverride('weather-pcb', 'ATtiny85', null)
+
+    expect(dispatchMock).toHaveBeenCalledWith('project.set_footprint_override', {
+      project_name: 'weather-pcb',
+      part_id: 'ATtiny85',
+      footprint_id: null,
+    })
   })
 })

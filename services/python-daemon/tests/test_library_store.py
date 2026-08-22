@@ -469,6 +469,70 @@ class TestProjectPartReferences(LibraryStoreTestCase):
         self.assertEqual(updated["intent"], "A weatherproof outdoor PCB.")
 
 
+class TestProjectFootprintOverrides(LibraryStoreTestCase):
+    """CTX-308.9 (SPEC-308): real user feedback -- there's no guarantee
+    the same footprint fits a Part in every project. A Project can
+    override which already-saved Footprint a Part resolves to for that
+    project only, falling back to the Part's own global `footprint_id`
+    when no override is set. This never creates a second Footprint
+    record (still one global library object, SPEC-300 §2.1's own
+    cardinality) -- only a per-project foreign-key override."""
+
+    def test_001_load_project_backfills_footprint_overrides_as_an_empty_dict(self):
+        store.save_project({"name": "weather-pcb"})
+
+        loaded = store.load_project("weather-pcb")
+
+        self.assertEqual(loaded["footprint_overrides"], {})
+
+    def test_002_set_footprint_override_persists_and_reloads(self):
+        store.save_project({"name": "weather-pcb"})
+
+        updated = store.set_project_footprint_override("weather-pcb", "ATtiny85", "SOIC-8")
+
+        self.assertEqual(updated["footprint_overrides"], {"ATtiny85": "SOIC-8"})
+        reloaded = store.load_project("weather-pcb")
+        self.assertEqual(reloaded["footprint_overrides"], {"ATtiny85": "SOIC-8"})
+
+    def test_003_setting_a_second_part_s_override_leaves_the_first_untouched(self):
+        store.save_project({"name": "weather-pcb"})
+
+        store.set_project_footprint_override("weather-pcb", "ATtiny85", "SOIC-8")
+        updated = store.set_project_footprint_override("weather-pcb", "ESP32-S3", "QFN-56")
+
+        self.assertEqual(updated["footprint_overrides"], {"ATtiny85": "SOIC-8", "ESP32-S3": "QFN-56"})
+
+    def test_004_re_setting_the_same_part_s_override_replaces_it(self):
+        store.save_project({"name": "weather-pcb"})
+
+        store.set_project_footprint_override("weather-pcb", "ATtiny85", "SOIC-8")
+        updated = store.set_project_footprint_override("weather-pcb", "ATtiny85", "DIP-8")
+
+        self.assertEqual(updated["footprint_overrides"], {"ATtiny85": "DIP-8"})
+
+    def test_005_footprint_id_none_clears_an_existing_override(self):
+        store.save_project({"name": "weather-pcb"})
+        store.set_project_footprint_override("weather-pcb", "ATtiny85", "SOIC-8")
+
+        updated = store.set_project_footprint_override("weather-pcb", "ATtiny85", None)
+
+        self.assertEqual(updated["footprint_overrides"], {})
+
+    def test_006_clearing_an_override_that_was_never_set_is_a_harmless_no_op(self):
+        store.save_project({"name": "weather-pcb"})
+
+        updated = store.set_project_footprint_override("weather-pcb", "ATtiny85", None)
+
+        self.assertEqual(updated["footprint_overrides"], {})
+
+    def test_007_preserves_the_record_s_other_real_fields(self):
+        store.save_project({"name": "weather-pcb", "intent": "A weatherproof outdoor PCB."})
+
+        updated = store.set_project_footprint_override("weather-pcb", "ATtiny85", "SOIC-8")
+
+        self.assertEqual(updated["intent"], "A weatherproof outdoor PCB.")
+
+
 class TestProjectDirectoryLink(LibraryStoreTestCase):
     """CTX-312.1: SPEC-304 §2.1 already described a Project as holding "a
     link to a KiCad project directory on disk" -- these tests cover the
@@ -508,9 +572,9 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
 
         loaded = store.load_project("weather-pcb")
 
-        # CTX-206.1/CTX-304.3: `intent` and `parts` are now real,
-        # backfilled state -- part of "exactly as before" now that both
-        # fields exist at all.
+        # CTX-206.1/CTX-304.3/CTX-308.9: `intent`, `parts`, and
+        # `footprint_overrides` are now real, backfilled state -- part
+        # of "exactly as before" now that all three fields exist at all.
         self.assertEqual(
             loaded,
             {
@@ -519,6 +583,7 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
                 "component_refs": [],
                 "intent": None,
                 "parts": [],
+                "footprint_overrides": {},
             },
         )
         self.assertNotIn("directory", loaded)

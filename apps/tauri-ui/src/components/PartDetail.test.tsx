@@ -22,6 +22,10 @@ const cacheDatasheetMock = vi.fn()
 const loadPartMock = vi.fn()
 const addProjectPartReferenceMock = vi.fn()
 const listProjectsMock = vi.fn()
+const setProjectFootprintOverrideMock = vi.fn()
+const attachFootprintToProjectOverrideMock = vi.fn()
+const attachCommunityFootprintToProjectOverrideMock = vi.fn()
+const generateFootprintForProjectOverrideMock = vi.fn()
 
 vi.mock('../lib/library', () => ({
   listLibraries: (...args: unknown[]) => listLibrariesMock(...args),
@@ -31,6 +35,7 @@ vi.mock('../lib/library', () => ({
 vi.mock('../lib/projects', () => ({
   addProjectPartReference: (...args: unknown[]) => addProjectPartReferenceMock(...args),
   listProjects: (...args: unknown[]) => listProjectsMock(...args),
+  setProjectFootprintOverride: (...args: unknown[]) => setProjectFootprintOverrideMock(...args),
 }))
 
 vi.mock('../lib/partDetail', () => ({
@@ -56,6 +61,10 @@ vi.mock('../lib/footprints', () => ({
   attachCommunityFootprintToPart: (...args: unknown[]) => attachCommunityFootprintToPartMock(...args),
   renderSymbolPreview: (...args: unknown[]) => renderSymbolPreviewMock(...args),
   renderFootprintPreview: (...args: unknown[]) => renderFootprintPreviewMock(...args),
+  attachFootprintToProjectOverride: (...args: unknown[]) => attachFootprintToProjectOverrideMock(...args),
+  attachCommunityFootprintToProjectOverride: (...args: unknown[]) =>
+    attachCommunityFootprintToProjectOverrideMock(...args),
+  generateFootprintForProjectOverride: (...args: unknown[]) => generateFootprintForProjectOverrideMock(...args),
 }))
 
 vi.mock('@tauri-apps/plugin-shell', () => ({
@@ -106,6 +115,10 @@ beforeEach(() => {
   loadPartMock.mockReset().mockRejectedValue(new Error('No Part found.'))
   addProjectPartReferenceMock.mockReset()
   listProjectsMock.mockReset().mockResolvedValue([])
+  setProjectFootprintOverrideMock.mockReset()
+  attachFootprintToProjectOverrideMock.mockReset()
+  attachCommunityFootprintToProjectOverrideMock.mockReset()
+  generateFootprintForProjectOverrideMock.mockReset()
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -999,6 +1012,105 @@ describe('PartDetail: CTX-306.7 visual symbol/footprint previews', () => {
 
     await waitFor(() => expect(renderFootprintPreviewMock).toHaveBeenCalledWith('MyPCBLibs__MP1584EN_5V_Module'))
     await waitFor(() => screen.getByTestId('footprint-preview-svg'))
+  })
+})
+
+describe('PartDetail: CTX-308.9 per-project footprint override', () => {
+  const SAVED_PART_WITH_FOOTPRINT = {
+    ...SAVED_PART_NO_FOOTPRINT,
+    footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
+    design_guidance: null,
+  }
+
+  it('offers no override control without a project open, even with a global footprint already linked', async () => {
+    render(<PartDetail initialPart={SAVED_PART_WITH_FOOTPRINT} />)
+
+    await waitFor(() => screen.getByText('Footprint linked: MyPCBLibs__MP1584EN_5V_Module'))
+    expect(screen.queryByRole('button', { name: /Use a different footprint/ })).toBeNull()
+  })
+
+  it('offers the override control once a project is open and a global default exists', async () => {
+    render(
+      <PartDetail
+        initialPart={SAVED_PART_WITH_FOOTPRINT}
+        currentProject={{ name: 'weather-pcb', parts: ['ATtiny85'], footprint_overrides: {} }}
+      />,
+    )
+
+    await waitFor(() => screen.getByRole('button', { name: 'Use a different footprint for this project…' }))
+  })
+
+  it('picking a candidate in override mode calls attachFootprintToProjectOverride, never attachFootprintToPart, and tags the result as project-only', async () => {
+    searchFootprintsMock.mockResolvedValueOnce([{ library: 'OtherLib', footprint_name: 'QFN-56' }])
+    attachFootprintToProjectOverrideMock.mockResolvedValueOnce('OtherLib__QFN-56')
+    render(
+      <PartDetail
+        initialPart={SAVED_PART_WITH_FOOTPRINT}
+        currentProject={{ name: 'weather-pcb', parts: ['ATtiny85'], footprint_overrides: {} }}
+      />,
+    )
+    await waitFor(() => screen.getByRole('button', { name: 'Use a different footprint for this project…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use a different footprint for this project…' }))
+    await waitFor(() => screen.getByText('Choose a different footprint for this project'))
+
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'QFN' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Use for this project' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use for this project' }))
+
+    await waitFor(() => screen.getByText('Footprint linked: OtherLib__QFN-56'))
+    expect(attachFootprintToProjectOverrideMock).toHaveBeenCalledWith(
+      { name: 'weather-pcb', parts: ['ATtiny85'], footprint_overrides: {} },
+      SAVED_PART_WITH_FOOTPRINT,
+      'OtherLib',
+      'QFN-56',
+    )
+    expect(attachFootprintToPartMock).not.toHaveBeenCalled()
+    screen.getByText('(this project only)')
+  })
+
+  it('cancelling override mode returns to the linked view without calling anything', async () => {
+    render(
+      <PartDetail
+        initialPart={SAVED_PART_WITH_FOOTPRINT}
+        currentProject={{ name: 'weather-pcb', parts: ['ATtiny85'], footprint_overrides: {} }}
+      />,
+    )
+    await waitFor(() => screen.getByRole('button', { name: 'Use a different footprint for this project…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use a different footprint for this project…' }))
+    await waitFor(() => screen.getByText('Choose a different footprint for this project'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => screen.getByText('Footprint linked: MyPCBLibs__MP1584EN_5V_Module'))
+    expect(screen.queryByText('Choose a different footprint for this project')).toBeNull()
+  })
+
+  it('shows an existing override and its Reset control, falling back to the global default once cleared', async () => {
+    setProjectFootprintOverrideMock.mockResolvedValueOnce({
+      name: 'weather-pcb',
+      parts: ['ATtiny85'],
+      footprint_overrides: {},
+    })
+    render(
+      <PartDetail
+        initialPart={SAVED_PART_WITH_FOOTPRINT}
+        currentProject={{
+          name: 'weather-pcb',
+          parts: ['ATtiny85'],
+          footprint_overrides: { ATtiny85: 'OtherLib__QFN-56' },
+        }}
+      />,
+    )
+    await waitFor(() => screen.getByText('Footprint linked: OtherLib__QFN-56'))
+    screen.getByText('(this project only)')
+    screen.getByRole('button', { name: 'Reset to default (MyPCBLibs__MP1584EN_5V_Module)' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to default (MyPCBLibs__MP1584EN_5V_Module)' }))
+
+    await waitFor(() => screen.getByText('Footprint linked: MyPCBLibs__MP1584EN_5V_Module'))
+    expect(setProjectFootprintOverrideMock).toHaveBeenCalledWith('weather-pcb', 'ATtiny85', null)
+    expect(screen.queryByText('(this project only)')).toBeNull()
   })
 })
 
