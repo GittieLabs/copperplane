@@ -387,13 +387,20 @@ describe('ComponentDiscovery', () => {
     await waitFor(() => screen.getByRole('button', { name: 'Open' }))
     fireEvent.click(screen.getByRole('button', { name: 'Open' }))
 
-    await waitFor(() => screen.getByText('PartDetail stub for ATtiny85'))
+    // CTX-308.11: real bug found via live testing -- this assertion used to
+    // read 'PartDetail stub for ATtiny85' with no project suffix, because
+    // currentProject was never actually forwarded to PartDetail here (only
+    // the `confirmed`-candidate render site below did). That silently
+    // hid every currentProject-gated feature (CTX-308.9's per-project
+    // footprint override among them) from a Part reopened via the Project
+    // Parts list -- the most common way to revisit an already-saved part.
+    await waitFor(() => screen.getByText('PartDetail stub for ATtiny85 (project: test-project)'))
     screen.getByRole('button', { name: '← Back to project parts' })
 
     fireEvent.click(screen.getByRole('button', { name: '← Back to project parts' }))
 
     await waitFor(() => screen.getByText('Project Parts'))
-    expect(screen.queryByText('PartDetail stub for ATtiny85')).toBeNull()
+    expect(screen.queryByText('PartDetail stub for ATtiny85 (project: test-project)')).toBeNull()
   })
 
   it('CTX-306.5: real bug -- a "← Back to project parts" link on search results clears the stale search so the Project Parts list comes back', async () => {

@@ -232,7 +232,7 @@ export function ComponentDiscovery({
         {!openedPartError && !openedPart && <p className="text-sm text-fg-muted">Loading…</p>}
         {openedPart && (
           <div className="mt-2 border-t border-line-subtle pt-3">
-            <PartDetail initialPart={openedPart} />
+            <PartDetail initialPart={openedPart} currentProject={currentProject} />
           </div>
         )}
       </div>

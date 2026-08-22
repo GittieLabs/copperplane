@@ -1016,6 +1016,38 @@ describe('PartDetail: CTX-306.7 visual symbol/footprint previews', () => {
     await waitFor(() => expect(renderFootprintPreviewMock).toHaveBeenCalledWith('MyPCBLibs__MP1584EN_5V_Module'))
     await waitFor(() => screen.getByTestId('footprint-preview-svg'))
   })
+
+  it('TEST-004 (CTX-308.11): clicking the symbol preview opens an enlarged view, closable via its Close button', async () => {
+    await saveAndReachFootprintSection()
+    await waitFor(() => screen.getByTestId('symbol-preview-svg'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'View larger symbol preview' }))
+
+    await waitFor(() => screen.getByRole('dialog', { name: 'Symbol preview' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('TEST-005 (CTX-308.11): clicking the footprint preview opens an enlarged view, closable via Escape', async () => {
+    searchFootprintsMock.mockResolvedValueOnce([{ library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module' }])
+    attachFootprintToPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
+    })
+    await saveAndReachFootprintSection()
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'MP1584' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
+    await waitFor(() => screen.getByTestId('footprint-preview-svg'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'View larger footprint preview' }))
+    await waitFor(() => screen.getByRole('dialog', { name: 'Footprint preview' }))
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
 })
 
 describe('PartDetail: CTX-308.9 per-project footprint override', () => {
