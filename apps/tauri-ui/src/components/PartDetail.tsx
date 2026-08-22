@@ -308,6 +308,20 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     }
   }, [candidate?.part_number, initialPart?.part_id])
 
+  // CTX-306.6: real user feedback -- a user searching for a footprint
+  // naturally tries the part's own name/package first, and had no idea
+  // what else to type. Pre-fills the search box with the part's real
+  // package once it's known, without fighting a user who deliberately
+  // clears it back to empty to search something else -- the effect's
+  // own dependency (extraction?.package) only changes once, when a new
+  // part's extraction first resolves, so it never re-fires and re-fills
+  // a field the user has since edited.
+  useEffect(() => {
+    if (extraction?.package) {
+      setFootprintQuery((prev) => (prev ? prev : extraction.package))
+    }
+  }, [extraction?.package])
+
   async function handleSave() {
     if (!extraction || !candidate) return
     setSaving(true)
@@ -462,6 +476,19 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     } finally {
       setAttachingFootprint(null)
     }
+  }
+
+  /** CTX-306.6: real user feedback -- a user typed the part's own name
+   * into this box, since that's the natural thing to try, and it's what
+   * this repo's own search already keys footprint results on. Unified,
+   * single-action search across both real sources (installed KiCad
+   * libraries + this repo's own already-saved footprints, and the
+   * curated community allowlist) instead of two separate searches
+   * sharing one box with no visible connection between them. */
+  async function handleSearch() {
+    const trimmed = footprintQuery.trim()
+    if (!trimmed) return
+    await Promise.all([handleFootprintSearch(), handleCommunitySearch()])
   }
 
   async function handleCommunitySearch() {
@@ -1055,48 +1082,56 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
                   value={footprintQuery}
                   onChange={(e) => setFootprintQuery(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleFootprintSearch()
+                    if (e.key === 'Enter') void handleSearch()
                   }}
                 />
                 <button
                   type="button"
                   className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
-                  onClick={handleFootprintSearch}
-                  disabled={footprintQuery.trim().length === 0 || footprintStatus === 'searching'}
+                  onClick={() => void handleSearch()}
+                  disabled={
+                    footprintQuery.trim().length === 0 ||
+                    footprintStatus === 'searching' ||
+                    communityStatus === 'searching'
+                  }
                 >
-                  {footprintStatus === 'searching' ? 'Searching…' : 'Search'}
+                  {footprintStatus === 'searching' || communityStatus === 'searching' ? 'Searching…' : 'Search'}
                 </button>
               </div>
+              {/* CTX-306.6: real user feedback -- one search across both
+                  real sources (this machine's installed KiCad libraries
+                  plus parts already saved here, and SPEC-314's own
+                  curated community allowlist), one combined result list
+                  labeled by source, instead of two separate searches
+                  sharing one box with no visible connection. */}
+              <p className="text-xs text-fg-muted">
+                Searches your installed KiCad libraries, parts you've already saved, and two
+                curated open-source community libraries (Espressif, SparkFun).
+              </p>
 
               {footprintStatus === 'error' && footprintError && (
                 <p className="text-sm text-danger">{footprintError}</p>
               )}
-
-              {footprintCandidates !== null && footprintCandidates.length === 0 && (
-                <p className="text-xs text-fg-muted">
-                  No match in this machine's own configured KiCad libraries.
-                </p>
+              {communityStatus === 'error' && communityError && (
+                <p className="text-sm text-danger">{communityError}</p>
               )}
 
-              {/* CTX-308.5: source three -- generate from this part's own
-                  datasheet dimensions (PRODUCT-PLAN.md §8 item 3), no new
-                  search needed. Always available, not gated on a zero-result
-                  search -- a user who already knows nothing installed will
-                  match shouldn't have to search first. */}
-              <div className="flex items-center gap-2 border-t border-line-subtle pt-2">
-                <button
-                  type="button"
-                  className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
-                  onClick={handleGenerateFootprint}
-                  disabled={generatingFootprint}
-                >
-                  {generatingFootprint ? 'Generating…' : 'Generate from datasheet dimensions'}
-                </button>
-              </div>
+              {footprintCandidates !== null &&
+                communityCandidates !== null &&
+                footprintCandidates.length === 0 &&
+                communityCandidates.length === 0 && (
+                  <p className="text-xs text-fg-muted">No match in any known source.</p>
+                )}
 
-              {footprintCandidates !== null && footprintCandidates.length > 0 && (
+              {/* CTX-306.6: hidden while browsing a multi-symbol .kicad_sym
+                  file's own contents below -- otherwise the original
+                  candidate's own "Import" button stays live at the same
+                  time as each real symbol's own "Import" button, two
+                  competing entry points for the same file. */}
+              {!communitySymbolBrowse &&
+                ((footprintCandidates?.length ?? 0) > 0 || (communityCandidates?.length ?? 0) > 0) && (
                 <div className="flex flex-col gap-2">
-                  {footprintCandidates.map((fp) => (
+                  {footprintCandidates?.map((fp) => (
                     <div
                       key={`${fp.library}:${fp.footprint_name}`}
                       className="flex items-center justify-between gap-3 rounded border border-line-subtle p-2"
@@ -1117,102 +1152,80 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
                       </button>
                     </div>
                   ))}
+                  {communityCandidates?.map((c) => (
+                    <div
+                      key={`${c.owner}/${c.repo}/${c.path}`}
+                      className="flex items-center justify-between gap-3 rounded border border-line-subtle p-2"
+                    >
+                      <p className="text-xs text-fg-secondary">
+                        {c.path.split('/').pop()}{' '}
+                        <span className="text-fg-muted">
+                          {c.owner}/{c.repo}
+                        </span>{' '}
+                        <span className="text-fg-faint">
+                          · {c.license} · {c.kind}
+                        </span>
+                      </p>
+                      <button
+                        type="button"
+                        className="rounded border border-line px-2 py-0.5 text-xs font-medium disabled:opacity-50"
+                        onClick={() => handleImportCommunityCandidate(c)}
+                        disabled={communityImportingPath !== null}
+                      >
+                        {communityImportingPath === c.path ? 'Importing…' : 'Import'}
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
 
-              {/* CTX-314.2/SPEC-314: source four -- a real, curated
-                  allowlist of GitHub-hosted community libraries, alongside
-                  the installed-library results above. Reuses the same
-                  query, its own separate search action/results. */}
-              <div className="flex flex-col gap-2 border-t border-line-subtle pt-2">
-                <div className="flex items-center gap-2">
-                  <p className="flex-1 text-xs font-medium uppercase text-fg-muted">Community Libraries</p>
-                  <button
-                    type="button"
-                    className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
-                    onClick={handleCommunitySearch}
-                    disabled={footprintQuery.trim().length === 0 || communityStatus === 'searching'}
-                  >
-                    {communityStatus === 'searching' ? 'Searching…' : 'Search community libraries'}
-                  </button>
-                </div>
-                {/* CTX-306.5: real user feedback -- this looked broken
-                    (reuses the box above with no visual cue) and its real
-                    scope was invisible (a fixed, curated allowlist --
-                    SPEC-314 §1's own deliberate non-goal against an
-                    unbounded GitHub-wide search -- not "all of GitHub",
-                    and not something a user can add to today). */}
-                <p className="text-xs text-fg-muted">
-                  Uses the search box above. Searches two known-good, curated open-source KiCad
-                  libraries (Espressif, SparkFun) -- not all of GitHub, and not user-configurable yet.
+              {communityImportedSymbolId && (
+                <p className="text-xs text-success">
+                  Imported symbol <code>{communityImportedSymbolId}</code> to your library.
                 </p>
+              )}
 
-                {communityStatus === 'error' && communityError && (
-                  <p className="text-sm text-danger">{communityError}</p>
-                )}
-
-                {communityCandidates !== null && communityCandidates.length === 0 && (
-                  <p className="text-xs text-fg-muted">No match in the known community libraries.</p>
-                )}
-
-                {communityImportedSymbolId && (
-                  <p className="text-xs text-success">
-                    Imported symbol <code>{communityImportedSymbolId}</code> to your library.
+              {communitySymbolBrowse && (
+                <div className="flex flex-col gap-2 rounded border border-line-subtle p-2">
+                  <p className="text-xs text-fg-tertiary">
+                    {communitySymbolBrowse.candidate.path} contains {communitySymbolBrowse.symbols.length} real
+                    symbols -- choose one to import:
                   </p>
-                )}
-
-                {communitySymbolBrowse && (
-                  <div className="flex flex-col gap-2 rounded border border-line-subtle p-2">
-                    <p className="text-xs text-fg-tertiary">
-                      {communitySymbolBrowse.candidate.path} contains {communitySymbolBrowse.symbols.length} real
-                      symbols -- choose one to import:
-                    </p>
-                    {communitySymbolBrowse.symbols.map((s) => (
-                      <div key={s.name} className="flex items-center justify-between gap-3">
-                        <p className="text-xs text-fg-secondary">
-                          {s.name} <span className="text-fg-faint">· {s.pin_count} pins</span>
-                        </p>
-                        <button
-                          type="button"
-                          className="rounded border border-line px-2 py-0.5 text-xs font-medium disabled:opacity-50"
-                          onClick={() => handleImportCommunitySymbol(s.name)}
-                          disabled={communityImportingPath !== null}
-                        >
-                          {communityImportingPath === communitySymbolBrowse.candidate.path ? 'Importing…' : 'Import'}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {communityCandidates !== null && communityCandidates.length > 0 && (
-                  <div className="flex flex-col gap-2">
-                    {communityCandidates.map((c) => (
-                      <div
-                        key={`${c.owner}/${c.repo}/${c.path}`}
-                        className="flex items-center justify-between gap-3 rounded border border-line-subtle p-2"
+                  {communitySymbolBrowse.symbols.map((s) => (
+                    <div key={s.name} className="flex items-center justify-between gap-3">
+                      <p className="text-xs text-fg-secondary">
+                        {s.name} <span className="text-fg-faint">· {s.pin_count} pins</span>
+                      </p>
+                      <button
+                        type="button"
+                        className="rounded border border-line px-2 py-0.5 text-xs font-medium disabled:opacity-50"
+                        onClick={() => handleImportCommunitySymbol(s.name)}
+                        disabled={communityImportingPath !== null}
                       >
-                        <p className="text-xs text-fg-secondary">
-                          {c.path.split('/').pop()}{' '}
-                          <span className="text-fg-muted">
-                            {c.owner}/{c.repo}
-                          </span>{' '}
-                          <span className="text-fg-faint">
-                            · {c.license} · {c.kind}
-                          </span>
-                        </p>
-                        <button
-                          type="button"
-                          className="rounded border border-line px-2 py-0.5 text-xs font-medium disabled:opacity-50"
-                          onClick={() => handleImportCommunityCandidate(c)}
-                          disabled={communityImportingPath !== null}
-                        >
-                          {communityImportingPath === c.path ? 'Importing…' : 'Import'}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                        {communityImportingPath === communitySymbolBrowse.candidate.path ? 'Importing…' : 'Import'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* CTX-308.5/CTX-306.6: source three -- generate from this
+                  part's own datasheet dimensions (PRODUCT-PLAN.md §8 item
+                  3). Moved below the real search results -- real user
+                  feedback found it sandwiched between the two searches,
+                  reading as a mid-flow option rather than the fallback it
+                  actually is. Still always available, not gated on a
+                  zero-result search -- a user who already knows nothing
+                  installed will match shouldn't have to search first. */}
+              <div className="flex items-center gap-2 border-t border-line-subtle pt-2">
+                <button
+                  type="button"
+                  className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
+                  onClick={handleGenerateFootprint}
+                  disabled={generatingFootprint}
+                >
+                  {generatingFootprint ? 'Generating…' : 'Generate from datasheet dimensions'}
+                </button>
               </div>
             </>
           )}
