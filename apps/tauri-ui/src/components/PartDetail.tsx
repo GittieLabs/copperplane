@@ -107,17 +107,23 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
   // Mirrors CTX-315.2's own "Add to library..." picker shape exactly
   // (same multi-select-then-Confirm interaction), since this is the
   // same kind of problem -- picking 0+ real targets to tag a saved
-  // object into -- already solved once in this file. Deliberately not
-  // gated on `currentProject`: the Library view (`initialPart`) has no
-  // such prop at all (App.tsx resets it to null the instant `view.kind`
-  // leaves `'project'`), so a real picker over every project, not a
-  // single current one, is the only way this works there too.
+  // object into -- already solved once in this file.
+  //
+  // CTX-306.5: real user feedback -- when `currentProject` IS known (this
+  // Part is being viewed from inside that project's own Components tab),
+  // asking which project via a picker is real, unnecessary friction; the
+  // answer is always "this one." The picker now only appears when there
+  // is no current project to default to at all (the Library view, where
+  // `currentProject` is always null -- App.tsx resets it the instant
+  // `view.kind` leaves `'project'`).
   const [projectPickerOpen, setProjectPickerOpen] = useState(false)
   const [availableProjects, setAvailableProjects] = useState<string[] | null>(null)
   const [selectedProjectNames, setSelectedProjectNames] = useState<string[]>([])
   const [addingToProjects, setAddingToProjects] = useState(false)
   const [projectTagError, setProjectTagError] = useState<string | null>(null)
   const [projectTagMessage, setProjectTagMessage] = useState<string | null>(null)
+  const [addingToCurrentProject, setAddingToCurrentProject] = useState(false)
+  const [justAddedToCurrentProject, setJustAddedToCurrentProject] = useState(false)
   const [exportedPath, setExportedPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -212,6 +218,8 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     setAddingToProjects(false)
     setProjectTagError(null)
     setProjectTagMessage(null)
+    setAddingToCurrentProject(false)
+    setJustAddedToCurrentProject(false)
     setExportError(null)
     setFootprintQuery('')
     setFootprintStatus('idle')
@@ -328,6 +336,23 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
       setSaveError(err instanceof Error ? err.message : String(err))
     } finally {
       setSaving(false)
+    }
+  }
+
+  /** CTX-306.5: the direct, no-picker path used whenever `currentProject`
+   * is already known -- see the state comment above for why asking which
+   * project is unnecessary friction in that case. */
+  async function handleAddToCurrentProject() {
+    if (!savedPart || !currentProject) return
+    setAddingToCurrentProject(true)
+    setProjectTagError(null)
+    try {
+      await addProjectPartReference(currentProject.name, savedPart.part_id)
+      setJustAddedToCurrentProject(true)
+    } catch (err) {
+      setProjectTagError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAddingToCurrentProject(false)
     }
   }
 
@@ -639,6 +664,13 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
   // own record (SPEC-202's extraction call never returns it); an
   // already-saved Part carries it on the Part record itself instead.
   const manufacturer = initialPart?.manufacturer ?? candidate?.manufacturer
+  // CTX-306.5: covers both "already linked before this view even opened"
+  // (the real Project.parts list, already on the currentProject prop) and
+  // "linked just now" (justAddedToCurrentProject -- the prop itself never
+  // refreshes mid-session, since currentProject is owned by App.tsx).
+  const alreadyInCurrentProject =
+    justAddedToCurrentProject ||
+    Boolean(currentProject && savedPart && currentProject.parts?.includes(savedPart.part_id))
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-3">
@@ -647,27 +679,10 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
         <span className="text-fg-muted">{schema.package}</span>
       </p>
 
-      <table className="w-full text-left text-xs">
-        <thead>
-          <tr className="text-fg-muted">
-            <th className="pr-2 font-medium">#</th>
-            <th className="pr-2 font-medium">Name</th>
-            <th className="pr-2 font-medium">Type</th>
-            <th className="font-medium">Source</th>
-          </tr>
-        </thead>
-        <tbody>
-          {schema.pins.map((pin) => (
-            <tr key={pin.number} className="text-fg-secondary">
-              <td className="pr-2">{pin.number}</td>
-              <td className="pr-2">{pin.name}</td>
-              <td className="pr-2">{pin.electrical_type}</td>
-              <td className="text-fg-muted">llm_extraction</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
+      {/* CTX-306.5: real user feedback found these buried below a
+          potentially-huge pin table, reading as disconnected from the
+          part identity above -- moved to the top, right under the
+          header, before anything else. */}
       {!savedSymbol ? (
         <div className="flex flex-col gap-1">
           <button
@@ -711,19 +726,49 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
 
       {savedPart && (
         <div className="flex flex-col gap-2 rounded border border-line p-3">
-          {/* CTX-315.2/SPEC-315 §5: real, separate from "Save to Library"
-              -- always saves to Default already; this tags into 0+
-              additional custom libraries. */}
+          {/* CTX-306.5: real user feedback -- "Add to library…" and "Add
+              to project…" used to be two separate bordered rows; they're
+              different real objects (SPEC-304 §2's Part-level project
+              reference vs. SPEC-315's library membership) but both are
+              short, one-off tagging actions that belong on the same row. */}
           <div className="flex flex-col gap-2 border-b border-line-subtle pb-2">
-            {!libraryPickerOpen ? (
-              <button
-                type="button"
-                className="self-start rounded border border-line px-3 py-1 text-xs font-medium"
-                onClick={() => void handleOpenLibraryPicker()}
-              >
-                Add to library…
-              </button>
-            ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              {!libraryPickerOpen && (
+                <button
+                  type="button"
+                  className="rounded border border-line px-3 py-1 text-xs font-medium"
+                  onClick={() => void handleOpenLibraryPicker()}
+                >
+                  Add to library…
+                </button>
+              )}
+              {currentProject ? (
+                alreadyInCurrentProject ? (
+                  <p className="text-xs text-fg-muted">✓ In project "{currentProject.name}"</p>
+                ) : (
+                  <button
+                    type="button"
+                    className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
+                    onClick={() => void handleAddToCurrentProject()}
+                    disabled={addingToCurrentProject}
+                  >
+                    {addingToCurrentProject ? 'Adding…' : `Add to project "${currentProject.name}"`}
+                  </button>
+                )
+              ) : (
+                !projectPickerOpen && (
+                  <button
+                    type="button"
+                    className="rounded border border-line px-3 py-1 text-xs font-medium"
+                    onClick={() => void handleOpenProjectPicker()}
+                  >
+                    Add to project…
+                  </button>
+                )
+              )}
+            </div>
+
+            {libraryPickerOpen && (
               <div className="flex flex-col gap-2">
                 {availableLibraries === null && !libraryTagError && (
                   <p className="text-xs text-fg-muted">Loading libraries…</p>
@@ -762,25 +807,11 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
                 </div>
               </div>
             )}
-            {libraryTagError && <p className="text-sm text-danger">{libraryTagError}</p>}
-            {libraryTagMessage && <p className="text-sm text-success">{libraryTagMessage}</p>}
-          </div>
 
-          {/* CTX-306.4: a real, separate action from "Add to library…"
-              above -- Projects and Libraries are different real objects
-              (SPEC-304 §2's Part-level project reference vs. SPEC-315's
-              library membership), so this is its own picker, not folded
-              into the one above. */}
-          <div className="flex flex-col gap-2 border-b border-line-subtle pb-2">
-            {!projectPickerOpen ? (
-              <button
-                type="button"
-                className="self-start rounded border border-line px-3 py-1 text-xs font-medium"
-                onClick={() => void handleOpenProjectPicker()}
-              >
-                Add to project…
-              </button>
-            ) : (
+            {/* CTX-306.5: this multi-project picker only ever renders when
+                there's no currentProject to default to -- see the state
+                comment near projectPickerOpen's declaration. */}
+            {projectPickerOpen && !currentProject && (
               <div className="flex flex-col gap-2">
                 {availableProjects === null && !projectTagError && (
                   <p className="text-xs text-fg-muted">Loading projects…</p>
@@ -817,10 +848,47 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
                 </div>
               </div>
             )}
+            {libraryTagError && <p className="text-sm text-danger">{libraryTagError}</p>}
+            {libraryTagMessage && <p className="text-sm text-success">{libraryTagMessage}</p>}
             {projectTagError && <p className="text-sm text-danger">{projectTagError}</p>}
             {projectTagMessage && <p className="text-sm text-success">{projectTagMessage}</p>}
           </div>
+        </div>
+      )}
 
+      {/* CTX-306.5: real user feedback -- a part with dozens of real pins
+          (an ESP32-S3's 54, say) made this table dominate the whole page.
+          Collapsed by default past a real, common single-row-package
+          size; still open by default for anything smaller, where there's
+          nothing to hide. */}
+      <details className="rounded border border-line-subtle" open={schema.pins.length <= 16}>
+        <summary className="cursor-pointer px-2 py-1 text-xs font-medium text-fg-muted">
+          {schema.pins.length} pin{schema.pins.length === 1 ? '' : 's'}
+        </summary>
+        <table className="w-full text-left text-xs">
+          <thead>
+            <tr className="text-fg-muted">
+              <th className="pr-2 pl-2 font-medium">#</th>
+              <th className="pr-2 font-medium">Name</th>
+              <th className="pr-2 font-medium">Type</th>
+              <th className="font-medium">Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            {schema.pins.map((pin) => (
+              <tr key={pin.number} className="text-fg-secondary">
+                <td className="pr-2 pl-2">{pin.number}</td>
+                <td className="pr-2">{pin.name}</td>
+                <td className="pr-2">{pin.electrical_type}</td>
+                <td className="text-fg-muted">llm_extraction</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
+
+      {savedPart && (
+        <div className="flex flex-col gap-2 rounded border border-line p-3">
           {/* CTX-205.3/.4/.7, SPEC-205: real, cited (Class B) design
               requirements grouped by category -- available as soon as a
               Part is real, not gated on a footprint the way Connection
@@ -983,7 +1051,7 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
               <div className="flex gap-2">
                 <input
                   className="flex-1 rounded border border-line bg-surface px-3 py-2 text-sm"
-                  placeholder="search this machine's own KiCad libraries"
+                  placeholder="search by footprint or package name, e.g. SOIC-8"
                   value={footprintQuery}
                   onChange={(e) => setFootprintQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -1068,6 +1136,16 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
                     {communityStatus === 'searching' ? 'Searching…' : 'Search community libraries'}
                   </button>
                 </div>
+                {/* CTX-306.5: real user feedback -- this looked broken
+                    (reuses the box above with no visual cue) and its real
+                    scope was invisible (a fixed, curated allowlist --
+                    SPEC-314 §1's own deliberate non-goal against an
+                    unbounded GitHub-wide search -- not "all of GitHub",
+                    and not something a user can add to today). */}
+                <p className="text-xs text-fg-muted">
+                  Uses the search box above. Searches two known-good, curated open-source KiCad
+                  libraries (Espressif, SparkFun) -- not all of GitHub, and not user-configurable yet.
+                </p>
 
                 {communityStatus === 'error' && communityError && (
                   <p className="text-sm text-danger">{communityError}</p>

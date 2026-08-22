@@ -395,4 +395,32 @@ describe('ComponentDiscovery', () => {
     await waitFor(() => screen.getByText('Project Parts'))
     expect(screen.queryByText('PartDetail stub for ATtiny85')).toBeNull()
   })
+
+  it('CTX-306.5: real bug -- a "← Back to project parts" link on search results clears the stale search so the Project Parts list comes back', async () => {
+    loadPartMock.mockResolvedValue({ part_id: 'ATtiny85', manufacturer: 'Microchip', package: 'DIP-8' })
+    searchComponentsMock.mockResolvedValueOnce([
+      {
+        part_number: 'ESP32-S3', manufacturer: 'Espressif', package: 'QFN-56',
+        datasheet_url: 'https://example.com/esp32.pdf', confidence: 'high', rationale: 'Exact match.',
+      },
+    ])
+
+    render(
+      <ComponentDiscovery
+        projectName="test-project"
+        currentProject={{ name: 'test-project', parts: ['ATtiny85'] }}
+      />,
+    )
+
+    await waitFor(() => screen.getByText('Project Parts'))
+    search('esp32')
+    await waitFor(() => screen.getByText('Did you mean:'))
+    expect(screen.queryByText('Project Parts')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '← Back to project parts' }))
+
+    await waitFor(() => screen.getByText('Project Parts'))
+    expect(screen.queryByText('Did you mean:')).toBeNull()
+  })
+
 })
