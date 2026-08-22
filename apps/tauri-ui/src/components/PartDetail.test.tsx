@@ -74,12 +74,16 @@ beforeEach(() => {
   saveConfirmedPartMock.mockReset()
   exportSymbolMock.mockReset()
   openMock.mockReset()
-  searchFootprintsMock.mockReset()
+  // CTX-306.6: Find Footprint now runs both real searches from one
+  // "Search" action -- default both to a real, empty result so a test
+  // that only configures one of them doesn't hit the other's
+  // unconfigured mock (which resolves to `undefined`, not `[]`).
+  searchFootprintsMock.mockReset().mockResolvedValue([])
   attachFootprintToPartMock.mockReset()
   generateFootprintFromPartMock.mockReset()
   exportFootprintMock.mockReset()
   getConnectionGuidanceMock.mockReset()
-  searchCommunityFootprintsMock.mockReset()
+  searchCommunityFootprintsMock.mockReset().mockResolvedValue([])
   importCommunityFootprintMock.mockReset()
   attachCommunityFootprintToPartMock.mockReset()
   listLibrariesMock.mockReset()
@@ -313,6 +317,53 @@ describe('PartDetail', () => {
     expect(searchFootprintsMock).not.toHaveBeenCalled()
   })
 
+  it('CTX-306.6: real user feedback -- the footprint search box auto-fills with the part\'s own package', async () => {
+    await saveAndReachFootprintSection()
+
+    const input = screen.getByPlaceholderText(/search by footprint or package name/) as HTMLInputElement
+    expect(input.value).toBe('SOIC-8')
+  })
+
+  it('CTX-306.6: one Search action runs both real searches and combines results into one list, labeled by source', async () => {
+    searchFootprintsMock.mockResolvedValueOnce([
+      { library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module', source: 'kicad_library' },
+    ])
+    searchCommunityFootprintsMock.mockResolvedValueOnce([
+      {
+        owner: 'sparkfun', repo: 'SparkFun-KiCad-Libraries', path: 'footprints/x.pretty/C_0201.kicad_mod',
+        kind: 'footprint', license: 'CC-BY-4.0', blob_sha: 'abc', download_url: 'https://example.com/C_0201.kicad_mod',
+      },
+    ])
+    await saveAndReachFootprintSection()
+
+    expect(screen.queryByRole('button', { name: 'Search community libraries' })).toBeNull()
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'x' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+    await waitFor(() => screen.getByText('MP1584EN_5V_Module'))
+    screen.getByText(/C_0201\.kicad_mod/)
+    expect(searchFootprintsMock).toHaveBeenCalledWith('x')
+    expect(searchCommunityFootprintsMock).toHaveBeenCalledWith('x')
+  })
+
+  it('CTX-306.6: real user feedback -- Generate from datasheet dimensions now follows the search results, not sandwiched between two searches', async () => {
+    searchFootprintsMock.mockResolvedValueOnce([
+      { library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module', source: 'kicad_library' },
+    ])
+    await saveAndReachFootprintSection()
+
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'x' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await waitFor(() => screen.getByText('MP1584EN_5V_Module'))
+
+    const resultsPosition = screen.getByText('MP1584EN_5V_Module').compareDocumentPosition(
+      screen.getByRole('button', { name: 'Generate from datasheet dimensions' }),
+    )
+    // Node.DOCUMENT_POSITION_FOLLOWING === 4 -- the Generate button comes
+    // after the result in document order.
+    expect(resultsPosition & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('TEST-002: searching renders real candidates from kicad.search_footprints', async () => {
     searchFootprintsMock.mockResolvedValueOnce([
       { library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module', source: 'kicad_library' },
@@ -369,7 +420,7 @@ describe('PartDetail', () => {
     fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'nonexistent' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
-    await waitFor(() => screen.getByText("No match in this machine's own configured KiCad libraries."))
+    await waitFor(() => screen.getByText('No match in any known source.'))
   })
 
   it('CTX-314.2: searching community libraries renders real candidates and importing a footprint attaches it to the Part', async () => {
@@ -388,7 +439,7 @@ describe('PartDetail', () => {
     await saveAndReachFootprintSection()
 
     fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'C_0201' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Search community libraries' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
     await waitFor(() => screen.getByText(/C_0201\.kicad_mod/))
     screen.getByText(/sparkfun\/SparkFun-KiCad-Libraries/)
@@ -414,7 +465,7 @@ describe('PartDetail', () => {
     await saveAndReachFootprintSection()
 
     fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'Capacitor' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Search community libraries' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     await waitFor(() => screen.getByText(/SparkFun-Capacitor\.kicad_sym/))
 
     fireEvent.click(screen.getByRole('button', { name: 'Import' }))
