@@ -965,9 +965,15 @@ def _backfill_project_intent(record: dict) -> dict:
     Parts referenced yet), so this always defaults to `[]`, never
     `None`, keeping every caller's list-handling code (`part_id in
     parts`, `.map()` on the frontend) uniform regardless of whether the
-    project predates this field."""
+    project predates this field.
+
+    CTX-308.9: same reasoning for `footprint_overrides` -- an absent key
+    and an explicitly-empty dict both mean "no per-project overrides
+    yet," so this always backfills to `{}`, keeping every caller's
+    `.get(part_id)` lookup uniform regardless of project age."""
     record.setdefault("intent", None)
     record.setdefault("parts", [])
+    record.setdefault("footprint_overrides", {})
     return record
 
 
@@ -1078,6 +1084,34 @@ def add_project_part_reference(project_name: str, part_id: str) -> dict:
     parts = project["parts"]
     if part_id not in parts:
         project["parts"] = [*parts, part_id]
+    return save_project(project)
+
+
+def set_project_footprint_override(project_name: str, part_id: str, footprint_id: str | None) -> dict:
+    """CTX-308.9 (SPEC-308): real user feedback -- there's no guarantee
+    the same footprint fits a part in every project it's used in, so a
+    Project can now override which already-saved Footprint a Part
+    resolves to *for that project only*, falling back to the Part's own
+    real `footprint_id` (still one shared, global library object --
+    this never creates a second Footprint record, only a foreign-key
+    override) when no override is set. `footprint_id=None` clears an
+    existing override rather than requiring a separate route -- the
+    same "one route, nullable value" shape a caller only ever needs one
+    of at a time.
+
+    Deliberately does not validate that `footprint_id` names an
+    existing, real Footprint record -- the caller (PartDetail.tsx) only
+    ever calls this with an id it just got back from
+    `library.save_footprint`/`library.import_community_footprint`/
+    `kicad.generate_footprint_from_part`, the same trust boundary
+    `add_project_part_reference` above already accepts for `part_id`."""
+    project = load_project(project_name)
+    overrides = project["footprint_overrides"]
+    if footprint_id is None:
+        overrides.pop(part_id, None)
+    else:
+        overrides[part_id] = footprint_id
+    project["footprint_overrides"] = overrides
     return save_project(project)
 
 

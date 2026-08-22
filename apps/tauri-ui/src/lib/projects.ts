@@ -17,7 +17,15 @@ import { dispatch } from './ipc'
  * (many-to-many, never a copy). Optional/absent on a project saved before
  * this context; `library_store.py`'s own `load_project` backfills it to
  * `[]` server-side, but the type stays optional here since a bare
- * `{name}` object (e.g. right after `project.list`) never carries it. */
+ * `{name}` object (e.g. right after `project.list`) never carries it.
+ *
+ * CTX-308.9: `footprint_overrides` -- real user feedback found there's
+ * no guarantee the same footprint fits a Part in every project it's
+ * used in. Keyed by `part_id`; a part with no entry here just uses its
+ * own global `footprint_id` (`SavedPart`, `lib/partDetail.ts`) as
+ * before -- this never creates a second Footprint record, only a
+ * per-project override of which existing one applies. Same optionality
+ * reasoning as `parts` above. */
 export interface Project {
   name: string
   schema_version?: number
@@ -25,6 +33,7 @@ export interface Project {
   last_results?: Record<string, unknown>
   export_history?: ExportHistoryEntry[]
   parts?: string[]
+  footprint_overrides?: Record<string, string>
 }
 
 /** One real, permanent record of an actual `freecad.export_enclosure`
@@ -129,5 +138,25 @@ export async function addProjectPartReference(
 ): Promise<Project> {
   return unwrap(
     await dispatch('project.add_part_reference', { project_name: projectName, part_id: partId }),
+  )
+}
+
+/** CTX-308.9: sets (or, with `footprintId: null`, clears) this
+ * project's own override of which Footprint a Part resolves to here --
+ * the Part's own global `footprint_id` is untouched either way. Real,
+ * fast local file I/O (`library_store.set_project_footprint_override`),
+ * so plain `dispatch`, matching `addProjectPartReference`'s own
+ * precedent -- not `submitJob`. */
+export async function setProjectFootprintOverride(
+  projectName: string,
+  partId: string,
+  footprintId: string | null,
+): Promise<Project> {
+  return unwrap(
+    await dispatch('project.set_footprint_override', {
+      project_name: projectName,
+      part_id: partId,
+      footprint_id: footprintId,
+    }),
   )
 }

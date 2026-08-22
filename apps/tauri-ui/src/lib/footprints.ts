@@ -1,5 +1,6 @@
 import { dispatch, submitJob } from './ipc'
 import type { SavedPart } from './partDetail'
+import { setProjectFootprintOverride, type Project } from './projects'
 
 /** CTX-308.4: kicad.search_footprints now merges two real sources --
  * KiCad's own installed libraries (CTX-308.1/CTX-308.3) and footprints
@@ -54,23 +55,48 @@ export async function searchFootprints(query: string): Promise<FootprintCandidat
  * a colon-containing id silently failed to round-trip through search on
  * real windows-latest CI. "__" is a safe, still-readable separator on
  * every platform this app ships to. */
-export async function attachFootprintToPart(
-  part: SavedPart,
-  library: string,
-  footprintName: string,
-): Promise<SavedPart> {
+/** Persists a found footprint as a real library_store Footprint record
+ * (idempotent -- re-saving the same id is harmless) and returns its id.
+ * Split out of `attachFootprintToPart` so `attachFootprintToProjectOverride`
+ * below can reuse the exact same persistence step without also
+ * rewriting the Part's own global `footprint_id`. */
+async function saveFootprintRecord(library: string, footprintName: string): Promise<string> {
   const footprintId = `${library}__${footprintName}`
-
   await unwrap<unknown>(
     await dispatch('library.save_footprint', {
       footprint: { footprint_id: footprintId, library, footprint_name: footprintName },
     }),
   )
+  return footprintId
+}
+
+export async function attachFootprintToPart(
+  part: SavedPart,
+  library: string,
+  footprintName: string,
+): Promise<SavedPart> {
+  const footprintId = await saveFootprintRecord(library, footprintName)
 
   const updatedPart: SavedPart = { ...part, footprint_id: footprintId }
   await unwrap<unknown>(await dispatch('library.save_part', { part: updatedPart }))
 
   return updatedPart
+}
+
+/** CTX-308.9: real user feedback -- the same Part may need a different
+ * footprint in a different project. Persists the found footprint the
+ * same way `attachFootprintToPart` does, but records it as *this
+ * project's own override* instead of overwriting the Part's global
+ * default -- the Part's own `footprint_id` is left untouched. */
+export async function attachFootprintToProjectOverride(
+  project: Project,
+  part: SavedPart,
+  library: string,
+  footprintName: string,
+): Promise<string> {
+  const footprintId = await saveFootprintRecord(library, footprintName)
+  await setProjectFootprintOverride(project.name, part.part_id, footprintId)
+  return footprintId
 }
 
 /** SPEC-308's third footprint source (PRODUCT-PLAN.md §8 item 3,
@@ -79,15 +105,33 @@ export async function attachFootprintToPart(
  * route reuses the extraction this part was already saved with). Like
  * kicad.search_footprints, this is real but cheap local computation, so
  * plain dispatch -- not submitJob. */
-export async function generateFootprintFromPart(part: SavedPart): Promise<SavedPart> {
-  const footprint = await unwrap<GeneratedFootprint>(
+/** Real, cheap local generation (the daemon route reuses the part's own
+ * already-saved extraction, no new LLM/network call) -- split out of
+ * `generateFootprintFromPart` so `generateFootprintForProjectOverride`
+ * below can reuse it without also rewriting the Part's global
+ * `footprint_id`. */
+async function generateFootprint(part: SavedPart): Promise<GeneratedFootprint> {
+  return unwrap<GeneratedFootprint>(
     await dispatch('kicad.generate_footprint_from_part', { part_id: part.part_id }),
   )
+}
+
+export async function generateFootprintFromPart(part: SavedPart): Promise<SavedPart> {
+  const footprint = await generateFootprint(part)
 
   const updatedPart: SavedPart = { ...part, footprint_id: footprint.footprint_id }
   await unwrap<unknown>(await dispatch('library.save_part', { part: updatedPart }))
 
   return updatedPart
+}
+
+/** CTX-308.9: the generate-from-datasheet counterpart to
+ * `attachFootprintToProjectOverride` above -- same "generate, then
+ * record as this project's own override" shape. */
+export async function generateFootprintForProjectOverride(project: Project, part: SavedPart): Promise<string> {
+  const footprint = await generateFootprint(part)
+  await setProjectFootprintOverride(project.name, part.part_id, footprint.footprint_id)
+  return footprint.footprint_id
 }
 
 /** CTX-308.6: SPEC-308 §1's "export it to a real .pretty library" --
@@ -204,6 +248,23 @@ export async function attachCommunityFootprintToPart(
   const updatedPart: SavedPart = { ...part, footprint_id: footprintId }
   await unwrap<unknown>(await dispatch('library.save_part', { part: updatedPart }))
   return updatedPart
+}
+
+/** CTX-308.9: the community-import counterpart to
+ * `attachFootprintToProjectOverride` above -- the record is already
+ * persisted by `importCommunityFootprint`, so this only ever records
+ * the project override, no re-save. */
+export async function attachCommunityFootprintToProjectOverride(
+  project: Project,
+  part: SavedPart,
+  record: ImportedCommunityRecord,
+): Promise<string> {
+  const footprintId = record.footprint_id
+  if (!footprintId) {
+    throw new Error('Only a footprint (not a symbol) can be attached to a Part this way.')
+  }
+  await setProjectFootprintOverride(project.name, part.part_id, footprintId)
+  return footprintId
 }
 
 /** CTX-306.7: real user feedback -- a footprint's pad layout and a

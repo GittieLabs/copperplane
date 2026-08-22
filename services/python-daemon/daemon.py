@@ -733,6 +733,13 @@ def project_add_part_reference(project_name: str, part_id: str) -> dict:
     return library_store.add_project_part_reference(project_name, part_id)
 
 
+def project_set_footprint_override(project_name: str, part_id: str, footprint_id) -> dict:
+    """CTX-308.9 (SPEC-308): thin wrapper, matching `project_add_part_reference`'s
+    own convention. Synchronous, fast local file I/O -- no LLM call.
+    `footprint_id: str | None` -- `None` clears an existing override."""
+    return library_store.set_project_footprint_override(project_name, part_id, footprint_id)
+
+
 def chat_load_thread(scope: str, scope_id: str) -> list:
     """CTX-206.3 (SPEC-206 §2.2): synchronous, real local file I/O
     (including a lazy, transparent migration of a legacy
@@ -1306,6 +1313,7 @@ def _build_routes() -> dict:
         routes["project.open_from_directory"] = project_open_from_directory
         routes["project.set_intent"] = project_set_intent
         routes["project.add_part_reference"] = project_add_part_reference
+        routes["project.set_footprint_override"] = project_set_footprint_override
         routes["chat.load_thread"] = chat_load_thread
         routes["chat.list_threads"] = chat_list_threads
     if community_libraries is not None:

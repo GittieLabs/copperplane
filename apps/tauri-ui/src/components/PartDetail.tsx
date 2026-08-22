@@ -3,8 +3,11 @@ import { useEffect, useState } from 'react'
 import { cacheDatasheet, type ComponentCandidate } from '../lib/components'
 import {
   attachCommunityFootprintToPart,
+  attachCommunityFootprintToProjectOverride,
   attachFootprintToPart,
+  attachFootprintToProjectOverride,
   exportFootprint,
+  generateFootprintForProjectOverride,
   generateFootprintFromPart,
   importCommunityFootprint,
   renderFootprintPreview,
@@ -16,7 +19,7 @@ import {
   type FootprintCandidate,
 } from '../lib/footprints'
 import { listLibraries, tagObject, type LibrarySummary } from '../lib/library'
-import { addProjectPartReference, listProjects, type Project } from '../lib/projects'
+import { addProjectPartReference, listProjects, setProjectFootprintOverride, type Project } from '../lib/projects'
 import {
   exportSymbol,
   extractPartDetail,
@@ -201,6 +204,20 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
   const [footprintPreviewLoading, setFootprintPreviewLoading] = useState(false)
   const [footprintPreviewError, setFootprintPreviewError] = useState<string | null>(null)
 
+  // CTX-308.9: real user feedback -- the same Part may need a different
+  // footprint in a different project. `footprintOverrideMode` reopens
+  // the same Find-Footprint search UI below, but a chosen candidate is
+  // recorded as this project's own override instead of overwriting the
+  // Part's global default. `justSetOverrideFootprintId`/
+  // `justClearedOverride` overlay onto `currentProject` the same way
+  // `justAddedToCurrentProject` already does elsewhere in this file --
+  // the prop itself never refreshes mid-session.
+  const [footprintOverrideMode, setFootprintOverrideMode] = useState(false)
+  const [justSetOverrideFootprintId, setJustSetOverrideFootprintId] = useState<string | null>(null)
+  const [justClearedOverride, setJustClearedOverride] = useState(false)
+  const [resettingOverride, setResettingOverride] = useState(false)
+  const [overrideResetError, setOverrideResetError] = useState<string | null>(null)
+
   // CTX-308.7: SPEC-308's third named concern (decoupling, protection,
   // power) -- available once a part and its footprint are both real
   // (SPEC-308 §5's own stated product stage), not gated on
@@ -368,11 +385,27 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     }
   }, [savedSymbol?.symbol_id])
 
+  // CTX-308.9: same "prop + local overlay" shape as alreadyInCurrentProject
+  // elsewhere in this file. `null` when there's no project open, or the
+  // project has no override for this Part -- falls back to the Part's
+  // own global footprint_id below, never displayed as its own separate
+  // state. Computed here (before the effect that needs it) rather than
+  // after the early `status === 'extracting'`/`'error'` returns further
+  // down, since hooks must run in the same order every render.
+  const projectFootprintOverride = justClearedOverride
+    ? null
+    : (justSetOverrideFootprintId ??
+      (currentProject && savedPart ? (currentProject.footprint_overrides?.[savedPart.part_id] ?? null) : null))
+  const effectiveFootprintId = projectFootprintOverride ?? savedPart?.footprint_id ?? null
+
   // CTX-306.7: same shape as the symbol preview effect above, keyed on
   // the linked footprint instead -- re-fetches whenever the footprint
   // changes (a new one found, generated, or imported).
+  // CTX-308.9: keyed on effectiveFootprintId (not the Part's own global
+  // footprint_id) so switching projects -- or setting/clearing this
+  // project's own override -- re-fetches the right preview.
   useEffect(() => {
-    const footprintId = savedPart?.footprint_id
+    const footprintId = effectiveFootprintId
     if (!footprintId) {
       setFootprintPreviewSvg(null)
       setFootprintPreviewError(null)
@@ -394,7 +427,7 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     return () => {
       cancelled = true
     }
-  }, [savedPart?.footprint_id])
+  }, [effectiveFootprintId])
 
   async function handleSave() {
     if (!extraction || !candidate) return
@@ -543,8 +576,22 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     if (!savedPart) return
     setAttachingFootprint(candidateFootprint.footprint_name)
     try {
-      const updated = await attachFootprintToPart(savedPart, candidateFootprint.library, candidateFootprint.footprint_name)
-      setSavedPart(updated)
+      if (footprintOverrideMode && currentProject) {
+        const footprintId = await attachFootprintToProjectOverride(
+          currentProject,
+          savedPart,
+          candidateFootprint.library,
+          candidateFootprint.footprint_name,
+        )
+        setJustSetOverrideFootprintId(footprintId)
+        setJustClearedOverride(false)
+        setExportedFootprintPath(null)
+        setFootprintGenerated(false)
+        setFootprintOverrideMode(false)
+      } else {
+        const updated = await attachFootprintToPart(savedPart, candidateFootprint.library, candidateFootprint.footprint_name)
+        setSavedPart(updated)
+      }
     } catch (err) {
       setFootprintError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -595,6 +642,13 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
       const result = await importCommunityFootprint(candidateFootprint)
       if ('symbols' in result) {
         setCommunitySymbolBrowse({ candidate: candidateFootprint, symbols: result.symbols })
+      } else if (footprintOverrideMode && currentProject) {
+        const footprintId = await attachCommunityFootprintToProjectOverride(currentProject, savedPart, result)
+        setJustSetOverrideFootprintId(footprintId)
+        setJustClearedOverride(false)
+        setExportedFootprintPath(null)
+        setFootprintGenerated(false)
+        setFootprintOverrideMode(false)
       } else {
         const updated = await attachCommunityFootprintToPart(savedPart, result)
         setSavedPart(updated)
@@ -631,9 +685,18 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     setGeneratingFootprint(true)
     setFootprintError(null)
     try {
-      const updated = await generateFootprintFromPart(savedPart)
-      setSavedPart(updated)
-      setFootprintGenerated(true)
+      if (footprintOverrideMode && currentProject) {
+        const footprintId = await generateFootprintForProjectOverride(currentProject, savedPart)
+        setJustSetOverrideFootprintId(footprintId)
+        setJustClearedOverride(false)
+        setExportedFootprintPath(null)
+        setFootprintGenerated(true)
+        setFootprintOverrideMode(false)
+      } else {
+        const updated = await generateFootprintFromPart(savedPart)
+        setSavedPart(updated)
+        setFootprintGenerated(true)
+      }
       setFootprintStatus('idle')
     } catch (err) {
       setFootprintError(err instanceof Error ? err.message : String(err))
@@ -643,12 +706,32 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     }
   }
 
+  /** CTX-308.9: clears this project's own override -- the Part's global
+   * `footprint_id` is untouched, so the "linked" view falls straight
+   * back to showing/exporting/previewing that default. */
+  async function handleResetFootprintOverride() {
+    if (!savedPart || !currentProject) return
+    setResettingOverride(true)
+    setOverrideResetError(null)
+    try {
+      await setProjectFootprintOverride(currentProject.name, savedPart.part_id, null)
+      setJustClearedOverride(true)
+      setJustSetOverrideFootprintId(null)
+      setExportedFootprintPath(null)
+      setFootprintGenerated(false)
+    } catch (err) {
+      setOverrideResetError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setResettingOverride(false)
+    }
+  }
+
   async function handleExportFootprint() {
-    if (!savedPart?.footprint_id) return
+    if (!effectiveFootprintId) return
     setExportingFootprint(true)
     setExportFootprintError(null)
     try {
-      const path = await exportFootprint(savedPart.footprint_id)
+      const path = await exportFootprint(effectiveFootprintId)
       setExportedFootprintPath(path)
     } catch (err) {
       setExportFootprintError(err instanceof Error ? err.message : String(err))
@@ -1088,16 +1171,46 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
             {citationOpenError && <p className="text-sm text-danger">{citationOpenError}</p>}
           </div>
 
-          {savedPart.footprint_id ? (
+          {savedPart.footprint_id && !footprintOverrideMode ? (
             <>
               <p className="text-sm text-success">
-                Footprint linked: {savedPart.footprint_id}
+                Footprint linked: {effectiveFootprintId}
                 {footprintGenerated && (
                   <span className="ml-2 text-xs font-medium text-warning">
                     (generated from datasheet dimensions — unverified)
                   </span>
                 )}
+                {projectFootprintOverride && (
+                  <span className="ml-2 text-xs font-medium text-accent">(this project only)</span>
+                )}
               </p>
+              {/* CTX-308.9: real user feedback -- the same Part may need
+                  a different footprint in a different project. Only
+                  offered once a global default footprint exists (a
+                  project's own override has nothing to "override"
+                  otherwise). */}
+              {currentProject && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {projectFootprintOverride && (
+                    <button
+                      type="button"
+                      className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
+                      onClick={() => void handleResetFootprintOverride()}
+                      disabled={resettingOverride}
+                    >
+                      {resettingOverride ? 'Resetting…' : `Reset to default (${savedPart.footprint_id})`}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="rounded border border-line px-3 py-1 text-xs font-medium"
+                    onClick={() => setFootprintOverrideMode(true)}
+                  >
+                    Use a different footprint for this project…
+                  </button>
+                </div>
+              )}
+              {overrideResetError && <p className="text-sm text-danger">{overrideResetError}</p>}
               {footprintPreviewLoading && (
                 <p className="text-xs text-fg-muted">Loading footprint preview…</p>
               )}
@@ -1170,7 +1283,20 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
             </>
           ) : (
             <>
-              <p className="text-xs font-medium uppercase text-fg-muted">Find Footprint</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-medium uppercase text-fg-muted">
+                  {footprintOverrideMode ? 'Choose a different footprint for this project' : 'Find Footprint'}
+                </p>
+                {footprintOverrideMode && (
+                  <button
+                    type="button"
+                    className="rounded border border-line px-2 py-0.5 text-xs"
+                    onClick={() => setFootprintOverrideMode(false)}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
               <div className="flex gap-2">
                 <input
                   className="flex-1 rounded border border-line bg-surface px-3 py-2 text-sm"
@@ -1244,7 +1370,11 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
                         onClick={() => handleAttachFootprint(fp)}
                         disabled={attachingFootprint !== null}
                       >
-                        {attachingFootprint === fp.footprint_name ? 'Linking…' : 'Use this'}
+                        {attachingFootprint === fp.footprint_name
+                          ? 'Linking…'
+                          : footprintOverrideMode
+                            ? 'Use for this project'
+                            : 'Use this'}
                       </button>
                     </div>
                   ))}
