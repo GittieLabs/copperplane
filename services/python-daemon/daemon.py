@@ -153,6 +153,12 @@ except Exception:
     logger.exception("datasheet_structure failed to import -- datasheet.read_pages will be unavailable")
     datasheet_structure = None
 
+try:
+    import chat_agents
+except Exception:
+    logger.exception("chat_agents failed to import -- chat.send will be unavailable")
+    chat_agents = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -753,6 +759,22 @@ def chat_list_threads(project_name: str) -> list:
     return library_store.list_threads(project_name)
 
 
+def chat_send(scope: str, scope_id: str, area: str, message: str, project_name: str = None) -> dict:
+    """The chat.send route (CTX-206.6, SPEC-206 §2.5): the real thing
+    `chat_load_thread`/`chat_list_threads`'s own docstrings named as "a
+    separate, later slice" -- routes a scoped conversation turn to one
+    of the five real SPEC-318 chat agents, threading CONFIG's own
+    provider/model/secrets through exactly like every other real LLM
+    route already does. A real LLM call (with an internal tool-use
+    loop), so registered in ASYNC_ROUTES below."""
+    return chat_agents.send(
+        scope, scope_id, area, message, project_name=project_name,
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+    )
+
+
 class InvalidParamsError(Exception):
     """Raised when a request's params don't match the route's real signature."""
 
@@ -1332,6 +1354,8 @@ def _build_routes() -> dict:
         routes["project.set_footprint_override"] = project_set_footprint_override
         routes["chat.load_thread"] = chat_load_thread
         routes["chat.list_threads"] = chat_list_threads
+    if chat_agents is not None and library_store is not None and tool_registry is not None:
+        routes["chat.send"] = chat_send
     if community_libraries is not None:
         routes["library.search_community_footprints"] = library_search_community_footprints
         routes["library.import_community_footprint"] = library_import_community_footprint
@@ -1374,6 +1398,7 @@ ASYNC_ROUTES = {
     "kicad.generate_connection_guidance", "kicad.suggest_footprint_query", "kicad.check_board", "kicad.check_schematic",
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
     "datasheet.read_pages", "library.render_symbol_preview", "library.render_footprint_preview",
+    "chat.send",
     # CTX-314.2: both make real GitHub network calls (community_libraries.py's
     # own _github_request/fetch_raw_content) -- a real bug in CTX-314.1's own
     # shipped code (search_community_footprints was never added here) meant
