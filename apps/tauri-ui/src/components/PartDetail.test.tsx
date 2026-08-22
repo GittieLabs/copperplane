@@ -319,7 +319,7 @@ describe('PartDetail', () => {
     ])
     await saveAndReachFootprintSection()
 
-    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'MP1584' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
     await waitFor(() => screen.getByText('MP1584EN_5V_Module'))
@@ -334,7 +334,7 @@ describe('PartDetail', () => {
     ])
     await saveAndReachFootprintSection()
 
-    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'x' } })
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'x' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
     await waitFor(() => screen.getByText('BatteryHolder_X'))
@@ -351,7 +351,7 @@ describe('PartDetail', () => {
       footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
     })
     await saveAndReachFootprintSection()
-    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'MP1584' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
 
@@ -366,7 +366,7 @@ describe('PartDetail', () => {
     searchFootprintsMock.mockResolvedValueOnce([])
     await saveAndReachFootprintSection()
 
-    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'nonexistent' } })
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'nonexistent' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
 
     await waitFor(() => screen.getByText("No match in this machine's own configured KiCad libraries."))
@@ -387,7 +387,7 @@ describe('PartDetail', () => {
     })
     await saveAndReachFootprintSection()
 
-    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'C_0201' } })
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'C_0201' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search community libraries' }))
 
     await waitFor(() => screen.getByText(/C_0201\.kicad_mod/))
@@ -413,7 +413,7 @@ describe('PartDetail', () => {
     })
     await saveAndReachFootprintSection()
 
-    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'Capacitor' } })
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'Capacitor' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search community libraries' }))
     await waitFor(() => screen.getByText(/SparkFun-Capacitor\.kicad_sym/))
 
@@ -500,6 +500,88 @@ describe('PartDetail', () => {
     await waitFor(() => expect(addProjectPartReferenceMock).toHaveBeenCalledWith('weather-pcb', 'ATtiny85'))
   })
 
+  it('CTX-306.5: with a currentProject, Add to project skips the picker and adds directly, no Confirm step', async () => {
+    addProjectPartReferenceMock.mockResolvedValueOnce({ name: 'weather-pcb', parts: ['ATtiny85'] })
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
+    saveConfirmedPartMock.mockResolvedValueOnce({
+      part: SAVED_PART_NO_FOOTPRINT,
+      symbol: { symbol_id: 'SOIC-8_0pin', reference_prefix: 'U', pins: [] },
+    })
+
+    render(<PartDetail candidate={CANDIDATE} currentProject={{ name: 'weather-pcb', parts: [] }} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+    await waitFor(() => screen.getByText('Saved to library.'))
+
+    // The auto-link-on-save (CTX-304.3) already fired once -- reset the
+    // mock's call history so this test's own assertion is unambiguous
+    // about the manual button below.
+    addProjectPartReferenceMock.mockClear()
+    addProjectPartReferenceMock.mockResolvedValueOnce({ name: 'weather-pcb', parts: ['ATtiny85'] })
+
+    expect(screen.queryByRole('button', { name: 'Add to project…' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Add to project "weather-pcb"' }))
+
+    await waitFor(() => expect(addProjectPartReferenceMock).toHaveBeenCalledWith('weather-pcb', 'ATtiny85'))
+    expect(listProjectsMock).not.toHaveBeenCalled()
+    await waitFor(() => screen.getByText('✓ In project "weather-pcb"'))
+  })
+
+  it('CTX-306.5: a part already listed on currentProject.parts shows as already added, no button at all', async () => {
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
+    saveConfirmedPartMock.mockResolvedValueOnce({
+      part: SAVED_PART_NO_FOOTPRINT,
+      symbol: { symbol_id: 'SOIC-8_0pin', reference_prefix: 'U', pins: [] },
+    })
+
+    render(<PartDetail candidate={CANDIDATE} currentProject={{ name: 'weather-pcb', parts: ['ATtiny85'] }} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Save to Library' }))
+    await waitFor(() => screen.getByText('✓ In project "weather-pcb"'))
+
+    expect(screen.queryByRole('button', { name: /Add to project/ })).toBeNull()
+  })
+
+  it('CTX-306.5: without a currentProject, the multi-project picker still appears (the Library view)', async () => {
+    await saveAndReachFootprintSection()
+
+    screen.getByRole('button', { name: 'Add to project…' })
+    expect(screen.queryByText(/✓ In project/)).toBeNull()
+  })
+
+  it('CTX-306.5: Add to library… and Add to project… render on the same row', async () => {
+    await saveAndReachFootprintSection()
+
+    const libraryButton = screen.getByRole('button', { name: 'Add to library…' })
+    const projectButton = screen.getByRole('button', { name: 'Add to project…' })
+    expect(libraryButton.parentElement).toBe(projectButton.parentElement)
+  })
+
+  it('CTX-306.5: the pin table stays open by default for a real, small part', async () => {
+    extractPartDetailMock.mockResolvedValueOnce({
+      part_number: 'ATtiny85', package: 'DIP-8',
+      pins: [{ number: '1', name: 'RESET', electrical_type: 'bidirectional' }],
+    })
+
+    render(<PartDetail candidate={CANDIDATE} />)
+
+    await waitFor(() => screen.getByText('RESET'))
+    const details = screen.getByText('1 pin').closest('details') as HTMLDetailsElement
+    expect(details.open).toBe(true)
+  })
+
+  it('CTX-306.5: the pin table collapses by default for a real, many-pin part (ESP32-S3 scale)', async () => {
+    const manyPins = Array.from({ length: 54 }, (_, i) => ({
+      number: String(i + 1), name: `GPIO${i}`, electrical_type: 'bidirectional',
+    }))
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ESP32-S3', package: 'QFN-56', pins: manyPins })
+
+    render(<PartDetail candidate={{ ...CANDIDATE, part_number: 'ESP32-S3' }} />)
+
+    await waitFor(() => screen.getByText('54 pins'))
+    const details = screen.getByText('54 pins').closest('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+  })
+
   it('CTX-308.5: Generate from datasheet dimensions calls generateFootprintFromPart and shows an unverified badge', async () => {
     generateFootprintFromPartMock.mockResolvedValueOnce({
       ...SAVED_PART_NO_FOOTPRINT,
@@ -541,7 +623,7 @@ describe('PartDetail', () => {
       footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
     })
     await saveAndReachFootprintSection()
-    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'MP1584' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
     fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
@@ -597,7 +679,7 @@ describe('PartDetail', () => {
       new Error("Footprint 'MyPCBLibs__MP1584EN_5V_Module' has no pad geometry to export."),
     )
     await saveAndReachFootprintSection()
-    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'MP1584' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
     fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
@@ -620,7 +702,7 @@ describe('PartDetail', () => {
       footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
     })
     await saveAndReachFootprintSection()
-    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'MP1584' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
     fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
@@ -641,7 +723,7 @@ describe('PartDetail', () => {
       footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
     })
     await saveAndReachFootprintSection()
-    fireEvent.change(screen.getByPlaceholderText(/search this machine's own KiCad libraries/), { target: { value: 'MP1584' } })
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'MP1584' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
     await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
     fireEvent.click(screen.getByRole('button', { name: 'Use this' }))

@@ -182,6 +182,20 @@ export function ComponentDiscovery({
     setOpenedPartId(partId)
   }
 
+  /** Real bug found by live user testing: `candidates` only ever reset on
+   * a genuine project switch, so once a search had run, its results
+   * stayed on screen forever -- the Project Parts list (gated on
+   * `candidates.length === 0`) could never come back without navigating
+   * away and back. This is the explicit escape hatch back to that
+   * default view. */
+  function handleClearSearch() {
+    setQuery('')
+    setStatus('idle')
+    setError(null)
+    setCandidates([])
+    setSavedPartIds(null)
+  }
+
   async function handleConfirm(candidate: ComponentCandidate) {
     setOpenedPartId(null)
     setConfirmingPartNumber(candidate.part_number)
@@ -334,7 +348,16 @@ export function ComponentDiscovery({
 
       {candidates.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-xs font-medium uppercase text-fg-muted">Did you mean:</p>
+          <div className="flex items-center gap-2">
+            <p className="flex-1 text-xs font-medium uppercase text-fg-muted">Did you mean:</p>
+            <button
+              type="button"
+              className="text-xs text-fg-tertiary underline"
+              onClick={handleClearSearch}
+            >
+              ← Back to project parts
+            </button>
+          </div>
           {candidates.map((candidate) => (
             <div
               key={candidate.part_number}
