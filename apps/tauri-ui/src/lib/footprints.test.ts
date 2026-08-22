@@ -5,8 +5,13 @@ const submitJobMock = vi.fn()
 
 vi.mock('./ipc', () => ({ dispatch: dispatchMock, submitJob: submitJobMock }))
 
-const { searchCommunityFootprints, importCommunityFootprint, attachCommunityFootprintToPart } =
-  await import('./footprints')
+const {
+  searchCommunityFootprints,
+  importCommunityFootprint,
+  attachCommunityFootprintToPart,
+  renderSymbolPreview,
+  renderFootprintPreview,
+} = await import('./footprints')
 
 beforeEach(() => {
   dispatchMock.mockReset()
@@ -91,5 +96,25 @@ describe('attachCommunityFootprintToPart', () => {
     const record = { symbol_id: 'x__y__C', pin_count: 2, provenance: {} as never }
 
     await expect(attachCommunityFootprintToPart(part as never, record)).rejects.toThrow(/Only a footprint/)
+  })
+})
+
+describe('renderSymbolPreview', () => {
+  it('submits library.render_symbol_preview and resolves the real SVG text', async () => {
+    submitJobMock.mockResolvedValueOnce(fakeHandle({ svg: '<svg>symbol</svg>' }))
+
+    await expect(renderSymbolPreview('SOIC-8_0pin')).resolves.toBe('<svg>symbol</svg>')
+    expect(submitJobMock).toHaveBeenCalledWith('library.render_symbol_preview', { symbol_id: 'SOIC-8_0pin' })
+  })
+})
+
+describe('renderFootprintPreview', () => {
+  it('submits library.render_footprint_preview and resolves the real SVG text', async () => {
+    submitJobMock.mockResolvedValueOnce(fakeHandle({ svg: '<svg>footprint</svg>' }))
+
+    await expect(renderFootprintPreview('MyPCBLibs__MP1584EN_5V_Module')).resolves.toBe('<svg>footprint</svg>')
+    expect(submitJobMock).toHaveBeenCalledWith('library.render_footprint_preview', {
+      footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
+    })
   })
 })

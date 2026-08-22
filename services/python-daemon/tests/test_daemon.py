@@ -2385,5 +2385,103 @@ class TestDatasheetReadPagesRoute(unittest.TestCase):
         self.assertEqual(result["pages"], [])
 
 
+class TestLibraryRenderSymbolPreviewRoute(unittest.TestCase):
+    """CTX-306.7: real user feedback -- a footprint/symbol shown only as
+    text doesn't let a user judge whether a match is right. This route
+    guarantees a real, current .kicad_sym exists (export_symbol_kicad_sym
+    is a cheap, idempotent text write -- never assumes "Export Symbol"
+    was already clicked) then renders it with real kicad-cli."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_route_is_registered_only_with_both_real_dependencies(self):
+        original_kc, original_ls = daemon.kicad_cli, daemon.library_store
+        try:
+            daemon.kicad_cli = None
+            self.assertNotIn("library.render_symbol_preview", daemon._build_routes())
+
+            daemon.kicad_cli = MagicMock()
+            daemon.library_store = None
+            self.assertNotIn("library.render_symbol_preview", daemon._build_routes())
+
+            daemon.library_store = original_ls
+            self.assertIn("library.render_symbol_preview", daemon._build_routes())
+        finally:
+            daemon.kicad_cli, daemon.library_store = original_kc, original_ls
+
+    def test_002_route_is_registered_as_async(self):
+        self.assertIn("library.render_symbol_preview", daemon.ASYNC_ROUTES)
+
+    @patch('daemon.kicad_cli.export_symbol_svg')
+    def test_003_writes_the_real_kicad_sym_first_then_reads_back_the_real_svg_text(self, mock_export_svg):
+        daemon.library_store.save_symbol({"symbol_id": "ATtiny85_1pin", "reference_prefix": "U", "pins": []})
+        svg_path = os.path.join(self._tmpdir.name, "fake.svg")
+        with open(svg_path, "w", encoding="utf-8") as f:
+            f.write("<svg>fake</svg>")
+        mock_export_svg.return_value = svg_path
+
+        result = daemon.library_render_symbol_preview("ATtiny85_1pin")
+
+        expected_sym_path = os.path.join(self._tmpdir.name, "library", "symbols", "ATtiny85_1pin.kicad_sym")
+        self.assertTrue(os.path.isfile(expected_sym_path))
+        mock_export_svg.assert_called_once_with(expected_sym_path)
+        self.assertEqual(result, {"svg": "<svg>fake</svg>"})
+
+
+class TestLibraryRenderFootprintPreviewRoute(unittest.TestCase):
+    """CTX-306.7: the footprint counterpart to
+    TestLibraryRenderSymbolPreviewRoute above."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_route_is_registered_only_with_both_real_dependencies(self):
+        original_kc, original_ls = daemon.kicad_cli, daemon.library_store
+        try:
+            daemon.kicad_cli = None
+            self.assertNotIn("library.render_footprint_preview", daemon._build_routes())
+
+            daemon.kicad_cli = MagicMock()
+            daemon.library_store = None
+            self.assertNotIn("library.render_footprint_preview", daemon._build_routes())
+
+            daemon.library_store = original_ls
+            self.assertIn("library.render_footprint_preview", daemon._build_routes())
+        finally:
+            daemon.kicad_cli, daemon.library_store = original_kc, original_ls
+
+    def test_002_route_is_registered_as_async(self):
+        self.assertIn("library.render_footprint_preview", daemon.ASYNC_ROUTES)
+
+    @patch('daemon.kicad_cli.export_footprint_svg')
+    def test_003_writes_the_real_kicad_mod_first_then_reads_back_the_real_svg_text(self, mock_export_svg):
+        daemon.library_store.save_footprint({
+            "footprint_id": "generated__ATtiny85",
+            "pads": [{"number": "1", "x_mm": 0, "y_mm": 0, "width_mm": 1, "height_mm": 1, "pad_type": "smd", "drill_mm": None}],
+            "courtyard": {"length_mm": 5.0, "width_mm": 5.0},
+        })
+        svg_path = os.path.join(self._tmpdir.name, "fake.svg")
+        with open(svg_path, "w", encoding="utf-8") as f:
+            f.write("<svg>fake fp</svg>")
+        mock_export_svg.return_value = svg_path
+
+        result = daemon.library_render_footprint_preview("generated__ATtiny85")
+
+        expected_pretty_dir = os.path.join(self._tmpdir.name, "library", "footprints.pretty")
+        mock_export_svg.assert_called_once_with(expected_pretty_dir, "generated__ATtiny85")
+        self.assertEqual(result, {"svg": "<svg>fake fp</svg>"})
+
+
 if __name__ == '__main__':
     unittest.main()

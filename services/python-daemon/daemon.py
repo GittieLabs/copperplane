@@ -549,6 +549,34 @@ def library_export_footprint(footprint_id: str) -> dict:
     return {"path": library_store.export_footprint_kicad_mod(footprint_id)}
 
 
+def library_render_symbol_preview(symbol_id: str) -> dict:
+    """The library.render_symbol_preview route (CTX-306.7): real user
+    feedback found Part Detail showing a footprint/symbol only as text
+    -- a footprint's pad layout and a symbol's pin arrangement are
+    inherently visual, and text alone doesn't let a user judge whether
+    a match is right. Reuses `export_symbol_kicad_sym` (a cheap,
+    idempotent text write) to guarantee a real, current `.kicad_sym`
+    file exists before rendering it -- never assumes "Export Symbol"
+    was already clicked. Returns the real SVG text itself, not a path
+    -- an inline-renderable string needs no Tauri asset-protocol
+    wiring, unlike `kicad.export_board_glb`'s binary `.glb`."""
+    path = library_store.export_symbol_kicad_sym(symbol_id)
+    svg_path = kicad_cli.export_symbol_svg(path)
+    with open(svg_path, encoding="utf-8") as f:
+        return {"svg": f.read()}
+
+
+def library_render_footprint_preview(footprint_id: str) -> dict:
+    """The library.render_footprint_preview route (CTX-306.7): the
+    footprint counterpart to library_render_symbol_preview above --
+    same reasoning, same real-file-then-render shape."""
+    path = library_store.export_footprint_kicad_mod(footprint_id)
+    pretty_dir = os.path.dirname(path)
+    svg_path = kicad_cli.export_footprint_svg(pretty_dir, footprint_id)
+    with open(svg_path, encoding="utf-8") as f:
+        return {"svg": f.read()}
+
+
 def library_search_community_footprints(query: str) -> list:
     """CTX-314.1: search-only -- real candidates from the curated
     GitHub allowlist, no import/persistence. The optional github_token
@@ -1262,6 +1290,10 @@ def _build_routes() -> dict:
         routes["library.list_libraries"] = library_list_libraries
         routes["library.create_library"] = library_create_library
         routes["library.tag_object"] = library_tag_object
+    if library_store is not None and kicad_cli is not None:
+        routes["library.render_symbol_preview"] = library_render_symbol_preview
+        routes["library.render_footprint_preview"] = library_render_footprint_preview
+    if library_store is not None:
         routes["project.save"] = project_save
         routes["project.load"] = project_load
         routes["project.list"] = project_list
@@ -1316,7 +1348,7 @@ ASYNC_ROUTES = {
     "kicad.inject_component", "component.search", "component.cache_datasheet",
     "kicad.generate_connection_guidance", "kicad.check_board", "kicad.check_schematic",
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
-    "datasheet.read_pages",
+    "datasheet.read_pages", "library.render_symbol_preview", "library.render_footprint_preview",
     # CTX-314.2: both make real GitHub network calls (community_libraries.py's
     # own _github_request/fetch_raw_content) -- a real bug in CTX-314.1's own
     # shipped code (search_community_footprints was never added here) meant
