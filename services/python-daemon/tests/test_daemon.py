@@ -949,6 +949,22 @@ class TestDaemonCapabilities(unittest.TestCase):
         finally:
             daemon.CONFIG["secrets"] = original_secrets
 
+    def test_009_fts5_available_reflects_a_real_probe(self):
+        """CTX-206.7 (SPEC-206 §3): real-probed, never sniffed from
+        sqlite3.sqlite_version -- matches whatever context_index.fts5_available()
+        itself reports, since that's the single real probe this flag reads."""
+        caps = daemon._detect_capabilities()
+        self.assertEqual(caps['fts5_available'], daemon.context_index.fts5_available())
+
+    def test_010_fts5_available_is_false_when_context_index_failed_to_import(self):
+        original = daemon.context_index
+        daemon.context_index = None
+        try:
+            caps = daemon._detect_capabilities()
+            self.assertFalse(caps['fts5_available'])
+        finally:
+            daemon.context_index = original
+
 
 class TestKicadGenerateComponentProviderOverride(unittest.TestCase):
     """CTX-303.2: kicad_generate_component used to always run
@@ -2006,6 +2022,88 @@ class TestChatSendRoute(unittest.TestCase):
 
     def test_003_registered_as_an_async_route(self):
         self.assertIn("chat.send", daemon.ASYNC_ROUTES)
+
+
+class TestContextSearchRoute(unittest.TestCase):
+    """CTX-206.7 (SPEC-206 §2.6): the real, cheap local FTS5 (or
+    LikeScanRetriever-fallback) route -- real context_index against a
+    real, isolated temp storage root, not mocked. The retriever/chunk-
+    extraction logic itself is covered in
+    services/python-daemon/tests/test_context_index.py; this only
+    verifies daemon-level wiring."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_translates_part_id_and_project_name_into_real_scopes(self):
+        daemon.library_store.save_part({
+            "part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8", "pins": [],
+            "datasheet_url": "https://example.com/x.pdf",
+            "provenance": {f: {"source": "test"} for f in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS},
+        })
+        daemon.context_index.rebuild_index()
+
+        result = daemon.context_search("Microchip", part_id="ATtiny85")
+
+        self.assertTrue(result)
+        self.assertEqual(result[0]["source_ref"]["part_id"], "ATtiny85")
+
+    def test_002_no_scope_filters_searches_everything(self):
+        daemon.library_store.save_project({"name": "weather-pcb", "intent": "A weatherproof outdoor board."})
+        daemon.context_index.rebuild_index()
+
+        result = daemon.context_search("weatherproof")
+
+        self.assertTrue(result)
+
+    def test_003_registered_only_when_context_index_and_library_store_are_real(self):
+        original = daemon.context_index
+        daemon.context_index = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("context.search", routes)
+            self.assertNotIn("context.rebuild_index", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.context_index = original
+
+    def test_004_registered_as_a_synchronous_route_not_async(self):
+        self.assertIn("context.search", daemon.ROUTES)
+        self.assertNotIn("context.search", daemon.ASYNC_ROUTES)
+
+
+class TestContextRebuildIndexRoute(unittest.TestCase):
+    """CTX-206.7 (SPEC-206 §2.6/§2.8): the manual rebuild trigger
+    PRODUCT-PLAN.md §4 requires -- a real, potentially non-trivial full
+    scan, so registered async unlike context.search."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_returns_the_real_chunk_count_and_fts5_status(self):
+        daemon.library_store.save_part({
+            "part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8", "pins": [],
+            "datasheet_url": "https://example.com/x.pdf",
+            "provenance": {f: {"source": "test"} for f in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS},
+        })
+
+        result = daemon.context_rebuild_index()
+
+        self.assertGreater(result["chunk_count"], 0)
+        self.assertIn("fts5", result)
+
+    def test_002_registered_as_an_async_route(self):
+        self.assertIn("context.rebuild_index", daemon.ASYNC_ROUTES)
 
 
 class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):

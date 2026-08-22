@@ -159,6 +159,12 @@ except Exception:
     logger.exception("chat_agents failed to import -- chat.send will be unavailable")
     chat_agents = None
 
+try:
+    import context_index
+except Exception:
+    logger.exception("context_index failed to import -- context.search/context.rebuild_index will be unavailable")
+    context_index = None
+
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
 # must match core/tauri-rust/src/config.rs's DAEMON_CONFIG_ENV_VAR. Applied
 # once, at import time, before the read loop starts, so every route sees
@@ -775,6 +781,34 @@ def chat_send(scope: str, scope_id: str, area: str, message: str, project_name: 
     )
 
 
+def context_search(query: str, part_id: str = None, project_name: str = None, limit: int = 8) -> list:
+    """The context.search route (CTX-206.7, SPEC-206 §2.6): real, cheap
+    local FTS5 (or LikeScanRetriever-fallback) lookup against the
+    rebuildable retrieval index -- synchronous, matching
+    kicad.search_footprints' own "real but cheap local computation"
+    precedent, unlike chat.send's real LLM call. `part_id`/`project_name`
+    are a friendlier, LLM-callable surface over context_index.search's
+    own lower-level `scopes` list -- a chat agent tool call names one
+    part or one project, never an arbitrary scope list."""
+    scopes = []
+    if part_id:
+        scopes.append(("part", part_id))
+    if project_name:
+        scopes.append(("project", project_name))
+    chunks = context_index.search(query, scopes=scopes, limit=limit)
+    return [{"body": c.body, "source_ref": c.source_ref, "kind": c.kind, "score": c.score} for c in chunks]
+
+
+def context_rebuild_index() -> dict:
+    """The context.rebuild_index route (CTX-206.7, SPEC-206 §2.6): the
+    manual trigger PRODUCT-PLAN.md §4 requires alongside the automatic
+    staleness check `context.search` already runs on every call. A real
+    full scan of every Part/Project record, so registered in
+    ASYNC_ROUTES below -- unlike context.search, which only re-runs the
+    scan when the automatic staleness check actually finds one stale."""
+    return context_index.rebuild_index()
+
+
 class InvalidParamsError(Exception):
     """Raised when a request's params don't match the route's real signature."""
 
@@ -1356,6 +1390,9 @@ def _build_routes() -> dict:
         routes["chat.list_threads"] = chat_list_threads
     if chat_agents is not None and library_store is not None and tool_registry is not None:
         routes["chat.send"] = chat_send
+    if context_index is not None and library_store is not None:
+        routes["context.search"] = context_search
+        routes["context.rebuild_index"] = context_rebuild_index
     if community_libraries is not None:
         routes["library.search_community_footprints"] = library_search_community_footprints
         routes["library.import_community_footprint"] = library_import_community_footprint
@@ -1398,7 +1435,7 @@ ASYNC_ROUTES = {
     "kicad.generate_connection_guidance", "kicad.suggest_footprint_query", "kicad.check_board", "kicad.check_schematic",
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
     "datasheet.read_pages", "library.render_symbol_preview", "library.render_footprint_preview",
-    "chat.send",
+    "chat.send", "context.rebuild_index",
     # CTX-314.2: both make real GitHub network calls (community_libraries.py's
     # own _github_request/fetch_raw_content) -- a real bug in CTX-314.1's own
     # shipped code (search_community_footprints was never added here) meant
@@ -1614,6 +1651,14 @@ def _detect_capabilities() -> dict:
 
     configured_secrets = CONFIG.get("secrets", {})
 
+    # CTX-206.7 (SPEC-206 §3): FTS5 is a compile-time SQLite option that
+    # can differ between this dev venv and the frozen PyInstaller
+    # sidecar -- surfaced here (real-probed, never sniffed from
+    # sqlite3.sqlite_version) so SPEC-303's "Copy Diagnostics" reports
+    # it. A cheap, real, non-blocking in-memory check, matching this
+    # whole function's own "cheap checks only" contract.
+    fts5_available = context_index.fts5_available() if context_index is not None else False
+
     return {
         "kicad_available": kicad_available,
         "kicad_socket_path_checked": kicad_socket_path_checked,
@@ -1641,6 +1686,7 @@ def _detect_capabilities() -> dict:
         # wired up. Community-library search still works unauthenticated,
         # just at GitHub's lower 60-requests/hour rate limit.
         "github_token_configured": bool(configured_secrets.get("github_token")),
+        "fts5_available": fts5_available,
     }
 
 

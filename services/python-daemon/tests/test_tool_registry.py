@@ -116,10 +116,6 @@ class TestChatAgentToolDefinitions(unittest.TestCase):
                         else:
                             in_tools_block = False
 
-        # context.search is a real, named exception -- CTX-206.5 deliberately
-        # defers it until SPEC-206 SS2.6's retrieval index exists.
-        referenced_tools.discard("context.search")
-
         for tool_name in referenced_tools:
             self.assertIn(tool_name, tool_registry.TOOL_DEFINITIONS, f"{tool_name} has no TOOL_DEFINITIONS entry")
             self.assertIn(tool_name, daemon.ROUTES, f"{tool_name} is not a real, registered daemon route")
@@ -131,6 +127,13 @@ class TestChatAgentToolDefinitions(unittest.TestCase):
     def test_003_library_load_part_requires_part_id(self):
         schema = tool_registry.TOOL_DEFINITIONS["library.load_part"]["input_schema"]
         self.assertEqual(schema["required"], ["part_id"])
+
+    def test_004_context_search_requires_only_query(self):
+        """CTX-206.7: closes the gap CTX-206.5 named -- context.search now
+        has a real route and TOOL_DEFINITIONS entry, so test_001 above no
+        longer needs to exempt it."""
+        schema = tool_registry.TOOL_DEFINITIONS["context.search"]["input_schema"]
+        self.assertEqual(schema["required"], ["query"])
 
     def test_004_library_list_parts_has_no_required_fields(self):
         schema = tool_registry.TOOL_DEFINITIONS["library.list_parts"]["input_schema"]
