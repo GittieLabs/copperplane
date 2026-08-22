@@ -146,6 +146,28 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
+    # SPEC-206 SS2.6 (CTX-206.7): the retrieval-index tool CTX-206.5 left
+    # deliberately absent -- every chat_*.prompt.md already declared it as
+    # a tool, but it had no real route or TOOL_DEFINITIONS entry to
+    # dispatch to until context_index.py existed.
+    "context.search": {
+        "description": (
+            "Searches this app's own real, already-stored context -- generated design guidance, "
+            "connection guidance, part fields, and project intent -- for text matching a query. "
+            "Scope to one Part or one Project by name; omit both to search everything. Returns real "
+            "matches with their own citable source, never a synthesized answer."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "part_id": {"type": "string"},
+                "project_name": {"type": "string"},
+                "limit": {"type": "integer"},
+            },
+            "required": ["query"],
+        },
+    },
 }
 
 # The only tool here that mutates a document the user didn't ask this app
