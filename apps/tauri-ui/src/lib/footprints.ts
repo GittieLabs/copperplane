@@ -205,3 +205,24 @@ export async function attachCommunityFootprintToPart(
   await unwrap<unknown>(await dispatch('library.save_part', { part: updatedPart }))
   return updatedPart
 }
+
+/** CTX-306.7: real user feedback -- a footprint's pad layout and a
+ * symbol's pin arrangement are inherently visual; text alone doesn't
+ * let a user judge whether a match is right. Both routes shell out to
+ * real `kicad-cli sym/fp export svg` (~1-2s observed), so ASYNC_ROUTES
+ * + submitJob, matching `searchCommunityFootprints`'s own precedent for
+ * "real but not instant." Returns raw SVG markup, safe to render
+ * directly -- kicad-cli's own output, never user-supplied text. */
+export async function renderSymbolPreview(symbolId: string): Promise<string> {
+  const handle = await submitJob<{ svg: string }>('library.render_symbol_preview', { symbol_id: symbolId })
+  const result = await handle.result
+  return result.svg
+}
+
+export async function renderFootprintPreview(footprintId: string): Promise<string> {
+  const handle = await submitJob<{ svg: string }>('library.render_footprint_preview', {
+    footprint_id: footprintId,
+  })
+  const result = await handle.result
+  return result.svg
+}

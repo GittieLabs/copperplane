@@ -13,6 +13,8 @@ const getConnectionGuidanceMock = vi.fn()
 const searchCommunityFootprintsMock = vi.fn()
 const importCommunityFootprintMock = vi.fn()
 const attachCommunityFootprintToPartMock = vi.fn()
+const renderSymbolPreviewMock = vi.fn()
+const renderFootprintPreviewMock = vi.fn()
 const listLibrariesMock = vi.fn()
 const tagObjectMock = vi.fn()
 const generateDesignGuidanceMock = vi.fn()
@@ -52,6 +54,8 @@ vi.mock('../lib/footprints', () => ({
   searchCommunityFootprints: (...args: unknown[]) => searchCommunityFootprintsMock(...args),
   importCommunityFootprint: (...args: unknown[]) => importCommunityFootprintMock(...args),
   attachCommunityFootprintToPart: (...args: unknown[]) => attachCommunityFootprintToPartMock(...args),
+  renderSymbolPreview: (...args: unknown[]) => renderSymbolPreviewMock(...args),
+  renderFootprintPreview: (...args: unknown[]) => renderFootprintPreviewMock(...args),
 }))
 
 vi.mock('@tauri-apps/plugin-shell', () => ({
@@ -86,6 +90,12 @@ beforeEach(() => {
   searchCommunityFootprintsMock.mockReset().mockResolvedValue([])
   importCommunityFootprintMock.mockReset()
   attachCommunityFootprintToPartMock.mockReset()
+  // CTX-306.7: both preview routes fire automatically as soon as a
+  // symbol/footprint id exists -- default to a real, resolved SVG so
+  // pre-existing tests (none of which know these routes exist) don't
+  // hit an unconfigured mock's `undefined` result.
+  renderSymbolPreviewMock.mockReset().mockResolvedValue('<svg data-testid="symbol-preview-svg"></svg>')
+  renderFootprintPreviewMock.mockReset().mockResolvedValue('<svg data-testid="footprint-preview-svg"></svg>')
   listLibrariesMock.mockReset()
   tagObjectMock.mockReset()
   generateDesignGuidanceMock.mockReset()
@@ -952,6 +962,43 @@ describe('PartDetail', () => {
     await waitFor(() => screen.getByText(/A 100 nF decoupling capacitor/))
     const details = screen.getByText('Citations').closest('details') as HTMLDetailsElement | null
     expect(details?.open).toBe(true)
+  })
+})
+
+describe('PartDetail: CTX-306.7 visual symbol/footprint previews', () => {
+  it('TEST-001: a symbol preview renders automatically once the part is saved, no click required', async () => {
+    await saveAndReachFootprintSection()
+
+    await waitFor(() => expect(renderSymbolPreviewMock).toHaveBeenCalledWith('SOIC-8_0pin'))
+    await waitFor(() => screen.getByTestId('symbol-preview-svg'))
+  })
+
+  it('TEST-002: a symbol preview failure shows a non-blocking message, not an error state', async () => {
+    renderSymbolPreviewMock.mockReset().mockRejectedValueOnce(new Error('kicad-cli not found'))
+
+    await saveAndReachFootprintSection()
+
+    await waitFor(() => screen.getByText('Symbol preview unavailable: kicad-cli not found'))
+    // The rest of the surface (Save flow, Find Footprint) stays usable.
+    screen.getByText('Find Footprint')
+  })
+
+  it('TEST-003: a footprint preview renders automatically once a footprint is linked', async () => {
+    searchFootprintsMock.mockResolvedValueOnce([
+      { library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module' },
+    ])
+    attachFootprintToPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
+    })
+    await saveAndReachFootprintSection()
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'MP1584' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
+
+    await waitFor(() => expect(renderFootprintPreviewMock).toHaveBeenCalledWith('MyPCBLibs__MP1584EN_5V_Module'))
+    await waitFor(() => screen.getByTestId('footprint-preview-svg'))
   })
 })
 

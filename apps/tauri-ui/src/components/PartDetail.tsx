@@ -7,6 +7,8 @@ import {
   exportFootprint,
   generateFootprintFromPart,
   importCommunityFootprint,
+  renderFootprintPreview,
+  renderSymbolPreview,
   searchCommunityFootprints,
   searchFootprints,
   type CommunityLibraryCandidate,
@@ -127,6 +129,13 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
   const [exportedPath, setExportedPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
+  // CTX-306.7: real user feedback -- a symbol's pin arrangement is
+  // inherently visual; text alone ("Saved to library") doesn't let a
+  // user judge whether it's right. Loaded automatically once a symbol
+  // is saved, not gated on "Export Symbol" first.
+  const [symbolPreviewSvg, setSymbolPreviewSvg] = useState<string | null>(null)
+  const [symbolPreviewLoading, setSymbolPreviewLoading] = useState(false)
+  const [symbolPreviewError, setSymbolPreviewError] = useState<string | null>(null)
 
   // CTX-315.2: SPEC-315 §5's own "Add to library..." action -- a real,
   // separate step from "Save to Library" above (which always tags into
@@ -183,6 +192,14 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
   const [exportedFootprintPath, setExportedFootprintPath] = useState<string | null>(null)
   const [exportingFootprint, setExportingFootprint] = useState(false)
   const [exportFootprintError, setExportFootprintError] = useState<string | null>(null)
+
+  // CTX-306.7: real user feedback -- a footprint's pad layout is
+  // inherently visual, and there was no way to tell if a linked
+  // footprint was right without opening it in KiCad. Loaded
+  // automatically once a footprint is linked.
+  const [footprintPreviewSvg, setFootprintPreviewSvg] = useState<string | null>(null)
+  const [footprintPreviewLoading, setFootprintPreviewLoading] = useState(false)
+  const [footprintPreviewError, setFootprintPreviewError] = useState<string | null>(null)
 
   // CTX-308.7: SPEC-308's third named concern (decoupling, protection,
   // power) -- available once a part and its footprint are both real
@@ -321,6 +338,63 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
       setFootprintQuery((prev) => (prev ? prev : extraction.package))
     }
   }, [extraction?.package])
+
+  // CTX-306.7: fetches a real symbol preview SVG as soon as a symbol_id
+  // exists -- not gated on "Export Symbol" being clicked first. Guards
+  // against a stale response landing after the symbol has changed
+  // (re-opening Part Detail for a different part).
+  useEffect(() => {
+    const symbolId = savedSymbol?.symbol_id
+    if (!symbolId) {
+      setSymbolPreviewSvg(null)
+      setSymbolPreviewError(null)
+      return
+    }
+    let cancelled = false
+    setSymbolPreviewLoading(true)
+    setSymbolPreviewError(null)
+    renderSymbolPreview(symbolId)
+      .then((svg) => {
+        if (!cancelled) setSymbolPreviewSvg(svg)
+      })
+      .catch((err) => {
+        if (!cancelled) setSymbolPreviewError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setSymbolPreviewLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [savedSymbol?.symbol_id])
+
+  // CTX-306.7: same shape as the symbol preview effect above, keyed on
+  // the linked footprint instead -- re-fetches whenever the footprint
+  // changes (a new one found, generated, or imported).
+  useEffect(() => {
+    const footprintId = savedPart?.footprint_id
+    if (!footprintId) {
+      setFootprintPreviewSvg(null)
+      setFootprintPreviewError(null)
+      return
+    }
+    let cancelled = false
+    setFootprintPreviewLoading(true)
+    setFootprintPreviewError(null)
+    renderFootprintPreview(footprintId)
+      .then((svg) => {
+        if (!cancelled) setFootprintPreviewSvg(svg)
+      })
+      .catch((err) => {
+        if (!cancelled) setFootprintPreviewError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setFootprintPreviewLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [savedPart?.footprint_id])
 
   async function handleSave() {
     if (!extraction || !candidate) return
@@ -726,6 +800,16 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
         <div className="flex flex-col gap-2 rounded border border-line p-3">
           <p className="text-sm text-success">Saved to library.</p>
           {projectLinkWarning && <p className="text-xs text-warning">{projectLinkWarning}</p>}
+          {symbolPreviewLoading && <p className="text-xs text-fg-muted">Loading symbol preview…</p>}
+          {symbolPreviewError && (
+            <p className="text-xs text-fg-muted">Symbol preview unavailable: {symbolPreviewError}</p>
+          )}
+          {symbolPreviewSvg && (
+            <div
+              className="max-h-64 overflow-auto rounded border border-line-subtle bg-white p-2 [&_svg]:h-auto [&_svg]:w-full"
+              dangerouslySetInnerHTML={{ __html: symbolPreviewSvg }}
+            />
+          )}
           {!exportedPath ? (
             <button
               type="button"
@@ -1014,6 +1098,18 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
                   </span>
                 )}
               </p>
+              {footprintPreviewLoading && (
+                <p className="text-xs text-fg-muted">Loading footprint preview…</p>
+              )}
+              {footprintPreviewError && (
+                <p className="text-xs text-fg-muted">Footprint preview unavailable: {footprintPreviewError}</p>
+              )}
+              {footprintPreviewSvg && (
+                <div
+                  className="max-h-64 overflow-auto rounded border border-line-subtle bg-white p-2 [&_svg]:h-auto [&_svg]:w-full"
+                  dangerouslySetInnerHTML={{ __html: footprintPreviewSvg }}
+                />
+              )}
               {!exportedFootprintPath ? (
                 <button
                   type="button"

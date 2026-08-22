@@ -198,3 +198,55 @@ def export_board_glb(pcb_path: str, origin_x_mm: float = None, origin_y_mm: floa
             f"{result.stderr.strip()}"
         )
     return output_path
+
+
+def export_symbol_svg(kicad_sym_path: str) -> str:
+    """Real `kicad-cli sym export svg` wrapper (CTX-306.7) -- takes the
+    `.kicad_sym` file path directly, confirmed live against real KiCad
+    (`test_library_store.py`'s own `TestExportSymbolKicadSym`). Unlike
+    `export_board_glb`, `-o` here names an *output directory*, not a
+    file -- the CLI derives the real SVG's own filename from the
+    symbol, so the directory is scanned afterward for whatever it
+    actually wrote rather than assuming a name."""
+    cli = find_kicad_cli()
+    if not os.path.exists(kicad_sym_path):
+        raise KicadCliError(f"Input file does not exist: {kicad_sym_path}")
+
+    output_dir = os.path.join(_output_dir_override or tempfile.gettempdir(), f"symsvg_{uuid.uuid4().hex}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    command = [cli, "sym", "export", "svg", "-o", output_dir, kicad_sym_path]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    svgs = [f for f in os.listdir(output_dir) if f.endswith(".svg")]
+    if not svgs:
+        raise KicadCliError(
+            f"kicad-cli did not produce an .svg (exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    return os.path.join(output_dir, svgs[0])
+
+
+def export_footprint_svg(pretty_dir: str, footprint_id: str) -> str:
+    """Real `kicad-cli fp export svg` wrapper (CTX-306.7). Unlike `sym
+    export svg`, this subcommand takes the *containing `.pretty`
+    directory* plus `--footprint <name>`, never the `.kicad_mod` file
+    path directly -- confirmed live against real KiCad
+    (`test_library_store.py`'s own `TestExportFootprintKicadMod`,
+    which found this the hard way rather than assuming it from
+    `--help` text alone)."""
+    cli = find_kicad_cli()
+    if not os.path.isdir(pretty_dir):
+        raise KicadCliError(f"Input directory does not exist: {pretty_dir}")
+
+    output_dir = os.path.join(_output_dir_override or tempfile.gettempdir(), f"fpsvg_{uuid.uuid4().hex}")
+    os.makedirs(output_dir, exist_ok=True)
+
+    command = [cli, "fp", "export", "svg", "-o", output_dir, "--footprint", footprint_id, pretty_dir]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    svgs = [f for f in os.listdir(output_dir) if f.endswith(".svg")]
+    if not svgs:
+        raise KicadCliError(
+            f"kicad-cli did not produce an .svg (exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    return os.path.join(output_dir, svgs[0])

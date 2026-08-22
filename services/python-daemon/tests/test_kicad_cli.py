@@ -8,8 +8,10 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import kicad_cli
+import library_store
 from kicad_cli import (
-    KicadCliError, KicadCliUnavailableError, export_board_glb, find_kicad_cli, run_drc, run_erc,
+    KicadCliError, KicadCliUnavailableError, export_board_glb, export_footprint_svg,
+    export_symbol_svg, find_kicad_cli, run_drc, run_erc,
 )
 
 _FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
@@ -194,6 +196,139 @@ class TestRealExportBoardGlb(unittest.TestCase):
             for p in (default_path, shifted_path):
                 if os.path.exists(p):
                     os.remove(p)
+
+
+_ATTINY85_PINS = [
+    {"number": "1", "name": "RESET", "electrical_type": "bidirectional"},
+    {"number": "2", "name": "PB3", "electrical_type": "input"},
+    {"number": "3", "name": "PB4", "electrical_type": "output"},
+    {"number": "4", "name": "GND", "electrical_type": "ground"},
+]
+_SOIC4_PADS = [
+    {"number": "1", "x_mm": -2.0, "y_mm": -1.27, "width_mm": 1.5, "height_mm": 0.6,
+     "pad_type": "smd", "drill_mm": None},
+    {"number": "2", "x_mm": -2.0, "y_mm": 1.27, "width_mm": 1.5, "height_mm": 0.6,
+     "pad_type": "smd", "drill_mm": None},
+]
+_SOIC4_COURTYARD = {"length_mm": 5.4, "width_mm": 4.4}
+
+
+class TestExportSymbolSvgErrorHandling(unittest.TestCase):
+    """Mocked -- no real kicad-cli needed to verify the error-mapping
+    logic itself, matching TestRunReportErrorHandling's own shape."""
+
+    @patch('kicad_cli.find_kicad_cli', return_value='/fake/kicad-cli')
+    def test_001_a_missing_input_file_raises_a_clean_error(self, mock_find):
+        with self.assertRaises(KicadCliError) as ctx:
+            export_symbol_svg('/nonexistent/Foo.kicad_sym')
+        self.assertIn("does not exist", str(ctx.exception))
+
+    @patch('kicad_cli.subprocess.run')
+    @patch('kicad_cli.find_kicad_cli', return_value='/fake/kicad-cli')
+    def test_002_a_run_that_never_produces_an_svg_raises_a_clean_error(self, mock_find, mock_run):
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "some real kicad-cli failure text"
+        with tempfile.NamedTemporaryFile(suffix=".kicad_sym") as f:
+            with self.assertRaises(KicadCliError) as ctx:
+                export_symbol_svg(f.name)
+        self.assertIn("some real kicad-cli failure text", str(ctx.exception))
+
+
+class TestExportFootprintSvgErrorHandling(unittest.TestCase):
+
+    @patch('kicad_cli.find_kicad_cli', return_value='/fake/kicad-cli')
+    def test_001_a_missing_pretty_dir_raises_a_clean_error(self, mock_find):
+        with self.assertRaises(KicadCliError) as ctx:
+            export_footprint_svg('/nonexistent/Foo.pretty', 'Foo')
+        self.assertIn("does not exist", str(ctx.exception))
+
+    @patch('kicad_cli.subprocess.run')
+    @patch('kicad_cli.find_kicad_cli', return_value='/fake/kicad-cli')
+    def test_002_a_run_that_never_produces_an_svg_raises_a_clean_error(self, mock_find, mock_run):
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stderr = "some real kicad-cli failure text"
+        with tempfile.TemporaryDirectory() as pretty_dir:
+            with self.assertRaises(KicadCliError) as ctx:
+                export_footprint_svg(pretty_dir, 'Foo')
+        self.assertIn("some real kicad-cli failure text", str(ctx.exception))
+
+
+class TestRealExportSymbolSvg(unittest.TestCase):
+    """Real, non-mocked kicad-cli calls against a real, valid .kicad_sym
+    file -- reusing library_store's own proven builder (already verified
+    parseable by real kicad-cli in test_library_store.py) rather than
+    hand-crafting new S-expression text here. Skips itself cleanly when
+    kicad-cli isn't found, same convention as every other real-tool test
+    in this module."""
+
+    def setUp(self):
+        if not _find_real_kicad_cli():
+            self.skipTest("kicad-cli not found on this machine.")
+        kicad_cli._output_dir_override = None
+
+    def tearDown(self):
+        kicad_cli._output_dir_override = None
+
+    def test_001_produces_a_real_svg_file(self):
+        text = library_store._build_kicad_sym_text(
+            {"symbol_id": "ATtiny85_4pin", "reference_prefix": "U", "pins": _ATTINY85_PINS}
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            sym_path = os.path.join(tmp_dir, "ATtiny85_4pin.kicad_sym")
+            with open(sym_path, "w", encoding="utf-8") as f:
+                f.write(text)
+
+            output_path = export_symbol_svg(sym_path)
+
+            self.assertTrue(os.path.exists(output_path))
+            self.assertTrue(output_path.endswith(".svg"))
+            with open(output_path, encoding="utf-8") as f:
+                self.assertIn("<svg", f.read())
+
+    def test_002_respects_a_configured_output_dir(self):
+        text = library_store._build_kicad_sym_text(
+            {"symbol_id": "ATtiny85_4pin", "reference_prefix": "U", "pins": _ATTINY85_PINS}
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir, tempfile.TemporaryDirectory() as out_dir:
+            sym_path = os.path.join(tmp_dir, "ATtiny85_4pin.kicad_sym")
+            with open(sym_path, "w", encoding="utf-8") as f:
+                f.write(text)
+            kicad_cli.configure(output_dir=out_dir)
+
+            output_path = export_symbol_svg(sym_path)
+
+            self.assertEqual(os.path.dirname(os.path.dirname(output_path)), out_dir)
+
+
+class TestRealExportFootprintSvg(unittest.TestCase):
+    """Real, non-mocked kicad-cli calls against a real, valid .kicad_mod
+    file inside a real .pretty directory -- same reused-builder
+    convention as the symbol test above."""
+
+    def setUp(self):
+        if not _find_real_kicad_cli():
+            self.skipTest("kicad-cli not found on this machine.")
+        kicad_cli._output_dir_override = None
+
+    def tearDown(self):
+        kicad_cli._output_dir_override = None
+
+    def test_001_produces_a_real_svg_file(self):
+        text = library_store._build_kicad_mod_text(
+            {"footprint_id": "SOIC-4_test", "pads": _SOIC4_PADS, "courtyard": _SOIC4_COURTYARD}
+        )
+        with tempfile.TemporaryDirectory() as parent_dir:
+            pretty_dir = os.path.join(parent_dir, "test.pretty")
+            os.makedirs(pretty_dir)
+            with open(os.path.join(pretty_dir, "SOIC-4_test.kicad_mod"), "w", encoding="utf-8") as f:
+                f.write(text)
+
+            output_path = export_footprint_svg(pretty_dir, "SOIC-4_test")
+
+            self.assertTrue(os.path.exists(output_path))
+            self.assertTrue(output_path.endswith(".svg"))
+            with open(output_path, encoding="utf-8") as f:
+                self.assertIn("<svg", f.read())
 
 
 if __name__ == '__main__':
