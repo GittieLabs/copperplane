@@ -440,6 +440,25 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     }
   }, [effectiveFootprintId])
 
+  // CTX-308.11: real user feedback -- the inline symbol/footprint
+  // previews clipped instead of scaling to fit their fixed-height box
+  // (the SVG's own real-world-unit width/height attributes fought the
+  // container instead of the viewBox's default xMidYMid-meet scaling).
+  // `enlargedPreview` drives a click-to-view-larger modal, the "resize
+  // the view" ask -- a full custom resizable panel is more than this
+  // needs; a bigger, still-scale-to-fit view covers the real complaint
+  // (the thumbnail is too small/cropped to read).
+  const [enlargedPreview, setEnlargedPreview] = useState<{ title: string; svg: string } | null>(null)
+
+  useEffect(() => {
+    if (!enlargedPreview) return
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setEnlargedPreview(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [enlargedPreview])
+
   async function handleSave() {
     if (!extraction || !candidate) return
     setSaving(true)
@@ -918,8 +937,12 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
             <p className="text-xs text-fg-muted">Symbol preview unavailable: {symbolPreviewError}</p>
           )}
           {symbolPreviewSvg && (
-            <div
-              className="max-h-64 overflow-auto rounded border border-line-subtle bg-white p-2 [&_svg]:h-auto [&_svg]:w-full"
+            <button
+              type="button"
+              className="h-64 w-full cursor-zoom-in overflow-hidden rounded border border-line-subtle bg-white p-2 [&_svg]:h-full [&_svg]:w-full"
+              title="Click to view larger"
+              aria-label="View larger symbol preview"
+              onClick={() => setEnlargedPreview({ title: 'Symbol preview', svg: symbolPreviewSvg })}
               dangerouslySetInnerHTML={{ __html: symbolPreviewSvg }}
             />
           )}
@@ -1248,8 +1271,12 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
                 <p className="text-xs text-fg-muted">Footprint preview unavailable: {footprintPreviewError}</p>
               )}
               {footprintPreviewSvg && (
-                <div
-                  className="max-h-64 overflow-auto rounded border border-line-subtle bg-white p-2 [&_svg]:h-auto [&_svg]:w-full"
+                <button
+                  type="button"
+                  className="h-64 w-full cursor-zoom-in overflow-hidden rounded border border-line-subtle bg-white p-2 [&_svg]:h-full [&_svg]:w-full"
+                  title="Click to view larger"
+                  aria-label="View larger footprint preview"
+                  onClick={() => setEnlargedPreview({ title: 'Footprint preview', svg: footprintPreviewSvg })}
                   dangerouslySetInnerHTML={{ __html: footprintPreviewSvg }}
                 />
               )}
@@ -1511,6 +1538,35 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
               </div>
             </>
           )}
+        </div>
+      )}
+      {enlargedPreview && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label={enlargedPreview.title}
+          onClick={() => setEnlargedPreview(null)}
+        >
+          <div
+            className="flex max-h-[90vh] w-full max-w-4xl flex-col gap-2 rounded border border-line bg-surface p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-sm font-medium text-fg">{enlargedPreview.title}</p>
+              <button
+                type="button"
+                className="rounded border border-line px-2 py-0.5 text-xs"
+                onClick={() => setEnlargedPreview(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div
+              className="min-h-0 flex-1 overflow-hidden rounded bg-white p-2 [&_svg]:h-full [&_svg]:w-full"
+              dangerouslySetInnerHTML={{ __html: enlargedPreview.svg }}
+            />
+          </div>
         </div>
       )}
     </div>
