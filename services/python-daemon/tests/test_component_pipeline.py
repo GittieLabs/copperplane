@@ -567,6 +567,103 @@ class TestRealGenerateConnectionGuidance(unittest.TestCase):
         self.assertTrue(any(e["pin_number"] == "8" for e in result["pin_guidance"]))
 
 
+class TestValidateFootprintQuerySuggestion(unittest.TestCase):
+    """CTX-308.10: unlike _validate_connection_guidance, there is no
+    real-world fact to check a suggested search term against -- this
+    only enforces the response's own shape."""
+
+    def _response(self, **overrides):
+        base = {"query": "QFN-56", "alternates": ["QFN-56-1EP"], "reasoning": "Matches the QFN-56 package."}
+        base.update(overrides)
+        return base
+
+    def test_001_a_well_formed_response_passes_through_unchanged(self):
+        response = self._response()
+        self.assertEqual(cp._validate_footprint_query_suggestion(response), response)
+
+    def test_002_a_non_dict_response_is_rejected(self):
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_footprint_query_suggestion([])
+
+    def test_003_a_response_missing_a_required_field_is_rejected(self):
+        response = self._response()
+        del response["reasoning"]
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_footprint_query_suggestion(response)
+
+    def test_004_an_empty_query_string_is_rejected(self):
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_footprint_query_suggestion(self._response(query=""))
+
+    def test_005_a_non_list_alternates_is_rejected(self):
+        with self.assertRaises(cp.ComponentValidationError):
+            cp._validate_footprint_query_suggestion(self._response(alternates="QFN-56"))
+
+    def test_006_an_empty_alternates_list_is_allowed(self):
+        response = self._response(alternates=[])
+        self.assertEqual(cp._validate_footprint_query_suggestion(response)["alternates"], [])
+
+
+class TestSuggestFootprintQuery(unittest.TestCase):
+    """CTX-308.10: mocked coverage of the provenance attachment, the same
+    shape TestGenerateConnectionGuidance already covers for its own
+    route. The real end-to-end path is TestRealSuggestFootprintQuery
+    below, which skips itself with no credential."""
+
+    @patch('component_pipeline._build_agent_executor')
+    @patch('component_pipeline._run_agent_and_close')
+    def test_001_attaches_the_real_resolved_provider_and_model_as_provenance(self, mock_run, mock_build):
+        mock_executor = MagicMock()
+        mock_executor.config.provider = "anthropic"
+        mock_executor.config.model = "claude-sonnet-5"
+        mock_build.return_value = (mock_executor, MagicMock())
+        mock_run.return_value = json.dumps({"query": "QFN-56", "alternates": [], "reasoning": "n"})
+
+        result = cp.suggest_footprint_query("ESP32-S3", "Espressif", "QFN-56")
+
+        self.assertEqual(result["provenance"], {"provider": "anthropic", "model": "claude-sonnet-5"})
+
+    @patch('component_pipeline._build_agent_executor')
+    @patch('component_pipeline._run_agent_and_close')
+    def test_002_passes_the_real_part_identity_to_the_agent(self, mock_run, mock_build):
+        mock_executor = MagicMock()
+        mock_executor.config.provider = "anthropic"
+        mock_executor.config.model = "claude-sonnet-5"
+        mock_build.return_value = (mock_executor, MagicMock())
+        mock_run.return_value = json.dumps({"query": "QFN-56", "alternates": [], "reasoning": "n"})
+
+        cp.suggest_footprint_query("ESP32-S3", "Espressif", "QFN-56")
+
+        message = json.loads(mock_run.call_args.args[1])
+        self.assertEqual(message, {"part_number": "ESP32-S3", "manufacturer": "Espressif", "package": "QFN-56"})
+
+
+class TestRealSuggestFootprintQuery(unittest.TestCase):
+    """Real, non-mocked calls against the actual prompt file -- CLAUDE.md's
+    'verify for real' norm. Skips itself cleanly when no real credential
+    is available."""
+
+    def test_001_real_suggestion_for_a_real_part_is_a_plausible_package_name(self):
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            self.skipTest("ANTHROPIC_API_KEY not set. Add it to .env.local to run this test for real.")
+
+        result = cp.suggest_footprint_query(
+            "ESP32-S3", "Espressif", "QFN-56", secrets={"anthropic_api_key": api_key},
+        )
+
+        self.assertIn("query", result)
+        self.assertTrue(result["query"])
+        self.assertIsInstance(result["alternates"], list)
+        self.assertEqual(result["provenance"]["provider"], "anthropic")
+        self.assertTrue(result["provenance"]["model"])
+        # The real model consistently mentions the real package family
+        # somewhere in its suggestion -- not a strict schema requirement,
+        # but a real signal the prompt is actually useful, without
+        # overfitting to one exact string format.
+        self.assertIn("QFN", result["query"].upper())
+
+
 _REAL_INVALID_OUTLINE_VIOLATION = {
     "description": "Board has malformed outline (no edges found on Edge.Cuts layer)",
     "items": [{"description": "PCB", "pos": {"x": 0.0, "y": 0.0}, "uuid": "fake-uuid"}],

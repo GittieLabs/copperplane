@@ -1319,6 +1319,60 @@ class TestKicadGenerateConnectionGuidanceRoute(unittest.TestCase):
         self.assertIn("kicad.generate_connection_guidance", daemon.ASYNC_ROUTES)
 
 
+class TestKicadSuggestFootprintQueryRoute(unittest.TestCase):
+    """CTX-308.10: the same daemon-level-wiring-only coverage shape as
+    TestKicadGenerateConnectionGuidanceRoute above -- the real, non-mocked
+    model call is verified in component_pipeline.TestRealSuggestFootprintQuery."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    @patch('daemon.component_pipeline.suggest_footprint_query')
+    def test_001_loads_the_real_part_and_passes_its_real_fields_through(self, mock_suggest):
+        daemon.library_store.save_part({
+            "part_id": "ESP32-S3", "manufacturer": "Espressif", "package": "QFN-56", "pins": [],
+            "datasheet_url": "https://example.com/x.pdf",
+            "provenance": {f: {"source": "test"} for f in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS},
+        })
+        daemon.CONFIG['llm_provider'] = "google"
+        daemon.CONFIG['llm_model'] = "gemini-flash"
+        daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
+        mock_suggest.return_value = {
+            "query": "QFN-56", "alternates": [], "reasoning": "n",
+            "provenance": {"provider": "google", "model": "gemini-flash"},
+        }
+
+        result = daemon.kicad_suggest_footprint_query("ESP32-S3")
+
+        args, kwargs = mock_suggest.call_args
+        self.assertEqual(args, ("ESP32-S3", "Espressif", "QFN-56"))
+        self.assertEqual(kwargs['provider'], "google")
+        self.assertEqual(kwargs['model'], "gemini-flash")
+        self.assertEqual(kwargs['secrets'], {"google_api_key": "fake"})
+        self.assertEqual(result, mock_suggest.return_value)
+
+    def test_002_build_routes_omits_it_when_component_pipeline_import_failed(self):
+        original = daemon.component_pipeline
+        daemon.component_pipeline = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("kicad.suggest_footprint_query", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.component_pipeline = original
+
+    def test_003_registered_as_an_async_route(self):
+        self.assertIn("kicad.suggest_footprint_query", daemon.ASYNC_ROUTES)
+
+
 _FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 _EMPTY_BOARD_FIXTURE = os.path.join(_FIXTURES_DIR, 'empty_board.kicad_pcb')
 _EMPTY_SCHEMATIC_FIXTURE = os.path.join(_FIXTURES_DIR, 'empty_schematic.kicad_sch')

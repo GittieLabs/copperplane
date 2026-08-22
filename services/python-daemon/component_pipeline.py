@@ -369,6 +369,65 @@ def generate_connection_guidance(
     return validated
 
 
+_FOOTPRINT_QUERY_REQUIRED_FIELDS = ("query", "alternates", "reasoning")
+
+
+def _validate_footprint_query_suggestion(response) -> dict:
+    """This response is only ever a *search term suggestion* fed into the
+    existing, already-real kicad.search_footprints/library.search_community_footprints
+    routes, which the user confirms against real results themselves --
+    unlike validate_schema/_validate_connection_guidance, there is no
+    real-world fact to check the response against (a suggested string is
+    never wrong, only more or less useful), so this only enforces the
+    response's own shape, not its content."""
+    if not isinstance(response, dict):
+        raise ComponentValidationError("Footprint query suggestion did not return a JSON object.")
+
+    missing = [f for f in _FOOTPRINT_QUERY_REQUIRED_FIELDS if f not in response]
+    if missing:
+        raise ComponentValidationError(
+            f"Footprint query suggestion response is missing required field(s): {', '.join(missing)}."
+        )
+    if not isinstance(response["query"], str) or not response["query"].strip():
+        raise ComponentValidationError("Footprint query suggestion's query must be a non-empty string.")
+    if not isinstance(response["alternates"], list):
+        raise ComponentValidationError("Footprint query suggestion's alternates must be a list.")
+    if not isinstance(response["reasoning"], str):
+        raise ComponentValidationError("Footprint query suggestion's reasoning must be a string.")
+
+    return response
+
+
+def suggest_footprint_query(
+    part_number: str, manufacturer: str, package: str, secrets: dict = None, provider: str = None, model: str = None,
+) -> dict:
+    """The kicad.suggest_footprint_query route (CTX-308.10): real user
+    feedback -- a user searching for a footprint naturally tries the
+    part's own name/package first, and has no reliable way to know what
+    else to type if that doesn't match. A single standalone agent call,
+    like generate_connection_guidance above -- this only ever suggests a
+    *search term* for the user to run through the existing footprint
+    search routes and confirm themselves; it never asserts a specific
+    footprint exists or picks one on the user's behalf, so there is no
+    hallucination risk of the kind validate_schema/_validate_connection_guidance
+    guard against."""
+    secrets = secrets or {}
+
+    loader = ConfigLoader(_AGENTFLOW_DIR)
+    loader.load()
+    executor, provider_client = _build_agent_executor(
+        "footprint_query_suggestion", loader, secrets, provider, model,
+    )
+    resolved_provenance = {"provider": executor.config.provider, "model": executor.config.model}
+
+    message = json.dumps({"part_number": part_number, "manufacturer": manufacturer, "package": package})
+    text = asyncio.run(_run_agent_and_close(executor, message, provider_client))
+    response = _extract_json(text)
+    validated = _validate_footprint_query_suggestion(response)
+    validated["provenance"] = resolved_provenance
+    return validated
+
+
 # How many violations go into a single explain-and-suggest LLM call.
 # Real, named decision (SPEC-309 §3 flagged this explicitly as
 # unresolved) -- errors first, then warnings, then exclusions (the same

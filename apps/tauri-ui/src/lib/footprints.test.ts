@@ -14,6 +14,7 @@ const {
   generateFootprintForProjectOverride,
   renderSymbolPreview,
   renderFootprintPreview,
+  suggestFootprintQuery,
 } = await import('./footprints')
 
 beforeEach(() => {
@@ -197,5 +198,15 @@ describe('generateFootprintForProjectOverride', () => {
       footprint_id: 'generated__ATtiny85',
     })
     expect(dispatchMock).not.toHaveBeenCalledWith('library.save_part', expect.anything())
+  })
+})
+
+describe('suggestFootprintQuery', () => {
+  it('submits kicad.suggest_footprint_query and resolves the real suggestion', async () => {
+    const suggestion = { query: 'QFN-56', alternates: ['QFN-56-1EP'], reasoning: 'Matches the QFN-56 package.' }
+    submitJobMock.mockResolvedValueOnce(fakeHandle(suggestion))
+
+    await expect(suggestFootprintQuery('ESP32-S3')).resolves.toEqual(suggestion)
+    expect(submitJobMock).toHaveBeenCalledWith('kicad.suggest_footprint_query', { part_id: 'ESP32-S3' })
   })
 })
