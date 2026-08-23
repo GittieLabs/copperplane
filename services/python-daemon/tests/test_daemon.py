@@ -2106,6 +2106,51 @@ class TestContextRebuildIndexRoute(unittest.TestCase):
         self.assertIn("context.rebuild_index", daemon.ASYNC_ROUTES)
 
 
+class TestChatPromoteTurnRoute(unittest.TestCase):
+    """CTX-206.8 (SPEC-206 §2.7): real chat_agents.promote_turn against
+    a real, isolated temp storage root -- the resolver/extraction logic
+    itself is covered in test_chat_agents.py/test_context_index.py;
+    this only verifies daemon-level wiring."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def test_001_promotes_a_real_turn_onto_a_real_project(self):
+        daemon.library_store.save_project({"name": "weather-pcb"})
+        daemon.library_store.append_thread_turn(
+            "project", "weather-pcb:overview",
+            {
+                "turn_id": "t1", "role": "assistant", "content": "Add a 100nF cap.",
+                "sources": [], "provenance": {"provider": "anthropic", "model": "claude-sonnet-5"},
+            },
+        )
+
+        note = daemon.chat_promote_turn("project", "weather-pcb:overview", "t1", "project", "weather-pcb")
+
+        self.assertEqual(note["text"], "Add a 100nF cap.")
+        reloaded = daemon.library_store.load_project("weather-pcb")
+        self.assertEqual(reloaded["notes"], [note])
+
+    def test_002_registered_only_when_chat_agents_and_library_store_are_real(self):
+        original = daemon.chat_agents
+        daemon.chat_agents = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("chat.promote_turn", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.chat_agents = original
+
+    def test_003_registered_as_a_synchronous_route_not_async(self):
+        self.assertIn("chat.promote_turn", daemon.ROUTES)
+        self.assertNotIn("chat.promote_turn", daemon.ASYNC_ROUTES)
+
+
 class TestFreecadGenerateEnclosurePcbPathMode(unittest.TestCase):
     """CTX-310.1: the file-based mode SPEC-310 adds -- composes
     kicad_pcb_import's file-based outline/hole extraction the same way

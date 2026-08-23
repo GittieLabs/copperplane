@@ -572,9 +572,10 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
 
         loaded = store.load_project("weather-pcb")
 
-        # CTX-206.1/CTX-304.3/CTX-308.9: `intent`, `parts`, and
-        # `footprint_overrides` are now real, backfilled state -- part
-        # of "exactly as before" now that all three fields exist at all.
+        # CTX-206.1/CTX-304.3/CTX-308.9/CTX-206.8: `intent`, `parts`,
+        # `footprint_overrides`, and `notes` are now real, backfilled
+        # state -- part of "exactly as before" now that all four fields
+        # exist at all.
         self.assertEqual(
             loaded,
             {
@@ -584,6 +585,7 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
                 "intent": None,
                 "parts": [],
                 "footprint_overrides": {},
+                "notes": None,
             },
         )
         self.assertNotIn("directory", loaded)
@@ -833,6 +835,91 @@ class TestAppendThreadTurn(LibraryStoreTestCase):
     def test_004_rejects_an_unknown_scope_the_same_way_load_thread_does(self):
         with self.assertRaises(store.SchemaValidationError):
             store.append_thread_turn("not-a-real-scope", "weather-pcb:overview", {"turn_id": "t1"})
+
+
+class TestUpdateThreadTurn(LibraryStoreTestCase):
+    """CTX-206.8 (SPEC-206 §2.7): `chat.promote_turn`'s own real caller
+    -- marks a turn's `promoted_note_id` once its note exists."""
+
+    def setUp(self):
+        super().setUp()
+        store.save_project({"name": "weather-pcb"})
+        store.append_thread_turn("project", "weather-pcb:overview", {"turn_id": "t1", "role": "user", "content": "hi"})
+        store.append_thread_turn(
+            "project", "weather-pcb:overview", {"turn_id": "t2", "role": "assistant", "content": "hello"},
+        )
+
+    def test_001_updates_only_the_real_matching_turn(self):
+        updated = store.update_thread_turn("project", "weather-pcb:overview", "t2", {"promoted_note_id": "n1"})
+
+        self.assertEqual(updated["promoted_note_id"], "n1")
+        turns = store.load_thread("project", "weather-pcb:overview")
+        self.assertEqual(turns[0].get("promoted_note_id"), None)
+        self.assertEqual(turns[1]["promoted_note_id"], "n1")
+
+    def test_002_preserves_the_turn_s_other_real_fields(self):
+        store.update_thread_turn("project", "weather-pcb:overview", "t2", {"promoted_note_id": "n1"})
+
+        turns = store.load_thread("project", "weather-pcb:overview")
+        self.assertEqual(turns[1]["content"], "hello")
+
+    def test_003_raises_a_clean_error_for_an_unknown_turn_id(self):
+        with self.assertRaises(store.SchemaValidationError):
+            store.update_thread_turn("project", "weather-pcb:overview", "not-real", {"promoted_note_id": "n1"})
+
+
+class TestAddPartNote(LibraryStoreTestCase):
+    """CTX-206.8 (SPEC-206 §2.7): always additive -- a Part's notes list
+    never shrinks."""
+
+    def setUp(self):
+        super().setUp()
+        store.save_part({
+            "part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8", "pins": [],
+            "datasheet_url": "https://example.com/x.pdf", "package_dimensions": {}, "courtyard": {},
+            "provenance": {f: {"source": "test"} for f in store.PART_PROVENANCE_REQUIRED_FIELDS},
+        })
+
+    def test_001_load_part_backfills_notes_to_none_not_an_empty_list(self):
+        loaded = store.load_part("ATtiny85")
+
+        self.assertIsNone(loaded["notes"])
+
+    def test_002_adds_and_persists_a_real_note(self):
+        note = {"note_id": "n1", "text": "Decouple with 100nF.", "sources": [], "created_at": "t"}
+
+        updated = store.add_part_note("ATtiny85", note)
+
+        self.assertEqual(updated["notes"], [note])
+        reloaded = store.load_part("ATtiny85")
+        self.assertEqual(reloaded["notes"], [note])
+
+    def test_003_a_second_note_is_appended_alongside_the_first(self):
+        store.add_part_note("ATtiny85", {"note_id": "n1", "text": "x"})
+        updated = store.add_part_note("ATtiny85", {"note_id": "n2", "text": "y"})
+
+        self.assertEqual([n["note_id"] for n in updated["notes"]], ["n1", "n2"])
+
+
+class TestAddProjectNote(LibraryStoreTestCase):
+
+    def setUp(self):
+        super().setUp()
+        store.save_project({"name": "weather-pcb"})
+
+    def test_001_load_project_backfills_notes_to_none_not_an_empty_list(self):
+        loaded = store.load_project("weather-pcb")
+
+        self.assertIsNone(loaded["notes"])
+
+    def test_002_adds_and_persists_a_real_note(self):
+        note = {"note_id": "n1", "text": "This project targets outdoor use.", "sources": [], "created_at": "t"}
+
+        updated = store.add_project_note("weather-pcb", note)
+
+        self.assertEqual(updated["notes"], [note])
+        reloaded = store.load_project("weather-pcb")
+        self.assertEqual(reloaded["notes"], [note])
 
 
 class TestChatThreadDirectoryLinkFix(LibraryStoreTestCase):

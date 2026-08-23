@@ -308,6 +308,16 @@ def _backfill_connection_guidance(record: dict) -> dict:
     return record
 
 
+def _backfill_part_notes(record: dict) -> dict:
+    """CTX-206.8 (SPEC-206 §2.7): `None` until a real `chat.promote_turn`
+    call ever targets this Part -- the same "never generated" vs.
+    "generated, empty" distinction `design_guidance`/`connection_guidance`
+    already preserve, applied here even though promotion is
+    additive-only (a note list, once real, never reverts to empty)."""
+    record.setdefault("notes", None)
+    return record
+
+
 def compute_pins_hash(pins: list) -> str:
     """SPEC-206 §2.4: sha256 over the canonical (sorted-key) JSON of a
     Part's real `pins` list -- the same invalidation role `content_hash`
@@ -346,14 +356,15 @@ def save_part(part: dict, library_ids: list | None = None) -> dict:
     # caller of `save_part` now gets the same real shape `load_part` does.
     _backfill_design_guidance(record)
     _backfill_connection_guidance(record)
+    _backfill_part_notes(record)
     _write_json(os.path.join(_parts_dir(), f"{part_id}.part.json"), record)
     return record
 
 
 def load_part(part_id: str) -> dict:
-    return _backfill_connection_guidance(_backfill_design_guidance(
+    return _backfill_part_notes(_backfill_connection_guidance(_backfill_design_guidance(
         _backfill_library_ids(_read_json(os.path.join(_parts_dir(), f"{part_id}.part.json")))
-    ))
+    )))
 
 
 def save_part_design_guidance(
@@ -970,10 +981,16 @@ def _backfill_project_intent(record: dict) -> dict:
     CTX-308.9: same reasoning for `footprint_overrides` -- an absent key
     and an explicitly-empty dict both mean "no per-project overrides
     yet," so this always backfills to `{}`, keeping every caller's
-    `.get(part_id)` lookup uniform regardless of project age."""
+    `.get(part_id)` lookup uniform regardless of project age.
+
+    CTX-206.8: `notes` backfills to `None` instead, the same
+    `design_guidance`/Part-`notes` "never generated" convention -- see
+    `_backfill_part_notes`'s own docstring for why this one field
+    differs from `parts`/`footprint_overrides` above."""
     record.setdefault("intent", None)
     record.setdefault("parts", [])
     record.setdefault("footprint_overrides", {})
+    record.setdefault("notes", None)
     return record
 
 
@@ -1113,6 +1130,45 @@ def set_project_footprint_override(project_name: str, part_id: str, footprint_id
         overrides[part_id] = footprint_id
     project["footprint_overrides"] = overrides
     return save_project(project)
+
+
+def add_part_note(part_id: str, note: dict) -> dict:
+    """CTX-206.8 (SPEC-206 §2.7): `chat.promote_turn`'s own real write
+    -- always additive, a Part's own notes list never shrinks (there is
+    no real "un-promote" action). Round-trips through `load_part`/
+    `save_part`, the same "load fresh, never blind-overwrite" shape
+    `set_project_footprint_override` above already uses."""
+    part = load_part(part_id)
+    notes = part.get("notes") or []
+    part["notes"] = [*notes, note]
+    return save_part(part)
+
+
+def add_project_note(project_name: str, note: dict) -> dict:
+    """The Project-scoped counterpart to `add_part_note` above -- same
+    reasoning, same shape."""
+    project = load_project(project_name)
+    notes = project.get("notes") or []
+    project["notes"] = [*notes, note]
+    return save_project(project)
+
+
+def update_thread_turn(scope: str, scope_id: str, turn_id: str, updates: dict) -> dict:
+    """CTX-206.8: `chat.promote_turn`'s own real, single real caller --
+    marks the source turn's `promoted_note_id` once its note exists, so
+    a future UI can tell an already-promoted turn apart from one that
+    isn't. A real, rare, user-initiated action (not `chat.send`'s own
+    hot per-turn append path), so a read-all-rewrite-all update is the
+    right cost here, matching `_write_thread_turns`'s own existing
+    shape rather than `append_thread_turn`'s single-line append."""
+    path = _thread_path(scope, scope_id)
+    turns = _read_thread_turns(path)
+    for turn in turns:
+        if turn.get("turn_id") == turn_id:
+            turn.update(updates)
+            _write_thread_turns(path, turns)
+            return turn
+    raise SchemaValidationError(f"No turn '{turn_id}' found in thread '{scope}:{scope_id}'.")
 
 
 def list_projects() -> list:
