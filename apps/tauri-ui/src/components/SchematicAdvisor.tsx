@@ -9,6 +9,7 @@ import {
   type ListProjectSchematicsResult,
   type SchematicCandidate,
 } from '../lib/boardAdvisor'
+import { AgentChat } from './AgentChat'
 import { ViolationsList } from './ViolationsList'
 
 /** SPEC-309: real ERC via kicad-cli (CTX-309.1), explained in plain
@@ -252,6 +253,17 @@ export function SchematicAdvisor({
         {error && <p className="text-sm text-danger">{error}</p>}
         {result && <ViolationsList result={result} hideSourcePath={selectedIsListed} />}
       </div>
+      {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area."
+          A project-scoped chat has no single Part to offer as a promotion
+          target -- "this project" is the only real target here. */}
+      <AgentChat
+        area="schematic"
+        scope="project"
+        scopeId={`${projectName}:schematic`}
+        title="Ask about the schematic"
+        projectName={projectName}
+        promotionTargets={[{ label: 'this project', scope: 'project', id: projectName }]}
+      />
     </div>
   )
 }

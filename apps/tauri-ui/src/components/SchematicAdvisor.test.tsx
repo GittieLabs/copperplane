@@ -13,6 +13,35 @@ vi.mock('../lib/boardAdvisor', () => ({
   openKicad: (...args: unknown[]) => openKicadMock(...args),
 }))
 
+// CTX-318.3: AgentChat has its own dedicated test file (AgentChat.test.tsx)
+// -- stubbed here, matching PartDetail.test.tsx's own precedent (CTX-318.2),
+// so SchematicAdvisor's tests stay focused on its own wiring (does it mount
+// AgentChat with the real scope/area/targets) and never need to mock
+// AgentChat's own internal chat.* IPC calls.
+vi.mock('./AgentChat', () => ({
+  AgentChat: ({
+    area,
+    scope,
+    scopeId,
+    title,
+    projectName,
+    promotionTargets,
+  }: {
+    area: string
+    scope: string
+    scopeId: string
+    title: string
+    projectName?: string
+    promotionTargets: { label: string; scope: string; id: string }[]
+  }) => (
+    <p>
+      AgentChat stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
+      {projectName && ` projectName=${projectName}`}
+      {' '}targets=[{promotionTargets.map((t) => `${t.label}:${t.scope}:${t.id}`).join(', ')}]
+    </p>
+  ),
+}))
+
 const { SchematicAdvisor } = await import('./SchematicAdvisor')
 
 const CLEAN_RESULT = { violations: [], summary: '', truncated_count: 0, source_path: '/real/board.kicad_sch' }
@@ -302,5 +331,29 @@ describe('SchematicAdvisor: SPEC-316 menuCommand', () => {
       <SchematicAdvisor projectName="test-project" menuCommand={{ area: 'schematic', command: 'open_kicad', nonce: 1 }} />,
     )
     await waitFor(() => expect(openKicadMock).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('SchematicAdvisor: CTX-318.3 AgentChat wiring', () => {
+  it('mounts AgentChat scoped to the project schematic area, offering only "this project"', async () => {
+    render(<SchematicAdvisor projectName="weather-pcb" />)
+
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+    const stub = screen.getByText(/AgentChat stub/)
+    expect(stub.textContent).toContain('area=schematic')
+    expect(stub.textContent).toContain('scope=project')
+    expect(stub.textContent).toContain('scopeId=weather-pcb:schematic')
+    expect(stub.textContent).toContain('title="Ask about the schematic"')
+    expect(stub.textContent).toContain('projectName=weather-pcb')
+    expect(stub.textContent).toContain('targets=[this project:project:weather-pcb]')
+  })
+
+  it('re-scopes AgentChat when the project changes', async () => {
+    const { rerender } = render(<SchematicAdvisor projectName="project-a" />)
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+
+    rerender(<SchematicAdvisor projectName="project-b" />)
+
+    await waitFor(() => expect(screen.getByText(/AgentChat stub/).textContent).toContain('scopeId=project-b:schematic'))
   })
 })

@@ -8,6 +8,7 @@ import {
   type CheckResult,
   type ListOpenBoardsResult,
 } from '../lib/boardAdvisor'
+import { AgentChat } from './AgentChat'
 import { ViolationsList } from './ViolationsList'
 
 /** SPEC-309: real DRC via kicad-cli (CTX-309.1), explained in plain
@@ -145,6 +146,17 @@ export function BoardAdvisor({
         checkResult={boardCheckResult}
         checkError={boardCheckError}
         onCheckBoard={(candidate) => void handleCheckBoard(candidate)}
+      />
+      {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area."
+          A project-scoped chat has no single Part to offer as a promotion
+          target -- "this project" is the only real target here. */}
+      <AgentChat
+        area="pcb"
+        scope="project"
+        scopeId={`${projectName}:pcb`}
+        title="Ask about the board"
+        projectName={projectName}
+        promotionTargets={[{ label: 'this project', scope: 'project', id: projectName }]}
       />
     </div>
   )

@@ -132,6 +132,22 @@ vi.mock('./lib/boardAdvisor', () => ({
   listProjectSchematics: (...args: unknown[]) => listProjectSchematicsMock(...args),
 }))
 
+// CTX-318.3: SchematicAdvisor and BoardAdvisor are NOT mocked in this file
+// (only their underlying `lib/boardAdvisor` calls are) -- both real
+// components stay mounted here (App.tsx keeps them mounted across every
+// area tab, hidden via CSS), and both now mount a real AgentChat of their
+// own. Left unmocked, this collided for real: the real AgentChat's own
+// "Send" button and message input made `sendMessage`'s `getByRole('button',
+// { name: 'Send' })` / `getByPlaceholderText` ambiguous the instant both
+// Schematic and PCB AgentChat panels were simultaneously in the DOM -- the
+// same AgentChat-rendered-unmocked trap already caught and fixed in
+// PartDetail.test.tsx (CTX-318.2), recurring here for a third time.
+vi.mock('./components/AgentChat', () => ({
+  AgentChat: ({ area, scopeId }: { area: string; scopeId: string }) => (
+    <p>AgentChat stub: area={area} scopeId={scopeId}</p>
+  ),
+}))
+
 const { default: App } = await import('./App')
 
 // CTX-316.2: App.tsx now calls `listLibraries()` unconditionally on every
