@@ -390,6 +390,47 @@ describe('App: chat & command surface', () => {
   })
 })
 
+/** CTX-318.5: Overview finishes CTX-306.2's own always-mounted pattern
+ * migration -- it was "simply never included when that fix was made."
+ * A half-typed question in the old chat input, and a half-edited intent
+ * draft, must both survive switching to another area tab and back, and
+ * both must still reset on a genuine project switch (this file's own
+ * established convention for every other area). */
+describe('App: Overview tab persists across area switches, resets on project switch', () => {
+  beforeEach(() => {
+    loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    listenMock.mockReset().mockResolvedValue(() => {})
+    openProjectFromDirectoryMock.mockReset()
+    pickProjectDirectoryMock.mockReset()
+    listProjectsMock.mockReset().mockResolvedValue(['test-project'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    loadConversationMock.mockReset().mockResolvedValue([])
+  })
+
+  it('a half-typed question in the old chat input survives switching to another area and back', async () => {
+    await renderAppOnOverview()
+
+    fireEvent.change(screen.getByPlaceholderText(/generate ATtiny85/), { target: { value: 'half-typed question' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Components' }))
+    await waitFor(() => screen.getByPlaceholderText(/search for a part/))
+    fireEvent.click(screen.getByRole('button', { name: 'Overview' }))
+
+    expect((screen.getByPlaceholderText(/generate ATtiny85/) as HTMLInputElement).value).toBe('half-typed question')
+  })
+
+  it('switching to a different real project resets the previous project\'s half-typed question', async () => {
+    listProjectsMock.mockReset().mockResolvedValue(['project-a', 'project-b'])
+    await renderAppOnOverview()
+    fireEvent.change(screen.getByPlaceholderText(/generate ATtiny85/), { target: { value: 'half-typed question' } })
+
+    fireEvent.click(screen.getByText('project-b'))
+
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText(/generate ATtiny85/) as HTMLInputElement).value).toBe(''),
+    )
+  })
+})
+
 /** Real user feedback: switching away from the PCB tab and back threw
  * out a check that had just finished, with no reason to -- App.tsx now
  * keeps BoardAdvisor mounted (hidden via CSS) across every area tab
@@ -711,6 +752,7 @@ describe('App: Enclosure tab persists across area switches', () => {
     await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
 
     for (const [label, testId] of [
+      ['Overview', 'overview-area'],
       ['Components', 'components-area'],
       ['Schematic', 'schematic-area'],
       ['PCB', 'pcb-area'],

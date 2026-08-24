@@ -17,7 +17,11 @@ export function Rail({
   projects: string[]
   selectedProject: string | null
   onSelectProject: (name: string) => void
-  onCreateProject: (name: string) => void
+  /** SPEC-318 §2.4: `intent` is only passed when the user actually typed
+   * something -- omitted entirely (not an empty string) when skipped, so
+   * `saveProject({ name })`'s existing unchanged-behavior path for a
+   * skipped intent stays exactly that: no second argument at all. */
+  onCreateProject: (name: string, intent?: string) => void
   libraryCount: number
   librarySelected: boolean
   onSelectLibrary: () => void
@@ -25,13 +29,20 @@ export function Rail({
   onSelectSettings: () => void
 }) {
   const [newProjectName, setNewProjectName] = useState('')
+  const [newProjectIntent, setNewProjectIntent] = useState('')
   const [creating, setCreating] = useState(false)
 
   function handleCreate() {
     const name = newProjectName.trim()
     if (!name) return
-    onCreateProject(name)
+    const intent = newProjectIntent.trim()
+    if (intent) {
+      onCreateProject(name, intent)
+    } else {
+      onCreateProject(name)
+    }
     setNewProjectName('')
+    setNewProjectIntent('')
     setCreating(false)
   }
 
@@ -55,7 +66,7 @@ export function Rail({
           </button>
         ))}
         {creating ? (
-          <div className="flex gap-1 px-2 py-1">
+          <div className="flex flex-col gap-1 px-2 py-1">
             <input
               autoFocus
               className="w-full rounded border border-line bg-surface px-1 py-0.5 text-xs"
@@ -67,9 +78,22 @@ export function Rail({
                 if (e.key === 'Escape') setCreating(false)
               }}
             />
+            {/* SPEC-318 §2.4: optional, skip-first-class -- the textarea's
+             * own placeholder is the only prompt; leaving it blank is a
+             * normal outcome, not a validation error. */}
+            <textarea
+              className="w-full rounded border border-line bg-surface px-1 py-0.5 text-xs"
+              rows={2}
+              placeholder="what are you building? (optional)"
+              value={newProjectIntent}
+              onChange={(e) => setNewProjectIntent(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setCreating(false)
+              }}
+            />
             <button
               type="button"
-              className="rounded bg-accent px-2 text-xs font-medium text-accent-fg disabled:opacity-50"
+              className="self-start rounded bg-accent px-2 py-0.5 text-xs font-medium text-accent-fg disabled:opacity-50"
               onClick={handleCreate}
               disabled={!newProjectName.trim()}
             >
