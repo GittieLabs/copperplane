@@ -1,5 +1,5 @@
 import { open } from '@tauri-apps/plugin-shell'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { cacheDatasheet, type ComponentCandidate } from '../lib/components'
 import {
   attachCommunityFootprintToPart,
@@ -449,11 +449,52 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
   // needs; a bigger, still-scale-to-fit view covers the real complaint
   // (the thumbnail is too small/cropped to read).
   const [enlargedPreview, setEnlargedPreview] = useState<{ title: string; svg: string } | null>(null)
+  // CTX-308.12: real follow-up bug -- the enlarged view's own container
+  // only capped its height (max-h) rather than setting a real one, so
+  // the flex-1/h-full percentage chain had nothing definite to resolve
+  // against and the SVG fell back to its native mm size instead of
+  // scaling to fit -- the exact "can't see the entire image, no way to
+  // scroll" complaint. Fixed with a real height on the scroll container
+  // (index.css's own .enlarged-preview-svg rule). `zoomLevel` is the
+  // real "resize the view" follow-up: 1 is the default scale-to-fit;
+  // above that, the SVG's own layout box grows past the container so
+  // overflow-auto has something real to scroll/pan, not just a
+  // cosmetic CSS transform that wouldn't extend the scrollable area.
+  const [zoomLevel, setZoomLevel] = useState(1)
+  const MIN_ZOOM = 0.5
+  const MAX_ZOOM = 4
+  const ZOOM_STEP = 0.25
+
+  function openEnlargedPreview(preview: { title: string; svg: string }) {
+    setZoomLevel(1)
+    setEnlargedPreview(preview)
+  }
+
+  function zoomIn() {
+    setZoomLevel((z) => Math.min(MAX_ZOOM, Math.round((z + ZOOM_STEP) * 100) / 100))
+  }
+  function zoomOut() {
+    setZoomLevel((z) => Math.max(MIN_ZOOM, Math.round((z - ZOOM_STEP) * 100) / 100))
+  }
+  function zoomReset() {
+    setZoomLevel(1)
+  }
 
   useEffect(() => {
     if (!enlargedPreview) return
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setEnlargedPreview(null)
+      if (e.key === 'Escape') {
+        setEnlargedPreview(null)
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault()
+        zoomIn()
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault()
+        zoomOut()
+      } else if (e.key === '0') {
+        e.preventDefault()
+        zoomReset()
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
@@ -942,7 +983,7 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
               className="h-64 w-full cursor-zoom-in overflow-hidden rounded border border-line-subtle bg-white p-2 [&_svg]:h-full [&_svg]:w-full"
               title="Click to view larger"
               aria-label="View larger symbol preview"
-              onClick={() => setEnlargedPreview({ title: 'Symbol preview', svg: symbolPreviewSvg })}
+              onClick={() => openEnlargedPreview({ title: 'Symbol preview', svg: symbolPreviewSvg })}
               dangerouslySetInnerHTML={{ __html: symbolPreviewSvg }}
             />
           )}
@@ -1276,7 +1317,7 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
                   className="h-64 w-full cursor-zoom-in overflow-hidden rounded border border-line-subtle bg-white p-2 [&_svg]:h-full [&_svg]:w-full"
                   title="Click to view larger"
                   aria-label="View larger footprint preview"
-                  onClick={() => setEnlargedPreview({ title: 'Footprint preview', svg: footprintPreviewSvg })}
+                  onClick={() => openEnlargedPreview({ title: 'Footprint preview', svg: footprintPreviewSvg })}
                   dangerouslySetInnerHTML={{ __html: footprintPreviewSvg }}
                 />
               )}
@@ -1554,16 +1595,52 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
           >
             <div className="flex items-center justify-between gap-4">
               <p className="text-sm font-medium text-fg">{enlargedPreview.title}</p>
-              <button
-                type="button"
-                className="rounded border border-line px-2 py-0.5 text-xs"
-                onClick={() => setEnlargedPreview(null)}
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded border border-line px-2 py-0.5 text-xs disabled:opacity-50"
+                  onClick={zoomOut}
+                  disabled={zoomLevel <= MIN_ZOOM}
+                  title="Zoom out (-)"
+                  aria-label="Zoom out"
+                >
+                  −
+                </button>
+                <button
+                  type="button"
+                  className="w-12 rounded border border-line px-1 py-0.5 text-xs"
+                  onClick={zoomReset}
+                  title="Reset zoom (0)"
+                >
+                  {Math.round(zoomLevel * 100)}%
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-line px-2 py-0.5 text-xs disabled:opacity-50"
+                  onClick={zoomIn}
+                  disabled={zoomLevel >= MAX_ZOOM}
+                  title="Zoom in (+)"
+                  aria-label="Zoom in"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-line px-2 py-0.5 text-xs"
+                  onClick={() => setEnlargedPreview(null)}
+                >
+                  Close
+                </button>
+              </div>
             </div>
+            {/* CTX-308.12: a real, definite height (not just max-h-*) so
+                the SVG's own percentage-based sizing below has something
+                real to resolve against, and overflow-auto so zooming
+                past 100% is actually scrollable/pannable, not just
+                cropped. */}
             <div
-              className="min-h-0 flex-1 overflow-hidden rounded bg-white p-2 [&_svg]:h-full [&_svg]:w-full"
+              className="enlarged-preview-svg h-[70vh] overflow-auto rounded bg-white p-2"
+              style={{ '--zoom': zoomLevel } as CSSProperties}
               dangerouslySetInnerHTML={{ __html: enlargedPreview.svg }}
             />
           </div>

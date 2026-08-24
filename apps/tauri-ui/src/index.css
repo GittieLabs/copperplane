@@ -1,5 +1,17 @@
 @import "tailwindcss";
 
+/* CTX-308.11 follow-up fix: the enlarged symbol/footprint preview modal
+ * (PartDetail.tsx). `--zoom` is set inline per-render from React state --
+ * a plain CSS custom property, not a Tailwind arbitrary value, since a
+ * runtime-computed className string isn't statically extractable by
+ * Tailwind's build-time scanner. width/height (not a transform: scale)
+ * so the element's real layout box grows with zoom, giving the
+ * `overflow-auto` container above it something real to scroll. */
+.enlarged-preview-svg svg {
+  width: calc(var(--zoom, 1) * 100%);
+  height: calc(var(--zoom, 1) * 100%);
+}
+
 /* SPEC-317: semantic theme tokens. Base values here are the app's existing
  * (and default) dark palette -- unchanged from what every component already
  * used before this file existed, just centralized. `:root[data-theme="light"]`

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const extractPartDetailMock = vi.fn()
@@ -1047,6 +1047,82 @@ describe('PartDetail: CTX-306.7 visual symbol/footprint previews', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
 
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('TEST-006 (CTX-308.12): the enlarged view starts at 100% and has a real, definite-height scroll container', async () => {
+    await saveAndReachFootprintSection()
+    await waitFor(() => screen.getByTestId('symbol-preview-svg'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'View larger symbol preview' }))
+    const dialog = await waitFor(() => screen.getByRole('dialog', { name: 'Symbol preview' }))
+
+    within(dialog).getByText('100%')
+    const scrollContainer = within(dialog).getByTestId('symbol-preview-svg').parentElement as HTMLElement
+    expect(scrollContainer.className).toContain('overflow-auto')
+    expect(scrollContainer.className).toContain('h-[70vh]')
+    expect(scrollContainer.style.getPropertyValue('--zoom')).toBe('1')
+  })
+
+  it('TEST-007 (CTX-308.12): the zoom-in/out buttons change the displayed percentage and the real --zoom CSS variable', async () => {
+    await saveAndReachFootprintSection()
+    await waitFor(() => screen.getByTestId('symbol-preview-svg'))
+    fireEvent.click(screen.getByRole('button', { name: 'View larger symbol preview' }))
+    const dialog = await waitFor(() => screen.getByRole('dialog', { name: 'Symbol preview' }))
+    const scrollContainer = () => within(dialog).getByTestId('symbol-preview-svg').parentElement as HTMLElement
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Zoom in' }))
+
+    within(dialog).getByText('125%')
+    expect(scrollContainer().style.getPropertyValue('--zoom')).toBe('1.25')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Zoom out' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Zoom out' }))
+
+    within(dialog).getByText('75%')
+  })
+
+  it('TEST-008 (CTX-308.12): +/-/0 keyboard shortcuts zoom in, out, and reset', async () => {
+    await saveAndReachFootprintSection()
+    await waitFor(() => screen.getByTestId('symbol-preview-svg'))
+    fireEvent.click(screen.getByRole('button', { name: 'View larger symbol preview' }))
+    await waitFor(() => screen.getByRole('dialog', { name: 'Symbol preview' }))
+
+    fireEvent.keyDown(window, { key: '+' })
+    screen.getByText('125%')
+
+    fireEvent.keyDown(window, { key: '-' })
+    fireEvent.keyDown(window, { key: '-' })
+    screen.getByText('75%')
+
+    fireEvent.keyDown(window, { key: '0' })
+    screen.getByText('100%')
+  })
+
+  it('TEST-009 (CTX-308.12): zoom is clamped and resets to 100% each time a preview is (re)opened', async () => {
+    searchFootprintsMock.mockResolvedValueOnce([{ library: 'MyPCBLibs', footprint_name: 'MP1584EN_5V_Module' }])
+    attachFootprintToPartMock.mockResolvedValueOnce({
+      ...SAVED_PART_NO_FOOTPRINT,
+      footprint_id: 'MyPCBLibs__MP1584EN_5V_Module',
+    })
+    await saveAndReachFootprintSection()
+    await waitFor(() => screen.getByTestId('symbol-preview-svg'))
+    fireEvent.click(screen.getByRole('button', { name: 'View larger symbol preview' }))
+    await waitFor(() => screen.getByRole('dialog', { name: 'Symbol preview' }))
+
+    for (let i = 0; i < 20; i++) fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    screen.getByText('400%') // clamped at MAX_ZOOM, never runs past it
+    expect((screen.getByRole('button', { name: 'Zoom in' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    fireEvent.change(screen.getByPlaceholderText(/search by footprint or package name/), { target: { value: 'MP1584' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Use this' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
+    await waitFor(() => screen.getByTestId('footprint-preview-svg'))
+    fireEvent.click(screen.getByRole('button', { name: 'View larger footprint preview' }))
+
+    await waitFor(() => screen.getByRole('dialog', { name: 'Footprint preview' }))
+    screen.getByText('100%')
   })
 })
 
