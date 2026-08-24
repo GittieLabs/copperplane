@@ -1,10 +1,10 @@
 ---
 id: SPEC-311
 title: "Enclosure Refinement & Interactive Preview"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-18
-last_updated: 2026-08-18
+last_updated: 2026-08-24
 target_version: v0.2.0
 location: "apps/tauri-ui/specs/SPEC-311-enclosure-refinement-interactive-preview.md"
 parent_spec: "../../../apps/tauri-ui/specs/SPEC-300-product-ia-interaction-model.md"

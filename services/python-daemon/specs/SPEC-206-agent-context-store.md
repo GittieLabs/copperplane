@@ -1,10 +1,10 @@
 ---
 id: SPEC-206
 title: "Agent Context Store, Retrieval & Conversation Persistence"
-status: Draft
+status: Completed
 type: Module
 created: 2026-08-21
-last_updated: 2026-08-21
+last_updated: 2026-08-24
 target_version: v0.3.0
 location: "services/python-daemon/specs/SPEC-206-agent-context-store.md"
 parent_spec: "../../../apps/tauri-ui/specs/SPEC-318-in-context-agent-chat-and-review.md"

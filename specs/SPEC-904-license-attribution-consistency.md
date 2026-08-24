@@ -1,10 +1,10 @@
 ---
 id: SPEC-904
 title: "Repository License & Attribution Consistency"
-status: Draft
+status: Completed
 type: System
 created: 2026-08-14
-last_updated: 2026-08-14
+last_updated: 2026-08-24
 target_version: v0.1.0
 location: "specs/SPEC-904-license-attribution-consistency.md"
 parent_spec: null
