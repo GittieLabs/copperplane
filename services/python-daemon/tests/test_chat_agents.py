@@ -425,16 +425,21 @@ class TestEnrichSourceRef(ChatAgentsTestCase):
 class TestMechanicalSourceRefs(unittest.TestCase):
     """CTX-206.6: the real, tool-trace-derived half of SPEC-206 §2.3's
     "both, layered" design -- never trusts the model's own account of
-    what it read."""
+    what it read.
+
+    Fixtures use `NodeOutput.metadata["tool_calls"]`'s real shape
+    (agentflow>=0.10.0): `result` is the tool's plain JSON string return
+    value (matching `tool_registry._wrap_route`'s real
+    `json.dumps(result)`), not a pre-parsed dict."""
 
     def test_001_derives_one_ref_per_real_page_read(self):
-        events = [{
-            "tool": "datasheet.read_pages", "is_error": False,
+        tool_calls = [{
+            "name": "datasheet.read_pages", "is_error": False,
             "input": {"part_id": "ATtiny85", "pages": [4, 5]},
-            "raw_result": {"content_hash": "abc123", "pages": [{"page": 4, "text": "..."}, {"page": 5, "text": "..."}]},
+            "result": json.dumps({"content_hash": "abc123", "pages": [{"page": 4, "text": "..."}, {"page": 5, "text": "..."}]}),
         }]
 
-        refs = chat_agents._mechanical_source_refs(events)
+        refs = chat_agents._mechanical_source_refs(tool_calls)
 
         self.assertEqual(refs, [
             {"kind": "datasheet_page", "part_id": "ATtiny85", "page": 4, "content_hash": "abc123"},
@@ -442,25 +447,45 @@ class TestMechanicalSourceRefs(unittest.TestCase):
         ])
 
     def test_002_ignores_a_different_tool(self):
-        events = [{"tool": "library.load_part", "is_error": False, "input": {}, "raw_result": {}}]
+        tool_calls = [{"name": "library.load_part", "is_error": False, "input": {}, "result": "{}"}]
 
-        self.assertEqual(chat_agents._mechanical_source_refs(events), [])
+        self.assertEqual(chat_agents._mechanical_source_refs(tool_calls), [])
 
     def test_003_ignores_an_errored_tool_call(self):
-        events = [{
-            "tool": "datasheet.read_pages", "is_error": True,
-            "input": {"part_id": "ATtiny85"}, "raw_result": None,
+        tool_calls = [{
+            "name": "datasheet.read_pages", "is_error": True,
+            "input": {"part_id": "ATtiny85"}, "result": "Tool error: boom",
         }]
 
-        self.assertEqual(chat_agents._mechanical_source_refs(events), [])
+        self.assertEqual(chat_agents._mechanical_source_refs(tool_calls), [])
 
     def test_004_ignores_a_result_missing_a_content_hash(self):
-        events = [{
-            "tool": "datasheet.read_pages", "is_error": False,
-            "input": {"part_id": "ATtiny85"}, "raw_result": {"pages": [{"page": 4}]},
+        tool_calls = [{
+            "name": "datasheet.read_pages", "is_error": False,
+            "input": {"part_id": "ATtiny85"}, "result": json.dumps({"pages": [{"page": 4}]}),
         }]
 
-        self.assertEqual(chat_agents._mechanical_source_refs(events), [])
+        self.assertEqual(chat_agents._mechanical_source_refs(tool_calls), [])
+
+    def test_005_ignores_a_result_that_is_not_valid_json(self):
+        """The result string comes from a real tool call, but a defensive
+        guard against a non-JSON or non-dict result (e.g. a plain-text
+        error string that isn't the `Tool error: ...` shape) -- never
+        raises, just drops it like any other unresolvable ref."""
+        tool_calls = [{
+            "name": "datasheet.read_pages", "is_error": False,
+            "input": {"part_id": "ATtiny85"}, "result": "not json at all",
+        }]
+
+        self.assertEqual(chat_agents._mechanical_source_refs(tool_calls), [])
+
+    def test_006_ignores_a_result_that_is_valid_json_but_not_an_object(self):
+        tool_calls = [{
+            "name": "datasheet.read_pages", "is_error": False,
+            "input": {"part_id": "ATtiny85"}, "result": json.dumps([1, 2, 3]),
+        }]
+
+        self.assertEqual(chat_agents._mechanical_source_refs(tool_calls), [])
 
 
 class TestAssembleContext(ChatAgentsTestCase):
@@ -542,12 +567,12 @@ class TestSend(ChatAgentsTestCase):
 
     _NO_CITATIONS_TEXT = 'Hello.\n<<<CITATIONS>>>\n{"sources": [], "general_practice": true}\n<<<END_CITATIONS>>>'
 
-    def _send(self, scope, scope_id, area, message, response_text=_NO_CITATIONS_TEXT, **kwargs):
+    def _send(self, scope, scope_id, area, message, response_text=_NO_CITATIONS_TEXT, metadata=None, **kwargs):
         with patch('chat_agents.llm_providers._build_provider', return_value=MagicMock()), \
              patch('chat_agents.llm_providers._close_provider_client', new=AsyncMock()), \
              patch('chat_agents.AgentExecutor') as MockExecutor:
             MockExecutor.return_value.run = AsyncMock(
-                return_value=NodeOutput(node_id="n", agent_id="a", text=response_text)
+                return_value=NodeOutput(node_id="n", agent_id="a", text=response_text, metadata=metadata or {})
             )
             return chat_agents.send(scope, scope_id, area, message, secrets={"anthropic_api_key": "fake"}, **kwargs)
 
@@ -629,7 +654,35 @@ class TestSend(ChatAgentsTestCase):
         self.assertEqual(turn["sources"], [])
         self.assertEqual(turn["sources_dropped"], 1)
 
-    def test_007_the_second_turn_in_a_conversation_sees_the_first_as_real_history_not_duplicated(self):
+    def test_007_a_real_datasheet_read_pages_tool_call_produces_a_mechanical_source_and_a_tool_calls_summary(self):
+        """End-to-end through `send()`: `NodeOutput.metadata["tool_calls"]`
+        (the real agentflow>=0.10.0 shape) flows into both the mechanical
+        `datasheet_page` source and the turn's own `tool_calls` summary --
+        no EventBus wiring involved, since AgentExecutor.run() surfaces
+        this directly on its own return value now."""
+        self._save_part()
+        path = store.datasheet_cache_path("ATtiny85")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(b"%PDF-1.4 real bytes")
+        real_hash = store.content_hash_of_file(path)
+        tool_result = json.dumps({"content_hash": real_hash, "pages": [{"page": 4, "text": "..."}]})
+        metadata = {"tool_calls": [{
+            "name": "datasheet.read_pages", "input": {"part_id": "ATtiny85", "pages": [4]},
+            "result": tool_result, "is_error": False,
+        }]}
+
+        turn = self._send("part", "ATtiny85", "components", "what does page 4 say?", metadata=metadata)
+
+        self.assertEqual(turn["sources"], [
+            {"kind": "datasheet_page", "part_id": "ATtiny85", "page": 4, "content_hash": real_hash},
+        ])
+        self.assertEqual(turn["tool_calls"], [{
+            "name": "datasheet.read_pages", "input": {"part_id": "ATtiny85", "pages": [4]},
+            "result_digest": tool_result,
+        }])
+
+    def test_008_the_second_turn_in_a_conversation_sees_the_first_as_real_history_not_duplicated(self):
         store.save_project({"name": "weather-pcb"})
 
         with patch('chat_agents.llm_providers._build_provider', return_value=MagicMock()), \
