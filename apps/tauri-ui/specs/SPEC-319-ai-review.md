@@ -29,11 +29,19 @@ user_facing: true
     written at all — building the seam without ever using it would have been wasted design.
 *   **Non-Goals:**
     *   **A review never mutates anything.** No tool with a write effect may be called from a
-        review invocation, full stop — not gated, not confirmed, **excluded**. `SPEC-309`'s advisor
-        already established the pattern (read a board, explain it, never touch it); this spec
-        inherits it for every area, including Schematic, whose chat agent's own tool allow-list
-        (`SPEC-318` §2.3) includes the gated `library.save_confirmed_part`. §2.2 below states
-        exactly how that tool is excluded from a review's own dispatch.
+        review invocation, full stop — **excluded from the registry it's handed, not merely
+        gated.** `SPEC-309`'s advisor already established the pattern (read a board, explain it,
+        never touch it); this spec inherits it for every area. Verified directly against
+        `tool_registry.py` before writing this: `_wrap_route`'s own execution-layer check already
+        stops any *unconfirmed* call to a `CONFIRMATION_REQUIRED_TOOLS` member
+        (`kicad.inject_component`, the only member today) from actually running, for chat and
+        review alike — so this is not filling a live safety hole. §2.2 excludes it from review's
+        own registry anyway, for a narrower, real reason: a review has no confirmation UI to ever
+        complete that exchange, so a model proposing it inside a review is a dead end presented as
+        an option. `library.save_confirmed_part`, named in an earlier draft of this section, turns
+        out not to be a real concern here — grep against `tool_registry.py` shows it isn't a
+        registered tool at all today (its own comment says "no real agent prompt references
+        them"), so no agent, chat or review, can reach it regardless.
     *   **Scheduled or automatic review.** Every review is a single, explicit user click. No
         background polling, no "review on save," no notification badge.
     *   **Cross-area review.** One review call is scoped to exactly one area, same as chat. A
@@ -81,19 +89,26 @@ This is a deliberate, load-bearing choice: reusing `_dispatch()` means a review 
 of sync with what that area's chat is actually grounded in and allowed to call — the two share one
 implementation, not two hand-maintained ones.
 
-### 2.2 Excluding writes from a review's own tool registry
+### 2.2 Excluding gated tools from a review's own tool registry
 
 `_dispatch()` calls `tool_registry.build_tool_registry()` unconditionally today — the same registry
-`send()` uses, which includes gated write tools like `library.save_confirmed_part`
-(`CONFIRMATION_REQUIRED_TOOLS`, `SPEC-204`). A review must never be able to reach a write tool even
-through the confirmation gate, since nothing in a review's own flow can ever answer a confirmation
-prompt. `_dispatch()` gains an optional `tools` parameter (defaulting to the full registry, so
-`send()`'s own call site is unchanged); `review()` passes a **read-only-filtered** registry —
-`tool_registry.build_tool_registry(exclude=CONFIRMATION_REQUIRED_TOOLS)` or equivalent — so the
-agent physically cannot call a gated tool during a review, not merely instructed not to. Named here
-because retrofitting this after review ships would mean re-auditing every area's own tool list for
-new gated tools added later; excluding by the registry's own existing gate list keeps this correct
-by construction as `CONFIRMATION_REQUIRED_TOOLS` grows.
+`send()` uses. **This is not closing a live safety gap**: `tool_registry.py`'s own `_wrap_route`
+wrapper already refuses to actually run any `CONFIRMATION_REQUIRED_TOOLS` member
+(`kicad.inject_component`, the only one registered today) unless the call carries `confirmed=true`
+— a real, execution-layer check every caller goes through, chat included, verified by reading
+`_wrap_route` directly rather than assumed. A chat or review agent that tries to call it today gets
+back "was proposed but not executed... re-invoke with confirmed=true," never a real board mutation.
+
+The real reason to still exclude it from review specifically: **a review has no confirmation UI at
+all**, so a model including it among a review's own tool choices is being offered a real dead end —
+an action it can propose to itself but never complete, framed as if it were a live option. Excluding
+`CONFIRMATION_REQUIRED_TOOLS` from review's own registry removes that dead end rather than trusting
+the model (or a review prompt's own wording) to never reach for it. `_dispatch()` gains an optional
+`tools` parameter (defaulting to the full registry, so `send()`'s own call site is unchanged);
+`review()` passes a registry built from `TOOL_DEFINITIONS` with every `CONFIRMATION_REQUIRED_TOOLS`
+member left out. Named here because retrofitting this after review ships would mean re-auditing
+every area's own tool list by hand for new gated tools added later; building the exclusion from
+`CONFIRMATION_REQUIRED_TOOLS` itself keeps it correct by construction as that set grows.
 
 ### 2.3 The real finding shape
 
@@ -168,12 +183,11 @@ response.
 *   **The Components area's chat is Part-scoped, not project-scoped** (`SPEC-318` §2.2) — a review
     on Components reviews the currently-open Part, not the whole project, and its own button must
     be gated the same way `AgentChat` already is there (`savedPart` must exist).
-*   **Excluding gated tools from review changes what a review *can* find, not just what it can do.**
-    A review of the Schematic area, for instance, cannot propose "save this part to the library" as
-    a finding action the way a chat conversation theoretically could walk toward — it can only
-    *describe* that a part is unsaved, never act on it. This is intentional (§2.2) but worth stating
-    plainly: a review is strictly read-only in what it can attempt, not just in what ships without
-    confirmation.
+*   **`kicad.inject_component` is the only tool this excludes today, and no area's chat prompt
+    currently steers toward proposing it anyway** — the exclusion is a real, load-bearing floor for
+    whatever gets added to `CONFIRMATION_REQUIRED_TOOLS` next, not a fix for an active problem with
+    today's five areas. Worth stating plainly so this section doesn't read as solving a bigger gap
+    than actually exists right now.
 *   **Reusing `_dispatch()`'s tool registry parameter is new, not yet exercised.** `send()`'s own
     call site passes no `tools` argument today and must be verified to still receive the full,
     unfiltered registry once the parameter is added — a regression here would silently narrow every
