@@ -26,6 +26,7 @@ That is the whole shape. Everything below follows from it.
 | **Guide connections** | Per-pin notes on decoupling, protection and power for a part you have saved. |
 | **Explain checker output** | Run ERC or DRC through KiCad's `kicad-cli` and translate the results into plain language with suggested fixes. |
 | **Build an enclosure** | Generate a printable body with standoffs and an optional lid from your board's real outline and mounting holes. Preview in 3D, export STEP or GLB. |
+| **Ask, with sources** | A scoped chat panel on every area, grounded in that area's real state — cited datasheet pages, real ERC/DRC findings, your own stated project intent. Save a good answer as a durable note instead of losing it in a transcript. |
 | **Keep all of it** | Projects, parts, symbols and footprints as readable files on your disk, reusable across projects. |
 
 ## What it will not do
