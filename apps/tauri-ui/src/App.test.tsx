@@ -179,15 +179,15 @@ function fakeJobHandle<T>(result: Promise<T>) {
  * real signal that the shell finished loading, not an arbitrary delay. */
 async function renderAppOnOverview() {
   render(<App />)
-  await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+  await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 }
 
 function sendMessage(text: string) {
-  fireEvent.change(screen.getByPlaceholderText(/generate ATtiny85/), { target: { value: text } })
+  fireEvent.change(screen.getByPlaceholderText(/ask a question/), { target: { value: text } })
   fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 }
 
-describe('App: chat & command surface', () => {
+describe('App: Overview plain chat', () => {
   beforeEach(() => {
     submitJobMock.mockReset()
     dispatchToolMock.mockReset()
@@ -200,102 +200,6 @@ describe('App: chat & command surface', () => {
     saveProjectMock.mockReset()
     loadConversationMock.mockReset().mockResolvedValue([])
     appendConversationTurnMock.mockReset().mockResolvedValue(undefined)
-  })
-
-  it('TEST-001: "generate <part>" calls kicad.generate_component and renders the schema', async () => {
-    const schema = { part_number: 'ATtiny85', package: 'SOIC-8', pins: [] }
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(schema)))
-
-    await renderAppOnOverview()
-    sendMessage('generate ATtiny85')
-
-    await waitFor(() => screen.getByText(/"part_number": "ATtiny85"/))
-    expect(submitJobMock).toHaveBeenLastCalledWith('kicad.generate_component', {
-      part_number: 'ATtiny85',
-    })
-    screen.getByText('Generated ATtiny85 (SOIC-8)')
-  })
-
-  it('TEST-002: "inject" with a schema already generated proposes the write via agent.dispatch_tool and awaits confirmation, mutating nothing yet', async () => {
-    const schema = { part_number: 'ATtiny85', package: 'SOIC-8', pins: [] }
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(schema)))
-    dispatchToolMock.mockResolvedValueOnce({
-      kind: 'pending_confirmation',
-      tool: 'kicad.inject_component',
-      input: { schema, x_mm: 50, y_mm: 50 },
-    })
-
-    await renderAppOnOverview()
-    sendMessage('generate ATtiny85')
-    await waitFor(() => screen.getByText(/"part_number": "ATtiny85"/))
-
-    sendMessage('inject')
-
-    await waitFor(() => screen.getByText('This will write into the board KiCad currently has open. Confirm?'))
-    expect(dispatchToolMock).toHaveBeenLastCalledWith('kicad.inject_component', {
-      schema,
-      x_mm: 50,
-      y_mm: 50,
-    })
-    expect(screen.queryByText('Injected into the open board.')).toBeNull()
-  })
-
-  it('TEST-002b: confirming the pending write re-dispatches with confirmed: true and reports success (SPEC-204/CTX-108.4)', async () => {
-    const schema = { part_number: 'ATtiny85', package: 'SOIC-8', pins: [] }
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(schema)))
-    dispatchToolMock.mockResolvedValueOnce({
-      kind: 'pending_confirmation',
-      tool: 'kicad.inject_component',
-      input: { schema, x_mm: 50, y_mm: 50 },
-    })
-    dispatchToolMock.mockResolvedValueOnce({
-      kind: 'dispatched',
-      handle: fakeJobHandle(Promise.resolve({ part_number: 'ATtiny85', package: 'SOIC-8', pins: 8 })),
-    })
-
-    await renderAppOnOverview()
-    sendMessage('generate ATtiny85')
-    await waitFor(() => screen.getByText(/"part_number": "ATtiny85"/))
-    sendMessage('inject')
-    await waitFor(() => screen.getByText('This will write into the board KiCad currently has open. Confirm?'))
-
-    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
-
-    await waitFor(() => screen.getByText('Injected into the open board.'))
-    expect(dispatchToolMock).toHaveBeenLastCalledWith(
-      'kicad.inject_component',
-      { schema, x_mm: 50, y_mm: 50 },
-      true,
-    )
-  })
-
-  it('TEST-002c: cancelling the pending write never calls the daemon again and mutates nothing', async () => {
-    const schema = { part_number: 'ATtiny85', package: 'SOIC-8', pins: [] }
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(schema)))
-    dispatchToolMock.mockResolvedValueOnce({
-      kind: 'pending_confirmation',
-      tool: 'kicad.inject_component',
-      input: { schema, x_mm: 50, y_mm: 50 },
-    })
-
-    await renderAppOnOverview()
-    sendMessage('generate ATtiny85')
-    await waitFor(() => screen.getByText(/"part_number": "ATtiny85"/))
-    sendMessage('inject')
-    await waitFor(() => screen.getByText('This will write into the board KiCad currently has open. Confirm?'))
-
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    await waitFor(() => screen.getByText('Cancelled — board not modified.'))
-    expect(dispatchToolMock).toHaveBeenCalledTimes(1)
-  })
-
-  it('TEST-003: "inject" with nothing generated yet shows a clean message, never calls the route', async () => {
-    await renderAppOnOverview()
-    sendMessage('inject')
-
-    await waitFor(() => screen.getByText('Nothing to inject yet — generate a component first.'))
-    expect(dispatchToolMock).not.toHaveBeenCalled()
   })
 
   it('TEST-004: an unrecognized message is a plain chat turn against llm.chat, rendering the real reply, and persists both turns', async () => {
@@ -339,24 +243,13 @@ describe('App: chat & command surface', () => {
     })
   })
 
-  it('TEST-006: a generate failure shows the real error, not a generic message', async () => {
-    submitJobMock.mockResolvedValueOnce(
-      fakeJobHandle(Promise.reject(new Error("Package 'FOO-1' is not in the known reference table."))),
-    )
-
-    await renderAppOnOverview()
-    sendMessage('generate FOO-1')
-
-    await waitFor(() => screen.getByText("Package 'FOO-1' is not in the known reference table."))
-  })
-
   it('TEST-007: a fresh install with no projects shows the empty state, not a broken chat surface', async () => {
     listProjectsMock.mockResolvedValueOnce([])
 
     render(<App />)
 
     await waitFor(() => screen.getByText('Create a project on the left to get started.'))
-    expect(screen.queryByPlaceholderText(/generate ATtiny85/)).toBeNull()
+    expect(screen.queryByPlaceholderText(/ask a question/)).toBeNull()
   })
 
   it('TEST-008b: the Components area tab renders the real ComponentDiscovery search box, not a placeholder', async () => {
@@ -386,7 +279,7 @@ describe('App: chat & command surface', () => {
 
     expect(screen.getByTestId('status-card-pcb').textContent).toContain('Not yet checked this session')
     expect(screen.getByTestId('status-card-enclosure').textContent).toContain('Not yet checked this session')
-    expect(screen.getByPlaceholderText(/generate ATtiny85/)).toBeTruthy()
+    expect(screen.getByPlaceholderText(/ask a question/)).toBeTruthy()
   })
 })
 
@@ -410,23 +303,23 @@ describe('App: Overview tab persists across area switches, resets on project swi
   it('a half-typed question in the old chat input survives switching to another area and back', async () => {
     await renderAppOnOverview()
 
-    fireEvent.change(screen.getByPlaceholderText(/generate ATtiny85/), { target: { value: 'half-typed question' } })
+    fireEvent.change(screen.getByPlaceholderText(/ask a question/), { target: { value: 'half-typed question' } })
     fireEvent.click(screen.getByRole('button', { name: 'Components' }))
     await waitFor(() => screen.getByPlaceholderText(/search for a part/))
     fireEvent.click(screen.getByRole('button', { name: 'Overview' }))
 
-    expect((screen.getByPlaceholderText(/generate ATtiny85/) as HTMLInputElement).value).toBe('half-typed question')
+    expect((screen.getByPlaceholderText(/ask a question/) as HTMLInputElement).value).toBe('half-typed question')
   })
 
   it('switching to a different real project resets the previous project\'s half-typed question', async () => {
     listProjectsMock.mockReset().mockResolvedValue(['project-a', 'project-b'])
     await renderAppOnOverview()
-    fireEvent.change(screen.getByPlaceholderText(/generate ATtiny85/), { target: { value: 'half-typed question' } })
+    fireEvent.change(screen.getByPlaceholderText(/ask a question/), { target: { value: 'half-typed question' } })
 
     fireEvent.click(screen.getByText('project-b'))
 
     await waitFor(() =>
-      expect((screen.getByPlaceholderText(/generate ATtiny85/) as HTMLInputElement).value).toBe(''),
+      expect((screen.getByPlaceholderText(/ask a question/) as HTMLInputElement).value).toBe(''),
     )
   })
 })
@@ -467,7 +360,7 @@ describe('App: PCB tab persists across area switches, resets on project switch',
 
   async function renderAppOnPcb() {
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     fireEvent.click(screen.getByRole('button', { name: 'PCB' }))
     await waitFor(() => pcbArea().getByText('board.kicad_pcb'))
   }
@@ -546,7 +439,7 @@ describe('App: Enclosure tab persists across area switches', () => {
     submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT)))
 
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
     await waitFor(() => enclosureArea().getByText('board.kicad_pcb'))
     fireEvent.click(enclosureArea().getByRole('button', { name: 'Generate Enclosure' }))
@@ -566,7 +459,7 @@ describe('App: Enclosure tab persists across area switches', () => {
     saveDialogMock.mockResolvedValueOnce('/real/dest/combined.step')
 
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
     await waitFor(() => enclosureArea().getByText('board.kicad_pcb'))
     fireEvent.click(enclosureArea().getByRole('button', { name: 'Generate Enclosure' }))
@@ -590,7 +483,7 @@ describe('App: Enclosure tab persists across area switches', () => {
     pickProjectDirectoryMock.mockResolvedValueOnce('/real/PCBs/test-project')
 
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     fireEvent.click(screen.getByRole('button', { name: 'Link to folder…' }))
 
@@ -609,7 +502,7 @@ describe('App: Enclosure tab persists across area switches', () => {
     pickProjectDirectoryMock.mockResolvedValueOnce(null)
 
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     fireEvent.click(screen.getByRole('button', { name: 'Link to folder…' }))
 
@@ -619,7 +512,7 @@ describe('App: Enclosure tab persists across area switches', () => {
 
   it('CTX-312.1: "Save Project" saves the current real project state on demand', async () => {
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     await waitFor(() => {
       const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
       expect(button.disabled).toBe(false)
@@ -637,7 +530,7 @@ describe('App: Enclosure tab persists across area switches', () => {
 
   it('CTX-312.3: the real native menu\'s own Save Project event runs the same real handleSaveProject flow as the button', async () => {
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     // The menu-event listener effect re-subscribes whenever `currentProject`
     // changes (so `handleSaveProject`'s own closure is never stale) --
     // waiting for the button to become enabled is the real signal that the
@@ -666,7 +559,7 @@ describe('App: Enclosure tab persists across area switches', () => {
     })
 
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     await waitFor(() => {
       const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
       expect(button.disabled).toBe(false)
@@ -686,7 +579,7 @@ describe('App: Enclosure tab persists across area switches', () => {
 
   it('CTX-316.1: the Settings… menu event shows the real Settings screen', async () => {
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://open-settings')!
     act(() => menuHandler())
@@ -696,7 +589,7 @@ describe('App: Enclosure tab persists across area switches', () => {
 
   it('CTX-316.1: the Default Library menu event opens Library deep-linked to Default', async () => {
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(
       ([event]) => event === 'menu://open-library-default',
@@ -711,7 +604,7 @@ describe('App: Enclosure tab persists across area switches', () => {
 
   it('CTX-316.1: the Manage Libraries… menu event opens Library with no deep link', async () => {
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(
       ([event]) => event === 'menu://manage-libraries',
@@ -726,7 +619,7 @@ describe('App: Enclosure tab persists across area switches', () => {
 
   it('CTX-316.1: a Design menu event switches to the matching area and runs the real handler', async () => {
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     // Starts on Overview -- confirms the PCB area really was hidden
     // before the menu event, not just already active.
     expect(screen.getByTestId('pcb-area').className).toContain('hidden')
@@ -749,7 +642,7 @@ describe('App: Enclosure tab persists across area switches', () => {
     // alone (as the test above checks) would not have caught this --
     // asserting the real class value does.
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     for (const [label, testId] of [
       ['Overview', 'overview-area'],
@@ -793,7 +686,7 @@ describe('App: Enclosure tab persists across area switches', () => {
 
   it('TEST-009: calls setDesignMenuEnabled(true) once a project is selected, and (false) when none is', async () => {
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     await waitFor(() => expect(setDesignMenuEnabledMock).toHaveBeenCalledWith(true))
 
@@ -804,7 +697,7 @@ describe('App: Enclosure tab persists across area switches', () => {
 
   it('TEST-010: the Open Library menu event sets view to library with the real payload as initialLibraryId', async () => {
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://open-library')!
     act(() => menuHandler({ payload: 'esp32-boards' }))
@@ -873,7 +766,7 @@ describe('App: Schematic tab persists across area switches, resets on project sw
 
   async function renderAppOnSchematic() {
     render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/generate ATtiny85/))
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     fireEvent.click(screen.getByRole('button', { name: 'Schematic' }))
     await waitFor(() => screen.getByText('board.kicad_sch'))
   }

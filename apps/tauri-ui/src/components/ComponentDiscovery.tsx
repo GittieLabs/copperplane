@@ -52,6 +52,15 @@ export function ComponentDiscovery({
   } | null>(null)
   const [confirmingPartNumber, setConfirmingPartNumber] = useState<string | null>(null)
   const [pathCopied, setPathCopied] = useState(false)
+  // CTX-318.6: SPEC-318 §2.6's rehome of the old Overview chat's
+  // `generate <part>` command -- a real, separate fallback next to
+  // search, not a replacement for it. `kicad.generate_component` (search's
+  // own extraction call, via `PartDetail`'s existing `candidate` effect)
+  // works from a bare part number with no search/ranking step at all, so
+  // it's a genuine escape hatch when search itself can't find something,
+  // not a duplicate of it.
+  const [generateOpen, setGenerateOpen] = useState(false)
+  const [generatePartNumber, setGeneratePartNumber] = useState('')
   // CTX-306.3: best-effort -- a listing failure shouldn't block search
   // results from rendering, it just means no candidate gets a badge.
   const [savedPartIds, setSavedPartIds] = useState<Set<string> | null>(null)
@@ -82,6 +91,8 @@ export function ComponentDiscovery({
     setPathCopied(false)
     setSavedPartIds(null)
     setOpenedPartId(null)
+    setGenerateOpen(false)
+    setGeneratePartNumber('')
   }, [projectName])
 
   const projectPartIds = currentProject?.parts?.join(',') ?? ''
@@ -218,6 +229,33 @@ export function ComponentDiscovery({
     }
   }
 
+  /** CTX-318.6: no candidate metadata exists yet for a bare, typed part
+   * number -- manufacturer/package/confidence/datasheet_url stay honestly
+   * unknown/empty rather than fabricated. `PartDetail`'s own existing
+   * `candidate` effect runs the real extraction (`kicad.generate_component`)
+   * the instant this renders, exactly as a real search-confirmed candidate
+   * would; there is no known datasheet to cache, so that step is skipped
+   * rather than attempted against an empty URL. */
+  function handleGenerateDirectly() {
+    const partNumber = generatePartNumber.trim()
+    if (!partNumber) return
+    setOpenedPartId(null)
+    setConfirmed({
+      candidate: {
+        part_number: partNumber,
+        manufacturer: 'Unknown',
+        package: '',
+        confidence: 'low',
+        datasheet_url: '',
+        rationale: 'Generated directly from a typed part number, without a search match.',
+      },
+      datasheetPath: null,
+      cacheError: null,
+    })
+    setGenerateOpen(false)
+    setGeneratePartNumber('')
+  }
+
   if (openedPartId) {
     return (
       <div className="flex w-full max-w-4xl flex-col gap-2 rounded border border-line p-4">
@@ -243,7 +281,13 @@ export function ComponentDiscovery({
     return (
       <div className="flex w-full max-w-4xl flex-col gap-2 rounded border border-line p-4">
         <p className="text-sm font-medium text-fg">
-          Confirmed: {confirmed.candidate.part_number} ({confirmed.candidate.manufacturer}, {confirmed.candidate.package})
+          Confirmed: {confirmed.candidate.part_number}
+          {(confirmed.candidate.manufacturer || confirmed.candidate.package) && (
+            <>
+              {' '}
+              ({[confirmed.candidate.manufacturer, confirmed.candidate.package].filter(Boolean).join(', ')})
+            </>
+          )}
         </p>
         {confirmed.datasheetPath ? (
           <div className="flex flex-col gap-1">
@@ -266,7 +310,7 @@ export function ComponentDiscovery({
               {pathCopied && <span className="text-xs text-success">Copied.</span>}
             </div>
           </div>
-        ) : (
+        ) : confirmed.cacheError ? (
           <div className="flex flex-col gap-1">
             <p className="text-xs text-warning">
               Datasheet couldn't be cached automatically ({confirmed.cacheError}).
@@ -279,6 +323,13 @@ export function ComponentDiscovery({
               Open datasheet externally
             </button>
           </div>
+        ) : (
+          // CTX-318.6: a directly-generated part has no real datasheet_url
+          // at all -- distinct from a real caching attempt that failed
+          // (above), so this never claims a failure that didn't happen.
+          <p className="text-xs text-fg-muted">
+            No datasheet known for this part -- generated directly from a part number, not found via search.
+          </p>
         )}
         <button
           type="button"
@@ -315,6 +366,49 @@ export function ComponentDiscovery({
         >
           {status === 'searching' ? 'Searching…' : 'Search'}
         </button>
+      </div>
+
+      {/* CTX-318.6: SPEC-318 §2.6's rehome of the old Overview chat's
+          `generate <part>` command -- a real fallback for a part search
+          can't find, not a second way to do the same thing search does. */}
+      <div className="flex items-center gap-2 text-xs">
+        {generateOpen ? (
+          <>
+            <input
+              autoFocus
+              className="flex-1 rounded border border-line bg-surface px-2 py-1 text-xs"
+              placeholder="exact part number, e.g. ATTINY85"
+              value={generatePartNumber}
+              onChange={(e) => setGeneratePartNumber(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleGenerateDirectly()
+                if (e.key === 'Escape') setGenerateOpen(false)
+              }}
+            />
+            <button
+              type="button"
+              className="rounded border border-line px-2 py-1 font-medium disabled:opacity-50"
+              onClick={handleGenerateDirectly}
+              disabled={generatePartNumber.trim().length === 0}
+            >
+              Generate
+            </button>
+            <button
+              type="button"
+              className="text-fg-tertiary underline"
+              onClick={() => {
+                setGenerateOpen(false)
+                setGeneratePartNumber('')
+              }}
+            >
+              Cancel
+            </button>
+          </>
+        ) : (
+          <button type="button" className="text-fg-tertiary underline" onClick={() => setGenerateOpen(true)}>
+            Can't find it via search? Generate directly from a part number…
+          </button>
+        )}
       </div>
 
       {status === 'error' && error && <p className="text-sm text-danger">{error}</p>}

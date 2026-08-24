@@ -333,6 +333,16 @@ Nothing in the daemon gets rewritten. This is a re-housing, not a rebuild.
 > confirmed action — since deleting the parser without rehoming them would silently remove a shipped
 > capability, not just clean up debt.
 
+> **Amendment (2026-08-24, `CTX-318.6`):** Done. `lib/commands.ts`/`lib/commands.test.ts` are
+> deleted; `Overview`'s chat is now unconditionally a plain `llm.chat` turn (`parseCommand`'s own
+> fallthrough for anything that wasn't `generate`/`inject`, so no user-visible behavior changed for
+> a plain question). `kicad.generate_component` is a real "Generate directly from a part number"
+> fallback in `ComponentDiscovery`, next to search — routes through `PartDetail`'s own existing
+> `candidate` extraction/review/save flow rather than dumping raw JSON into a chat window, a real
+> improvement over the old surface (which had no save step at all). `SPEC-108`'s inject flow is a
+> real "Inject into open board" action on `PartDetail`, gated on `savedPart` (a Part actually
+> confirmed/saved), through the same `agent.dispatch_tool`/`SPEC-204` confirmation gate as before.
+
 ---
 
 ## 8. Open questions

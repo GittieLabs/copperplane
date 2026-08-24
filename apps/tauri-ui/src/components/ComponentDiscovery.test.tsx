@@ -431,3 +431,69 @@ describe('ComponentDiscovery', () => {
   })
 
 })
+
+describe('ComponentDiscovery: CTX-318.6 Generate directly from a part number', () => {
+  it('the fallback is collapsed by default, next to search', async () => {
+    render(<ComponentDiscovery projectName="test-project" />)
+
+    screen.getByRole('button', { name: "Can't find it via search? Generate directly from a part number…" })
+    expect(screen.queryByPlaceholderText(/exact part number/)).toBeNull()
+  })
+
+  it('opens a real input, and confirming routes straight to PartDetail with no search or datasheet cache involved', async () => {
+    render(<ComponentDiscovery projectName="test-project" />)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: "Can't find it via search? Generate directly from a part number…" }),
+    )
+    fireEvent.change(screen.getByPlaceholderText(/exact part number/), { target: { value: 'ATtiny85' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+
+    await waitFor(() => screen.getByText(/Confirmed: ATtiny85/))
+    screen.getByText('PartDetail stub for ATtiny85')
+    expect(searchComponentsMock).not.toHaveBeenCalled()
+    expect(cacheDatasheetMock).not.toHaveBeenCalled()
+  })
+
+  it('an honest "no datasheet known" message, distinct from a real cache failure', async () => {
+    render(<ComponentDiscovery projectName="test-project" />)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: "Can't find it via search? Generate directly from a part number…" }),
+    )
+    fireEvent.change(screen.getByPlaceholderText(/exact part number/), { target: { value: 'ATtiny85' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Generate' }))
+
+    await waitFor(() => screen.getByText(/No datasheet known for this part/))
+    expect(screen.queryByText(/couldn't be cached automatically/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Open datasheet externally' })).toBeNull()
+  })
+
+  it('Generate is disabled for an empty part number, and Cancel discards the draft', async () => {
+    render(<ComponentDiscovery projectName="test-project" />)
+
+    fireEvent.click(
+      screen.getByRole('button', { name: "Can't find it via search? Generate directly from a part number…" }),
+    )
+    expect((screen.getByRole('button', { name: 'Generate' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.change(screen.getByPlaceholderText(/exact part number/), { target: { value: 'ATtiny85' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(screen.queryByPlaceholderText(/exact part number/)).toBeNull()
+    screen.getByRole('button', { name: "Can't find it via search? Generate directly from a part number…" })
+  })
+
+  it('switching to a different real project resets any in-progress draft', async () => {
+    const { rerender } = render(<ComponentDiscovery projectName="project-a" />)
+    fireEvent.click(
+      screen.getByRole('button', { name: "Can't find it via search? Generate directly from a part number…" }),
+    )
+    fireEvent.change(screen.getByPlaceholderText(/exact part number/), { target: { value: 'Half-typed' } })
+
+    rerender(<ComponentDiscovery projectName="project-b" />)
+
+    expect(screen.queryByPlaceholderText(/exact part number/)).toBeNull()
+    screen.getByRole('button', { name: "Can't find it via search? Generate directly from a part number…" })
+  })
+})

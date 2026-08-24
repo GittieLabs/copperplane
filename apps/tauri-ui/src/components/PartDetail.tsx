@@ -2,6 +2,7 @@ import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState, type CSSProperties } from 'react'
 import { AgentChat, type PromotionTarget } from './AgentChat'
 import { cacheDatasheet, type ComponentCandidate } from '../lib/components'
+import { dispatchTool } from '../lib/ipc'
 import {
   attachCommunityFootprintToPart,
   attachCommunityFootprintToProjectOverride,
@@ -58,6 +59,14 @@ const DESIGN_GUIDANCE_CATEGORY_LABELS: Record<string, string> = {
 
 type Status = 'extracting' | 'ready' | 'error'
 type FootprintSearchStatus = 'idle' | 'searching' | 'error'
+type InjectStatus = 'idle' | 'pending' | 'awaiting_confirmation' | 'done' | 'error'
+
+// CTX-318.6: rehomed from Overview's old parseCommand-driven 'inject'
+// command (SPEC-108's own Cross-Module Impacts section names a fixed
+// placement position as enough for a first UI trigger, "even a
+// hardcoded board-origin default for M1's demo"). A real position-picker
+// UI is future work, not this button's job.
+const _INJECT_DEFAULT_POSITION_MM = { x: 50, y: 50 }
 
 /** SPEC-307: replaces SPEC-306's confirmed-candidate dead end with a
  * real pin diagram/table -- a second, real re-run of SPEC-202's
@@ -262,6 +271,15 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
   const [openingCitationPage, setOpeningCitationPage] = useState<number | null>(null)
   const [citationOpenError, setCitationOpenError] = useState<string | null>(null)
 
+  // CTX-318.6: SPEC-108's confirmation-gated write into whatever board
+  // KiCad currently has open, rehomed here from Overview's old
+  // parseCommand-driven 'inject' command -- available once a Part is
+  // confirmed/saved, matching this file's own established "once
+  // savedPart exists" gating for every other post-save action.
+  const [injectStatus, setInjectStatus] = useState<InjectStatus>('idle')
+  const [injectError, setInjectError] = useState<string | null>(null)
+  const [injectPendingInput, setInjectPendingInput] = useState<Record<string, unknown> | null>(null)
+
   useEffect(() => {
     let cancelled = false
     setError(null)
@@ -308,6 +326,9 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     setTaggingLibraries(false)
     setLibraryTagError(null)
     setLibraryTagMessage(null)
+    setInjectStatus('idle')
+    setInjectError(null)
+    setInjectPendingInput(null)
 
     if (initialPart) {
       // Already-saved -- hydrate directly from the Library's own real
@@ -543,6 +564,71 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
     } finally {
       setSaving(false)
     }
+  }
+
+  /** CTX-318.6/SPEC-108/CTX-204.1: writes this saved Part into whatever
+   * board KiCad currently has open -- the only tool SPEC-204 gates behind
+   * explicit confirmation, since it's the only one that mutates a
+   * document the user didn't ask this app to open. `savedPart` already
+   * carries every field `kicad_bridge.inject_component` reads
+   * (`package_dimensions`/`courtyard` included, CTX-308.5) -- the exact
+   * same shape the old Overview `generate`/`inject` chat commands
+   * round-tripped through `latestSchema`, now sourced from the real
+   * persisted record instead of a raw, unsaved LLM response. */
+  async function handleInject() {
+    if (!savedPart) return
+    setInjectStatus('pending')
+    setInjectError(null)
+    const schema = {
+      part_number: savedPart.part_id,
+      package: savedPart.package,
+      pins: savedPart.pins,
+      package_dimensions: savedPart.package_dimensions,
+      courtyard: savedPart.courtyard,
+    }
+    const toolInput = { schema, x_mm: _INJECT_DEFAULT_POSITION_MM.x, y_mm: _INJECT_DEFAULT_POSITION_MM.y }
+    try {
+      const outcome = await dispatchTool<Record<string, unknown>>('kicad.inject_component', toolInput)
+      if (outcome.kind === 'pending_confirmation') {
+        setInjectStatus('awaiting_confirmation')
+        setInjectPendingInput(outcome.input)
+        return
+      }
+      await outcome.handle.result
+      setInjectStatus('done')
+    } catch (err) {
+      setInjectError(err instanceof Error ? err.message : String(err))
+      setInjectStatus('error')
+    }
+  }
+
+  /** SPEC-204's confirmation gate, actually reachable: re-dispatches the
+   * exact proposed input with `confirmed: true`, which runs through the
+   * real async job protocol identically to any other route. */
+  async function handleConfirmInject() {
+    if (!injectPendingInput) return
+    setInjectStatus('pending')
+    setInjectError(null)
+    try {
+      const outcome = await dispatchTool<Record<string, unknown>>('kicad.inject_component', injectPendingInput, true)
+      if (outcome.kind === 'pending_confirmation') {
+        throw new Error('Expected a confirmed dispatch to run, got pending_confirmation again')
+      }
+      await outcome.handle.result
+      setInjectStatus('done')
+    } catch (err) {
+      setInjectError(err instanceof Error ? err.message : String(err))
+      setInjectStatus('error')
+    }
+  }
+
+  /** Never calls the daemon at all -- declining a proposed board write is
+   * a purely local decision; the first, unconfirmed call never started
+   * any real work to cancel. */
+  function handleCancelInject() {
+    setInjectStatus('error')
+    setInjectError('Cancelled — board not modified.')
+    setInjectPendingInput(null)
   }
 
   /** CTX-306.5: the direct, no-picker path used whenever `currentProject`
@@ -1155,6 +1241,69 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
             {projectTagError && <p className="text-sm text-danger">{projectTagError}</p>}
             {projectTagMessage && <p className="text-sm text-success">{projectTagMessage}</p>}
           </div>
+        </div>
+      )}
+
+      {savedPart && (
+        <div className="flex flex-col gap-2 rounded border border-line p-3">
+          <p className="text-xs font-medium uppercase text-fg-muted">Inject into board</p>
+          {injectStatus === 'idle' && (
+            <button
+              type="button"
+              className="self-start rounded border border-line px-3 py-1 text-xs font-medium"
+              onClick={() => void handleInject()}
+            >
+              Inject into open board
+            </button>
+          )}
+          {injectStatus === 'pending' && <p className="text-xs text-fg-tertiary">Injecting…</p>}
+          {injectStatus === 'awaiting_confirmation' && (
+            <div className="flex flex-col gap-2 rounded border border-warning-line bg-surface p-3">
+              <p className="text-sm text-warning">
+                This will write into the board KiCad currently has open. Confirm?
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="rounded bg-warning-accent px-3 py-1 text-xs font-medium text-accent-fg"
+                  onClick={() => void handleConfirmInject()}
+                >
+                  Confirm
+                </button>
+                <button
+                  type="button"
+                  className="rounded bg-surface-alt px-3 py-1 text-xs font-medium text-fg-bright"
+                  onClick={handleCancelInject}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+          {injectStatus === 'done' && (
+            <div className="flex flex-col gap-1">
+              <p className="text-xs text-success">Injected into the open board.</p>
+              <button
+                type="button"
+                className="self-start rounded border border-line px-3 py-1 text-xs font-medium"
+                onClick={() => void handleInject()}
+              >
+                Inject again
+              </button>
+            </div>
+          )}
+          {injectStatus === 'error' && (
+            <div className="flex flex-col gap-1">
+              <p className="text-xs text-danger">{injectError}</p>
+              <button
+                type="button"
+                className="self-start rounded border border-line px-3 py-1 text-xs font-medium"
+                onClick={() => void handleInject()}
+              >
+                Try again
+              </button>
+            </div>
+          )}
         </div>
       )}
 

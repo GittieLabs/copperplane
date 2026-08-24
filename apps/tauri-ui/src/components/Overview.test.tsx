@@ -87,10 +87,10 @@ describe('Overview: CTX-318.5 AgentChat wiring', () => {
     await waitFor(() => expect(screen.getByText(/AgentChat stub/).textContent).toContain('scopeId=project-b:overview'))
   })
 
-  it('the old parseCommand-driven chat still coexists alongside the new AgentChat panel (SPEC-318 §2.6 defers deleting it)', async () => {
+  it('the plain llm.chat surface still coexists alongside the new AgentChat panel (CTX-318.6 only removed the generate/inject branches)', async () => {
     await renderOverview()
 
-    screen.getByPlaceholderText(/generate ATtiny85/)
+    screen.getByPlaceholderText(/ask a question about this project/)
     screen.getByText(/AgentChat stub/)
   })
 })
