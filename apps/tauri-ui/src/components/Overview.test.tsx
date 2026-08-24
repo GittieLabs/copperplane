@@ -115,6 +115,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
 
+    await waitFor(() => screen.getByPlaceholderText(/I want to build/))
     const textarea = screen.getByPlaceholderText(/I want to build/) as HTMLTextAreaElement
     expect(textarea.value).toBe('')
   })
@@ -136,6 +137,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
     await waitFor(() => screen.getByText(/AgentChat stub/))
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => screen.getByPlaceholderText(/I want to build/))
     fireEvent.change(screen.getByPlaceholderText(/I want to build/), {
       target: { value: 'A macropad from scratch' },
     })
@@ -150,6 +152,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
     await renderOverview({ name: 'weather-pcb', intent: 'Original intent' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    await waitFor(() => screen.getByPlaceholderText(/I want to build/))
     fireEvent.change(screen.getByPlaceholderText(/I want to build/), { target: { value: 'Something else' } })
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
@@ -162,6 +165,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
     await renderOverview({ name: 'weather-pcb', intent: null })
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => screen.getByPlaceholderText(/I want to build/))
     fireEvent.change(screen.getByPlaceholderText(/I want to build/), { target: { value: 'A macropad' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
@@ -173,6 +177,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
     const { rerender } = render(<Overview projectName="project-a" project={{ name: 'project-a', intent: null }} />)
     await waitFor(() => screen.getByText(/AgentChat stub/))
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => screen.getByPlaceholderText(/I want to build/))
     fireEvent.change(screen.getByPlaceholderText(/I want to build/), { target: { value: 'Half-typed' } })
 
     rerender(<Overview projectName="project-b" project={{ name: 'project-b', intent: null }} />)
