@@ -118,18 +118,23 @@ interface ReviewFinding {
   title: string
   detail: string
   sources: SourceRef[]        // same union as chat -- SPEC-206 §2.3
+  generalPractice: boolean    // per-finding, not one thread-wide flag -- see below
   area: Area
 }
 ```
 
-Exactly `SPEC-318` §2.5's own already-designed shape, unchanged. `sources`/`area` are filled in
-server-side (`area` from the route's own parameter, `sources` validated through the identical
-`validate_source_refs`/`_enrich_source_ref` path chat answers already go through) — the model never
-supplies either directly, matching `content_hash` in `_enrich_source_ref` today. A finding with no
-real sources must self-report `general_practice: true` at the finding level (not a single
-thread-wide flag as chat has today) — a review naming five things can have some cited and some not
-in the same call, and the UI must be able to tell them apart per-finding, not just for the whole
-response.
+**Corrected from `SPEC-318` §2.5's own first draft of this shape**, found while actually designing
+the extraction mechanism (§2.1), not left as originally written: that draft omitted a
+general-practice flag entirely. Chat gets away with exactly one, thread-wide `general_practice`
+per turn because a turn is one answer; a review naming several findings in one call can have some
+grounded and some not in the same response, and the UI must be able to tell them apart per finding,
+not just for the whole result — so the flag moves from the response to each `ReviewFinding` itself.
+`sources`/`generalPractice`/`area` are filled in server-side (`area` from the route's own parameter,
+`sources` validated through the identical `validate_source_refs`/`_enrich_source_ref` path chat
+answers already go through) — the model self-reports `sources` and a raw `general_practice` per
+finding the same way it self-reports a whole turn's `sources`/`general_practice` for chat today
+(`chat_agents.py`'s existing `<<<CITATIONS>>>` contract, generalized to per-finding rather than
+per-turn); it never computes `content_hash` itself, matching `_enrich_source_ref` today.
 
 ### 2.4 Where the button lives
 

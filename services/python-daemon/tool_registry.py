@@ -200,15 +200,25 @@ def _wrap_route(name: str, handler: Callable[..., Any]) -> Callable[..., Any]:
     return _tool
 
 
-def build_tool_registry() -> ToolRegistry:
+def build_tool_registry(exclude: set | None = None) -> ToolRegistry:
     """Builds a real ToolRegistry wrapping whichever of TOOL_DEFINITIONS'
     routes actually exist in daemon.ROUTES right now. A route is absent
     when its bridge module never imported (SPEC-107 SS2 -- e.g. no KiCad
     connection available) -- this registry silently reflects that, the
     same way daemon.ROUTES' own conditional registration already does,
-    rather than registering a tool that would immediately KeyError."""
+    rather than registering a tool that would immediately KeyError.
+
+    `exclude` (CTX-319.1, SPEC-319 §2.2): `review()` passes
+    `CONFIRMATION_REQUIRED_TOOLS` here so a review's own registry never
+    includes a gated tool at all -- `ToolRegistry` itself (upstream
+    `agentflow`) has no `remove_tool`, only `add_tool`, so this filters
+    at construction time rather than building the full registry and
+    trying to remove from it after."""
+    exclude = exclude or set()
     registry = ToolRegistry()
     for name, definition in TOOL_DEFINITIONS.items():
+        if name in exclude:
+            continue
         handler = daemon.ROUTES.get(name)
         if handler is None:
             continue

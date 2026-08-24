@@ -781,6 +781,19 @@ def chat_send(scope: str, scope_id: str, area: str, message: str, project_name: 
     )
 
 
+def chat_review(scope: str, scope_id: str, area: str, project_name: str = None) -> list:
+    """The chat.review route (CTX-319.1, SPEC-319 §2.1): the seam
+    SPEC-318 §2.5 defined but did not build. Real LLM call (reuses
+    chat_agents._dispatch(), same as chat.send), so registered in
+    ASYNC_ROUTES below."""
+    return chat_agents.review(
+        scope, scope_id, area, project_name=project_name,
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+    )
+
+
 def context_search(query: str, part_id: str = None, project_name: str = None, limit: int = 8) -> list:
     """The context.search route (CTX-206.7, SPEC-206 §2.6): real, cheap
     local FTS5 (or LikeScanRetriever-fallback) lookup against the
@@ -1399,6 +1412,7 @@ def _build_routes() -> dict:
         routes["chat.list_threads"] = chat_list_threads
     if chat_agents is not None and library_store is not None and tool_registry is not None:
         routes["chat.send"] = chat_send
+        routes["chat.review"] = chat_review
     if chat_agents is not None and library_store is not None:
         # CTX-206.8: unlike chat.send, promote_turn never touches the
         # tool registry at all (it's plain local read/write, no agent
@@ -1449,7 +1463,7 @@ ASYNC_ROUTES = {
     "kicad.generate_connection_guidance", "kicad.suggest_footprint_query", "kicad.check_board", "kicad.check_schematic",
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
     "datasheet.read_pages", "library.render_symbol_preview", "library.render_footprint_preview",
-    "chat.send", "context.rebuild_index",
+    "chat.send", "chat.review", "context.rebuild_index",
     # CTX-314.2: both make real GitHub network calls (community_libraries.py's
     # own _github_request/fetch_raw_content) -- a real bug in CTX-314.1's own
     # shipped code (search_community_footprints was never added here) meant

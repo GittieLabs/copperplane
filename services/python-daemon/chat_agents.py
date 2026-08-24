@@ -321,6 +321,12 @@ def _assemble_context(area: str, scope: str, scope_id: str, project_name: str | 
 
 
 _CITATIONS_PATTERN = re.compile(r"<<<CITATIONS>>>(.*?)<<<END_CITATIONS>>>", re.DOTALL)
+# CTX-319.1, SPEC-319 §2.1: the review-response counterpart to
+# _CITATIONS_PATTERN above -- a separate trailing block, never present
+# in a real chat response, so running both extractors against either
+# kind of response is always safe (each simply finds no match in the
+# other's own text).
+_FINDINGS_PATTERN = re.compile(r"<<<FINDINGS>>>(.*?)<<<END_FINDINGS>>>", re.DOTALL)
 
 
 def _extract_self_reported(text: str) -> tuple:
@@ -356,6 +362,32 @@ def _extract_self_reported(text: str) -> tuple:
     if not isinstance(sources, list):
         sources = []
     return visible, sources, bool(payload.get("general_practice", True))
+
+
+def _extract_findings(text: str) -> list:
+    """CTX-319.1, SPEC-319 §2.1/§2.3: parses a review response's own
+    trailing `<<<FINDINGS>>>[...]<<<END_FINDINGS>>>` block -- a JSON
+    array, each entry a draft `ReviewFinding` still missing `sources`/
+    `area` (filled in by `review()` below, per finding, the same way
+    `_enrich_source_ref` already fills in what a chat turn's own model
+    output cannot supply itself). Mirrors `_extract_self_reported`'s own
+    resilience contract exactly: a missing or malformed block is never a
+    raised error, only an empty list -- "the model didn't return the
+    format" is a different failure from "the daemon is broken." A
+    malformed individual entry (missing `severity`/`title`/`detail`, or
+    an unrecognized `severity`) is dropped rather than shown broken;
+    `review()` does that per-entry validation, this function only
+    guarantees every returned item is at least a dict."""
+    match = _FINDINGS_PATTERN.search(text)
+    if not match:
+        return []
+    try:
+        payload = json.loads(match.group(1).strip())
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [f for f in payload if isinstance(f, dict)]
 
 
 def _enrich_source_ref(ref) -> dict:
@@ -431,7 +463,16 @@ def _history_as_messages(scope: str, scope_id: str) -> list:
 async def _dispatch(
     area: str, scope: str, scope_id: str, project_name: str | None, message: str,
     history: list, secrets: dict, provider: str | None, model: str | None,
+    tools: "tool_registry.ToolRegistry | None" = None,
 ) -> dict:
+    """`tools` (CTX-319.1, SPEC-319 §2.1/§2.2): defaults to the full
+    registry -- `send()`'s own call site passes nothing, unchanged from
+    before this parameter existed. `review()` passes a registry with
+    every `CONFIRMATION_REQUIRED_TOOLS` member left out, since a review
+    has no confirmation UI to ever complete that exchange (SPEC-319
+    §2.2) -- not because an unconfirmed call would otherwise do
+    anything: `tool_registry._wrap_route`'s own execution-layer check
+    already refuses to run one for any caller, chat included."""
     loader = ConfigLoader(_AGENTFLOW_DIR)
     loader.load()
     router_config, router_prompt = loader.router
@@ -454,7 +495,7 @@ async def _dispatch(
 
     executor = AgentExecutor(
         config=agent_config, prompt_body=prompt_body, llm=provider_client,
-        tools=tool_registry.build_tool_registry(),
+        tools=tools if tools is not None else tool_registry.build_tool_registry(),
     )
 
     context_block = _assemble_context(area, scope, scope_id, project_name)
@@ -483,6 +524,11 @@ async def _dispatch(
         "sources_dropped": dropped,
         "general_practice": general_practice,
         "tool_calls": tool_calls,
+        # CTX-319.1: the untruncated, unparsed tool-call list -- review()
+        # needs this (not the digest-truncated `tool_calls` above) to
+        # feed `_mechanical_source_refs`, which re-parses each call's own
+        # full JSON `result` itself.
+        "tool_calls_raw": tool_calls_raw,
         "provenance": {"provider": agent_config.provider, "model": agent_config.model},
     }
 
@@ -550,6 +596,78 @@ def send(
     )
     library_store.append_thread_turn(scope, scope_id, assistant_turn)
     return assistant_turn
+
+
+# CTX-319.1, SPEC-319 §2.1: a single, area-agnostic instruction --
+# per-area framing lives in each `chat_*.prompt.md`'s own new "Review
+# format" section, matching the existing "Citation format" section's
+# own per-agent-appropriate-subset convention, not a second prompt file
+# per area.
+_REVIEW_PROMPT = (
+    "Review this area for anything worth flagging -- a real risk, a gap, or a suggestion -- "
+    "using only what you're actually grounded in. Return your findings in the format described "
+    "in your own instructions. An empty list is a normal, honest result when nothing stands out."
+)
+_REVIEW_SEVERITIES = ("info", "suggestion", "warning")
+
+
+def review(
+    scope: str, scope_id: str, area: str, project_name: str | None = None,
+    secrets: dict | None = None, provider: str | None = None, model: str | None = None,
+) -> list:
+    """The real `chat.review` route body (CTX-319.1, SPEC-319 §2.1): the
+    seam `SPEC-318` §2.5 defined but did not build. Reuses `_dispatch()`
+    exactly as chat does -- same router, same per-area agent config,
+    same context assembly -- with three real differences from `send()`:
+    a fixed internal prompt instead of user text, no history (a review
+    has no turn of its own to remember, and must not see an unrelated
+    question's own framing), and a read-only-filtered tool registry
+    (`CONFIRMATION_REQUIRED_TOOLS` excluded, SPEC-319 §2.2). Never
+    touches the conversation thread at all -- a review is a flow step
+    with a typed result, not a turn (`PRODUCT-PLAN.md` §3.3), so nothing
+    here calls `append_thread_turn`."""
+    if area not in _KNOWN_AREAS:
+        raise UnknownChatAreaError(f"'{area}' is not a real chat area. Expected one of {', '.join(_KNOWN_AREAS)}.")
+    secrets = secrets or {}
+
+    read_only_tools = tool_registry.build_tool_registry(exclude=tool_registry.CONFIRMATION_REQUIRED_TOOLS)
+
+    result = asyncio.run(_dispatch(
+        area, scope, scope_id, project_name, _REVIEW_PROMPT, [], secrets, provider, model,
+        tools=read_only_tools,
+    ))
+
+    findings = []
+    for raw in _extract_findings(result["text"]):
+        severity = raw.get("severity")
+        title = raw.get("title")
+        detail = raw.get("detail")
+        if severity not in _REVIEW_SEVERITIES or not isinstance(title, str) or not title.strip() \
+                or not isinstance(detail, str) or not detail.strip():
+            # A malformed individual finding is dropped, not shown broken --
+            # the same "model output can be wrong, the daemon staying up is
+            # not the same claim as the model being right" contract
+            # _extract_self_reported already applies to a whole turn.
+            continue
+
+        self_reported = raw.get("sources")
+        if not isinstance(self_reported, list):
+            self_reported = []
+        enriched = [_enrich_source_ref(ref) for ref in self_reported]
+        resolved, _dropped = validate_source_refs(
+            _mechanical_source_refs(result["tool_calls_raw"]) + enriched
+        )
+
+        findings.append({
+            "severity": severity,
+            "title": title.strip(),
+            "detail": detail.strip(),
+            "sources": resolved,
+            "general_practice": bool(raw.get("general_practice", True)),
+            "area": area,
+        })
+
+    return findings
 
 
 # --- Promotion (CTX-206.8, SPEC-206 §2.7) ---------------------------------
