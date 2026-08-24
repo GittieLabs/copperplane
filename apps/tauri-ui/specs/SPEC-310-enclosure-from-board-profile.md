@@ -1,10 +1,10 @@
 ---
 id: SPEC-310
 title: "Enclosure from Board Profile"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-16
-last_updated: 2026-08-16
+last_updated: 2026-08-24
 target_version: v0.1.0
 location: "apps/tauri-ui/specs/SPEC-310-enclosure-from-board-profile.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
