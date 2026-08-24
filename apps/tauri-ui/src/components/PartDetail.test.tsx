@@ -73,6 +73,35 @@ vi.mock('@tauri-apps/plugin-shell', () => ({
   open: (...args: unknown[]) => openMock(...args),
 }))
 
+// CTX-318.2: AgentChat has its own dedicated test file (AgentChat.test.tsx)
+// -- stubbed here, matching ComponentDiscovery.test.tsx's own precedent
+// for PartDetail, so PartDetail's tests stay focused on PartDetail's own
+// wiring (does it mount AgentChat with the real scope/area/targets) and
+// never need to mock AgentChat's own internal chat.* IPC calls.
+vi.mock('./AgentChat', () => ({
+  AgentChat: ({
+    area,
+    scope,
+    scopeId,
+    title,
+    projectName,
+    promotionTargets,
+  }: {
+    area: string
+    scope: string
+    scopeId: string
+    title: string
+    projectName?: string
+    promotionTargets: { label: string; scope: string; id: string }[]
+  }) => (
+    <p>
+      AgentChat stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
+      {projectName && ` projectName=${projectName}`}
+      {' '}targets=[{promotionTargets.map((t) => `${t.label}:${t.scope}:${t.id}`).join(', ')}]
+    </p>
+  ),
+}))
+
 const { PartDetail } = await import('./PartDetail')
 
 const CANDIDATE = {
@@ -1313,5 +1342,39 @@ describe('PartDetail: CTX-315.4 initialPart (reopened from the Library)', () => 
     fireEvent.click(screen.getByRole('button', { name: 'Add to library…' }))
 
     await waitFor(() => screen.getByText('ESP32 Boards'))
+  })
+})
+
+describe('PartDetail: CTX-318.2 AgentChat wiring', () => {
+  const SAVED_PART = { ...SAVED_PART_NO_FOOTPRINT, design_guidance: null }
+
+  it('mounts AgentChat scoped to the real part, offering only "this part" when no project is open', async () => {
+    render(<PartDetail initialPart={SAVED_PART} />)
+
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+    const stub = screen.getByText(/AgentChat stub/)
+    expect(stub.textContent).toContain('area=components')
+    expect(stub.textContent).toContain('scope=part')
+    expect(stub.textContent).toContain('scopeId=ATtiny85')
+    expect(stub.textContent).toContain('title="Ask about this part"')
+    expect(stub.textContent).not.toContain('projectName=')
+    expect(stub.textContent).toContain('targets=[this part:part:ATtiny85]')
+  })
+
+  it('also offers "this project" when a project is open', async () => {
+    render(<PartDetail initialPart={SAVED_PART} currentProject={{ name: 'weather-pcb' }} />)
+
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+    const stub = screen.getByText(/AgentChat stub/)
+    expect(stub.textContent).toContain('projectName=weather-pcb')
+    expect(stub.textContent).toContain('targets=[this part:part:ATtiny85, this project:project:weather-pcb]')
+  })
+
+  it('does not mount AgentChat before a Part is actually saved -- there is no part_id to scope it to yet', async () => {
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
+    render(<PartDetail candidate={CANDIDATE} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
+
+    expect(screen.queryByText(/AgentChat stub/)).toBeNull()
   })
 })

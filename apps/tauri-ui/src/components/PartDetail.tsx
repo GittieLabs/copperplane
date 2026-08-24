@@ -1,5 +1,6 @@
 import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState, type CSSProperties } from 'react'
+import { AgentChat, type PromotionTarget } from './AgentChat'
 import { cacheDatasheet, type ComponentCandidate } from '../lib/components'
 import {
   attachCommunityFootprintToPart,
@@ -88,6 +89,19 @@ function initialPartToExtraction(part: SavedPart): ExtractedSchema {
 }
 function initialPartToSymbol(part: SavedPart): SavedSymbol {
   return { symbol_id: part.symbol_id, reference_prefix: '', pins: part.pins }
+}
+
+/** CTX-318.2: always offers the Part itself; additionally offers the
+ * current Project when one is open (SPEC-318 §5's "Save as note...
+ * to the Part or Project" -- a Part is global (SPEC-304), so it's
+ * always a real, valid target regardless of whether a project happens
+ * to be open right now). */
+function componentsPromotionTargets(partId: string, currentProject: Project | null | undefined): PromotionTarget[] {
+  const targets: PromotionTarget[] = [{ label: 'this part', scope: 'part', id: partId }]
+  if (currentProject) {
+    targets.push({ label: 'this project', scope: 'project', id: currentProject.name })
+  }
+  return targets
 }
 
 export function PartDetail({ candidate, initialPart, currentProject }: PartDetailProps) {
@@ -1580,6 +1594,22 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
             </>
           )}
         </div>
+      )}
+      {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area" --
+          only mounted once a real Part exists to scope it to (there's no
+          part_id before Save to Library). `currentProject` is optional
+          context enrichment, not a routing input (SPEC-318 §3's own named
+          "no project open" state, legitimate from PartDetail's own
+          `initialPart`-via-Library entry point, CTX-315.4). */}
+      {savedPart && (
+        <AgentChat
+          area="components"
+          scope="part"
+          scopeId={savedPart.part_id}
+          title="Ask about this part"
+          projectName={currentProject?.name}
+          promotionTargets={componentsPromotionTargets(savedPart.part_id, currentProject)}
+        />
       )}
       {enlargedPreview && (
         <div
