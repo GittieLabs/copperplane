@@ -25,7 +25,14 @@ import { dispatch } from './ipc'
  * own global `footprint_id` (`SavedPart`, `lib/partDetail.ts`) as
  * before -- this never creates a second Footprint record, only a
  * per-project override of which existing one applies. Same optionality
- * reasoning as `parts` above. */
+ * reasoning as `parts` above.
+ *
+ * CTX-318.5: `intent` -- SPEC-318 §2.4's free-text statement of what the
+ * user is building, injected verbatim into every agent's context as the
+ * user's stated goal, never a verified fact. The backend already
+ * validates/backfills it (`library_store.py`'s `_validate_project_intent`/
+ * `_backfill_project_intent`, `CTX-206.1`) -- `null`/absent is a normal
+ * state, not a degraded one, for every project that predates this field. */
 export interface Project {
   name: string
   schema_version?: number
@@ -34,6 +41,7 @@ export interface Project {
   export_history?: ExportHistoryEntry[]
   parts?: string[]
   footprint_overrides?: Record<string, string>
+  intent?: string | null
 }
 
 /** One real, permanent record of an actual `freecad.export_enclosure`
@@ -139,6 +147,15 @@ export async function addProjectPartReference(
   return unwrap(
     await dispatch('project.add_part_reference', { project_name: projectName, part_id: partId }),
   )
+}
+
+/** CTX-318.5: sets a project's `intent` on its own, via `project.set_intent`
+ * (`library_store.set_project_intent`, `CTX-206.1`) -- a dedicated route
+ * rather than a full `saveProject(project)` round-trip, so editing the
+ * intent from Overview can't race a stale in-memory copy of `last_results`
+ * or `export_history` into the saved record. */
+export async function setProjectIntent(projectName: string, intent: string): Promise<Project> {
+  return unwrap(await dispatch('project.set_intent', { name: projectName, intent }))
 }
 
 /** CTX-308.9: sets (or, with `footprintId: null`, clears) this
