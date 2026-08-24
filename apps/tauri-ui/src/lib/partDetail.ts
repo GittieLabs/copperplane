@@ -24,6 +24,15 @@ export interface SavedPart {
   datasheet_url: string
   symbol_id: string
   footprint_id: string | null
+  /** CTX-308.5: real, LLM-inferred package geometry -- required on every
+   * saved Part (`library_store.py`'s `PART_PROVENANCE_REQUIRED_FIELDS`),
+   * already round-tripped by the backend but never declared here until
+   * CTX-318.6 needed it to build a real `kicad.inject_component` payload
+   * (`kicad_bridge.inject_component` reads `schema["package_dimensions"]`/
+   * `schema["courtyard"]` directly). Shape not otherwise interpreted by
+   * the frontend -- passed through verbatim. */
+  package_dimensions: Record<string, number>
+  courtyard: Record<string, number>
   /** SPEC-300 §2.2's provenance record, keyed by field name. Real,
    * already returned by library.save_confirmed_part/library.save_part
    * (verified directly against library_store.py -- save_part's own

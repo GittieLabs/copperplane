@@ -27,6 +27,11 @@ const attachFootprintToProjectOverrideMock = vi.fn()
 const attachCommunityFootprintToProjectOverrideMock = vi.fn()
 const generateFootprintForProjectOverrideMock = vi.fn()
 const suggestFootprintQueryMock = vi.fn()
+const dispatchToolMock = vi.fn()
+
+vi.mock('../lib/ipc', () => ({
+  dispatchTool: (...args: unknown[]) => dispatchToolMock(...args),
+}))
 
 vi.mock('../lib/library', () => ({
   listLibraries: (...args: unknown[]) => listLibrariesMock(...args),
@@ -151,6 +156,7 @@ beforeEach(() => {
   attachCommunityFootprintToProjectOverrideMock.mockReset()
   generateFootprintForProjectOverrideMock.mockReset()
   suggestFootprintQueryMock.mockReset()
+  dispatchToolMock.mockReset()
 })
 
 const SAVED_PART_NO_FOOTPRINT = {
@@ -162,6 +168,8 @@ const SAVED_PART_NO_FOOTPRINT = {
   symbol_id: 'SOIC-8_0pin',
   footprint_id: null,
   provenance: {},
+  package_dimensions: { length_mm: 4.9, width_mm: 3.9 },
+  courtyard: { length_mm: 5.9, width_mm: 4.9 },
 }
 
 async function saveAndReachFootprintSection() {
@@ -1376,5 +1384,115 @@ describe('PartDetail: CTX-318.2 AgentChat wiring', () => {
     await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
 
     expect(screen.queryByText(/AgentChat stub/)).toBeNull()
+  })
+})
+
+/** Builds a fake JobHandle whose `result` resolves/rejects on demand --
+ * matches App.test.tsx's own established convention for the same real
+ * async job protocol (`kicad.inject_component` runs through it once
+ * dispatched/confirmed). */
+function fakeJobHandle<T>(result: Promise<T>) {
+  result.catch(() => {})
+  return { jobId: 'job_1', result, onUpdate: () => () => {}, cancel: vi.fn() }
+}
+
+describe('PartDetail: CTX-318.6 Inject into open board', () => {
+  const SAVED_PART = {
+    ...SAVED_PART_NO_FOOTPRINT,
+    design_guidance: null,
+    package_dimensions: { length_mm: 4.9, width_mm: 3.9 },
+    courtyard: { length_mm: 5.9, width_mm: 4.9 },
+  }
+  const EXPECTED_SCHEMA = {
+    part_number: 'ATtiny85',
+    package: 'SOIC-8',
+    pins: [],
+    package_dimensions: { length_mm: 4.9, width_mm: 3.9 },
+    courtyard: { length_mm: 5.9, width_mm: 4.9 },
+  }
+
+  it('is not offered before a Part is actually saved', async () => {
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
+    render(<PartDetail candidate={CANDIDATE} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
+
+    expect(screen.queryByText('Inject into board')).toBeNull()
+  })
+
+  it('a real, unconfirmed dispatch that comes back pending_confirmation shows the real confirm/cancel gate, mutating nothing yet', async () => {
+    dispatchToolMock.mockResolvedValueOnce({
+      kind: 'pending_confirmation',
+      tool: 'kicad.inject_component',
+      input: { schema: EXPECTED_SCHEMA, x_mm: 50, y_mm: 50 },
+    })
+
+    render(<PartDetail initialPart={SAVED_PART} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Inject into open board' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Inject into open board' }))
+
+    await waitFor(() => screen.getByText('This will write into the board KiCad currently has open. Confirm?'))
+    expect(dispatchToolMock).toHaveBeenLastCalledWith('kicad.inject_component', {
+      schema: EXPECTED_SCHEMA,
+      x_mm: 50,
+      y_mm: 50,
+    })
+    expect(screen.queryByText('Injected into the open board.')).toBeNull()
+  })
+
+  it('confirming re-dispatches with confirmed: true and reports success (SPEC-204/CTX-108.4)', async () => {
+    dispatchToolMock.mockResolvedValueOnce({
+      kind: 'pending_confirmation',
+      tool: 'kicad.inject_component',
+      input: { schema: EXPECTED_SCHEMA, x_mm: 50, y_mm: 50 },
+    })
+    dispatchToolMock.mockResolvedValueOnce({
+      kind: 'dispatched',
+      handle: fakeJobHandle(Promise.resolve({ part_number: 'ATtiny85', package: 'SOIC-8', pins: 8 })),
+    })
+
+    render(<PartDetail initialPart={SAVED_PART} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Inject into open board' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Inject into open board' }))
+    await waitFor(() => screen.getByText('This will write into the board KiCad currently has open. Confirm?'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }))
+
+    await waitFor(() => screen.getByText('Injected into the open board.'))
+    expect(dispatchToolMock).toHaveBeenLastCalledWith(
+      'kicad.inject_component',
+      { schema: EXPECTED_SCHEMA, x_mm: 50, y_mm: 50 },
+      true,
+    )
+  })
+
+  it('cancelling never calls the daemon again and mutates nothing', async () => {
+    dispatchToolMock.mockResolvedValueOnce({
+      kind: 'pending_confirmation',
+      tool: 'kicad.inject_component',
+      input: { schema: EXPECTED_SCHEMA, x_mm: 50, y_mm: 50 },
+    })
+
+    render(<PartDetail initialPart={SAVED_PART} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Inject into open board' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Inject into open board' }))
+    await waitFor(() => screen.getByText('This will write into the board KiCad currently has open. Confirm?'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => screen.getByText('Cancelled — board not modified.'))
+    expect(dispatchToolMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a genuine inject failure shows the real error, with a way to try again', async () => {
+    dispatchToolMock.mockRejectedValueOnce(new Error('Lost connection to KiCad mid-request. It may have been closed.'))
+
+    render(<PartDetail initialPart={SAVED_PART} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Inject into open board' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Inject into open board' }))
+
+    await waitFor(() => screen.getByText(/Lost connection to KiCad/))
+    screen.getByRole('button', { name: 'Try again' })
   })
 })

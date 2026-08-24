@@ -87,10 +87,10 @@ describe('Overview: CTX-318.5 AgentChat wiring', () => {
     await waitFor(() => expect(screen.getByText(/AgentChat stub/).textContent).toContain('scopeId=project-b:overview'))
   })
 
-  it('the old parseCommand-driven chat still coexists alongside the new AgentChat panel (SPEC-318 §2.6 defers deleting it)', async () => {
+  it('the plain llm.chat surface still coexists alongside the new AgentChat panel (CTX-318.6 only removed the generate/inject branches)', async () => {
     await renderOverview()
 
-    screen.getByPlaceholderText(/generate ATtiny85/)
+    screen.getByPlaceholderText(/ask a question about this project/)
     screen.getByText(/AgentChat stub/)
   })
 })
@@ -115,6 +115,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
 
+    await waitFor(() => screen.getByPlaceholderText(/I want to build/))
     const textarea = screen.getByPlaceholderText(/I want to build/) as HTMLTextAreaElement
     expect(textarea.value).toBe('')
   })
@@ -136,6 +137,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
     await waitFor(() => screen.getByText(/AgentChat stub/))
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => screen.getByPlaceholderText(/I want to build/))
     fireEvent.change(screen.getByPlaceholderText(/I want to build/), {
       target: { value: 'A macropad from scratch' },
     })
@@ -150,6 +152,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
     await renderOverview({ name: 'weather-pcb', intent: 'Original intent' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    await waitFor(() => screen.getByPlaceholderText(/I want to build/))
     fireEvent.change(screen.getByPlaceholderText(/I want to build/), { target: { value: 'Something else' } })
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
@@ -162,6 +165,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
     await renderOverview({ name: 'weather-pcb', intent: null })
 
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => screen.getByPlaceholderText(/I want to build/))
     fireEvent.change(screen.getByPlaceholderText(/I want to build/), { target: { value: 'A macropad' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
@@ -173,6 +177,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
     const { rerender } = render(<Overview projectName="project-a" project={{ name: 'project-a', intent: null }} />)
     await waitFor(() => screen.getByText(/AgentChat stub/))
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
+    await waitFor(() => screen.getByPlaceholderText(/I want to build/))
     fireEvent.change(screen.getByPlaceholderText(/I want to build/), { target: { value: 'Half-typed' } })
 
     rerender(<Overview projectName="project-b" project={{ name: 'project-b', intent: null }} />)
