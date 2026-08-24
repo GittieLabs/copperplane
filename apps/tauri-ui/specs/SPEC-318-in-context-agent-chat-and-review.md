@@ -1,10 +1,10 @@
 ---
 id: SPEC-318
 title: "In-Context Agent Chat, Project Intent & AI Review"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-21
-last_updated: 2026-08-21
+last_updated: 2026-08-24
 target_version: v0.3.0
 location: "apps/tauri-ui/specs/SPEC-318-in-context-agent-chat-and-review.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
