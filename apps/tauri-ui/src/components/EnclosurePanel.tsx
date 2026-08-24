@@ -15,6 +15,7 @@ import {
   type ExportParts,
 } from '../lib/enclosure'
 import { listOpenBoards, openKicad, type BoardCandidate, type ListOpenBoardsResult } from '../lib/boardAdvisor'
+import { AgentChat } from './AgentChat'
 import { EnclosureViewer } from './EnclosureViewer'
 
 /** Real, defensive path join -- avoids pulling in `@tauri-apps/api/path`
@@ -389,7 +390,8 @@ export function EnclosurePanel({
     // layout than every other tab's own max-w-4xl (CTX-305.2) -- a large
     // 3D preview is a real, direct benefit of the extra room beyond what
     // a plain text/list column needs.
-    <div className="flex w-full max-w-6xl flex-col gap-4 lg:flex-row lg:items-start">
+    <div className="flex w-full max-w-6xl flex-col gap-4">
+    <div className="flex w-full flex-col gap-4 lg:flex-row lg:items-start">
       {/* CTX-305.3: the two-column split (a fixed-width sidebar next to a
        * flex-1 viewer column) only makes sense once there's a real result
        * to show on the right -- the viewer column below is now entirely
@@ -674,6 +676,18 @@ export function EnclosurePanel({
           </>
         </div>
       )}
+    </div>
+    {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area."
+        A project-scoped chat has no single Part to offer as a promotion
+        target -- "this project" is the only real target here. */}
+    <AgentChat
+      area="enclosure"
+      scope="project"
+      scopeId={`${projectName}:enclosure`}
+      title="Ask about the enclosure"
+      projectName={projectName}
+      promotionTargets={[{ label: 'this project', scope: 'project', id: projectName }]}
+    />
     </div>
   )
 }

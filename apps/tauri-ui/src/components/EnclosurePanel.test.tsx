@@ -34,6 +34,35 @@ vi.mock('./EnclosureViewer', () => ({
   },
 }))
 
+// CTX-318.4: AgentChat has its own dedicated test file (AgentChat.test.tsx)
+// -- stubbed here, matching PartDetail.test.tsx's own precedent (CTX-318.2),
+// so EnclosurePanel's tests stay focused on its own wiring (does it mount
+// AgentChat with the real scope/area/targets) and never need to mock
+// AgentChat's own internal chat.* IPC calls.
+vi.mock('./AgentChat', () => ({
+  AgentChat: ({
+    area,
+    scope,
+    scopeId,
+    title,
+    projectName,
+    promotionTargets,
+  }: {
+    area: string
+    scope: string
+    scopeId: string
+    title: string
+    projectName?: string
+    promotionTargets: { label: string; scope: string; id: string }[]
+  }) => (
+    <p>
+      AgentChat stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
+      {projectName && ` projectName=${projectName}`}
+      {' '}targets=[{promotionTargets.map((t) => `${t.label}:${t.scope}:${t.id}`).join(', ')}]
+    </p>
+  ),
+}))
+
 const { EnclosurePanel } = await import('./EnclosurePanel')
 
 /** Real user feedback exercising the actual running app: the old
@@ -780,5 +809,29 @@ describe('EnclosurePanel: SPEC-316 menuCommand', () => {
 
     await waitFor(() => expect(listOpenBoardsMock).toHaveBeenCalled())
     expect(openKicadMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('EnclosurePanel: CTX-318.4 AgentChat wiring', () => {
+  it('mounts AgentChat scoped to the project enclosure area, offering only "this project"', async () => {
+    render(<EnclosurePanel projectName="weather-pcb" />)
+
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+    const stub = screen.getByText(/AgentChat stub/)
+    expect(stub.textContent).toContain('area=enclosure')
+    expect(stub.textContent).toContain('scope=project')
+    expect(stub.textContent).toContain('scopeId=weather-pcb:enclosure')
+    expect(stub.textContent).toContain('title="Ask about the enclosure"')
+    expect(stub.textContent).toContain('projectName=weather-pcb')
+    expect(stub.textContent).toContain('targets=[this project:project:weather-pcb]')
+  })
+
+  it('re-scopes AgentChat when the project changes', async () => {
+    const { rerender } = render(<EnclosurePanel projectName="project-a" />)
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+
+    rerender(<EnclosurePanel projectName="project-b" />)
+
+    await waitFor(() => expect(screen.getByText(/AgentChat stub/).textContent).toContain('scopeId=project-b:enclosure'))
   })
 })
