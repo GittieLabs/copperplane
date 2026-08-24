@@ -32,7 +32,6 @@ import uuid
 from datetime import datetime, timezone
 
 from agentflow import AgentExecutor, ConfigLoader, RouterEngine
-from agentflow.events import TOOL_RESULT, EventBus
 from agentflow.types import Message, Role
 
 import library_store
@@ -359,20 +358,35 @@ def _enrich_source_ref(ref) -> dict:
     return {**ref, "content_hash": content_hash} if content_hash else ref
 
 
-def _mechanical_source_refs(tool_events: list) -> list:
+def _mechanical_source_refs(tool_calls: list) -> list:
     """SPEC-206 §2.3's `datasheet_page` kind, derived mechanically from
-    real `datasheet.read_pages` `TOOL_RESULT` events -- the one
-    `SourceRef` kind that's a genuine fresh tool call within this turn,
-    not a citation of context assembled up front. Never trusts the
-    model's own account of what it read; only a real, observed tool
-    result produces one of these."""
+    real `datasheet.read_pages` tool calls -- the one `SourceRef` kind
+    that's a genuine fresh tool call within this turn, not a citation of
+    context assembled up front. Never trusts the model's own account of
+    what it read; only a real, observed tool result produces one of these.
+
+    `tool_calls` is `NodeOutput.metadata["tool_calls"]` as surfaced
+    directly by `AgentExecutor.run()` (real, upstream `agentflow>=0.10.0`
+    capability -- confirmed against the installed source; this used to
+    require subscribing an `EventBus` to `TOOL_CALLED`/`TOOL_RESULT`
+    before calling `run()`, since no earlier version surfaced tool calls
+    on the return value itself). Each entry's `result` is the tool's
+    plain JSON string return value, not a pre-parsed dict -- `tool_
+    registry._wrap_route` always returns `json.dumps(result)`, so this
+    re-parses it rather than needing a second, richer channel for the
+    same data."""
     refs = []
-    for event in tool_events:
-        if event.get("tool") != "datasheet.read_pages" or event.get("is_error"):
+    for call in tool_calls:
+        if call.get("name") != "datasheet.read_pages" or call.get("is_error"):
             continue
-        raw = event.get("raw_result") or {}
+        try:
+            raw = json.loads(call.get("result") or "")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(raw, dict):
+            continue
         content_hash = raw.get("content_hash")
-        part_id = (event.get("input") or {}).get("part_id")
+        part_id = (call.get("input") or {}).get("part_id")
         if not content_hash or not part_id:
             continue
         for page in raw.get("pages", []):
@@ -383,20 +397,6 @@ def _mechanical_source_refs(tool_events: list) -> list:
                     "page": page_number, "content_hash": content_hash,
                 })
     return refs
-
-
-class _ToolResultCollector:
-    """A minimal `agentflow.protocols.EventHandler` that accumulates
-    every real `TOOL_RESULT` payload for one `chat.send` call --
-    `AgentExecutor` never surfaces tool calls on its own return value
-    (confirmed directly against the installed `agentflow` source), so
-    this is the only way to see them."""
-
-    def __init__(self):
-        self.events = []
-
-    async def on_event(self, event_type, data):
-        self.events.append(data)
 
 
 def _history_as_messages(scope: str, scope_id: str) -> list:
@@ -431,12 +431,9 @@ async def _dispatch(
     api_key = secrets.get(f"{agent_config.provider}_api_key", "")
     provider_client = llm_providers._build_provider(agent_config.provider, api_key, agent_config.model)
 
-    collector = _ToolResultCollector()
-    events = EventBus()
-    events.on(TOOL_RESULT, collector)
     executor = AgentExecutor(
         config=agent_config, prompt_body=prompt_body, llm=provider_client,
-        tools=tool_registry.build_tool_registry(), event_bus=events,
+        tools=tool_registry.build_tool_registry(),
     )
 
     context_block = _assemble_context(area, scope, scope_id, project_name)
@@ -447,13 +444,15 @@ async def _dispatch(
     finally:
         await llm_providers._close_provider_client(provider_client)
 
+    tool_calls_raw = output.metadata.get("tool_calls", [])
+
     visible_text, self_reported, general_practice = _extract_self_reported(output.text)
     enriched = [_enrich_source_ref(ref) for ref in self_reported]
-    resolved, dropped = validate_source_refs(_mechanical_source_refs(collector.events) + enriched)
+    resolved, dropped = validate_source_refs(_mechanical_source_refs(tool_calls_raw) + enriched)
 
     tool_calls = [
-        {"name": e.get("tool"), "input": e.get("input", {}), "result_digest": (e.get("result") or "")[:200]}
-        for e in collector.events
+        {"name": tc.get("name"), "input": tc.get("input", {}), "result_digest": (tc.get("result") or "")[:200]}
+        for tc in tool_calls_raw
     ]
 
     return {
