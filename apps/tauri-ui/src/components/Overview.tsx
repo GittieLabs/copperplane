@@ -8,6 +8,7 @@ import {
   type Project,
 } from '../lib/projects'
 import { AgentChat } from './AgentChat'
+import { ReviewPanel } from './ReviewPanel'
 import { OverviewDashboard } from './OverviewDashboard'
 
 type Status = 'pending' | 'done' | 'error'
@@ -154,6 +155,17 @@ export function Overview({
           Send
         </button>
       </div>
+      {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
+          is a flow step with a typed result, not a conversational turn.
+          No Design submenu exists for Overview (SPEC-316's own menu has
+          none), so the in-area button is this area's only entry point. */}
+      <ReviewPanel
+        area="overview"
+        scope="project"
+        scopeId={`${projectName}:overview`}
+        title="Review this project"
+        projectName={projectName}
+      />
       {/* SPEC-318 §5: a second, separately-scoped chat panel -- the real
           project agent, grounded in project intent/last_results/
           export_history/referenced Parts (§2.3's Overview row), with

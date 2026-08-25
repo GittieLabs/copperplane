@@ -48,6 +48,30 @@ vi.mock('./AgentChat', () => ({
   ),
 }))
 
+// CTX-319.5: ReviewPanel has its own dedicated test file
+// (ReviewPanel.test.tsx) -- stubbed here, matching AgentChat's own
+// precedent immediately above.
+vi.mock('./ReviewPanel', () => ({
+  ReviewPanel: ({
+    area,
+    scope,
+    scopeId,
+    title,
+    projectName,
+  }: {
+    area: string
+    scope: string
+    scopeId: string
+    title: string
+    projectName?: string
+  }) => (
+    <p>
+      ReviewPanel stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
+      {projectName && ` projectName=${projectName}`}
+    </p>
+  ),
+}))
+
 const { Overview } = await import('./Overview')
 
 beforeEach(() => {
@@ -92,6 +116,28 @@ describe('Overview: CTX-318.5 AgentChat wiring', () => {
 
     screen.getByPlaceholderText(/ask a question about this project/)
     screen.getByText(/AgentChat stub/)
+  })
+})
+
+describe('Overview: CTX-319.5 ReviewPanel wiring', () => {
+  it('mounts ReviewPanel scoped to the project overview area', async () => {
+    await renderOverview()
+
+    const stub = screen.getByText(/ReviewPanel stub/)
+    expect(stub.textContent).toContain('area=overview')
+    expect(stub.textContent).toContain('scope=project')
+    expect(stub.textContent).toContain('scopeId=weather-pcb:overview')
+    expect(stub.textContent).toContain('title="Review this project"')
+    expect(stub.textContent).toContain('projectName=weather-pcb')
+  })
+
+  it('re-scopes ReviewPanel when the project changes', async () => {
+    const { rerender } = render(<Overview projectName="project-a" project={{ name: 'project-a' }} />)
+    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+
+    rerender(<Overview projectName="project-b" project={{ name: 'project-b' }} />)
+
+    await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:overview'))
   })
 })
 
