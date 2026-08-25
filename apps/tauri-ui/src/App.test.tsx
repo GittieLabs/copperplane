@@ -148,6 +148,17 @@ vi.mock('./components/AgentChat', () => ({
   ),
 }))
 
+// CTX-319.3: same real reason as the AgentChat stub immediately above --
+// SchematicAdvisor/BoardAdvisor are real and unmocked here, and now both
+// mount a real ReviewPanel too. Stubbed module-level so it (and every
+// future consumer) is covered without a fix per area, matching what
+// CTX-318.4 already confirmed about this exact stub pattern.
+vi.mock('./components/ReviewPanel', () => ({
+  ReviewPanel: ({ area, scopeId }: { area: string; scopeId: string }) => (
+    <p>ReviewPanel stub: area={area} scopeId={scopeId}</p>
+  ),
+}))
+
 const { default: App } = await import('./App')
 
 // CTX-316.2: App.tsx now calls `listLibraries()` unconditionally on every

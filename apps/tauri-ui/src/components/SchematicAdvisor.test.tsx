@@ -42,6 +42,30 @@ vi.mock('./AgentChat', () => ({
   ),
 }))
 
+// CTX-319.3: ReviewPanel has its own dedicated test file
+// (ReviewPanel.test.tsx) -- stubbed here, matching AgentChat's own
+// precedent immediately above.
+vi.mock('./ReviewPanel', () => ({
+  ReviewPanel: ({
+    area,
+    scope,
+    scopeId,
+    title,
+    projectName,
+  }: {
+    area: string
+    scope: string
+    scopeId: string
+    title: string
+    projectName?: string
+  }) => (
+    <p>
+      ReviewPanel stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
+      {projectName && ` projectName=${projectName}`}
+    </p>
+  ),
+}))
+
 const { SchematicAdvisor } = await import('./SchematicAdvisor')
 
 const CLEAN_RESULT = { violations: [], summary: '', truncated_count: 0, source_path: '/real/board.kicad_sch' }
@@ -355,5 +379,28 @@ describe('SchematicAdvisor: CTX-318.3 AgentChat wiring', () => {
     rerender(<SchematicAdvisor projectName="project-b" />)
 
     await waitFor(() => expect(screen.getByText(/AgentChat stub/).textContent).toContain('scopeId=project-b:schematic'))
+  })
+})
+
+describe('SchematicAdvisor: CTX-319.3 ReviewPanel wiring', () => {
+  it('mounts ReviewPanel scoped to the project schematic area', async () => {
+    render(<SchematicAdvisor projectName="weather-pcb" />)
+
+    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+    const stub = screen.getByText(/ReviewPanel stub/)
+    expect(stub.textContent).toContain('area=schematic')
+    expect(stub.textContent).toContain('scope=project')
+    expect(stub.textContent).toContain('scopeId=weather-pcb:schematic')
+    expect(stub.textContent).toContain('title="Review the schematic"')
+    expect(stub.textContent).toContain('projectName=weather-pcb')
+  })
+
+  it('re-scopes ReviewPanel when the project changes', async () => {
+    const { rerender } = render(<SchematicAdvisor projectName="project-a" />)
+    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+
+    rerender(<SchematicAdvisor projectName="project-b" />)
+
+    await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:schematic'))
   })
 })

@@ -10,6 +10,7 @@ import {
   type SchematicCandidate,
 } from '../lib/boardAdvisor'
 import { AgentChat } from './AgentChat'
+import { ReviewPanel } from './ReviewPanel'
 import { ViolationsList } from './ViolationsList'
 
 /** SPEC-309: real ERC via kicad-cli (CTX-309.1), explained in plain
@@ -253,6 +254,15 @@ export function SchematicAdvisor({
         {error && <p className="text-sm text-danger">{error}</p>}
         {result && <ViolationsList result={result} hideSourcePath={selectedIsListed} />}
       </div>
+      {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
+          is a flow step with a typed result, not a conversational turn. */}
+      <ReviewPanel
+        area="schematic"
+        scope="project"
+        scopeId={`${projectName}:schematic`}
+        title="Review the schematic"
+        projectName={projectName}
+      />
       {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area."
           A project-scoped chat has no single Part to offer as a promotion
           target -- "this project" is the only real target here. */}
