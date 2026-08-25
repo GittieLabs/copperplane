@@ -156,6 +156,7 @@ export function BoardAdvisor({
         scopeId={`${projectName}:pcb`}
         title="Review the board"
         projectName={projectName}
+        menuCommand={menuCommand}
       />
       {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area."
           A project-scoped chat has no single Part to offer as a promotion

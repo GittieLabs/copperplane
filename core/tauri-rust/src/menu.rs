@@ -79,6 +79,12 @@ pub const MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT: &str = "menu://design/enclosur
 pub const MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT: &str = "menu://design/enclosure/pick-pcb";
 /// Emitted when Design > Enclosure > "Generate" is clicked.
 pub const MENU_DESIGN_ENCLOSURE_GENERATE_EVENT: &str = "menu://design/enclosure/generate";
+/// Emitted when Design > Schematic > "Run Review" is clicked (SPEC-319 §2.4).
+pub const MENU_DESIGN_SCHEMATIC_RUN_REVIEW_EVENT: &str = "menu://design/schematic/run-review";
+/// Emitted when Design > PCB > "Run Review" is clicked (SPEC-319 §2.4).
+pub const MENU_DESIGN_PCB_RUN_REVIEW_EVENT: &str = "menu://design/pcb/run-review";
+/// Emitted when Design > Enclosure > "Run Review" is clicked (SPEC-319 §2.4).
+pub const MENU_DESIGN_ENCLOSURE_RUN_REVIEW_EVENT: &str = "menu://design/enclosure/run-review";
 
 const GITHUB_REPO_URL: &str = "https://github.com/GittieLabs/hardware-agent-studio";
 
@@ -96,6 +102,9 @@ const DESIGN_PCB_OPEN_KICAD_ID: &str = "design_pcb_open_kicad";
 const DESIGN_ENCLOSURE_OPEN_KICAD_ID: &str = "design_enclosure_open_kicad";
 const DESIGN_ENCLOSURE_PICK_PCB_ID: &str = "design_enclosure_pick_pcb";
 const DESIGN_ENCLOSURE_GENERATE_ID: &str = "design_enclosure_generate";
+const DESIGN_SCHEMATIC_RUN_REVIEW_ID: &str = "design_schematic_run_review";
+const DESIGN_PCB_RUN_REVIEW_ID: &str = "design_pcb_run_review";
+const DESIGN_ENCLOSURE_RUN_REVIEW_ID: &str = "design_enclosure_run_review";
 const LIBRARY_OPEN_CUSTOM_PREFIX: &str = "library_open_custom_";
 /// Must match `library_store.DEFAULT_LIBRARY_ID` in
 /// `services/python-daemon/library_store.py` -- Default already has its
@@ -194,25 +203,42 @@ fn build_menu_inner(app: &AppHandle<Wry>, custom_libraries: &[LibraryMenuEntry])
         MenuItemBuilder::with_id(DESIGN_SCHEMATIC_OPEN_KICAD_ID, "Open in KiCad").build(app)?;
     let schematic_pick_manually =
         MenuItemBuilder::with_id(DESIGN_SCHEMATIC_PICK_MANUALLY_ID, "Pick Schematic Manually…").build(app)?;
+    // SPEC-319 §2.4: Run Review reuses the same real, area-scoped agent
+    // chat.review already dispatches to -- ReviewPanel's own in-area
+    // button is the same action, this is just a second, native entry
+    // point to it.
+    let schematic_run_review =
+        MenuItemBuilder::with_id(DESIGN_SCHEMATIC_RUN_REVIEW_ID, "Run Review").build(app)?;
     let schematic_menu = SubmenuBuilder::new(app, "Schematic")
         .item(&schematic_open_kicad)
         .item(&schematic_pick_manually)
+        .separator()
+        .item(&schematic_run_review)
         .build()?;
 
     // BoardAdvisor has no manual-pick equivalent today -- a real, current
     // limitation of that component, not an oversight here.
     let pcb_open_kicad = MenuItemBuilder::with_id(DESIGN_PCB_OPEN_KICAD_ID, "Open in KiCad").build(app)?;
-    let pcb_menu = SubmenuBuilder::new(app, "PCB").item(&pcb_open_kicad).build()?;
+    let pcb_run_review = MenuItemBuilder::with_id(DESIGN_PCB_RUN_REVIEW_ID, "Run Review").build(app)?;
+    let pcb_menu = SubmenuBuilder::new(app, "PCB")
+        .item(&pcb_open_kicad)
+        .separator()
+        .item(&pcb_run_review)
+        .build()?;
 
     let enclosure_open_kicad =
         MenuItemBuilder::with_id(DESIGN_ENCLOSURE_OPEN_KICAD_ID, "Open in KiCad").build(app)?;
     let enclosure_pick_pcb =
         MenuItemBuilder::with_id(DESIGN_ENCLOSURE_PICK_PCB_ID, "Pick PCB File…").build(app)?;
     let enclosure_generate = MenuItemBuilder::with_id(DESIGN_ENCLOSURE_GENERATE_ID, "Generate").build(app)?;
+    let enclosure_run_review =
+        MenuItemBuilder::with_id(DESIGN_ENCLOSURE_RUN_REVIEW_ID, "Run Review").build(app)?;
     let enclosure_menu = SubmenuBuilder::new(app, "Enclosure")
         .item(&enclosure_open_kicad)
         .item(&enclosure_pick_pcb)
         .item(&enclosure_generate)
+        .separator()
+        .item(&enclosure_run_review)
         .build()?;
 
     // Explicit id (not read in this file yet) so CTX-316.2 can look this
@@ -335,6 +361,15 @@ pub fn handle_menu_event(app: &AppHandle<Wry>, event: MenuEvent) {
         }
         DESIGN_ENCLOSURE_GENERATE_ID => {
             let _ = app.emit(MENU_DESIGN_ENCLOSURE_GENERATE_EVENT, ());
+        }
+        DESIGN_SCHEMATIC_RUN_REVIEW_ID => {
+            let _ = app.emit(MENU_DESIGN_SCHEMATIC_RUN_REVIEW_EVENT, ());
+        }
+        DESIGN_PCB_RUN_REVIEW_ID => {
+            let _ = app.emit(MENU_DESIGN_PCB_RUN_REVIEW_EVENT, ());
+        }
+        DESIGN_ENCLOSURE_RUN_REVIEW_ID => {
+            let _ = app.emit(MENU_DESIGN_ENCLOSURE_RUN_REVIEW_EVENT, ());
         }
         id if id.starts_with(LIBRARY_OPEN_CUSTOM_PREFIX) => {
             let library_id = &id[LIBRARY_OPEN_CUSTOM_PREFIX.len()..];

@@ -262,6 +262,7 @@ export function SchematicAdvisor({
         scopeId={`${projectName}:schematic`}
         title="Review the schematic"
         projectName={projectName}
+        menuCommand={menuCommand}
       />
       {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area."
           A project-scoped chat has no single Part to offer as a promotion

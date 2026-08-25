@@ -22,6 +22,12 @@ export const MENU_DESIGN_PCB_OPEN_KICAD_EVENT = 'menu://design/pcb/open-kicad'
 export const MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT = 'menu://design/enclosure/open-kicad'
 export const MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT = 'menu://design/enclosure/pick-pcb'
 export const MENU_DESIGN_ENCLOSURE_GENERATE_EVENT = 'menu://design/enclosure/generate'
+/** CTX-319.6, SPEC-319 §2.4: Run Review, one per applicable Design
+ * submenu -- Overview/Components have no submenu at all (unchanged by
+ * this phase). */
+export const MENU_DESIGN_SCHEMATIC_RUN_REVIEW_EVENT = 'menu://design/schematic/run-review'
+export const MENU_DESIGN_PCB_RUN_REVIEW_EVENT = 'menu://design/pcb/run-review'
+export const MENU_DESIGN_ENCLOSURE_RUN_REVIEW_EVENT = 'menu://design/enclosure/run-review'
 
 /** CTX-316.2: payload is the real, dynamically-listed custom library's
  * own id -- unlike every other MENU_* event above, this one can't have

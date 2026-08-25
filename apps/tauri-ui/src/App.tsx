@@ -12,6 +12,9 @@ import {
   MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT,
   MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT,
   MENU_DESIGN_ENCLOSURE_GENERATE_EVENT,
+  MENU_DESIGN_SCHEMATIC_RUN_REVIEW_EVENT,
+  MENU_DESIGN_PCB_RUN_REVIEW_EVENT,
+  MENU_DESIGN_ENCLOSURE_RUN_REVIEW_EVENT,
   MENU_OPEN_LIBRARY_EVENT,
 } from './lib/ipc'
 import {
@@ -272,6 +275,9 @@ function App() {
     on(MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT, () => onDesignCommand('enclosure', 'open_kicad'))
     on(MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT, () => onDesignCommand('enclosure', 'pick_pcb'))
     on(MENU_DESIGN_ENCLOSURE_GENERATE_EVENT, () => onDesignCommand('enclosure', 'generate'))
+    on(MENU_DESIGN_SCHEMATIC_RUN_REVIEW_EVENT, () => onDesignCommand('schematic', 'run_review'))
+    on(MENU_DESIGN_PCB_RUN_REVIEW_EVENT, () => onDesignCommand('pcb', 'run_review'))
+    on(MENU_DESIGN_ENCLOSURE_RUN_REVIEW_EVENT, () => onDesignCommand('enclosure', 'run_review'))
 
     // CTX-316.2: the one menu event with a real payload -- a custom
     // library's own id, which can't have a compile-time const the way

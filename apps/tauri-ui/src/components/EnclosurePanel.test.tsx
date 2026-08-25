@@ -73,16 +73,19 @@ vi.mock('./ReviewPanel', () => ({
     scopeId,
     title,
     projectName,
+    menuCommand,
   }: {
     area: string
     scope: string
     scopeId: string
     title: string
     projectName?: string
+    menuCommand?: { area: string; command: string; nonce: number } | null
   }) => (
     <p>
       ReviewPanel stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
       {projectName && ` projectName=${projectName}`}
+      {menuCommand && ` menuCommand=${menuCommand.area}:${menuCommand.command}:${menuCommand.nonce}`}
     </p>
   ),
 }))
@@ -833,6 +836,19 @@ describe('EnclosurePanel: SPEC-316 menuCommand', () => {
 
     await waitFor(() => expect(listOpenBoardsMock).toHaveBeenCalled())
     expect(openKicadMock).not.toHaveBeenCalled()
+  })
+
+  it('TEST-009d (CTX-319.6): a real menuCommand is forwarded through to ReviewPanel unchanged', async () => {
+    render(
+      <EnclosurePanel
+        projectName="test-project"
+        menuCommand={{ area: 'enclosure', command: 'run_review', nonce: 4 }}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('menuCommand=enclosure:run_review:4'),
+    )
   })
 })
 
