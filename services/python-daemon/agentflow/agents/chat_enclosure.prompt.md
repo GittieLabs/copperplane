@@ -1,8 +1,7 @@
 ---
 name: chat_enclosure
 description: Scoped conversational agent for the Enclosure area -- discusses generated enclosure parameters against real board/component data, and gives advisory guidance for manual FreeCAD work this app doesn't generate (cutouts, etc.).
-provider: anthropic
-model: claude-sonnet-4-6
+model_role: fast
 temperature: 0.3
 max_tokens: 2048
 max_tool_rounds: 4

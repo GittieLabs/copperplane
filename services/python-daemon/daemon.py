@@ -239,6 +239,7 @@ def kicad_generate_component(part_number: str) -> dict:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
 
 
@@ -254,6 +255,7 @@ def component_search(query: str) -> list:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
 
 
@@ -778,6 +780,7 @@ def chat_send(scope: str, scope_id: str, area: str, message: str, project_name: 
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        config=CONFIG,
     )
 
 
@@ -791,6 +794,7 @@ def chat_review(scope: str, scope_id: str, area: str, project_name: str = None) 
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        config=CONFIG,
     )
 
 
@@ -1040,6 +1044,7 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
     library_store.save_part_connection_guidance(
         part_id,
@@ -1063,6 +1068,7 @@ def kicad_suggest_footprint_query(part_id: str) -> dict:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
 
 
@@ -1165,6 +1171,7 @@ def kicad_check_board(pcb_path: str) -> dict:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
     result["source_path"] = pcb_path
     result["status"] = "ok"
@@ -1223,6 +1230,7 @@ def kicad_check_schematic(sch_path: str) -> dict:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
     result["source_path"] = sch_path
     return result

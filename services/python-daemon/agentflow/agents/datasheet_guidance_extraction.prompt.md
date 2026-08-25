@@ -1,8 +1,7 @@
 ---
 name: datasheet_guidance_extraction
 description: Extracts cited design guidance for one category from real datasheet page excerpts
-provider: anthropic
-model: claude-sonnet-5
+model_role: reasoning
 temperature: 0.2
 max_tokens: 4096
 ---
