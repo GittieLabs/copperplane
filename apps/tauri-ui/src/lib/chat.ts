@@ -55,6 +55,23 @@ export interface ChatTurn {
 
 export type ChatScope = 'project' | 'part'
 
+/** SPEC-319 §2.3's real finding shape, mirroring `chat_agents.review()`'s
+ * own returned dict exactly -- snake_case throughout, matching every
+ * other wire-shaped interface in this file (`ChatTurn.general_practice`/
+ * `.sources_dropped`), not camelCased. `SPEC-319` §2.3 corrected `SPEC-318`
+ * §2.5's own first draft of this shape, which had no per-finding
+ * groundedness flag at all -- a review naming several findings in one
+ * call can have some cited and some not, and the UI needs to tell them
+ * apart per finding, not just for the whole result. */
+export interface ReviewFinding {
+  severity: 'info' | 'suggestion' | 'warning'
+  title: string
+  detail: string
+  sources: SourceRef[]
+  general_practice: boolean
+  area: string
+}
+
 export interface ContextSearchResult {
   body: string
   source_ref: SourceRef
@@ -131,6 +148,25 @@ export async function sendChatMessage(
     scope_id: scopeId,
     area,
     message,
+    project_name: projectName ?? null,
+  })
+  return handle.result
+}
+
+/** chat.review (CTX-319.1, SPEC-319 §2.1): the seam SPEC-318 §2.5 named
+ * but did not build. A real LLM call like chat.send, so submitJob --
+ * same shape, minus `message` (a review's own prompt is fixed
+ * internally, never user text). */
+export async function runReview(
+  scope: ChatScope,
+  scopeId: string,
+  area: string,
+  projectName?: string,
+): Promise<ReviewFinding[]> {
+  const handle = await submitJob<ReviewFinding[]>('chat.review', {
+    scope,
+    scope_id: scopeId,
+    area,
     project_name: projectName ?? null,
   })
   return handle.result

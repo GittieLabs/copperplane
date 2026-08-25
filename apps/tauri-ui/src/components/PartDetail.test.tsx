@@ -107,6 +107,31 @@ vi.mock('./AgentChat', () => ({
   ),
 }))
 
+// CTX-319.2: ReviewPanel has its own dedicated test file
+// (ReviewPanel.test.tsx) -- stubbed here, matching AgentChat's own
+// precedent immediately above, so PartDetail's tests stay focused on
+// its own wiring, not ReviewPanel's internals.
+vi.mock('./ReviewPanel', () => ({
+  ReviewPanel: ({
+    area,
+    scope,
+    scopeId,
+    title,
+    projectName,
+  }: {
+    area: string
+    scope: string
+    scopeId: string
+    title: string
+    projectName?: string
+  }) => (
+    <p>
+      ReviewPanel stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
+      {projectName && ` projectName=${projectName}`}
+    </p>
+  ),
+}))
+
 const { PartDetail } = await import('./PartDetail')
 
 const CANDIDATE = {
@@ -1384,6 +1409,37 @@ describe('PartDetail: CTX-318.2 AgentChat wiring', () => {
     await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
 
     expect(screen.queryByText(/AgentChat stub/)).toBeNull()
+  })
+})
+
+describe('PartDetail: CTX-319.2 ReviewPanel wiring', () => {
+  const SAVED_PART = { ...SAVED_PART_NO_FOOTPRINT, design_guidance: null }
+
+  it('mounts ReviewPanel scoped to the real part', async () => {
+    render(<PartDetail initialPart={SAVED_PART} />)
+
+    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+    const stub = screen.getByText(/ReviewPanel stub/)
+    expect(stub.textContent).toContain('area=components')
+    expect(stub.textContent).toContain('scope=part')
+    expect(stub.textContent).toContain('scopeId=ATtiny85')
+    expect(stub.textContent).toContain('title="Review this part"')
+    expect(stub.textContent).not.toContain('projectName=')
+  })
+
+  it('receives the real projectName when a project is open', async () => {
+    render(<PartDetail initialPart={SAVED_PART} currentProject={{ name: 'weather-pcb' }} />)
+
+    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+    expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('projectName=weather-pcb')
+  })
+
+  it('does not mount ReviewPanel before a Part is actually saved -- there is no part_id to scope it to yet', async () => {
+    extractPartDetailMock.mockResolvedValueOnce({ part_number: 'ATtiny85', package: 'SOIC-8', pins: [] })
+    render(<PartDetail candidate={CANDIDATE} />)
+    await waitFor(() => screen.getByRole('button', { name: 'Save to Library' }))
+
+    expect(screen.queryByText(/ReviewPanel stub/)).toBeNull()
   })
 })
 
