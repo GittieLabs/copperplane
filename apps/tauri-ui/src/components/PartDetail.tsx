@@ -1,6 +1,7 @@
 import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState, type CSSProperties } from 'react'
 import { AgentChat, type PromotionTarget } from './AgentChat'
+import { ReviewPanel } from './ReviewPanel'
 import { cacheDatasheet, type ComponentCandidate } from '../lib/components'
 import { dispatchTool } from '../lib/ipc'
 import {
@@ -1750,6 +1751,18 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
           context enrichment, not a routing input (SPEC-318 §3's own named
           "no project open" state, legitimate from PartDetail's own
           `initialPart`-via-Library entry point, CTX-315.4). */}
+      {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a
+          review is a flow step with a typed result, not a
+          conversational turn. */}
+      {savedPart && (
+        <ReviewPanel
+          area="components"
+          scope="part"
+          scopeId={savedPart.part_id}
+          title="Review this part"
+          projectName={currentProject?.name}
+        />
+      )}
       {savedPart && (
         <AgentChat
           area="components"
