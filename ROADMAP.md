@@ -502,7 +502,7 @@ daemon application code**; the real hazard is one layer in, where `chat_agents.p
 `component_pipeline.py` build a provider via `_build_provider()` and call `.chat()` directly, so
 anything added only to `chat()` is invisible to two of the three paths.
 
-#### [SPEC-208](services/python-daemon/specs/SPEC-208-provider-records-and-model-roles.md) — Provider Records & Model Role Resolution — 📋 Draft 2026-08-25
+#### [SPEC-208](services/python-daemon/specs/SPEC-208-provider-records-and-model-roles.md) — Provider Records & Model Role Resolution — ✅ done ([CTX-208.1](services/python-daemon/context/CTX-208.1-provider-records-and-resolver.md), [CTX-208.2](services/python-daemon/context/CTX-208.2-model-roles-across-prompt-files.md), [CTX-208.3](services/python-daemon/context/CTX-208.3-capability-preflight.md)) 2026-08-25
 *Module:* `services/python-daemon` + `core/tauri-rust` · *Depends on:* SPEC-201, SPEC-106 · *Parent:* SPEC-201
 
 Closes three couplings `SPEC-201` left behind, found by reading the code rather than from a failure
