@@ -1,10 +1,10 @@
 ---
 id: SPEC-319
 title: "AI Review"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-24
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 target_version: v0.3.0
 location: "apps/tauri-ui/specs/SPEC-319-ai-review.md"
 parent_spec: "SPEC-318-in-context-agent-chat-and-review.md"
