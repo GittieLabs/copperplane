@@ -483,6 +483,51 @@ the first of eight slices (`CTX-206.1`–`CTX-206.8`) that shipped the full stor
 and `chat.send`/`chat.promote_turn` routes SPEC-318's five per-area agents and `AgentChat` panels
 now run on.
 
+#### [SPEC-207](services/python-daemon/specs/SPEC-207-managed-provider-adapter.md) — Managed Provider Adapter — 📋 Draft 2026-08-25
+*Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-105, SPEC-106 · *Parent:* SPEC-404
+
+The daemon-side half of `SPEC-404`: a `managed` branch on the existing provider wrapper pointing
+`OpenAICompatProvider` at the gateway, plus a structured error taxonomy so "your allowance ran out",
+"your token was revoked" and "the service is down" reach the UI as distinct codes rather than one
+string.
+
+Two findings from reading the installed source rather than assuming, both of which changed the spec.
+**AgentFlow already returns token usage on every provider** — `providers/openai_compat.py`,
+`anthropic.py` and `google_genai.py` all normalise to `{input_tokens, output_tokens}`, so no
+AgentFlow change is needed; what loses it is `llm_providers.chat()` ending in `return response.text`.
+Widening that return shape is a breaking change to every caller, should land as its own context
+first, and is worth doing for the free build regardless — a project premised on provenance for every
+field currently cannot say what any AI call cost. And **no naked vendor-SDK calls exist anywhere in
+daemon application code**; the real hazard is one layer in, where `chat_agents.py` and
+`component_pipeline.py` build a provider via `_build_provider()` and call `.chat()` directly, so
+anything added only to `chat()` is invisible to two of the three paths.
+
+#### [SPEC-208](services/python-daemon/specs/SPEC-208-provider-records-and-model-roles.md) — Provider Records & Model Role Resolution — 📋 Draft 2026-08-25
+*Module:* `services/python-daemon` + `core/tauri-rust` · *Depends on:* SPEC-201, SPEC-106 · *Parent:* SPEC-201
+
+Closes three couplings `SPEC-201` left behind, found by reading the code rather than from a failure
+report. A provider is a *name* matched against a hardcoded if-chain with a hardcoded endpoint, so
+"plug in local models" means exactly one shape — Ollama, this machine, port 11434 — and an Ollama
+server on another box, LM Studio, `llama.cpp` or vLLM has no config field that could reach it. The
+Settings override is one global provider+model pair applied to every agent, so the per-agent
+differentiation the twelve `.prompt.md` files already encode is destroyed the moment anyone sets a
+model: bring-your-own-model and right-model-per-job are mutually exclusive today. And an agent's real
+requirements are undeclared, so a model that cannot tool-call returns text on round 1, the executor
+loop simply ends, and the answer arrives ungrounded with every citation dropped — no error anywhere.
+
+The design: provider *records* (`{id, kind, base_url, api_key_ref, models}`) with construction
+switching on `kind` rather than vendor name, today's five providers reseeded as editable presets;
+`.prompt.md` naming a **role** (`reasoning`/`fast`) that each record resolves to its own model; and
+`requires:` declarations checked before the first call. **`managed` stays locked** — `SPEC-207` §2.1
+rules a settable managed endpoint an exfiltration surface, and this spec honours it by construction.
+
+*Sequencing:* both this and `SPEC-207` edit the same three call sites and the same function. Landing
+this first makes `SPEC-207` smaller; landing `SPEC-207` first means writing an if-branch this spec
+then deletes. *Known gotcha, verified in the installed source:* AgentFlow's `AgentConfig` is a
+pydantic model with `extra` defaulting to `"ignore"`, so `model_role`/`requires` are parsed and
+silently dropped — the daemon needs its own small sidecar reader, and a typo in either key is
+discarded just as quietly.
+
 #### Open questions for this layer — both resolved by `SPEC-201`/`CTX-201.1`
 
 *   **Where does AgentFlow's `context/` tree live inside `services/python-daemon`?** AgentFlow
@@ -767,6 +812,34 @@ directly from a part number" fallback in Components and `SPEC-108`'s inject flow
 "Inject into open board" action on `PartDetail`. The AI Review buttons themselves remain unbuilt --
 that is this spec's own deliberate scope boundary, not debt.
 
+#### [SPEC-320](apps/tauri-ui/specs/SPEC-320-managed-account-signin-and-usage.md) — Managed Account Sign-In & Usage — 📋 Draft 2026-08-25
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-303, SPEC-300, SPEC-106 · *Parent:* SPEC-404
+
+The only part of `SPEC-404` a person touches. Managed appears in `SPEC-303`'s existing provider
+dropdown beside Anthropic/OpenAI/Google/Ollama — a peer of Ollama, not a tier above the product —
+and nowhere else: no nag banners, no upgrade badges, no upsell surface anywhere in the app. Sign-in
+is paste-a-token for v1, since an open-source binary cannot hold a client secret; PKCE with a
+loopback redirect is the named successor, revisitable once `SPEC-403` closes.
+
+The weight is in the four failure states, each selected by `SPEC-207`'s structured code and never by
+string-matching prose — the same rule `PRODUCT-PLAN.md` established for user input after
+`parseCommand` was deleted. Quota exhaustion, token revocation, an unreachable gateway and upstream
+vendor trouble each get a structured choice card offering real options, because a subscriber who
+hits the monthly ceiling and sees "LLM request failed" concludes the product is broken and leaves.
+
+#### SPEC-321 — Provider Configuration UI — 🔭 not written
+*Module:* `apps/tauri-ui` + `core/tauri-rust` · *Depends on:* SPEC-208, SPEC-303
+
+`SPEC-208` deliberately stops at the daemon and the config schema, which leaves its provider records
+unreachable by a person: `SPEC-303`'s picker writes two flat fields and its
+`KEY_BASED_PROVIDERS`/`ALL_PROVIDERS` literals are hardcoded provider lists. This spec replaces that
+picker with a real editor — add, edit and remove records, bind the two roles, and see which records
+are actually usable — plus the migration display for an install arriving with the legacy fields.
+
+*Requirement inherited from `SPEC-208` §3, not to be rediscovered:* a record pairing a vendor
+`api_key_ref` with a non-loopback `base_url` sends the user's own key to whatever host they typed.
+That combination must warn explicitly. `managed` is not editable here at all (`SPEC-207` §2.1).
+
 ### 3.4 `4xx` — Distribution & operations
 
 #### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — ✅ Completed ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md), [CTX-401.2](context/CTX-401.2-tauri-sidecar-wiring.md)) 2026-08-14
@@ -823,6 +896,53 @@ manual checklist, or containerized KiCad. Until then, "works on Windows" is an u
 the two most fragile integration points in the codebase. `SPEC-402`'s `CTX-402.5` (2026-08-17)
 shipped real Windows/Linux *builds*, still explicitly pre-release for exactly this reason — this
 spec is what would move them past that label.
+
+
+#### [SPEC-404](specs/SPEC-404-managed-hosted-access.md) — Managed Hosted Access — 📋 Draft 2026-08-25
+*Module:* repo-wide + an external gateway service · *Depends on:* SPEC-201, SPEC-106, SPEC-402
+
+An optional paid tier supplying LLM inference through a GittieLabs-operated gateway, so a user can
+install the app and use every AI feature without holding an account with a model vendor. Today's
+first run sends them out of the product for five steps — vendor account, payment method, API key —
+which is where the funnel ends for anyone who wanted to look up a part rather than become an
+LLM-API customer.
+
+**The tier sells operation, not capability, and no source is ever withheld from this repository** —
+not temporarily, not behind an early-access window. Subscribers receive earlier *builds* of source
+that is already public, through a second `SPEC-402` updater channel; anyone building from source has
+the same feature the same day. That early-access fleet is also the closest thing to a real answer
+for `SPEC-403`'s problem, which is that every live CAD test to date has run on one machine.
+
+Managed is one more entry in `SPEC-201`'s provider abstraction — a base URL and a bearer token — not
+a hosted version of the app, which would contradict `PRODUCT-PLAN.md`'s files-as-source-of-truth
+model and the local KiCad/FreeCAD process dependency. The gateway is an external system; this spec
+carries only the wire contract the client is written against.
+
+Two things it settles rather than defers. **Updates are not sold** — `SPEC-402` already ships
+auto-update free to every installed copy, so selling updates would require degrading the free build.
+And the contributor policy is **DCO, not CLA**: the cost is that the project can no longer be
+relicensed without contributor consent, which is the intended outcome, not an oversight. Vendor
+terms were verified rather than assumed (Anthropic Commercial Terms §A.1/§D.4, OpenAI Services
+Agreement §2.2/§3.1) — building an application for your own end users is expressly permitted,
+reselling account or API access is expressly prohibited, and the gateway must be funded by a paid
+API account rather than a consumer subscription.
+
+#### [SPEC-405](specs/SPEC-405-product-rename-copperplane.md) — Product Rename to Copperplane — 📋 Draft 2026-08-25
+*Module:* repo-wide (code, docs, icons) · *Depends on:* SPEC-402, SPEC-106 · *Parent:* SPEC-000
+
+Renames the product from Hardware Agent Studio to **Copperplane** everywhere a person can see it —
+window title, menu, About box, docs site, app icon — while freezing the five on-disk identity
+strings (bundle identifier, keychain service, both daemon data-directory constants, the
+`.kicad_mod` generator stamp) exactly as they are, so a `v0.1.3` user's library, keys and linked
+projects survive the update untouched. "Agent Studio" collides with Oracle, Google, Automation
+Anywhere and others; Copperplane is clean on USPTO and pulls the name out of AI-tooling vocabulary
+into the user's own — the solid ground layer of a PCB.
+
+The real hazard the spec is built around: a global find-and-replace would appear to work, keep CI
+green, and silently orphan every existing user's keys and linked projects by renaming the frozen
+identity strings along with everything else. Three identity-guard tests are the mitigation. Fully
+independent of the managed-tier work above — no shared files, no shared dependency — and can land
+on its own branch whenever a clean 75-file diff is convenient.
 
 ### 3.5 `9xx` — The framework itself
 
