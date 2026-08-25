@@ -1,8 +1,7 @@
 ---
 name: connection_guidance
 description: Per-pin connection guidance (decoupling, protection, power) for an already-identified part
-provider: anthropic
-model: claude-sonnet-4-6
+model_role: reasoning
 temperature: 0.2
 max_tokens: 3072
 ---

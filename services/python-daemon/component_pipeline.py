@@ -29,6 +29,7 @@ import os
 from agentflow import AgentExecutor, ConfigLoader, NodeOutput, WorkflowExecutor
 from agentflow.workflow.node import NodeRunner
 
+import agent_roles
 import llm_providers
 
 logger = logging.getLogger(__name__)
@@ -186,6 +187,7 @@ async def validate_component_schema(message: str, prior_outputs: dict) -> NodeOu
 
 def _build_agent_executor(
     agent_name: str, loader: ConfigLoader, secrets: dict, provider: str = None, model: str = None,
+    app_config: dict = None,
 ) -> tuple:
     """Returns (AgentExecutor, provider_client) -- the raw provider client
     is returned alongside so the caller can close it explicitly, since
@@ -216,13 +218,23 @@ def _build_agent_executor(
     provider's own default model instead, the same fallback `resolve()`
     applies when `model` is falsy -- applied explicitly here since
     `config.model` would
-    otherwise never be falsy."""
+    otherwise never be falsy.
+
+    `app_config` (CTX-208.2, SPEC-208 §2.3.2): `daemon.CONFIG` itself --
+    named `app_config` rather than `config` purely to avoid shadowing
+    this function's own long-standing local `config` (the agent's own
+    `AgentConfig`, from `loader.get_agent`). Passed straight through to
+    `llm_providers.resolve()` and nowhere else read."""
     config, prompt_body = loader.get_agent(agent_name)
+    agent_role = agent_roles.load_agent_roles(os.path.join(_AGENTFLOW_DIR, "agents")).get(agent_name, {})
     # SPEC-208 §2.6: the override-computation this used to do itself is
     # now `llm_providers.resolve()`'s job, consolidated with
-    # `chat_agents._dispatch`'s identical duplicate.
+    # `chat_agents._dispatch`'s identical duplicate. `model_role`
+    # (CTX-208.2) routes through `app_config`'s provider_roles binding
+    # when no explicit provider/model override is given.
     provider_client, resolved_provider, resolved_model = llm_providers.resolve(
         config.provider, config.model, secrets, provider=provider, model=model,
+        config=app_config, model_role=agent_role.get("model_role"),
     )
     config = config.model_copy(update={"provider": resolved_provider, "model": resolved_model})
     executor = AgentExecutor(config=config, prompt_body=prompt_body, llm=provider_client)
@@ -268,7 +280,9 @@ async def _run_agent_and_close(executor: AgentExecutor, message: str, provider_c
         await llm_providers._close_provider_client(provider_client)
 
 
-def search_components(query: str, secrets: dict = None, provider: str = None, model: str = None) -> list:
+def search_components(
+    query: str, secrets: dict = None, provider: str = None, model: str = None, app_config: dict = None,
+) -> list:
     """The component.search route (SPEC-306): a free-text query in,
     ranked candidates out -- a sibling to generate_component, not a
     branch inside it, since it's a distinct extraction shape (multiple
@@ -280,7 +294,9 @@ def search_components(query: str, secrets: dict = None, provider: str = None, mo
 
     loader = ConfigLoader(_AGENTFLOW_DIR)
     loader.load()
-    executor, provider_client = _build_agent_executor("component_search", loader, secrets, provider, model)
+    executor, provider_client = _build_agent_executor(
+        "component_search", loader, secrets, provider, model, app_config=app_config,
+    )
 
     text = asyncio.run(_run_agent_and_close(executor, query, provider_client))
     candidates = _extract_json(text)
@@ -331,6 +347,7 @@ def _validate_connection_guidance(response, pins: list) -> dict:
 
 def generate_connection_guidance(
     part_number: str, package: str, pins: list, secrets: dict = None, provider: str = None, model: str = None,
+    app_config: dict = None,
 ) -> dict:
     """The kicad.generate_connection_guidance route -- SPEC-308's third
     named concern (decoupling, protection, power), once a part and its
@@ -355,7 +372,9 @@ def generate_connection_guidance(
 
     loader = ConfigLoader(_AGENTFLOW_DIR)
     loader.load()
-    executor, provider_client = _build_agent_executor("connection_guidance", loader, secrets, provider, model)
+    executor, provider_client = _build_agent_executor(
+        "connection_guidance", loader, secrets, provider, model, app_config=app_config,
+    )
     resolved_provenance = {"provider": executor.config.provider, "model": executor.config.model}
 
     message = json.dumps({"part_number": part_number, "package": package, "pins": pins})
@@ -397,6 +416,7 @@ def _validate_footprint_query_suggestion(response) -> dict:
 
 def suggest_footprint_query(
     part_number: str, manufacturer: str, package: str, secrets: dict = None, provider: str = None, model: str = None,
+    app_config: dict = None,
 ) -> dict:
     """The kicad.suggest_footprint_query route (CTX-308.10): real user
     feedback -- a user searching for a footprint naturally tries the
@@ -413,7 +433,7 @@ def suggest_footprint_query(
     loader = ConfigLoader(_AGENTFLOW_DIR)
     loader.load()
     executor, provider_client = _build_agent_executor(
-        "footprint_query_suggestion", loader, secrets, provider, model,
+        "footprint_query_suggestion", loader, secrets, provider, model, app_config=app_config,
     )
     resolved_provenance = {"provider": executor.config.provider, "model": executor.config.model}
 
@@ -494,6 +514,7 @@ def _validate_board_advisor_response(response, violation_count: int) -> dict:
 
 def explain_violations(
     violations: list, check_type: str, secrets: dict = None, provider: str = None, model: str = None,
+    app_config: dict = None,
 ) -> dict:
     """The kicad.check_board/kicad.check_schematic routes' own real
     substance (SPEC-309): a single standalone agent call (like
@@ -523,7 +544,9 @@ def explain_violations(
 
     loader = ConfigLoader(_AGENTFLOW_DIR)
     loader.load()
-    executor, provider_client = _build_agent_executor("board_advisor", loader, secrets, provider, model)
+    executor, provider_client = _build_agent_executor(
+        "board_advisor", loader, secrets, provider, model, app_config=app_config,
+    )
 
     indexed = [{"index": i, **v} for i, v in enumerate(prioritized)]
     message = json.dumps({"check_type": check_type, "violations": indexed})
@@ -568,7 +591,9 @@ _MAX_EXTRACTION_ATTEMPTS = 2
 _JSON_PARSE_ERROR_PREFIX = "Extraction did not return valid JSON"
 
 
-def generate_component(part_number: str, secrets: dict = None, provider: str = None, model: str = None) -> dict:
+def generate_component(
+    part_number: str, secrets: dict = None, provider: str = None, model: str = None, app_config: dict = None,
+) -> dict:
     """The kicad.generate_component route (SPEC-202): runs the real
     extract -> validate DAG and returns the validated schema, or raises
     ComponentValidationError for any check failure. Synchronous, matching
@@ -590,7 +615,9 @@ def generate_component(part_number: str, secrets: dict = None, provider: str = N
 
         def runner_factory(node_id: str) -> NodeRunner:
             node = next(n for n in config.nodes if n.id == node_id)
-            executor, provider_client = _build_agent_executor(node.agent, loader, secrets, provider, model)
+            executor, provider_client = _build_agent_executor(
+                node.agent, loader, secrets, provider, model, app_config=app_config,
+            )
             provider_clients.append(provider_client)
             return NodeRunner(node, executor)
 

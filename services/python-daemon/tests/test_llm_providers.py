@@ -404,5 +404,100 @@ class TestResolve(unittest.TestCase):
             resolve("anthropic", "claude-sonnet-4-6", {}, provider="managed", config=config)
 
 
+class TestMigrateLegacyConfig(unittest.TestCase):
+    """SPEC-208 §2.5: a config.json predating SPEC-208 (llm_provider/
+    llm_model, no provider_roles) is read as binding both roles to that
+    provider, using llm_model for the reasoning role specifically."""
+
+    def test_001_none_config_binds_both_roles_to_the_built_in_default(self):
+        migrated = llm_providers.migrate_legacy_config(None)
+        self.assertEqual(
+            migrated["provider_roles"], {"reasoning": llm_providers._DEFAULT_PROVIDER, "fast": llm_providers._DEFAULT_PROVIDER}
+        )
+
+    def test_002_llm_provider_only_binds_both_roles_to_it_unchanged(self):
+        migrated = llm_providers.migrate_legacy_config({"llm_provider": "google"})
+        self.assertEqual(migrated["provider_roles"], {"reasoning": "google", "fast": "google"})
+        self.assertNotIn("providers", migrated, "no llm_model means no override record is needed")
+
+    def test_003_llm_model_overrides_only_the_reasoning_role_for_that_provider(self):
+        migrated = llm_providers.migrate_legacy_config({"llm_provider": "anthropic", "llm_model": "claude-sonnet-5-low"})
+        override = next(p for p in migrated["providers"] if p["id"] == "anthropic")
+        self.assertEqual(override["models"]["reasoning"], "claude-sonnet-5-low")
+        self.assertEqual(override["models"]["fast"], llm_providers._DEFAULT_MODELS["anthropic"], "fast keeps the preset's own default")
+
+    def test_004_an_existing_provider_roles_map_is_returned_unchanged(self):
+        config = {"llm_provider": "google", "provider_roles": {"reasoning": "anthropic", "fast": "ollama"}}
+        migrated = llm_providers.migrate_legacy_config(config)
+        self.assertEqual(migrated["provider_roles"], {"reasoning": "anthropic", "fast": "ollama"})
+
+    def test_005_never_mutates_its_input(self):
+        original = {"llm_provider": "google"}
+        llm_providers.migrate_legacy_config(original)
+        self.assertEqual(original, {"llm_provider": "google"})
+
+
+class TestResolveModelRole(unittest.TestCase):
+    """SPEC-208 §2.3.2: resolution order step 2 -- model_role, resolved
+    through config's (migrated) provider_roles map."""
+
+    def test_001_an_unconfigured_install_resolves_via_the_built_in_default_provider(self):
+        _, resolved_provider, resolved_model = resolve(
+            "anthropic", "claude-sonnet-4-6", {"anthropic_api_key": "sk-fake"}, model_role="fast", config={},
+        )
+        self.assertEqual(resolved_provider, llm_providers._DEFAULT_PROVIDER)
+        self.assertEqual(resolved_model, llm_providers._DEFAULT_MODELS[llm_providers._DEFAULT_PROVIDER])
+
+    def test_002_a_real_provider_roles_binding_is_honored_per_role(self):
+        config = {"provider_roles": {"reasoning": "anthropic", "fast": "google"}}
+        _, resolved_provider, resolved_model = resolve(
+            "anthropic", "claude-sonnet-4-6", {"google_api_key": "fake"}, model_role="fast", config=config,
+        )
+        self.assertEqual(resolved_provider, "google")
+        self.assertEqual(resolved_model, llm_providers._DEFAULT_MODELS["google"])
+
+    def test_003_a_role_bound_to_an_unknown_provider_id_is_a_real_error_not_a_silent_fallback(self):
+        config = {"provider_roles": {"reasoning": "does-not-exist", "fast": "anthropic"}}
+        with self.assertRaises(LLMProviderError):
+            resolve("anthropic", "claude-sonnet-4-6", {}, model_role="reasoning", config=config)
+
+    def test_004_a_record_with_no_model_for_the_requested_role_is_a_real_error(self):
+        config = {
+            "providers": [{"id": "custom", "kind": "openai_compat", "base_url": "http://x", "models": {"fast": "small-model"}}],
+            "provider_roles": {"reasoning": "custom", "fast": "custom"},
+        }
+        with self.assertRaises(LLMProviderError):
+            resolve("anthropic", "claude-sonnet-4-6", {}, model_role="reasoning", config=config)
+
+    def test_005_an_explicit_provider_override_wins_over_model_role(self):
+        """Resolution order step 1 beats step 2 -- a Settings-level
+        provider override applies wholesale, unaware of any role."""
+        config = {"provider_roles": {"reasoning": "anthropic", "fast": "anthropic"}}
+        _, resolved_provider, resolved_model = resolve(
+            "anthropic", "claude-sonnet-4-6", {"google_api_key": "fake"},
+            provider="google", model_role="reasoning", config=config,
+        )
+        self.assertEqual(resolved_provider, "google")
+        self.assertEqual(resolved_model, llm_providers._DEFAULT_MODELS["google"])
+
+    def test_006_llm_model_migration_reaches_a_real_reasoning_role_call(self):
+        """End-to-end: a config.json from before SPEC-208 (llm_provider +
+        llm_model set, no provider_roles) still routes a reasoning-role
+        agent to the user's own chosen model, via migration."""
+        config = {"llm_provider": "anthropic", "llm_model": "claude-sonnet-5-low"}
+        _, resolved_provider, resolved_model = resolve(
+            "anthropic", "claude-sonnet-4-6", {"anthropic_api_key": "sk-fake"}, model_role="reasoning", config=config,
+        )
+        self.assertEqual(resolved_provider, "anthropic")
+        self.assertEqual(resolved_model, "claude-sonnet-5-low")
+
+    def test_007_llm_model_migration_does_not_leak_into_the_fast_role(self):
+        config = {"llm_provider": "anthropic", "llm_model": "claude-sonnet-5-low"}
+        _, resolved_provider, resolved_model = resolve(
+            "anthropic", "claude-sonnet-4-6", {"anthropic_api_key": "sk-fake"}, model_role="fast", config=config,
+        )
+        self.assertEqual(resolved_model, llm_providers._DEFAULT_MODELS["anthropic"])
+
+
 if __name__ == '__main__':
     unittest.main()

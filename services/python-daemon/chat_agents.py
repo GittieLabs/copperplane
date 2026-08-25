@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from agentflow import AgentExecutor, ConfigLoader, RouterEngine
 from agentflow.types import Message, Role
 
+import agent_roles
 import library_store
 import llm_providers
 import tool_registry
@@ -463,7 +464,7 @@ def _history_as_messages(scope: str, scope_id: str) -> list:
 async def _dispatch(
     area: str, scope: str, scope_id: str, project_name: str | None, message: str,
     history: list, secrets: dict, provider: str | None, model: str | None,
-    tools: "tool_registry.ToolRegistry | None" = None,
+    tools: "tool_registry.ToolRegistry | None" = None, config: dict | None = None,
 ) -> dict:
     """`tools` (CTX-319.1, SPEC-319 §2.1/§2.2): defaults to the full
     registry -- `send()`'s own call site passes nothing, unchanged from
@@ -472,7 +473,12 @@ async def _dispatch(
     has no confirmation UI to ever complete that exchange (SPEC-319
     §2.2) -- not because an unconfirmed call would otherwise do
     anything: `tool_registry._wrap_route`'s own execution-layer check
-    already refuses to run one for any caller, chat included."""
+    already refuses to run one for any caller, chat included.
+
+    `config` (CTX-208.2, SPEC-208 §2.3.2): `daemon.CONFIG` itself, passed
+    through unread except by `llm_providers.resolve()` -- this module
+    still has no dependency on it beyond that one call, matching
+    `llm_providers`'s own existing rule."""
     loader = ConfigLoader(_AGENTFLOW_DIR)
     loader.load()
     router_config, router_prompt = loader.router
@@ -480,11 +486,15 @@ async def _dispatch(
     routing = await router.route("", context={"area": area})
 
     agent_config, prompt_body = loader.get_agent(routing.target)
+    agent_role = agent_roles.load_agent_roles(os.path.join(_AGENTFLOW_DIR, "agents")).get(routing.target, {})
     # SPEC-208 §2.6: the override-computation this used to do itself is
     # now `llm_providers.resolve()`'s job, consolidated with
     # `component_pipeline._build_agent_executor`'s identical duplicate.
+    # `model_role` (CTX-208.2) routes through `config`'s provider_roles
+    # binding when no explicit provider/model override is given.
     provider_client, resolved_provider, resolved_model = llm_providers.resolve(
         agent_config.provider, agent_config.model, secrets, provider=provider, model=model,
+        config=config, model_role=agent_role.get("model_role"),
     )
     agent_config = agent_config.model_copy(update={"provider": resolved_provider, "model": resolved_model})
 
@@ -551,6 +561,7 @@ def _make_turn(
 def send(
     scope: str, scope_id: str, area: str, message: str, project_name: str | None = None,
     secrets: dict | None = None, provider: str | None = None, model: str | None = None,
+    config: dict | None = None,
 ) -> dict:
     """The real `chat.send` route body (SPEC-206 §2.5): appends the
     user turn, dispatches to the routed agent with this thread's real
@@ -580,7 +591,7 @@ def send(
     library_store.append_thread_turn(scope, scope_id, user_turn)
 
     result = asyncio.run(
-        _dispatch(area, scope, scope_id, project_name, message, history, secrets, provider, model)
+        _dispatch(area, scope, scope_id, project_name, message, history, secrets, provider, model, config=config)
     )
 
     assistant_turn = _make_turn(
@@ -609,6 +620,7 @@ _REVIEW_SEVERITIES = ("info", "suggestion", "warning")
 def review(
     scope: str, scope_id: str, area: str, project_name: str | None = None,
     secrets: dict | None = None, provider: str | None = None, model: str | None = None,
+    config: dict | None = None,
 ) -> list:
     """The real `chat.review` route body (CTX-319.1, SPEC-319 §2.1): the
     seam `SPEC-318` §2.5 defined but did not build. Reuses `_dispatch()`
@@ -629,7 +641,7 @@ def review(
 
     result = asyncio.run(_dispatch(
         area, scope, scope_id, project_name, _REVIEW_PROMPT, [], secrets, provider, model,
-        tools=read_only_tools,
+        tools=read_only_tools, config=config,
     ))
 
     findings = []

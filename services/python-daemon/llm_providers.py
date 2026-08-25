@@ -215,6 +215,51 @@ def _resolve_api_key(record: "ProviderRecord", secrets: dict) -> str:
     return secrets.get(ref, "")
 
 
+def migrate_legacy_config(config: dict | None) -> dict:
+    """SPEC-208 §2.5: a `config` with `llm_provider` set and no
+    `provider_roles` is read as binding both roles to the preset with
+    that id, using `llm_model` for the `reasoning` role if it's set (the
+    `fast` role keeps that preset's own untouched default -- SPEC-208's
+    own wording draws this line specifically for `reasoning`). A `config`
+    that already has `provider_roles` set is returned unchanged -- real
+    configuration always wins over anything synthesized here. Never
+    mutates its input; returns a new dict.
+
+    This is what SPEC-208 §2.3.2 means by "the seeded records mean a
+    fresh install is fully configured": by the time `resolve()` looks at
+    `provider_roles`, it is never actually empty, even for a `config.json`
+    that predates SPEC-208 entirely (`llm_provider`/`llm_model` both
+    unset) -- that case binds both roles to `_DEFAULT_PROVIDER`, the same
+    built-in default `daemon.py`'s own pre-SPEC-208 fallback already
+    used."""
+    config = dict(config or {})
+    if config.get("provider_roles"):
+        return config
+
+    legacy_provider = config.get("llm_provider") or _DEFAULT_PROVIDER
+    legacy_model = config.get("llm_model")
+
+    config["provider_roles"] = {"reasoning": legacy_provider, "fast": legacy_provider}
+
+    if legacy_model:
+        preset = _preset_records().get(legacy_provider)
+        models = dict(preset["models"]) if preset else {}
+        models["reasoning"] = legacy_model
+        override_record: ProviderRecord = {
+            "id": legacy_provider,
+            "kind": preset["kind"] if preset else "anthropic",
+            "base_url": preset["base_url"] if preset else None,
+            "api_key_ref": preset["api_key_ref"] if preset else f"{legacy_provider}_api_key",
+            "models": models,
+            "capabilities": preset["capabilities"] if preset else {"tool_use": True, "strict_json": True},
+        }
+        providers = [p for p in (config.get("providers") or []) if p.get("id") != legacy_provider]
+        providers.append(override_record)
+        config["providers"] = providers
+
+    return config
+
+
 def resolve(
     default_provider: str,
     default_model: str,
@@ -222,6 +267,7 @@ def resolve(
     provider: str | None = None,
     model: str | None = None,
     config: dict | None = None,
+    model_role: str | None = None,
 ) -> tuple[Any, str, str]:
     """The single provider-construction entry point SPEC-208 §2.6 asks
     for, consolidating what `chat_agents._dispatch` and
@@ -229,25 +275,36 @@ def resolve(
     duplicate) themselves. Returns `(provider_client, resolved_provider,
     resolved_model)`.
 
-    `default_provider`/`default_model` are the caller's own default (an
-    agent's `.prompt.md` frontmatter, today); `provider`/`model` are an
-    explicit per-call override (SPEC-303, CTX-303.2) -- unchanged
-    precedence from before this function existed. Switching `provider`
-    without an explicit `model` does NOT keep the default provider's model
-    -- it falls back to the new provider's own default, exactly as
-    today's `_DEFAULT_MODELS.get(provider, config.model)` behaved (a
-    cross-provider model name is invalid and previously produced a
-    confusing empty-response error rather than an obvious one).
+    Resolution order (SPEC-208 §2.3.2), first hit wins:
+    1. An explicit per-call `provider`/`model` (SPEC-303, CTX-303.2) --
+       unchanged precedence from before this function existed. Switching
+       `provider` without an explicit `model` does NOT keep the old
+       provider's model -- it falls back to the new provider's own
+       default, exactly as today's `_DEFAULT_MODELS.get(provider,
+       config.model)` behaved (a cross-provider model name is invalid and
+       previously produced a confusing empty-response error).
+    2. `model_role` (CTX-208.2, from the `.prompt.md` sidecar,
+       `agent_roles.py`) resolved through `config`'s (migrated)
+       `provider_roles` map to a record, then that record's own model for
+       the role. A role bound to an unknown provider id, or a record with
+       no model for that role, is a real `LLMProviderError` -- never a
+       silent fall-through, per SPEC-208 §2.3.2's own explicit rule.
+    3. `default_provider`/`default_model` -- the caller's own default (an
+       agent's `.prompt.md` frontmatter default, or a direct caller with
+       no role concept at all)."""
+    migrated = migrate_legacy_config(config)
+    records = _resolve_provider_records(migrated)
 
-    `config` is accepted now so a hand-authored `config.json` provider
-    record is already reachable, but role-based binding
-    (`provider_roles`/`model_role`, SPEC-208 §2.3) is CTX-208.2 -- no real
-    caller threads `config` through from `daemon.CONFIG` yet in this
-    phase, matching this module's existing rule of never reaching into
-    `daemon.py`'s own global itself."""
-    records = _resolve_provider_records(config)
+    if provider:
+        resolved_provider = provider
+    elif model_role:
+        bound_id = (migrated.get("provider_roles") or {}).get(model_role)
+        if not bound_id:
+            raise LLMProviderError(f"No provider bound to model_role={model_role!r}.")
+        resolved_provider = bound_id
+    else:
+        resolved_provider = default_provider
 
-    resolved_provider = provider or default_provider
     record = records.get(resolved_provider)
     if record is None:
         raise LLMProviderError(f"Unknown LLM provider: {resolved_provider}")
@@ -256,6 +313,10 @@ def resolve(
         resolved_model = model
     elif provider:
         resolved_model = record["models"].get("reasoning") or record["models"].get("fast") or default_model
+    elif model_role:
+        resolved_model = record["models"].get(model_role)
+        if not resolved_model:
+            raise LLMProviderError(f"Provider {resolved_provider!r} has no model configured for role {model_role!r}.")
     else:
         resolved_model = default_model
 

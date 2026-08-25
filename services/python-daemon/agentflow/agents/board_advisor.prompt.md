@@ -1,8 +1,7 @@
 ---
 name: board_advisor
 description: Explains real KiCad ERC/DRC violations in plain language and suggests fixes
-provider: anthropic
-model: claude-sonnet-4-6
+model_role: reasoning
 temperature: 0.2
 max_tokens: 4096
 ---

@@ -2007,6 +2007,7 @@ class TestChatSendRoute(unittest.TestCase):
         mock_send.assert_called_once_with(
             "project", "weather-pcb:overview", "overview", "hello", project_name="weather-pcb",
             secrets={"google_api_key": "fake"}, provider="google", model="gemini-flash",
+            config=daemon.CONFIG,
         )
         self.assertEqual(result, {"turn_id": "t1", "role": "assistant", "content": "hi"})
 
@@ -2051,6 +2052,7 @@ class TestChatReviewRoute(unittest.TestCase):
         mock_review.assert_called_once_with(
             "project", "weather-pcb:overview", "overview", project_name="weather-pcb",
             secrets={"google_api_key": "fake"}, provider="google", model="gemini-flash",
+            config=daemon.CONFIG,
         )
         self.assertEqual(result, [{"severity": "info", "title": "x", "detail": "y"}])
 
