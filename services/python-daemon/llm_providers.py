@@ -15,6 +15,10 @@ themselves (from `CONFIG`, in `daemon.py`'s case) and pass them in
 explicitly, the same pattern `kicad_bridge`/`freecad_bridge` already use.
 """
 import asyncio
+import logging
+from typing import Any, TypedDict
+
+logger = logging.getLogger(__name__)
 
 
 class LLMProviderError(Exception):
@@ -62,45 +66,202 @@ _DEFAULT_MODELS = {
 _DEFAULT_PROVIDER = "anthropic"
 
 
-def _build_provider(provider: str, api_key: str, model: str | None):
-    """Constructs the AgentFlow provider class for `provider`. Raises
-    `LLMProviderError` for an unrecognized provider name -- a clean,
-    specific error rather than a KeyError/AttributeError reaching the
-    caller."""
-    if provider == "anthropic":
+# ---------------------------------------------------------------------------
+# SPEC-208: provider records replace the hardcoded if-chain above. A record
+# is `{id, kind, base_url, api_key_ref, models, capabilities}` -- `kind`
+# (not `id`) selects which AgentFlow SDK class gets constructed, so any
+# OpenAI-compatible server is expressible as a record without a code
+# change. `models` is role-keyed (`reasoning`/`fast`, SPEC-208 §2.3) --
+# CTX-208.1 seeds both roles with today's single per-provider default
+# (see `_preset_records` below) since no agent declares a role yet;
+# CTX-208.2 is what actually differentiates them per prompt file.
+# ---------------------------------------------------------------------------
+
+
+class ProviderRecord(TypedDict):
+    id: str
+    kind: str  # "anthropic" | "openai_compat" | "google"
+    base_url: str | None
+    api_key_ref: str | None  # a key name in the secrets dict, never a key
+    models: dict[str, str]  # role -> model name
+    capabilities: dict[str, bool]
+
+
+# `managed` is reserved for SPEC-207's locked, code-constructed record --
+# never accepted from config.json (SPEC-208 §2.2.3). No preset claims it
+# yet; SPEC-207 adds the real record once its gateway base URL exists.
+_RESERVED_PROVIDER_IDS = frozenset({"managed"})
+
+
+def _preset_records() -> dict[str, "ProviderRecord"]:
+    """Today's five if-chain providers, reseeded as ordinary (editable)
+    records with today's exact values -- SPEC-208 §2.2.2. Built fresh on
+    every call (a handful of small dicts) so nothing here is a shared
+    mutable global a caller could accidentally mutate across calls."""
+    return {
+        "anthropic": {
+            "id": "anthropic", "kind": "anthropic", "base_url": None,
+            "api_key_ref": "anthropic_api_key",
+            "models": {"reasoning": _DEFAULT_MODELS["anthropic"], "fast": _DEFAULT_MODELS["anthropic"]},
+            "capabilities": {"tool_use": True, "strict_json": True},
+        },
+        "google": {
+            "id": "google", "kind": "google", "base_url": None,
+            "api_key_ref": "google_api_key",
+            "models": {"reasoning": _DEFAULT_MODELS["google"], "fast": _DEFAULT_MODELS["google"]},
+            "capabilities": {"tool_use": True, "strict_json": True},
+        },
+        "openai": {
+            "id": "openai", "kind": "openai_compat", "base_url": None,
+            "api_key_ref": "openai_api_key",
+            "models": {"reasoning": _DEFAULT_MODELS["openai"], "fast": _DEFAULT_MODELS["openai"]},
+            "capabilities": {"tool_use": True, "strict_json": True},
+        },
+        "perplexity": {
+            "id": "perplexity", "kind": "openai_compat", "base_url": _PERPLEXITY_BASE_URL,
+            "api_key_ref": "perplexity_api_key",
+            "models": {"reasoning": _DEFAULT_MODELS["perplexity"], "fast": _DEFAULT_MODELS["perplexity"]},
+            "capabilities": {"tool_use": False, "strict_json": False},
+        },
+        "ollama": {
+            "id": "ollama", "kind": "openai_compat", "base_url": _OLLAMA_BASE_URL,
+            # No real key concept -- _build_provider_from_record substitutes
+            # _OLLAMA_PLACEHOLDER_API_KEY for this record specifically.
+            "api_key_ref": None,
+            "models": {"reasoning": _DEFAULT_MODELS["ollama"], "fast": _DEFAULT_MODELS["ollama"]},
+            # SPEC-208 §3: llama3.2:1b cannot reliably tool-call or hold a
+            # strict-JSON contract -- known, not yet verified-and-replaced
+            # (§2.2.2 requires a live call against a real local server,
+            # unavailable in this environment; see CTX-208.1 Plan Drift).
+            "capabilities": {"tool_use": False, "strict_json": False},
+        },
+    }
+
+
+def _build_provider_from_record(record: "ProviderRecord", api_key: str, model: str | None):
+    """The kind-based constructor SPEC-208 §2.2.1 replaces the if-chain
+    with. `_build_provider` below is now a thin, id-based lookup on top of
+    this -- the one place that still resolves a bare provider *name*
+    rather than a full record, kept only for direct callers
+    (`llm_providers.chat()`, and this module's own existing test suite)
+    that have no `ProviderRecord` to hand it."""
+    kind = record["kind"]
+    resolved_model = model or record["models"].get("reasoning") or record["models"].get("fast")
+
+    if not api_key and record["id"] == "ollama":
+        api_key = _OLLAMA_PLACEHOLDER_API_KEY
+
+    if kind == "anthropic":
         from agentflow import AnthropicProvider
 
-        return AnthropicProvider(api_key=api_key, model=model or _DEFAULT_MODELS["anthropic"])
+        return AnthropicProvider(api_key=api_key, model=resolved_model)
 
-    if provider == "google":
+    if kind == "google":
         from agentflow import GoogleGenAIProvider
 
-        return GoogleGenAIProvider(api_key=api_key, model=model or _DEFAULT_MODELS["google"])
+        return GoogleGenAIProvider(api_key=api_key, model=resolved_model)
 
-    if provider == "openai":
+    if kind == "openai_compat":
         from agentflow import OpenAICompatProvider
 
-        return OpenAICompatProvider(api_key=api_key, model=model or _DEFAULT_MODELS["openai"])
+        kwargs: dict[str, Any] = {"api_key": api_key, "model": resolved_model}
+        if record["base_url"]:
+            kwargs["base_url"] = record["base_url"]
+        return OpenAICompatProvider(**kwargs)
 
-    if provider == "perplexity":
-        from agentflow import OpenAICompatProvider
+    raise LLMProviderError(f"Unknown provider kind: {kind!r} (record id={record['id']!r})")
 
-        return OpenAICompatProvider(
-            api_key=api_key,
-            model=model or _DEFAULT_MODELS["perplexity"],
-            base_url=_PERPLEXITY_BASE_URL,
-        )
 
-    if provider == "ollama":
-        from agentflow import OpenAICompatProvider
+def _build_provider(provider: str, api_key: str, model: str | None):
+    """Constructs the AgentFlow provider class for `provider`, by id,
+    against the built-in presets only (no `config.json`-authored records
+    -- callers that need those go through `resolve()` instead). Raises
+    `LLMProviderError` for an unrecognized provider name -- a clean,
+    specific error rather than a KeyError/AttributeError reaching the
+    caller. Behavior-preserving refactor of the old if-chain (SPEC-208
+    §2.2.1): same construction, same error, same base URLs, for every
+    existing caller and this module's own pre-SPEC-208 test suite."""
+    record = _preset_records().get(provider)
+    if record is None:
+        raise LLMProviderError(f"Unknown LLM provider: {provider}")
+    return _build_provider_from_record(record, api_key, model)
 
-        return OpenAICompatProvider(
-            api_key=api_key or _OLLAMA_PLACEHOLDER_API_KEY,
-            model=model or _DEFAULT_MODELS["ollama"],
-            base_url=_OLLAMA_BASE_URL,
-        )
 
-    raise LLMProviderError(f"Unknown LLM provider: {provider}")
+def _resolve_provider_records(config: dict | None) -> dict[str, "ProviderRecord"]:
+    """Preset records, overlaid with any `config.json`-authored `providers`
+    entries (SPEC-208 §2.2.1) -- a user record can add a new id or replace
+    a preset's id outright ("editable, removable, and copyable"). An entry
+    claiming the reserved `managed` id is ignored with a logged warning,
+    never merged (SPEC-208 §2.2.3) -- `managed` is SPEC-207's own
+    code-constructed record, not yet added by this phase."""
+    records = _preset_records()
+    for entry in (config or {}).get("providers") or []:
+        record_id = entry.get("id")
+        if not record_id:
+            continue
+        if record_id in _RESERVED_PROVIDER_IDS:
+            logger.warning(
+                "config.json provider record id=%r is reserved and was ignored (not merged)", record_id
+            )
+            continue
+        records[record_id] = entry
+    return records
+
+
+def _resolve_api_key(record: "ProviderRecord", secrets: dict) -> str:
+    ref = record.get("api_key_ref")
+    if ref is None:
+        return ""
+    return secrets.get(ref, "")
+
+
+def resolve(
+    default_provider: str,
+    default_model: str,
+    secrets: dict,
+    provider: str | None = None,
+    model: str | None = None,
+    config: dict | None = None,
+) -> tuple[Any, str, str]:
+    """The single provider-construction entry point SPEC-208 §2.6 asks
+    for, consolidating what `chat_agents._dispatch` and
+    `component_pipeline._build_agent_executor` each used to compute (and
+    duplicate) themselves. Returns `(provider_client, resolved_provider,
+    resolved_model)`.
+
+    `default_provider`/`default_model` are the caller's own default (an
+    agent's `.prompt.md` frontmatter, today); `provider`/`model` are an
+    explicit per-call override (SPEC-303, CTX-303.2) -- unchanged
+    precedence from before this function existed. Switching `provider`
+    without an explicit `model` does NOT keep the default provider's model
+    -- it falls back to the new provider's own default, exactly as
+    today's `_DEFAULT_MODELS.get(provider, config.model)` behaved (a
+    cross-provider model name is invalid and previously produced a
+    confusing empty-response error rather than an obvious one).
+
+    `config` is accepted now so a hand-authored `config.json` provider
+    record is already reachable, but role-based binding
+    (`provider_roles`/`model_role`, SPEC-208 §2.3) is CTX-208.2 -- no real
+    caller threads `config` through from `daemon.CONFIG` yet in this
+    phase, matching this module's existing rule of never reaching into
+    `daemon.py`'s own global itself."""
+    records = _resolve_provider_records(config)
+
+    resolved_provider = provider or default_provider
+    record = records.get(resolved_provider)
+    if record is None:
+        raise LLMProviderError(f"Unknown LLM provider: {resolved_provider}")
+
+    if model:
+        resolved_model = model
+    elif provider:
+        resolved_model = record["models"].get("reasoning") or record["models"].get("fast") or default_model
+    else:
+        resolved_model = default_model
+
+    api_key = _resolve_api_key(record, secrets)
+    provider_client = _build_provider_from_record(record, api_key, resolved_model)
+    return provider_client, resolved_provider, resolved_model
 
 
 async def _close_provider_client(provider_client) -> None:

@@ -3,8 +3,30 @@
 //! single environment variable -- see `daemon.rs`'s `spawn_daemon` for how
 //! it's actually applied, and `secrets.rs` for the OS-keychain-backed
 //! counterpart this deliberately doesn't hold.
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
+
+/// SPEC-208 §2.2.1: a provider record, as authored in `config.json`'s new
+/// `providers` array. Rust never interprets `kind`/`models`/`capabilities`
+/// -- it carries the whole record through to the daemon exactly as it
+/// carries every other config field it doesn't read (this file's own
+/// module doc). `id: "managed"` is reserved (SPEC-208 §2.2.3) and is the
+/// daemon's own concern to reject, not this struct's -- Rust has no
+/// opinion on which ids are valid, only that the shape round-trips.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ProviderRecord {
+    pub id: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_ref: Option<String>,
+    pub models: HashMap<String, String>,
+    pub capabilities: HashMap<String, bool>,
+}
 
 /// Env var name the daemon reads its non-secret config from at startup.
 /// Must match `_DAEMON_CONFIG_ENV_VAR` in `services/python-daemon/daemon.py`.
@@ -51,6 +73,20 @@ pub struct DaemonConfig {
     /// on this struct already has.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub storage_root_override: Option<String>,
+    /// SPEC-208 §2.2: replaces the flat `llm_provider`/`llm_model` pair
+    /// above, which stay present for one release's migration read
+    /// (§2.5) rather than being removed here. `None`/absent is a normal,
+    /// pre-SPEC-208 install -- the daemon's own migration logic (not
+    /// this struct) is what synthesizes `provider_roles` from the legacy
+    /// fields when this is unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub providers: Option<Vec<ProviderRecord>>,
+    /// SPEC-208 §2.3.2: role name -> provider record id. Always the
+    /// complete current map when set, never a partial update -- the same
+    /// "always the complete current set" contract `CTX-303.1` already
+    /// established for `secrets`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_roles: Option<HashMap<String, String>>,
 }
 
 /// `AppHandle`-free core of `load_config`, directly unit-testable against
@@ -201,6 +237,47 @@ mod tests {
             output_dir: None,
             storage_root: None,
             storage_root_override: Some("/Volumes/External/has-storage".to_string()),
+            providers: None,
+            provider_roles: None,
+        };
+
+        save_config_to_dir(&base, &config).expect("save_config_to_dir should succeed");
+        let loaded = load_config_from_dir(&base);
+
+        assert_eq!(loaded, config);
+        std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
+    }
+
+    #[test]
+    fn save_config_to_dir_and_load_config_from_dir_round_trip_provider_records() {
+        // SPEC-208 §2.2.1/§2.5: Rust never interprets `providers`/
+        // `provider_roles` -- this proves only that the shape survives a
+        // real write/read cycle unchanged, same discipline as the
+        // pre-SPEC-208 round-trip test above.
+        let base = std::env::temp_dir().join(format!("ctx-208.1-provider-records-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        let mut models = HashMap::new();
+        models.insert("reasoning".to_string(), "qwen2.5:32b".to_string());
+        models.insert("fast".to_string(), "qwen2.5:7b".to_string());
+        let mut capabilities = HashMap::new();
+        capabilities.insert("tool_use".to_string(), true);
+        capabilities.insert("strict_json".to_string(), true);
+        let mut provider_roles = HashMap::new();
+        provider_roles.insert("reasoning".to_string(), "workshop-ollama".to_string());
+        provider_roles.insert("fast".to_string(), "workshop-ollama".to_string());
+
+        let config = DaemonConfig {
+            providers: Some(vec![ProviderRecord {
+                id: "workshop-ollama".to_string(),
+                kind: "openai_compat".to_string(),
+                base_url: Some("http://nuc.local:11434/v1".to_string()),
+                api_key_ref: None,
+                models,
+                capabilities,
+            }]),
+            provider_roles: Some(provider_roles),
+            ..Default::default()
         };
 
         save_config_to_dir(&base, &config).expect("save_config_to_dir should succeed");
@@ -230,6 +307,8 @@ mod tests {
             output_dir: Some("/app/data/generated".to_string()),
             storage_root: None,
             storage_root_override: None,
+            providers: None,
+            provider_roles: None,
         };
 
         let env = build_daemon_env(&config);
