@@ -226,8 +226,14 @@ class TestRealLLMChatJob(unittest.TestCase):
 
         self.assertIsNotNone(terminal_notification, "llm.chat job never reached a terminal state within 30s")
         self.assertEqual(terminal_notification["method"], "job.completed")
-        self.assertIsInstance(terminal_notification["params"]["result"], str)
-        self.assertGreater(len(terminal_notification["params"]["result"].strip()), 0)
+        result = terminal_notification["params"]["result"]
+        # CTX-207.1 (SPEC-207 §2.2): the job result is now
+        # {"text", "usage", "model"}, not a bare string.
+        self.assertIsInstance(result["text"], str)
+        self.assertGreater(len(result["text"].strip()), 0)
+        self.assertIsNotNone(result["usage"], "a real call must report real usage")
+        self.assertGreater(result["usage"]["input_tokens"], 0)
+        self.assertGreater(result["usage"]["output_tokens"], 0)
 
     def test_002_llm_chat_history_dispatched_through_handle_request_actually_uses_prior_context(self):
         """TEST-006 (CTX-302.1): llm.chat's new `history` parameter,
@@ -299,7 +305,7 @@ class TestRealLLMChatJob(unittest.TestCase):
 
         self.assertIsNotNone(terminal_notification, "llm.chat job never reached a terminal state within 30s")
         self.assertEqual(terminal_notification["method"], "job.completed")
-        self.assertIn("42", terminal_notification["params"]["result"])
+        self.assertIn("42", terminal_notification["params"]["result"]["text"])
 
 
 class TestRealComponentGenerationJob(unittest.TestCase):

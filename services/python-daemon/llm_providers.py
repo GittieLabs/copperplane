@@ -402,6 +402,22 @@ async def _chat_and_close(provider_client, messages, system: str):
         await _close_provider_client(provider_client)
 
 
+def _resolved_model_for(provider: str, model: str | None) -> str | None:
+    """The model `_build_provider`/`_build_provider_from_record` would
+    actually construct the provider with, given an explicit `model`
+    override or none -- computed independently rather than returned by
+    `_build_provider` itself, so `chat()`'s new `model` field in its
+    return dict (SPEC-207 §2.2) doesn't require changing `_build_provider`'s
+    existing, separately-tested return contract (a bare provider client,
+    asserted directly by `TestBuildProvider`)."""
+    if model:
+        return model
+    record = _preset_records().get(provider)
+    if record is None:
+        return None
+    return record["models"].get("reasoning") or record["models"].get("fast")
+
+
 def chat(
     prompt: str,
     provider: str,
@@ -409,8 +425,25 @@ def chat(
     model: str | None = None,
     system: str = "",
     history: list[dict] | None = None,
-) -> str:
-    """Sends one prompt to `provider` and returns its text response.
+) -> dict:
+    """Sends one prompt to `provider` and returns `{"text": str, "usage":
+    {"input_tokens": int, "output_tokens": int} | None, "model": str |
+    None}` (SPEC-207 §2.2) -- a breaking change from the bare `str` this
+    returned before, landed as its own context ahead of SPEC-207's
+    managed branch per that spec's own explicit sequencing.
+
+    **AgentFlow already reports token usage on every provider** --
+    verified directly against the installed source: `providers/
+    anthropic.py`, `openai_compat.py`, and `google_genai.py` all
+    normalise their own vendor response into the same
+    `AgentResponse.usage = {"input_tokens": int, "output_tokens": int}`
+    shape (Google's raw response carries a third `thinking_tokens` key,
+    dropped here for a return shape that doesn't vary by provider). What
+    was missing was never AgentFlow's own reporting -- it was this
+    function discarding `response.usage`/`response` entirely and
+    returning only `.text`. `usage` is `None` only if a provider reports
+    an empty usage dict (observed: Google, when `response.usage_metadata`
+    itself is absent), never a fabricated `{0, 0}`.
 
     `history` (SPEC-302), each entry `{"role": "user"|"assistant", "content": str}`, is prepended
     to `prompt` as prior turns in the same conversation -- the raw provider's own `chat(messages:
@@ -444,4 +477,15 @@ def chat(
     except Exception as e:
         raise LLMProviderError(f"'{provider}' chat call failed: {e}") from e
 
-    return response.text
+    usage = None
+    if response.usage:
+        usage = {
+            "input_tokens": response.usage.get("input_tokens", 0),
+            "output_tokens": response.usage.get("output_tokens", 0),
+        }
+
+    return {
+        "text": response.text,
+        "usage": usage,
+        "model": _resolved_model_for(provider, model),
+    }

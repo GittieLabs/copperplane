@@ -111,6 +111,25 @@ describe('Overview: CTX-318.5 AgentChat wiring', () => {
     await waitFor(() => expect(screen.getByText(/AgentChat stub/).textContent).toContain('scopeId=project-b:overview'))
   })
 
+  it('CTX-207.1: renders the real reply text out of llm.chat\'s {text, usage, model} result, not the whole object', async () => {
+    submitJobMock.mockResolvedValue({
+      result: Promise.resolve({
+        text: 'Sure, here is an answer.',
+        usage: { input_tokens: 12, output_tokens: 6 },
+        model: 'claude-sonnet-5',
+      }),
+    })
+    await renderOverview()
+
+    fireEvent.change(screen.getByPlaceholderText(/ask a question about this project/), {
+      target: { value: 'what should I do next?' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => screen.getByText('Sure, here is an answer.'))
+    expect(screen.queryByText(/\[object Object\]/)).toBeNull()
+  })
+
   it('the plain llm.chat surface still coexists alongside the new AgentChat panel (CTX-318.6 only removed the generate/inject branches)', async () => {
     await renderOverview()
 

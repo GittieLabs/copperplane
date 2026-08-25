@@ -882,7 +882,7 @@ def get_daemon_capabilities() -> dict:
 
 def llm_chat(
     prompt: str, provider: str = None, model: str = None, system: str = "", history: list = None
-) -> str:
+) -> dict:
     """The llm.chat route (SPEC-201): resolves the configured provider/
     model from CONFIG (SPEC-106's daemon.configure/env-config handshake)
     and the matching secret, then delegates to llm_providers.chat.
@@ -897,7 +897,13 @@ def llm_chat(
     explicit `provider` nor CONFIG["llm_provider"] is set (SPEC-303's
     settings UI, which would let a human choose, doesn't exist yet --
     found by actually running the real chat surface against a real,
-    never-configured install, CTX-302.1 Plan Drift)."""
+    never-configured install, CTX-302.1 Plan Drift).
+
+    CTX-207.1 (SPEC-207 §2.2): returns `llm_providers.chat`'s own real
+    `{"text", "usage", "model"}` dict as the job result, not just a bare
+    string -- the free build's first real per-call token accounting.
+    `Overview.tsx`'s `llm.chat` call site is this route's only real
+    frontend consumer and was updated alongside this change."""
     provider_name = provider or CONFIG.get("llm_provider") or llm_providers._DEFAULT_PROVIDER
 
     model_name = model or CONFIG.get("llm_model")
