@@ -2,6 +2,7 @@
 name: chat_components
 description: Scoped conversational agent for the Components area -- answers questions about one selected Part, grounded in its stored guidance, connection guidance, and cached datasheet.
 model_role: fast
+requires: [tool_use]
 temperature: 0.3
 max_tokens: 2048
 max_tool_rounds: 4

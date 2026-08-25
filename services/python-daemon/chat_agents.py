@@ -495,6 +495,7 @@ async def _dispatch(
     provider_client, resolved_provider, resolved_model = llm_providers.resolve(
         agent_config.provider, agent_config.model, secrets, provider=provider, model=model,
         config=config, model_role=agent_role.get("model_role"),
+        agent_name=routing.target, requires=agent_role.get("requires"),
     )
     agent_config = agent_config.model_copy(update={"provider": resolved_provider, "model": resolved_model})
 

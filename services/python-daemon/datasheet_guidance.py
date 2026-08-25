@@ -147,6 +147,7 @@ def _make_validate_handler(pages_by_number: dict, category: str, page_numbers: l
 async def _run_category_workflow(
     category: str, page_numbers: list, pages_by_number: dict,
     loader: ConfigLoader, secrets: dict, provider: str, model: str, provider_clients: list,
+    app_config: dict = None,
 ) -> list:
     """Runs the real `extract -> validate` DAG for one real category and
     returns its real, citation-valid guidance items. `provider_clients`
@@ -158,7 +159,9 @@ async def _run_category_workflow(
 
     def runner_factory(node_id: str) -> NodeRunner:
         node = next(n for n in config.nodes if n.id == node_id)
-        executor, provider_client = _build_agent_executor(node.agent, loader, secrets, provider, model)
+        executor, provider_client = _build_agent_executor(
+            node.agent, loader, secrets, provider, model, app_config=app_config,
+        )
         provider_clients.append(provider_client)
         return NodeRunner(node, executor)
 
@@ -180,6 +183,7 @@ async def _run_category_workflow(
 async def _run_synthesis_workflow(
     category: str, items: list,
     loader: ConfigLoader, secrets: dict, provider: str, model: str, provider_clients: list,
+    app_config: dict = None,
 ) -> str:
     """Runs the real, single-node `datasheet_guidance_synthesis` workflow
     (SPEC-205 §2.1.1) over one category's already-validated items,
@@ -192,7 +196,9 @@ async def _run_synthesis_workflow(
 
     def runner_factory(node_id: str) -> NodeRunner:
         node = next(n for n in config.nodes if n.id == node_id)
-        executor, provider_client = _build_agent_executor(node.agent, loader, secrets, provider, model)
+        executor, provider_client = _build_agent_executor(
+            node.agent, loader, secrets, provider, model, app_config=app_config,
+        )
         provider_clients.append(provider_client)
         return NodeRunner(node, executor)
 
@@ -210,6 +216,7 @@ async def _run_synthesis_workflow(
 async def _run_all_categories_and_close(
     categories_to_run: dict, pages_by_number: dict,
     loader: ConfigLoader, secrets: dict, provider: str, model: str, cancel_event=None,
+    app_config: dict = None,
 ) -> tuple:
     """Runs every real category with candidate pages sequentially (not
     concurrently -- a real, deliberate simplification for this context;
@@ -246,10 +253,13 @@ async def _run_all_categories_and_close(
                 break
             items = await _run_category_workflow(
                 category, page_numbers, pages_by_number, loader, secrets, provider, model, provider_clients,
+                app_config=app_config,
             )
             results[category] = items
             summaries[category] = (
-                await _run_synthesis_workflow(category, items, loader, secrets, provider, model, provider_clients)
+                await _run_synthesis_workflow(
+                    category, items, loader, secrets, provider, model, provider_clients, app_config=app_config,
+                )
                 if items else None
             )
         return results, summaries
@@ -260,7 +270,7 @@ async def _run_all_categories_and_close(
 
 def generate_datasheet_guidance(
     pdf_path: str, categories: list = None, secrets: dict = None, provider: str = None, model: str = None,
-    cancel_event=None,
+    cancel_event=None, app_config: dict = None,
 ) -> dict:
     """The real, top-level entry point this context ships: a real
     datasheet PDF path in, real cited guidance out, grouped by category --
@@ -298,6 +308,7 @@ def generate_datasheet_guidance(
         run_results, run_summaries = asyncio.run(
             _run_all_categories_and_close(
                 categories_to_run, pages_by_number, loader, secrets, provider, model, cancel_event,
+                app_config=app_config,
             )
         )
         results.update(run_results)

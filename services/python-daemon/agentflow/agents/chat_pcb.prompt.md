@@ -2,6 +2,7 @@
 name: chat_pcb
 description: Scoped conversational agent for the PCB area -- explains DRC findings, discusses resolution strategies, and answers datasheet-grounded layout/thermal/clearance questions for known parts in this project.
 model_role: fast
+requires: [tool_use]
 temperature: 0.3
 max_tokens: 2048
 max_tool_rounds: 4
