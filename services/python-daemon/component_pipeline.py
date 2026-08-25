@@ -203,7 +203,9 @@ def _build_agent_executor(
     fresh install with nothing configured in Settings yet behaves exactly
     as before (CTX-303.1 Plan Drift Deviation 2 -- this used to always run
     the extraction agent's own hardcoded provider, ignoring Settings
-    entirely).
+    entirely). The override computation itself is `llm_providers.resolve()`
+    (SPEC-208 §2.6), consolidated with `chat_agents._dispatch`'s identical
+    duplicate rather than kept as two copies.
 
     Switching `provider` without an explicit `model` does NOT keep the
     prompt file's own model default -- that default is provider-specific
@@ -211,23 +213,18 @@ def _build_agent_executor(
     provider's API, which a real call against Google proved directly:
     an empty response, surfaced as a confusing JSON-parse error rather
     than an obviously-wrong-model error. Falls back to that new
-    provider's own default model instead, the same fallback
-    `llm_providers._build_provider` already applies when `model` is
-    falsy -- applied explicitly here since `config.model` would
+    provider's own default model instead, the same fallback `resolve()`
+    applies when `model` is falsy -- applied explicitly here since
+    `config.model` would
     otherwise never be falsy."""
     config, prompt_body = loader.get_agent(agent_name)
-    overrides = {}
-    if provider:
-        overrides["provider"] = provider
-    if model:
-        overrides["model"] = model
-    elif provider:
-        overrides["model"] = llm_providers._DEFAULT_MODELS.get(provider, config.model)
-    if overrides:
-        config = config.model_copy(update=overrides)
-
-    api_key = secrets.get(f"{config.provider}_api_key", "")
-    provider_client = llm_providers._build_provider(config.provider, api_key, config.model)
+    # SPEC-208 §2.6: the override-computation this used to do itself is
+    # now `llm_providers.resolve()`'s job, consolidated with
+    # `chat_agents._dispatch`'s identical duplicate.
+    provider_client, resolved_provider, resolved_model = llm_providers.resolve(
+        config.provider, config.model, secrets, provider=provider, model=model,
+    )
+    config = config.model_copy(update={"provider": resolved_provider, "model": resolved_model})
     executor = AgentExecutor(config=config, prompt_body=prompt_body, llm=provider_client)
     return executor, provider_client
 

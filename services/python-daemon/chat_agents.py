@@ -480,18 +480,13 @@ async def _dispatch(
     routing = await router.route("", context={"area": area})
 
     agent_config, prompt_body = loader.get_agent(routing.target)
-    overrides = {}
-    if provider:
-        overrides["provider"] = provider
-    if model:
-        overrides["model"] = model
-    elif provider:
-        overrides["model"] = llm_providers._DEFAULT_MODELS.get(provider, agent_config.model)
-    if overrides:
-        agent_config = agent_config.model_copy(update=overrides)
-
-    api_key = secrets.get(f"{agent_config.provider}_api_key", "")
-    provider_client = llm_providers._build_provider(agent_config.provider, api_key, agent_config.model)
+    # SPEC-208 §2.6: the override-computation this used to do itself is
+    # now `llm_providers.resolve()`'s job, consolidated with
+    # `component_pipeline._build_agent_executor`'s identical duplicate.
+    provider_client, resolved_provider, resolved_model = llm_providers.resolve(
+        agent_config.provider, agent_config.model, secrets, provider=provider, model=model,
+    )
+    agent_config = agent_config.model_copy(update={"provider": resolved_provider, "model": resolved_model})
 
     executor = AgentExecutor(
         config=agent_config, prompt_body=prompt_body, llm=provider_client,
