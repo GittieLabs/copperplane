@@ -40,6 +40,9 @@ vi.mock('./lib/ipc', () => ({
   MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT: 'menu://design/enclosure/open-kicad',
   MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT: 'menu://design/enclosure/pick-pcb',
   MENU_DESIGN_ENCLOSURE_GENERATE_EVENT: 'menu://design/enclosure/generate',
+  MENU_DESIGN_SCHEMATIC_RUN_REVIEW_EVENT: 'menu://design/schematic/run-review',
+  MENU_DESIGN_PCB_RUN_REVIEW_EVENT: 'menu://design/pcb/run-review',
+  MENU_DESIGN_ENCLOSURE_RUN_REVIEW_EVENT: 'menu://design/enclosure/run-review',
   MENU_OPEN_LIBRARY_EVENT: 'menu://open-library',
 }))
 
@@ -154,8 +157,19 @@ vi.mock('./components/AgentChat', () => ({
 // future consumer) is covered without a fix per area, matching what
 // CTX-318.4 already confirmed about this exact stub pattern.
 vi.mock('./components/ReviewPanel', () => ({
-  ReviewPanel: ({ area, scopeId }: { area: string; scopeId: string }) => (
-    <p>ReviewPanel stub: area={area} scopeId={scopeId}</p>
+  ReviewPanel: ({
+    area,
+    scopeId,
+    menuCommand,
+  }: {
+    area: string
+    scopeId: string
+    menuCommand?: { area: string; command: string; nonce: number } | null
+  }) => (
+    <p>
+      ReviewPanel stub: area={area} scopeId={scopeId}
+      {menuCommand && ` menuCommand=${menuCommand.area}:${menuCommand.command}:${menuCommand.nonce}`}
+    </p>
   ),
 }))
 
@@ -642,6 +656,24 @@ describe('App: Enclosure tab persists across area switches', () => {
 
     await waitFor(() => expect(screen.getByTestId('pcb-area').className).not.toContain('hidden'))
     await waitFor(() => expect(openKicadMock).toHaveBeenCalled())
+  })
+
+  it('CTX-319.6: a Design > PCB > Run Review menu event switches to PCB and forwards the real menuCommand to ReviewPanel', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
+    expect(screen.getByTestId('pcb-area').className).toContain('hidden')
+
+    const [, menuHandler] = listenMock.mock.calls.findLast(
+      ([event]) => event === 'menu://design/pcb/run-review',
+    )!
+    act(() => menuHandler())
+
+    await waitFor(() => expect(screen.getByTestId('pcb-area').className).not.toContain('hidden'))
+    await waitFor(() =>
+      expect(within(screen.getByTestId('pcb-area')).getByText(/ReviewPanel stub/).textContent).toContain(
+        'menuCommand=pcb:run_review:0',
+      ),
+    )
   })
 
   it('CTX-305.4: every area wrapper stretches full width when active, not just visible', async () => {

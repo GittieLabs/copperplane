@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Area } from '../lib/areas'
+import type { Area, MenuCommand } from '../lib/areas'
 import { runReview, type ChatScope, type ReviewFinding, type SourceRef } from '../lib/chat'
 import { isOpenableSource, openSource, sourceChipLabel } from '../lib/sourceRefs'
 
@@ -29,9 +29,14 @@ export interface ReviewPanelProps {
   scopeId: string
   title: string
   projectName?: string
+  /** SPEC-319 §2.4/CTX-319.6: a Design > <Area> > "Run Review" menu
+   * click -- only Schematic/PCB/Enclosure have a real Design submenu at
+   * all (SPEC-316's own menu), so this is `undefined` for Overview and
+   * Components; the in-area button is their only real entry point. */
+  menuCommand?: MenuCommand | null
 }
 
-export function ReviewPanel({ area, scope, scopeId, title, projectName }: ReviewPanelProps) {
+export function ReviewPanel({ area, scope, scopeId, title, projectName, menuCommand }: ReviewPanelProps) {
   const [findings, setFindings] = useState<ReviewFinding[] | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -48,6 +53,15 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName }: Review
     setError(null)
     setOpenSourceError(null)
   }, [scope, scopeId])
+
+  // SPEC-316: a Design > <Area> > "Run Review" menu click -- the same
+  // real handler the in-area button already calls, matching every other
+  // area component's own established menuCommand convention exactly.
+  useEffect(() => {
+    if (menuCommand?.area !== area) return
+    if (menuCommand.command === 'run_review') void handleRunReview()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuCommand?.nonce])
 
   async function handleRunReview() {
     setRunning(true)

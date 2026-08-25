@@ -50,16 +50,19 @@ vi.mock('./ReviewPanel', () => ({
     scopeId,
     title,
     projectName,
+    menuCommand,
   }: {
     area: string
     scope: string
     scopeId: string
     title: string
     projectName?: string
+    menuCommand?: { area: string; command: string; nonce: number } | null
   }) => (
     <p>
       ReviewPanel stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
       {projectName && ` projectName=${projectName}`}
+      {menuCommand && ` menuCommand=${menuCommand.area}:${menuCommand.command}:${menuCommand.nonce}`}
     </p>
   ),
 }))
@@ -344,6 +347,14 @@ describe('BoardAdvisor: SPEC-316 menuCommand', () => {
 
     await waitFor(() => expect(listOpenBoardsMock).toHaveBeenCalled())
     expect(openKicadMock).not.toHaveBeenCalled()
+  })
+
+  it('TEST-008b (CTX-319.6): a real menuCommand is forwarded through to ReviewPanel unchanged', async () => {
+    render(<BoardAdvisor projectName="test-project" menuCommand={{ area: 'pcb', command: 'run_review', nonce: 2 }} />)
+
+    await waitFor(() =>
+      expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('menuCommand=pcb:run_review:2'),
+    )
   })
 })
 

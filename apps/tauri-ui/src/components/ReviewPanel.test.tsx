@@ -148,3 +148,61 @@ describe('ReviewPanel', () => {
     await waitFor(() => expect(openSourceMock).toHaveBeenCalledWith({ kind: 'datasheet_page', part_id: 'ATtiny85', page: 4 }))
   })
 })
+
+describe('ReviewPanel: CTX-319.6 menuCommand wiring', () => {
+  it('TEST-009: a matching run_review menuCommand runs the real review, same as clicking the button', async () => {
+    runReviewMock.mockResolvedValueOnce([])
+
+    render(
+      <ReviewPanel
+        area="schematic"
+        scope="project"
+        scopeId="weather-pcb:schematic"
+        title="Review the schematic"
+        menuCommand={{ area: 'schematic', command: 'run_review', nonce: 0 }}
+      />,
+    )
+
+    await waitFor(() => expect(runReviewMock).toHaveBeenCalledWith('project', 'weather-pcb:schematic', 'schematic', undefined))
+  })
+
+  it('TEST-010: a menuCommand for a different area is ignored', async () => {
+    render(
+      <ReviewPanel
+        area="schematic"
+        scope="project"
+        scopeId="weather-pcb:schematic"
+        title="Review the schematic"
+        menuCommand={{ area: 'pcb', command: 'run_review', nonce: 0 }}
+      />,
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(runReviewMock).not.toHaveBeenCalled()
+  })
+
+  it('TEST-011: the same command fired twice (nonce bumped) re-triggers the review both times', async () => {
+    runReviewMock.mockResolvedValue([])
+    const { rerender } = render(
+      <ReviewPanel
+        area="pcb"
+        scope="project"
+        scopeId="weather-pcb:pcb"
+        title="Review the board"
+        menuCommand={{ area: 'pcb', command: 'run_review', nonce: 0 }}
+      />,
+    )
+    await waitFor(() => expect(runReviewMock).toHaveBeenCalledTimes(1))
+
+    rerender(
+      <ReviewPanel
+        area="pcb"
+        scope="project"
+        scopeId="weather-pcb:pcb"
+        title="Review the board"
+        menuCommand={{ area: 'pcb', command: 'run_review', nonce: 1 }}
+      />,
+    )
+    await waitFor(() => expect(runReviewMock).toHaveBeenCalledTimes(2))
+  })
+})
