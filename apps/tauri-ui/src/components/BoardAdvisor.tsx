@@ -9,6 +9,7 @@ import {
   type ListOpenBoardsResult,
 } from '../lib/boardAdvisor'
 import { AgentChat } from './AgentChat'
+import { ReviewPanel } from './ReviewPanel'
 import { ViolationsList } from './ViolationsList'
 
 /** SPEC-309: real DRC via kicad-cli (CTX-309.1), explained in plain
@@ -146,6 +147,15 @@ export function BoardAdvisor({
         checkResult={boardCheckResult}
         checkError={boardCheckError}
         onCheckBoard={(candidate) => void handleCheckBoard(candidate)}
+      />
+      {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
+          is a flow step with a typed result, not a conversational turn. */}
+      <ReviewPanel
+        area="pcb"
+        scope="project"
+        scopeId={`${projectName}:pcb`}
+        title="Review the board"
+        projectName={projectName}
       />
       {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area."
           A project-scoped chat has no single Part to offer as a promotion

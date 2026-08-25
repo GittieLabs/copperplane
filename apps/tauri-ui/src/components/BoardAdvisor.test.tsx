@@ -40,6 +40,30 @@ vi.mock('./AgentChat', () => ({
   ),
 }))
 
+// CTX-319.3: ReviewPanel has its own dedicated test file
+// (ReviewPanel.test.tsx) -- stubbed here, matching AgentChat's own
+// precedent immediately above.
+vi.mock('./ReviewPanel', () => ({
+  ReviewPanel: ({
+    area,
+    scope,
+    scopeId,
+    title,
+    projectName,
+  }: {
+    area: string
+    scope: string
+    scopeId: string
+    title: string
+    projectName?: string
+  }) => (
+    <p>
+      ReviewPanel stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
+      {projectName && ` projectName=${projectName}`}
+    </p>
+  ),
+}))
+
 const { BoardAdvisor } = await import('./BoardAdvisor')
 
 const CLEAN_RESULT = { violations: [], summary: '', truncated_count: 0, source_path: '/real/board.kicad_pcb' }
@@ -344,5 +368,28 @@ describe('BoardAdvisor: CTX-318.3 AgentChat wiring', () => {
     rerender(<BoardAdvisor projectName="project-b" />)
 
     await waitFor(() => expect(screen.getByText(/AgentChat stub/).textContent).toContain('scopeId=project-b:pcb'))
+  })
+})
+
+describe('BoardAdvisor: CTX-319.3 ReviewPanel wiring', () => {
+  it('mounts ReviewPanel scoped to the project pcb area', async () => {
+    render(<BoardAdvisor projectName="weather-pcb" />)
+
+    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+    const stub = screen.getByText(/ReviewPanel stub/)
+    expect(stub.textContent).toContain('area=pcb')
+    expect(stub.textContent).toContain('scope=project')
+    expect(stub.textContent).toContain('scopeId=weather-pcb:pcb')
+    expect(stub.textContent).toContain('title="Review the board"')
+    expect(stub.textContent).toContain('projectName=weather-pcb')
+  })
+
+  it('re-scopes ReviewPanel when the project changes', async () => {
+    const { rerender } = render(<BoardAdvisor projectName="project-a" />)
+    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+
+    rerender(<BoardAdvisor projectName="project-b" />)
+
+    await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:pcb'))
   })
 })
