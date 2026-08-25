@@ -703,6 +703,179 @@ class TestSend(ChatAgentsTestCase):
         self.assertEqual(history[0].content, "first message")
 
 
+class TestReview(ChatAgentsTestCase):
+    """CTX-319.1 (SPEC-319 §2.1): the real `chat.review` route body --
+    real router/agent config loading, mocked LLM call only, mirroring
+    `TestSend`'s own convention exactly."""
+
+    _NO_FINDINGS_TEXT = '<<<FINDINGS>>>\n[]\n<<<END_FINDINGS>>>'
+
+    def _review(self, scope, scope_id, area, response_text=_NO_FINDINGS_TEXT, metadata=None, **kwargs):
+        with patch('chat_agents.llm_providers._build_provider', return_value=MagicMock()), \
+             patch('chat_agents.llm_providers._close_provider_client', new=AsyncMock()), \
+             patch('chat_agents.AgentExecutor') as MockExecutor:
+            MockExecutor.return_value.run = AsyncMock(
+                return_value=NodeOutput(node_id="n", agent_id="a", text=response_text, metadata=metadata or {})
+            )
+            findings = chat_agents.review(scope, scope_id, area, secrets={"anthropic_api_key": "fake"}, **kwargs)
+            return findings, MockExecutor
+
+    def test_001_an_unknown_area_is_a_hard_error(self):
+        with self.assertRaises(chat_agents.UnknownChatAreaError):
+            self._review("project", "weather-pcb:overview", "not-a-real-area")
+
+    def test_002_each_of_the_five_real_areas_routes_to_its_own_real_agent(self):
+        store.save_project({"name": "weather-pcb", "parts": []})
+        self._save_part()
+        cases = [
+            ("project", "weather-pcb:overview", "overview"),
+            ("part", "ATtiny85", "components"),
+            ("project", "weather-pcb:schematic", "schematic"),
+            ("project", "weather-pcb:pcb", "pcb"),
+            ("project", "weather-pcb:enclosure", "enclosure"),
+        ]
+        for scope, scope_id, area in cases:
+            with self.subTest(area=area):
+                findings, MockExecutor = self._review(scope, scope_id, area)
+                self.assertEqual(findings, [])
+                MockExecutor.assert_called_once()
+
+    def test_003_an_empty_findings_block_is_a_normal_empty_list_not_an_error(self):
+        store.save_project({"name": "weather-pcb"})
+
+        findings, _ = self._review("project", "weather-pcb:overview", "overview")
+
+        self.assertEqual(findings, [])
+
+    def test_004_a_real_finding_is_parsed_with_area_filled_in_server_side(self):
+        store.save_project({"name": "weather-pcb"})
+        response_text = (
+            '<<<FINDINGS>>>\n'
+            '[{"severity": "warning", "title": "No project intent set", '
+            '"detail": "Agents will answer generically until one is added.", '
+            '"sources": [], "general_practice": true}]\n<<<END_FINDINGS>>>'
+        )
+
+        findings, _ = self._review("project", "weather-pcb:overview", "overview", response_text=response_text)
+
+        self.assertEqual(findings, [{
+            "severity": "warning",
+            "title": "No project intent set",
+            "detail": "Agents will answer generically until one is added.",
+            "sources": [],
+            "general_practice": True,
+            "area": "overview",
+        }])
+
+    def test_005_a_malformed_finding_is_dropped_not_shown_broken(self):
+        store.save_project({"name": "weather-pcb"})
+        response_text = (
+            '<<<FINDINGS>>>\n'
+            '[{"severity": "not-a-real-severity", "title": "x", "detail": "y"}, '
+            '{"severity": "info", "title": "", "detail": "y"}, '
+            '{"severity": "info", "title": "x", "detail": ""}, '
+            '{"title": "missing severity and detail"}]\n<<<END_FINDINGS>>>'
+        )
+
+        findings, _ = self._review("project", "weather-pcb:overview", "overview", response_text=response_text)
+
+        self.assertEqual(findings, [])
+
+    def test_006_self_reported_sources_are_validated_and_enriched_per_finding(self):
+        self._save_part(design_guidance={
+            "generated_at": "2026-01-01T00:00:00Z", "content_hash": "abc123", "document_revision": None,
+            "categories": {"power": [{"quote": "Add a 100nF cap.", "page": 4, "category": "power"}]},
+            "category_summaries": {},
+        })
+        response_text = (
+            '<<<FINDINGS>>>\n'
+            '[{"severity": "suggestion", "title": "Add decoupling", "detail": "Add a 100nF cap near VCC.", '
+            '"sources": [{"kind": "guidance_item", "part_id": "ATtiny85", "category": "power", '
+            '"quote": "Add a 100nF cap."}], "general_practice": false}]\n<<<END_FINDINGS>>>'
+        )
+
+        findings, _ = self._review("part", "ATtiny85", "components", response_text=response_text)
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["sources"], [{
+            "kind": "guidance_item", "part_id": "ATtiny85", "category": "power",
+            "quote": "Add a 100nF cap.", "content_hash": "abc123",
+        }])
+        self.assertFalse(findings[0]["general_practice"])
+
+    def test_007_an_unresolvable_self_reported_source_is_dropped_from_the_finding(self):
+        self._save_part()
+        response_text = (
+            '<<<FINDINGS>>>\n'
+            '[{"severity": "info", "title": "x", "detail": "y", '
+            '"sources": [{"kind": "part_field", "part_id": "ATtiny85", "field": "not_a_real_field"}], '
+            '"general_practice": false}]\n<<<END_FINDINGS>>>'
+        )
+
+        findings, _ = self._review("part", "ATtiny85", "components", response_text=response_text)
+
+        self.assertEqual(findings[0]["sources"], [])
+
+    def test_008_a_real_datasheet_read_pages_tool_call_produces_a_mechanical_source_on_the_finding(self):
+        self._save_part()
+        path = store.datasheet_cache_path("ATtiny85")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(b"%PDF-1.4 real bytes")
+        real_hash = store.content_hash_of_file(path)
+        tool_result = json.dumps({"content_hash": real_hash, "pages": [{"page": 4, "text": "..."}]})
+        metadata = {"tool_calls": [{
+            "name": "datasheet.read_pages", "input": {"part_id": "ATtiny85", "pages": [4]},
+            "result": tool_result, "is_error": False,
+        }]}
+        response_text = (
+            '<<<FINDINGS>>>\n'
+            '[{"severity": "info", "title": "x", "detail": "y", "sources": [], '
+            '"general_practice": false}]\n<<<END_FINDINGS>>>'
+        )
+
+        findings, _ = self._review(
+            "part", "ATtiny85", "components", response_text=response_text, metadata=metadata,
+        )
+
+        self.assertEqual(findings[0]["sources"], [
+            {"kind": "datasheet_page", "part_id": "ATtiny85", "page": 4, "content_hash": real_hash},
+        ])
+
+    def test_009_never_appends_to_the_conversation_thread(self):
+        store.save_project({"name": "weather-pcb"})
+
+        self._review("project", "weather-pcb:overview", "overview")
+
+        self.assertEqual(store.load_thread("project", "weather-pcb:overview"), [])
+
+    def test_010_calls_with_no_history_even_when_the_thread_already_has_turns(self):
+        store.save_project({"name": "weather-pcb"})
+        store.append_thread_turn(
+            "project", "weather-pcb:overview",
+            {"turn_id": "t1", "role": "user", "content": "an earlier real question"},
+        )
+
+        _, MockExecutor = self._review("project", "weather-pcb:overview", "overview")
+
+        self.assertEqual(MockExecutor.return_value.run.call_args.kwargs["history"], [])
+
+    def test_011_the_gated_confirmation_required_tool_is_excluded_from_the_registry_it_receives(self):
+        store.save_project({"name": "weather-pcb"})
+
+        with patch('chat_agents.llm_providers._build_provider', return_value=MagicMock()), \
+             patch('chat_agents.llm_providers._close_provider_client', new=AsyncMock()), \
+             patch('chat_agents.AgentExecutor') as MockExecutor:
+            MockExecutor.return_value.run = AsyncMock(
+                return_value=NodeOutput(node_id="n", agent_id="a", text=self._NO_FINDINGS_TEXT)
+            )
+            chat_agents.review("project", "weather-pcb:overview", "overview", secrets={})
+
+            passed_tools = MockExecutor.call_args.kwargs["tools"]
+            tool_names = {t["name"] for t in passed_tools.list_tools()}
+            self.assertNotIn("kicad.inject_component", tool_names)
+
+
 class TestPromoteTurn(ChatAgentsTestCase):
     """CTX-206.8 (SPEC-206 §2.7): "the actual answer to answer
     consistency" -- moves a settled assistant turn out of a transcript

@@ -2024,6 +2024,50 @@ class TestChatSendRoute(unittest.TestCase):
         self.assertIn("chat.send", daemon.ASYNC_ROUTES)
 
 
+class TestChatReviewRoute(unittest.TestCase):
+    """CTX-319.1 (SPEC-319 §2.1): the AI Review seam SPEC-318 §2.5
+    defined but did not build -- a thin wrapper matching
+    TestChatSendRoute's own precedent exactly. The real review()
+    extraction/validation logic is covered in
+    services/python-daemon/tests/test_chat_agents.py; this only
+    verifies daemon-level wiring."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    @patch('daemon.chat_agents.review')
+    def test_001_threads_config_provider_model_and_secrets_through(self, mock_review):
+        daemon.CONFIG['llm_provider'] = "google"
+        daemon.CONFIG['llm_model'] = "gemini-flash"
+        daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
+        mock_review.return_value = [{"severity": "info", "title": "x", "detail": "y"}]
+
+        result = daemon.chat_review("project", "weather-pcb:overview", "overview", project_name="weather-pcb")
+
+        mock_review.assert_called_once_with(
+            "project", "weather-pcb:overview", "overview", project_name="weather-pcb",
+            secrets={"google_api_key": "fake"}, provider="google", model="gemini-flash",
+        )
+        self.assertEqual(result, [{"severity": "info", "title": "x", "detail": "y"}])
+
+    def test_002_registered_only_when_chat_agents_library_store_and_tool_registry_are_all_real(self):
+        original = daemon.chat_agents
+        daemon.chat_agents = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("chat.review", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.chat_agents = original
+
+    def test_003_registered_as_an_async_route(self):
+        self.assertIn("chat.review", daemon.ASYNC_ROUTES)
+
+
 class TestContextSearchRoute(unittest.TestCase):
     """CTX-206.7 (SPEC-206 §2.6): the real, cheap local FTS5 (or
     LikeScanRetriever-fallback) route -- real context_index against a

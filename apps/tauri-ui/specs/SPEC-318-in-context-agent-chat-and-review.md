@@ -10,6 +10,7 @@ location: "apps/tauri-ui/specs/SPEC-318-in-context-agent-chat-and-review.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
 child_specs:
   - "../../../services/python-daemon/specs/SPEC-206-agent-context-store.md"
+  - "SPEC-319-ai-review.md"
 user_facing: true
 ---
 
