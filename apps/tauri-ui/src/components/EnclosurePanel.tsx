@@ -16,6 +16,7 @@ import {
 } from '../lib/enclosure'
 import { listOpenBoards, openKicad, type BoardCandidate, type ListOpenBoardsResult } from '../lib/boardAdvisor'
 import { AgentChat } from './AgentChat'
+import { ReviewPanel } from './ReviewPanel'
 import { EnclosureViewer } from './EnclosureViewer'
 
 /** Real, defensive path join -- avoids pulling in `@tauri-apps/api/path`
@@ -677,6 +678,15 @@ export function EnclosurePanel({
         </div>
       )}
     </div>
+    {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
+        is a flow step with a typed result, not a conversational turn. */}
+    <ReviewPanel
+      area="enclosure"
+      scope="project"
+      scopeId={`${projectName}:enclosure`}
+      title="Review the enclosure"
+      projectName={projectName}
+    />
     {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area."
         A project-scoped chat has no single Part to offer as a promotion
         target -- "this project" is the only real target here. */}
