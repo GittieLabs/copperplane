@@ -260,6 +260,45 @@ def migrate_legacy_config(config: dict | None) -> dict:
     return config
 
 
+# SPEC-208 §2.4: (record id, agent name) pairs already preflight-checked
+# this session -- keyed on the *agent*, not the `(record, role)` pair the
+# spec's own prose suggests, because two agents sharing a role do not
+# necessarily share `requires` (this repo's own data: every "fast"-role
+# chat agent needs `tool_use`, but `datasheet_guidance_synthesis` -- also
+# "fast" -- needs neither). Caching by role alone would let one agent's
+# passing check wrongly exempt a different agent's real, unchecked
+# requirement against the same record.
+_preflight_checked: set[tuple[str, str]] = set()
+
+
+def _check_capabilities(agent_name: str | None, requires: list[str] | None, record: "ProviderRecord") -> None:
+    """SPEC-208 §2.4: before the first call of a session for a given
+    (record, agent), checks the agent's declared `requires` against the
+    record's declared `capabilities` -- a mismatch is a real
+    `LLMProviderError` naming the agent, the requirement, and the record,
+    never a silent degrade. A declaration is a claim, not a measurement
+    (SPEC-208 §2.4's own explicit caveat) -- this catches an honest
+    mismatch (a record that admits it can't tool-call), not an optimistic
+    one."""
+    if not requires or not agent_name:
+        return
+
+    cache_key = (record["id"], agent_name)
+    if cache_key in _preflight_checked:
+        return
+
+    capabilities = record.get("capabilities") or {}
+    missing = [r for r in requires if not capabilities.get(r)]
+    if missing:
+        raise LLMProviderError(
+            f"Agent {agent_name!r} requires {missing}, but provider record {record['id']!r} "
+            f"does not declare {'it' if len(missing) == 1 else 'them'}. Bind this agent's role to "
+            f"a different provider, or fix that record's declared capabilities."
+        )
+
+    _preflight_checked.add(cache_key)
+
+
 def resolve(
     default_provider: str,
     default_model: str,
@@ -268,6 +307,8 @@ def resolve(
     model: str | None = None,
     config: dict | None = None,
     model_role: str | None = None,
+    agent_name: str | None = None,
+    requires: list[str] | None = None,
 ) -> tuple[Any, str, str]:
     """The single provider-construction entry point SPEC-208 §2.6 asks
     for, consolidating what `chat_agents._dispatch` and
@@ -291,7 +332,11 @@ def resolve(
        silent fall-through, per SPEC-208 §2.3.2's own explicit rule.
     3. `default_provider`/`default_model` -- the caller's own default (an
        agent's `.prompt.md` frontmatter default, or a direct caller with
-       no role concept at all)."""
+       no role concept at all).
+
+    `agent_name`/`requires` (CTX-208.3, SPEC-208 §2.4): the resolved
+    record's `capabilities` are checked against `requires` before any
+    provider client is constructed -- see `_check_capabilities`."""
     migrated = migrate_legacy_config(config)
     records = _resolve_provider_records(migrated)
 
@@ -319,6 +364,8 @@ def resolve(
             raise LLMProviderError(f"Provider {resolved_provider!r} has no model configured for role {model_role!r}.")
     else:
         resolved_model = default_model
+
+    _check_capabilities(agent_name, requires, record)
 
     api_key = _resolve_api_key(record, secrets)
     provider_client = _build_provider_from_record(record, api_key, resolved_model)

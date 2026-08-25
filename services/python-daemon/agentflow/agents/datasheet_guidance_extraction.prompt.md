@@ -2,6 +2,7 @@
 name: datasheet_guidance_extraction
 description: Extracts cited design guidance for one category from real datasheet page excerpts
 model_role: reasoning
+requires: [strict_json]
 temperature: 0.2
 max_tokens: 4096
 ---

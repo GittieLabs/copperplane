@@ -2,6 +2,7 @@
 name: component_search
 description: Ranks candidate parts matching a free-text search query, with a confidence signal
 model_role: reasoning
+requires: [strict_json]
 temperature: 0.2
 max_tokens: 3072
 ---

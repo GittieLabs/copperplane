@@ -2,6 +2,7 @@
 name: connection_guidance
 description: Per-pin connection guidance (decoupling, protection, power) for an already-identified part
 model_role: reasoning
+requires: [strict_json]
 temperature: 0.2
 max_tokens: 3072
 ---

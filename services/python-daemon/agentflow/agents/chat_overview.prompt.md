@@ -2,6 +2,7 @@
 name: chat_overview
 description: Scoped conversational agent for the Overview tab -- the project-level agent, answering "what should I do next" and "does this fit what I'm building" questions grounded in project intent, area status, and the Parts this project references.
 model_role: fast
+requires: [tool_use]
 temperature: 0.3
 max_tokens: 2048
 max_tool_rounds: 4

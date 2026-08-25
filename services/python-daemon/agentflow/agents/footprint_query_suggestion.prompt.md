@@ -2,6 +2,7 @@
 name: footprint_query_suggestion
 description: Suggests a real search term for finding this part's footprint in installed/community KiCad libraries
 model_role: reasoning
+requires: [strict_json]
 temperature: 0.2
 max_tokens: 512
 ---

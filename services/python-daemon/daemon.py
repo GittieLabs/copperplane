@@ -1097,6 +1097,7 @@ def datasheet_generate_guidance(part_id: str, cancel_event=None) -> dict:
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
         cancel_event=cancel_event,
+        app_config=CONFIG,
     )
     content_hash = library_store.content_hash_of_file(pdf_path)
     return library_store.save_part_design_guidance(

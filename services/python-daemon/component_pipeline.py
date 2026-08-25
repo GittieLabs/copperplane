@@ -235,6 +235,7 @@ def _build_agent_executor(
     provider_client, resolved_provider, resolved_model = llm_providers.resolve(
         config.provider, config.model, secrets, provider=provider, model=model,
         config=app_config, model_role=agent_role.get("model_role"),
+        agent_name=agent_name, requires=agent_role.get("requires"),
     )
     config = config.model_copy(update={"provider": resolved_provider, "model": resolved_model})
     executor = AgentExecutor(config=config, prompt_body=prompt_body, llm=provider_client)

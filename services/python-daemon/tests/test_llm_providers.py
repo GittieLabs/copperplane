@@ -499,5 +499,95 @@ class TestResolveModelRole(unittest.TestCase):
         self.assertEqual(resolved_model, llm_providers._DEFAULT_MODELS["anthropic"])
 
 
+class TestCheckCapabilities(unittest.TestCase):
+    """SPEC-208 §2.4: an agent's requires checked against a provider
+    record's declared capabilities, before any provider client is built."""
+
+    def setUp(self):
+        llm_providers._preflight_checked.clear()
+
+    def _record(self, **capabilities) -> "llm_providers.ProviderRecord":
+        return {
+            "id": "test-record", "kind": "anthropic", "base_url": None, "api_key_ref": None,
+            "models": {"reasoning": "m", "fast": "m"}, "capabilities": capabilities,
+        }
+
+    def test_001_no_requires_is_a_no_op(self):
+        llm_providers._check_capabilities("some_agent", None, self._record())
+        llm_providers._check_capabilities("some_agent", [], self._record())
+
+    def test_002_no_agent_name_is_a_no_op_even_with_requires(self):
+        llm_providers._check_capabilities(None, ["tool_use"], self._record())
+
+    def test_003_a_satisfied_requirement_raises_nothing(self):
+        llm_providers._check_capabilities("chat_overview", ["tool_use"], self._record(tool_use=True))
+
+    def test_004_a_missing_capability_raises_naming_the_agent_requirement_and_record(self):
+        with self.assertRaises(LLMProviderError) as ctx:
+            llm_providers._check_capabilities("chat_overview", ["tool_use"], self._record(tool_use=False))
+        message = str(ctx.exception)
+        self.assertIn("chat_overview", message)
+        self.assertIn("tool_use", message)
+        self.assertIn("test-record", message)
+
+    def test_005_an_undeclared_capability_key_counts_as_not_offered(self):
+        with self.assertRaises(LLMProviderError):
+            llm_providers._check_capabilities("component_extraction", ["strict_json"], self._record(tool_use=True))
+
+    def test_006_a_passed_check_is_cached_per_record_and_agent(self):
+        from unittest.mock import patch
+
+        record = self._record(tool_use=True)
+        llm_providers._check_capabilities("chat_overview", ["tool_use"], record)
+        self.assertIn(("test-record", "chat_overview"), llm_providers._preflight_checked)
+
+        # A second call against a record whose capabilities have since
+        # regressed does NOT re-raise -- cached per (record id, agent),
+        # matching "before the first call of a session".
+        with patch.dict(record, {"capabilities": {"tool_use": False}}):
+            llm_providers._check_capabilities("chat_overview", ["tool_use"], record)
+
+    def test_007_caching_is_per_agent_not_per_role_or_record_alone(self):
+        """Regression check for the exact bug a (record, role) cache key
+        would have: two agents sharing a role/record but NOT sharing
+        requires must each be checked independently."""
+        record = self._record(tool_use=False)
+        # chat_overview has no requires met yet -- checking a DIFFERENT
+        # agent (datasheet_guidance_synthesis, real requires=[]) against
+        # the same record first must not exempt chat_overview afterward.
+        llm_providers._check_capabilities("datasheet_guidance_synthesis", [], record)
+        with self.assertRaises(LLMProviderError):
+            llm_providers._check_capabilities("chat_overview", ["tool_use"], record)
+
+    def test_008_resolve_raises_before_constructing_a_provider_for_a_failed_preflight(self):
+        config = {
+            "providers": [{
+                "id": "weak-local", "kind": "openai_compat", "base_url": "http://localhost:9999/v1",
+                "models": {"reasoning": "tiny", "fast": "tiny"}, "capabilities": {"tool_use": False, "strict_json": False},
+            }],
+            "provider_roles": {"reasoning": "weak-local", "fast": "weak-local"},
+        }
+        with self.assertRaises(LLMProviderError):
+            resolve(
+                "anthropic", "claude-sonnet-4-6", {}, model_role="fast", config=config,
+                agent_name="chat_overview", requires=["tool_use"],
+            )
+
+    def test_009_resolve_succeeds_when_the_bound_record_declares_the_requirement(self):
+        config = {
+            "providers": [{
+                "id": "capable-local", "kind": "openai_compat", "base_url": "http://localhost:9999/v1",
+                "api_key_ref": "capable_local_key",
+                "models": {"reasoning": "big", "fast": "big"}, "capabilities": {"tool_use": True, "strict_json": True},
+            }],
+            "provider_roles": {"reasoning": "capable-local", "fast": "capable-local"},
+        }
+        _, resolved_provider, _ = resolve(
+            "anthropic", "claude-sonnet-4-6", {"capable_local_key": "fake"}, model_role="fast", config=config,
+            agent_name="chat_overview", requires=["tool_use"],
+        )
+        self.assertEqual(resolved_provider, "capable-local")
+
+
 if __name__ == '__main__':
     unittest.main()
