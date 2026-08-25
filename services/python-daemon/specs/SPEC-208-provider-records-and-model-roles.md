@@ -1,7 +1,7 @@
 ---
 id: SPEC-208
 title: "Provider Records & Model Role Resolution"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-25
 last_updated: 2026-08-25
