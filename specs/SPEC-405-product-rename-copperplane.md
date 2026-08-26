@@ -156,6 +156,17 @@ name is not something this spec should assert without someone watching it happen
 should carry a real `v0.1.3` install being auto-updated to the renamed build on a real machine, and
 record what actually occurred, including if it turns out to be wrong about this.
 
+**Amendment, 2026-08-26, real product decision rather than deferred by default:** no build under the
+old name has ever been downloaded by anyone -- confirmed directly with Keith, not assumed. That
+means there is no real install anywhere that will ever cross the `hardware-agent-studio` ->
+`Copperplane` boundary through the updater; every first Copperplane user starts fresh. The risk this
+section names literally cannot occur for the upcoming release, so it is not a release gate for it.
+What *does* still need real verification, and is deferred to it rather than to this release, is the
+first ordinary update after that one -- Copperplane vN to vN+1, no rename involved, just this
+project's first real end-to-end proof that `tauri-plugin-updater` still works at all under the new
+name. That is a normal release-verification task for whichever context handles the release after
+next, not a rename-specific risk this spec needs to keep open.
+
 ### 3.3 The sidecar binary name is atomic or nothing
 
 `hardware-agent-studio-daemon` appears in six places across three languages and two build systems:
