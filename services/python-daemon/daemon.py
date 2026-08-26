@@ -1557,7 +1557,20 @@ def _run_job(job_id: str, method: str, params: dict, cancel_event: threading.Eve
         if cancel_event.is_set():
             emit({"jsonrpc": "2.0", "method": "job.cancelled", "params": {"job_id": job_id}})
         else:
-            emit({"jsonrpc": "2.0", "method": "job.failed", "params": {"job_id": job_id, "error": str(e)}})
+            failure = {"job_id": job_id, "error": str(e)}
+            # SPEC-207 §2.3: a structured `code` (e.g. `managed_quota_exhausted`)
+            # alongside its own real extra fields (`reset_at`/`retry_after`),
+            # duck-typed via getattr rather than importing
+            # llm_providers.ManagedProviderError here -- this function stays
+            # decoupled from any one bridge module's exception classes, same
+            # as the cancellation check above. Absent for every other
+            # exception, so this is a strictly additive, backward-compatible
+            # payload change.
+            code = getattr(e, "code", None)
+            if code:
+                failure["code"] = code
+                failure.update(getattr(e, "extra", None) or {})
+            emit({"jsonrpc": "2.0", "method": "job.failed", "params": failure})
     finally:
         JOBS.pop(job_id, None)
 

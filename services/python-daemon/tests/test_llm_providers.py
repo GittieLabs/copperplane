@@ -254,7 +254,7 @@ class TestPresetRecords(unittest.TestCase):
 
     def test_001_every_known_provider_has_a_preset_record(self):
         records = llm_providers._preset_records()
-        self.assertEqual(set(records.keys()), {"anthropic", "google", "openai", "perplexity", "ollama"})
+        self.assertEqual(set(records.keys()), {"anthropic", "google", "openai", "perplexity", "ollama", "managed"})
 
     def test_002_kind_matches_which_sdk_each_provider_used_before(self):
         records = llm_providers._preset_records()
@@ -320,7 +320,7 @@ class TestResolveProviderRecords(unittest.TestCase):
 
     def test_001_no_config_returns_only_presets(self):
         records = llm_providers._resolve_provider_records(None)
-        self.assertEqual(set(records.keys()), {"anthropic", "google", "openai", "perplexity", "ollama"})
+        self.assertEqual(set(records.keys()), {"anthropic", "google", "openai", "perplexity", "ollama", "managed"})
 
     def test_002_a_new_id_is_added_alongside_the_presets(self):
         config = {"providers": [{"id": "workshop-ollama", "kind": "openai_compat", "base_url": "http://nuc.local:11434/v1"}]}
@@ -337,12 +337,15 @@ class TestResolveProviderRecords(unittest.TestCase):
     def test_004_an_entry_claiming_the_reserved_managed_id_is_ignored(self):
         config = {"providers": [{"id": "managed", "kind": "openai_compat", "base_url": "http://attacker.example/v1"}]}
         records = llm_providers._resolve_provider_records(config)
-        self.assertNotIn("managed", records, "the reserved id must never be reachable from config.json")
+        self.assertNotEqual(
+            records["managed"]["base_url"], "http://attacker.example/v1",
+            "a config.json entry must never override the locked managed record",
+        )
 
     def test_005_an_entry_with_no_id_is_skipped_rather_than_crashing(self):
         config = {"providers": [{"kind": "openai_compat", "base_url": "http://x"}]}
         records = llm_providers._resolve_provider_records(config)
-        self.assertEqual(set(records.keys()), {"anthropic", "google", "openai", "perplexity", "ollama"})
+        self.assertEqual(set(records.keys()), {"anthropic", "google", "openai", "perplexity", "ollama", "managed"})
 
 
 class TestResolve(unittest.TestCase):
@@ -599,6 +602,179 @@ class TestCheckCapabilities(unittest.TestCase):
             agent_name="chat_overview", requires=["tool_use"],
         )
         self.assertEqual(resolved_provider, "capable-local")
+
+
+def _fake_status_error(status: int, body: dict | None = None, headers: dict | None = None):
+    """A real `openai.APIStatusError` (or the real subclass the SDK's own
+    `_make_status_error` would construct for `status`) built against a
+    real `httpx.Response` -- SPEC-207 §2.5: no test may contact the real
+    gateway, so this is the stub HTTP layer standing in for one, not a
+    mock of `_map_managed_error` itself."""
+    import httpx
+    import openai
+
+    request = httpx.Request("POST", "https://managed.example/v1/chat/completions")
+    response = httpx.Response(status, request=request, json=body or {}, headers=headers or {})
+
+    if status == 401:
+        return openai.AuthenticationError(f"status {status}", response=response, body=body)
+    if status == 429:
+        return openai.RateLimitError(f"status {status}", response=response, body=body)
+    if status >= 500:
+        return openai.InternalServerError(f"status {status}", response=response, body=body)
+    return openai.APIStatusError(f"status {status}", response=response, body=body)
+
+
+def _fake_connection_error():
+    import httpx
+    import openai
+
+    request = httpx.Request("POST", "https://managed.example/v1/chat/completions")
+    return openai.APIConnectionError(message="Connection error.", request=request)
+
+
+class TestMapManagedError(unittest.TestCase):
+    """SPEC-207 §2.3: gateway HTTP status -> structured error code, built
+    against real openai SDK exception instances (SPEC-207 §2.5's stub
+    HTTP layer), never a live gateway."""
+
+    def test_001_401_maps_to_managed_auth_invalid(self):
+        mapped = llm_providers._map_managed_error(_fake_status_error(401))
+        self.assertEqual(mapped.code, "managed_auth_invalid")
+
+    def test_002_402_maps_to_managed_quota_exhausted_carrying_reset_at(self):
+        mapped = llm_providers._map_managed_error(_fake_status_error(402, body={"reset_at": "2026-09-01T00:00:00Z"}))
+        self.assertEqual(mapped.code, "managed_quota_exhausted")
+        self.assertEqual(mapped.extra["reset_at"], "2026-09-01T00:00:00Z")
+
+    def test_003_429_maps_to_managed_rate_limited_carrying_retry_after(self):
+        mapped = llm_providers._map_managed_error(_fake_status_error(429, headers={"Retry-After": "12"}))
+        self.assertEqual(mapped.code, "managed_rate_limited")
+        self.assertEqual(mapped.extra["retry_after"], "12")
+
+    def test_004_503_maps_to_managed_upstream_unavailable(self):
+        mapped = llm_providers._map_managed_error(_fake_status_error(503))
+        self.assertEqual(mapped.code, "managed_upstream_unavailable")
+
+    def test_005_an_unmapped_status_falls_back_to_managed_error(self):
+        mapped = llm_providers._map_managed_error(_fake_status_error(418))
+        self.assertEqual(mapped.code, "managed_error")
+
+    def test_006_a_connection_failure_maps_to_managed_unreachable(self):
+        mapped = llm_providers._map_managed_error(_fake_connection_error())
+        self.assertEqual(mapped.code, "managed_unreachable")
+
+    def test_007_an_unrelated_exception_is_not_mapped(self):
+        self.assertIsNone(llm_providers._map_managed_error(ValueError("not a managed error at all")))
+
+
+class TestManagedProviderWrapper(unittest.IsolatedAsyncioTestCase):
+    """SPEC-207 §2.3's retry policy: 503 retries with backoff, 429
+    retries honoring Retry-After, 401/402 never retry."""
+
+    def _wrapper_around(self, side_effects):
+        from unittest.mock import AsyncMock
+
+        inner = AsyncMock()
+        inner.chat.side_effect = side_effects
+        inner._client = "the-real-client"
+        wrapper = llm_providers._ManagedProviderWrapper(inner)
+        return wrapper, inner
+
+    async def test_001_a_success_on_the_first_try_returns_immediately(self):
+        wrapper, inner = self._wrapper_around(["ok"])
+        result = await wrapper.chat([])
+        self.assertEqual(result, "ok")
+        self.assertEqual(inner.chat.call_count, 1)
+
+    async def test_002_delegates_close_via_the_real_inner_client(self):
+        wrapper, _ = self._wrapper_around(["ok"])
+        self.assertEqual(wrapper._client, "the-real-client")
+
+    async def test_003_a_401_is_never_retried(self):
+        wrapper, inner = self._wrapper_around([_fake_status_error(401)])
+        with self.assertRaises(llm_providers.ManagedProviderError) as ctx:
+            await wrapper.chat([])
+        self.assertEqual(ctx.exception.code, "managed_auth_invalid")
+        self.assertEqual(inner.chat.call_count, 1)
+
+    async def test_004_a_402_is_never_retried(self):
+        wrapper, inner = self._wrapper_around([_fake_status_error(402)])
+        with self.assertRaises(llm_providers.ManagedProviderError) as ctx:
+            await wrapper.chat([])
+        self.assertEqual(ctx.exception.code, "managed_quota_exhausted")
+        self.assertEqual(inner.chat.call_count, 1)
+
+    async def test_005_a_503_retries_then_succeeds(self):
+        wrapper, inner = self._wrapper_around([_fake_status_error(503), _fake_status_error(503), "ok"])
+        llm_providers._MANAGED_BACKOFF_BASE_SECONDS = 0.0  # don't actually sleep in tests
+        result = await wrapper.chat([])
+        self.assertEqual(result, "ok")
+        self.assertEqual(inner.chat.call_count, 3)
+
+    async def test_006_a_503_that_never_recovers_raises_after_max_retries(self):
+        llm_providers._MANAGED_BACKOFF_BASE_SECONDS = 0.0
+        wrapper, inner = self._wrapper_around(
+            [_fake_status_error(503) for _ in range(llm_providers._MANAGED_MAX_RETRIES + 1)]
+        )
+        with self.assertRaises(llm_providers.ManagedProviderError) as ctx:
+            await wrapper.chat([])
+        self.assertEqual(ctx.exception.code, "managed_upstream_unavailable")
+        self.assertEqual(inner.chat.call_count, llm_providers._MANAGED_MAX_RETRIES + 1)
+
+    async def test_007_a_429_retries_honoring_retry_after_then_succeeds(self):
+        wrapper, inner = self._wrapper_around(
+            [_fake_status_error(429, headers={"Retry-After": "0"}), "ok"]
+        )
+        result = await wrapper.chat([])
+        self.assertEqual(result, "ok")
+        self.assertEqual(inner.chat.call_count, 2)
+
+    async def test_008_an_unrelated_exception_propagates_unchanged(self):
+        wrapper, _ = self._wrapper_around([ValueError("boom")])
+        with self.assertRaises(ValueError):
+            await wrapper.chat([])
+
+
+class TestManagedPresetConstruction(unittest.TestCase):
+    """SPEC-207 §2.1/§2.4: the locked preset itself -- no config.json
+    override reachable (proven above), no hardcoded default model
+    (SPEC-207 §2.1's own "must not validate a Managed model name"), and a
+    real timeout applied post-construction."""
+
+    def test_001_managed_has_no_default_models_for_either_role(self):
+        record = llm_providers._preset_records()["managed"]
+        self.assertEqual(record["models"], {})
+
+    def test_002_constructing_managed_with_no_gateway_configured_raises_clearly(self):
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(llm_providers._MANAGED_GATEWAY_ENV_VAR, None)
+            record = dict(llm_providers._preset_records()["managed"])
+            with self.assertRaises(LLMProviderError):
+                llm_providers._build_provider_from_record(record, "a-real-token", "has-standard")
+
+    def test_003_a_configured_gateway_constructs_a_wrapped_client_with_the_real_timeout(self):
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {llm_providers._MANAGED_GATEWAY_ENV_VAR: "http://localhost:9999/v1"}):
+            record = llm_providers._resolve_provider_records(None)["managed"]
+            client = llm_providers._build_provider_from_record(record, "a-real-token", "has-standard")
+
+        self.assertIsInstance(client, llm_providers._ManagedProviderWrapper)
+        self.assertEqual(client._client.timeout, llm_providers._MANAGED_TIMEOUT_SECONDS)
+
+    def test_004_resolve_raises_when_managed_is_bound_with_no_explicit_model(self):
+        """SPEC-208 §2.3.2's existing "no model for role" rule, applied to
+        managed's deliberately-empty models map -- an alias must be
+        supplied explicitly (SPEC-320's job, once it exists), never
+        guessed."""
+        config = {"provider_roles": {"reasoning": "managed", "fast": "managed"}}
+        with self.assertRaises(LLMProviderError):
+            resolve("anthropic", "claude-sonnet-4-6", {}, model_role="reasoning", config=config)
 
 
 if __name__ == '__main__':

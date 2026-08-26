@@ -16,6 +16,7 @@ explicitly, the same pattern `kicad_bridge`/`freecad_bridge` already use.
 """
 import asyncio
 import logging
+import os
 from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,46 @@ class ProviderRecord(TypedDict):
 # yet; SPEC-207 adds the real record once its gateway base URL exists.
 _RESERVED_PROVIDER_IDS = frozenset({"managed"})
 
+# SPEC-207 §2.1: the gateway's base URL is a build-time constant, never a
+# config.json field (a settable managed endpoint would let a user's own
+# subscription token be pointed at an attacker-chosen host). **No
+# hardcoded production fallback is set here.** The real GittieLabs
+# gateway is SPEC-404's own external system and does not exist yet as of
+# this phase -- inventing a plausible-looking production domain now would
+# be worse than an honest "not configured in this build" error, since it
+# could be mistaken for a real endpoint or accidentally contacted.
+# Development against a local/staging gateway sets this env var; a real
+# release build's own hardcoded value is added once the gateway is real.
+_MANAGED_GATEWAY_ENV_VAR = "HAS_MANAGED_GATEWAY_URL"
+
+# SPEC-207 §2.4: no live gateway exists to measure against in this
+# environment (same external-system gap as the base URL above). Reasoned
+# from openai-python's own default (600s read/write) plus real headroom
+# for "the gateway adds a hop and may itself be retrying upstream" --
+# not a live-measured value. Revisit once a real gateway exists to time.
+_MANAGED_TIMEOUT_SECONDS = 900.0
+
+_MANAGED_MAX_RETRIES = 2
+# SPEC-207 §2.3: 503 (managed_upstream_unavailable) retries with backoff;
+# 429 (managed_rate_limited) retries honoring the gateway's own
+# Retry-After value instead. Never 401/402 -- see _ManagedProviderWrapper.
+_MANAGED_BACKOFF_BASE_SECONDS = 1.0
+
+
+class ManagedProviderError(LLMProviderError):
+    """SPEC-207 §2.3: a structured, gateway-specific error -- `code` is
+    one of the six values that row names, never prose a caller would
+    have to string-match. `extra` carries the one real per-code payload
+    field SPEC-207 defines (`reset_at` for `managed_quota_exhausted`,
+    `retry_after` for `managed_rate_limited`), empty otherwise. Raised
+    only for a request that actually reached the managed gateway --
+    never for a vendor-direct provider's own, unrelated HTTP error."""
+
+    def __init__(self, code: str, message: str, *, extra: dict | None = None):
+        super().__init__(message)
+        self.code = code
+        self.extra = extra or {}
+
 
 def _preset_records() -> dict[str, "ProviderRecord"]:
     """Today's five if-chain providers, reseeded as ordinary (editable)
@@ -135,7 +176,122 @@ def _preset_records() -> dict[str, "ProviderRecord"]:
             # unavailable in this environment; see CTX-208.1 Plan Drift).
             "capabilities": {"tool_use": False, "strict_json": False},
         },
+        "managed": {
+            "id": "managed", "kind": "openai_compat",
+            "base_url": os.environ.get(_MANAGED_GATEWAY_ENV_VAR),
+            "api_key_ref": "managed_token",
+            # SPEC-207 §2.1: "the daemon must not validate a Managed model
+            # name" -- no default alias is invented here. A role bound to
+            # `managed` with no explicit model override is a real
+            # LLMProviderError (SPEC-208 §2.3.2's existing "no model for
+            # role" rule), not a guessed alias name.
+            "models": {},
+            # The gateway proxies to real hosted vendor APIs (SPEC-404
+            # §2.2) -- both capabilities are real there, unlike Ollama's
+            # honestly-declared gaps above.
+            "capabilities": {"tool_use": True, "strict_json": True},
+        },
     }
+
+
+def _map_managed_error(exc: Exception) -> "ManagedProviderError | None":
+    """SPEC-207 §2.3: translates a real `openai` SDK exception (the
+    gateway is `openai_compat`-shaped by contract, SPEC-404 §2.3) into
+    the six-row structured taxonomy -- verified directly against the
+    installed SDK's own `_make_status_error` (401/403/404/409/422 ->
+    named classes, 429 -> `RateLimitError`, >=500 -> `InternalServerError`,
+    anything else -> a bare `APIStatusError` with `.status_code` still
+    set). Returns `None` for anything that isn't one of these -- the
+    caller re-raises the original exception unchanged in that case."""
+    import openai
+
+    if isinstance(exc, openai.APIConnectionError):
+        return ManagedProviderError(
+            "managed_unreachable",
+            "Can't reach the managed service. Your network or the service is down.",
+        )
+
+    if isinstance(exc, openai.APIStatusError):
+        status = exc.status_code
+        body = exc.body if isinstance(exc.body, dict) else {}
+
+        if status == 401:
+            return ManagedProviderError(
+                "managed_auth_invalid",
+                "Your Hardware Agent Studio account couldn't be verified.",
+            )
+        if status == 402:
+            return ManagedProviderError(
+                "managed_quota_exhausted",
+                "You've used this month's allowance.",
+                extra={"reset_at": body.get("reset_at")},
+            )
+        if status == 429:
+            retry_after = exc.response.headers.get("Retry-After") if exc.response is not None else None
+            return ManagedProviderError(
+                "managed_rate_limited",
+                "The managed service is rate-limiting requests.",
+                extra={"retry_after": retry_after},
+            )
+        if status == 503:
+            return ManagedProviderError(
+                "managed_upstream_unavailable",
+                "The model provider is having trouble. This isn't your account.",
+            )
+        return ManagedProviderError("managed_error", f"Managed request failed (status {status}).")
+
+    return None
+
+
+class _ManagedProviderWrapper:
+    """SPEC-207 §2.2.1: the managed branch and its error mapping live
+    here, wrapping whatever real `openai_compat` client
+    `_build_provider_from_record` already built for the `managed` record
+    -- transparent to every caller of `.chat(...)`, whether that's
+    `llm_providers.chat()`'s own code or AgentFlow's `AgentExecutor`
+    calling the provider client directly (SPEC-207 §2.2.1's own named
+    three-call-site problem: anything added only inside `chat()` is
+    invisible to the other two).
+
+    Retries `managed_upstream_unavailable` (503) with linear backoff and
+    `managed_rate_limited` (429) honoring the gateway's own `Retry-After`
+    -- never `managed_auth_invalid`/`managed_quota_exhausted`, where a
+    retry cannot change the outcome before the account is fixed or the
+    period resets (SPEC-207 §2.3's own retry policy)."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        # `_close_provider_client` (CTX-201.1) reaches into `.aio`/`.close()`
+        # on whatever's at `._client` -- delegate so cleanup still works
+        # for the wrapped client exactly as it would for the real one.
+        self._client = getattr(inner, "_client", None)
+
+    async def chat(self, messages, system: str = "", **kwargs):
+        attempt = 0
+        while True:
+            try:
+                return await self._inner.chat(messages, system=system, **kwargs)
+            except Exception as exc:
+                mapped = _map_managed_error(exc)
+                if mapped is None:
+                    raise
+
+                if mapped.code == "managed_upstream_unavailable" and attempt < _MANAGED_MAX_RETRIES:
+                    attempt += 1
+                    await asyncio.sleep(_MANAGED_BACKOFF_BASE_SECONDS * attempt)
+                    continue
+
+                if mapped.code == "managed_rate_limited" and attempt < _MANAGED_MAX_RETRIES:
+                    retry_after = mapped.extra.get("retry_after")
+                    if retry_after is not None:
+                        try:
+                            attempt += 1
+                            await asyncio.sleep(float(retry_after))
+                            continue
+                        except (TypeError, ValueError):
+                            pass  # an unparsable Retry-After falls through to raising below
+
+                raise mapped from exc
 
 
 def _build_provider_from_record(record: "ProviderRecord", api_key: str, model: str | None):
@@ -164,10 +320,22 @@ def _build_provider_from_record(record: "ProviderRecord", api_key: str, model: s
     if kind == "openai_compat":
         from agentflow import OpenAICompatProvider
 
+        if record["id"] == "managed" and not record["base_url"]:
+            raise LLMProviderError(
+                f"The managed provider has no gateway configured in this build "
+                f"(set {_MANAGED_GATEWAY_ENV_VAR} for local development)."
+            )
+
         kwargs: dict[str, Any] = {"api_key": api_key, "model": resolved_model}
         if record["base_url"]:
             kwargs["base_url"] = record["base_url"]
-        return OpenAICompatProvider(**kwargs)
+        client = OpenAICompatProvider(**kwargs)
+
+        if record["id"] == "managed":
+            client._client.timeout = _MANAGED_TIMEOUT_SECONDS
+            return _ManagedProviderWrapper(client)
+
+        return client
 
     raise LLMProviderError(f"Unknown provider kind: {kind!r} (record id={record['id']!r})")
 
