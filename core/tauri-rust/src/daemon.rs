@@ -113,6 +113,11 @@ pub const KNOWN_SECRET_KEYS: &[&str] = &[
     "openai_api_key",
     "perplexity_api_key",
     "github_token",
+    // SPEC-207 §2.1/§2.6: the Managed subscription token -- reuses this
+    // exact keychain -> spawn-time secret channel, distinct from every
+    // vendor key name above. Sign-in itself is SPEC-320's job; this only
+    // adds the name the daemon reads it under once pasted.
+    "managed_token",
 ];
 
 /// Rebuilds the known-secrets map fresh from the OS keychain (SPEC-106 §2)

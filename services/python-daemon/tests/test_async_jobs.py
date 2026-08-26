@@ -103,6 +103,93 @@ class TestAsyncJobLifecycle(unittest.TestCase):
         self.assertEqual(methods_in_order, ["job.progress", "job.completed"])
         self.assertEqual(job_notifications[-1]["params"]["result"], {"echoed": "hi"})
 
+    def test_002_a_structured_error_code_reaches_job_failed(self):
+        """SPEC-207 §2.3: an exception carrying `.code`/`.extra` (the real
+        shape `llm_providers.ManagedProviderError` has, duck-typed here
+        rather than importing it -- `_run_job` itself never imports any
+        bridge module's exception classes) surfaces both on the
+        `job.failed` payload, additive to the existing `error` string."""
+        captured = []
+        original_write_line = daemon._write_line
+        daemon._write_line = lambda text: captured.append(json.loads(text))
+
+        class _FakeManagedError(Exception):
+            def __init__(self):
+                super().__init__("You've used this month's allowance.")
+                self.code = "managed_quota_exhausted"
+                self.extra = {"reset_at": "2026-09-01T00:00:00Z"}
+
+        def _raise_fake_managed_error():
+            raise _FakeManagedError()
+
+        daemon.ROUTES['test.fail_managed'] = _raise_fake_managed_error
+        daemon.ASYNC_ROUTES.add('test.fail_managed')
+        try:
+            request = json.dumps({
+                "jsonrpc": "2.0", "method": "test.fail_managed", "params": {}, "id": "req_2"
+            })
+            response = json.loads(daemon.handle_request(request))
+            job_id = response["result"]["job_id"]
+
+            deadline = time.monotonic() + 2.0
+            terminal = None
+            while time.monotonic() < deadline:
+                for n in captured:
+                    if n.get("params", {}).get("job_id") == job_id and n["method"] == "job.failed":
+                        terminal = n
+                        break
+                if terminal:
+                    break
+                time.sleep(0.01)
+        finally:
+            daemon._write_line = original_write_line
+            daemon.ROUTES.pop('test.fail_managed', None)
+            daemon.ASYNC_ROUTES.discard('test.fail_managed')
+
+        self.assertIsNotNone(terminal, "job.failed was never emitted")
+        self.assertEqual(terminal["params"]["code"], "managed_quota_exhausted")
+        self.assertEqual(terminal["params"]["reset_at"], "2026-09-01T00:00:00Z")
+        self.assertIn("allowance", terminal["params"]["error"])
+
+    def test_003_an_ordinary_exception_with_no_code_keeps_the_existing_payload_shape(self):
+        """Regression check: this codepath must stay additive -- an
+        exception with no `.code` attribute (every pre-existing failure
+        mode) must not gain a `code` key at all."""
+        captured = []
+        original_write_line = daemon._write_line
+        daemon._write_line = lambda text: captured.append(json.loads(text))
+
+        def _raise_plain_error():
+            raise ValueError("plain, unrelated failure")
+
+        daemon.ROUTES['test.fail_plain'] = _raise_plain_error
+        daemon.ASYNC_ROUTES.add('test.fail_plain')
+        try:
+            request = json.dumps({
+                "jsonrpc": "2.0", "method": "test.fail_plain", "params": {}, "id": "req_3"
+            })
+            response = json.loads(daemon.handle_request(request))
+            job_id = response["result"]["job_id"]
+
+            deadline = time.monotonic() + 2.0
+            terminal = None
+            while time.monotonic() < deadline:
+                for n in captured:
+                    if n.get("params", {}).get("job_id") == job_id and n["method"] == "job.failed":
+                        terminal = n
+                        break
+                if terminal:
+                    break
+                time.sleep(0.01)
+        finally:
+            daemon._write_line = original_write_line
+            daemon.ROUTES.pop('test.fail_plain', None)
+            daemon.ASYNC_ROUTES.discard('test.fail_plain')
+
+        self.assertIsNotNone(terminal, "job.failed was never emitted")
+        self.assertNotIn("code", terminal["params"])
+        self.assertEqual(terminal["params"]["error"], "plain, unrelated failure")
+
 
 class TestRealCancellation(unittest.TestCase):
 
