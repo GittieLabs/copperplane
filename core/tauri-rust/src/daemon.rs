@@ -120,22 +120,42 @@ pub const KNOWN_SECRET_KEYS: &[&str] = &[
     "managed_token",
 ];
 
+/// Rebuilds the known-secrets map fresh from the OS keychain (SPEC-106 §2),
+/// for exactly the key names given -- the fixed vendor/GitHub presets plus
+/// whatever custom `api_key_ref`s a caller supplies (`SPEC-321` §2.2).
+/// `AppHandle`-free so the lookup itself is directly unit-testable, the
+/// same split `config.rs` already uses for `ensure_output_dir`/
+/// `resolve_output_dir`.
+fn collect_secrets_for(keys: impl Iterator<Item = String>) -> BTreeMap<String, String> {
+    keys.filter_map(|key| {
+        crate::secrets::get_secret(&key)
+            .ok()
+            .flatten()
+            .map(|value| (key, value))
+    })
+    .collect()
+}
+
 /// Rebuilds the known-secrets map fresh from the OS keychain (SPEC-106 §2)
 /// -- the same lookup `spawn_daemon` performs once at startup. Reused by
 /// `SPEC-303`'s `save_secret`/`clear_secret` commands so a live update
 /// always sends `daemon.configure` the *complete* current secret set,
 /// never a partial delta -- this is what lets `configure_daemon`'s
 /// replace-not-merge semantics on the Python side stay untouched.
-pub fn collect_known_secrets() -> BTreeMap<String, String> {
-    KNOWN_SECRET_KEYS
-        .iter()
-        .filter_map(|key| {
-            crate::secrets::get_secret(key)
-                .ok()
-                .flatten()
-                .map(|value| (key.to_string(), value))
-        })
-        .collect()
+///
+/// `SPEC-321` §2.2: also reads the current `config.json`'s `providers`
+/// array so a user-authored record's own `api_key_ref` is collected and
+/// synced exactly like every vendor key already is -- no second sync
+/// mechanism for "custom" keys once the record naming them is saved.
+pub fn collect_known_secrets(app: &AppHandle) -> BTreeMap<String, String> {
+    let config = crate::config::load_config(app);
+    let custom_refs = config
+        .providers
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| p.api_key_ref);
+
+    collect_secrets_for(KNOWN_SECRET_KEYS.iter().map(|k| k.to_string()).chain(custom_refs))
 }
 
 /// Pushes the complete current secrets set to the already-running daemon
@@ -143,7 +163,7 @@ pub fn collect_known_secrets() -> BTreeMap<String, String> {
 /// a live daemon picks up the change without a restart. A plain Rust call
 /// into `dispatch_to_daemon`, not a second IPC round trip.
 pub fn sync_secrets_to_daemon(app: &AppHandle) -> Result<(), String> {
-    let secrets = collect_known_secrets();
+    let secrets = collect_known_secrets(app);
     let request = build_configure_request(&secrets);
     dispatch_to_daemon(app.clone(), request)
 }
@@ -287,7 +307,7 @@ pub fn spawn_daemon(app: &AppHandle) -> std::io::Result<DaemonHandle> {
     // daemon ever reads -- before spawn_daemon returns and hands the
     // stdin handle to anything that could write a second, ordinary
     // request ahead of it.
-    let secrets = collect_known_secrets();
+    let secrets = collect_known_secrets(app);
     write_request(&mut stdin, &build_configure_request(&secrets))?;
 
     // SPEC-107 §2: the clock starts now, not on the first heartbeat --
@@ -400,7 +420,7 @@ mod heartbeat_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_configure_request, collect_known_secrets, write_request, KNOWN_SECRET_KEYS};
+    use super::{build_configure_request, collect_secrets_for, write_request, KNOWN_SECRET_KEYS};
     use std::collections::BTreeMap;
 
     #[test]
@@ -409,6 +429,9 @@ mod tests {
         // real" norm) -- skips cleanly if no OS keychain store is
         // reachable, e.g. a headless CI runner, same pattern as
         // secrets.rs's own real_round_trip_through_the_os_keychain test.
+        // Exercises the `AppHandle`-free core (`collect_secrets_for`)
+        // directly -- `collect_known_secrets` itself needs a real
+        // `AppHandle` to load config.json, unavailable in a unit test.
         use keyring::Entry;
         if Entry::store_status().is_err() {
             eprintln!("Skipping collect_known_secrets_reads_every_configured_key_fresh_from_the_real_keychain: no OS keychain store available");
@@ -419,15 +442,38 @@ mod tests {
         crate::secrets::set_secret(test_key, "ctx-303.1-test-value")
             .expect("set_secret should succeed against a real, reachable keychain");
 
-        let secrets = collect_known_secrets();
+        let keys = || KNOWN_SECRET_KEYS.iter().map(|k| k.to_string());
+        let secrets = collect_secrets_for(keys());
         assert_eq!(secrets.get(test_key), Some(&"ctx-303.1-test-value".to_string()));
 
         crate::secrets::delete_secret(test_key).expect("cleanup delete_secret should succeed");
-        let after_delete = collect_known_secrets();
+        let after_delete = collect_secrets_for(keys());
         assert!(
             !after_delete.contains_key(test_key),
             "a deleted key should not still appear in the collected map"
         );
+    }
+
+    /// SPEC-321 §2.2: a custom `api_key_ref` (not in `KNOWN_SECRET_KEYS`
+    /// at all) is collected exactly like a vendor key, once it's passed
+    /// in -- the real mechanism `collect_known_secrets` uses once it
+    /// reads such a ref out of `config.json`.
+    #[test]
+    fn collect_secrets_for_reads_a_custom_ref_that_is_not_a_known_vendor_key() {
+        use keyring::Entry;
+        if Entry::store_status().is_err() {
+            eprintln!("Skipping collect_secrets_for_reads_a_custom_ref_that_is_not_a_known_vendor_key: no OS keychain store available");
+            return;
+        }
+
+        let custom_key = "ctx-321.1-custom-provider-key";
+        crate::secrets::set_secret(custom_key, "custom-value-456")
+            .expect("set_secret should succeed against a real, reachable keychain");
+
+        let secrets = collect_secrets_for(std::iter::once(custom_key.to_string()));
+        assert_eq!(secrets.get(custom_key), Some(&"custom-value-456".to_string()));
+
+        crate::secrets::delete_secret(custom_key).expect("cleanup delete_secret should succeed");
     }
 
     #[test]

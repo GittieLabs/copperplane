@@ -176,7 +176,7 @@ _DAEMON_CONFIG_ENV_VAR = "HAS_DAEMON_CONFIG"
 # never written to disk, never logged (SPEC-106 §3). llm_provider/
 # llm_model existed on Rust's DaemonConfig since CTX-106.1 but were never
 # read on this side until SPEC-201 -- its first real consumer.
-CONFIG = {"secrets": {}, "llm_provider": None, "llm_model": None}
+CONFIG = {"secrets": {}, "llm_provider": None, "llm_model": None, "providers": None, "provider_roles": None}
 
 # Providers that need a stored API key to be usable (SPEC-303) -- matches
 # core/tauri-rust/src/daemon.rs's KNOWN_SECRET_KEYS allowlist and
@@ -217,6 +217,13 @@ def _apply_env_config() -> None:
 
     CONFIG["llm_provider"] = env_config.get("llm_provider")
     CONFIG["llm_model"] = env_config.get("llm_model")
+    # SPEC-321 §2.3: threads the two fields llm_providers.resolve()'s own
+    # `config` parameter has been able to read since CTX-208.2, but which
+    # nothing supplied until this route existed to write them. Both
+    # default to None/absent exactly like a pre-SPEC-208 install --
+    # migrate_legacy_config() already handles that case correctly.
+    CONFIG["providers"] = env_config.get("providers")
+    CONFIG["provider_roles"] = env_config.get("provider_roles")
 
 
 _apply_env_config()
@@ -848,12 +855,15 @@ class JobNotFoundError(Exception):
 # supply directly over the wire.
 _INTERNAL_ONLY_PARAMS = {"cancel_event"}
 
-def configure_daemon(secrets: dict = None, llm_provider: str = None, llm_model: str = None) -> dict:
-    """The daemon.configure route (SPEC-106 §2, extended by SPEC-303):
-    merges secrets Rust hands over on the daemon's very first request into
-    CONFIG. Ordinary route, dispatched through the normal ROUTES registry
-    like anything else -- Rust's spawn_daemon (CTX-106.1) is what
-    guarantees this line reaches stdin before any other, not any
+def configure_daemon(
+    secrets: dict = None, llm_provider: str = None, llm_model: str = None,
+    providers: list = None, provider_roles: dict = None,
+) -> dict:
+    """The daemon.configure route (SPEC-106 §2, extended by SPEC-303, then
+    SPEC-321): merges secrets Rust hands over on the daemon's very first
+    request into CONFIG. Ordinary route, dispatched through the normal
+    ROUTES registry like anything else -- Rust's spawn_daemon (CTX-106.1)
+    is what guarantees this line reaches stdin before any other, not any
     special-casing here.
 
     Also callable again later, live, from the Settings UI (SPEC-303) --
@@ -862,13 +872,23 @@ def configure_daemon(secrets: dict = None, llm_provider: str = None, llm_model: 
     replacing CONFIG["secrets"] wholesale is correct either way, not a
     partial-update bug. `llm_provider`/`llm_model` default to None meaning
     "leave unchanged" -- Rust's spawn-time call never passes them, so this
-    extension can't regress that call."""
+    extension can't regress that call.
+
+    `providers`/`provider_roles` (SPEC-321 §2.3) follow the identical
+    "None means leave unchanged, otherwise replace wholesale" contract --
+    SPEC-208 §2.5's own rule that a role-binding update is always the
+    complete current pair, never a partial delta, applied at the CONFIG
+    layer exactly like `secrets` already is."""
     if secrets is not None:
         CONFIG["secrets"] = dict(secrets)
     if llm_provider is not None:
         CONFIG["llm_provider"] = llm_provider
     if llm_model is not None:
         CONFIG["llm_model"] = llm_model
+    if providers is not None:
+        CONFIG["providers"] = list(providers)
+    if provider_roles is not None:
+        CONFIG["provider_roles"] = dict(provider_roles)
     return {"configured": True}
 
 
@@ -912,6 +932,41 @@ def llm_chat(
     return llm_providers.chat(
         prompt, provider=provider_name, api_key=api_key, model=model_name, system=system, history=history
     )
+
+
+def llm_get_provider_records() -> dict:
+    """The llm.get_provider_records route (SPEC-321 §2.4/§2.5): the
+    resolved provider set -- the five built-in presets plus whatever
+    custom records `CONFIG["providers"]` currently carries -- for
+    Settings' editor to render. Reuses `llm_providers
+    ._resolve_provider_records` (real and tested since CTX-208.1) rather
+    than duplicating preset knowledge in TypeScript, which would drift
+    the moment either side changed a default.
+
+    `managed` is filtered out here, unconditionally -- SPEC-208 §2.2.3
+    already stops a config.json entry from *claiming* that id, but this
+    route is the one place that stops it from ever being *rendered*, a
+    distinct guarantee that spec's own contract never made on its own
+    (SPEC-321 §3).
+
+    `provider_roles` in the response is always the real, resolved
+    binding -- run through `migrate_legacy_config` first, so a
+    pre-SPEC-208 install (no `provider_roles` saved at all) sees what it
+    would actually get today, not an empty map that reads as
+    unconfigured. `provider_roles_saved` distinguishes that from a real,
+    explicit save, so the editor's migration display (SPEC-321 §2.5) can
+    say "currently bound to X, not yet saved" instead of implying the
+    user already made this choice.
+
+    Synchronous: a dict lookup and a filter, no network, no LLM call --
+    not registered in ASYNC_ROUTES."""
+    migrated = llm_providers.migrate_legacy_config(CONFIG)
+    records = llm_providers._resolve_provider_records(migrated)
+    return {
+        "records": [record for record_id, record in records.items() if record_id != "managed"],
+        "provider_roles": migrated.get("provider_roles") or {},
+        "provider_roles_saved": bool(CONFIG.get("provider_roles")),
+    }
 
 
 def cancel_job(job_id: str) -> dict:
@@ -1386,6 +1441,7 @@ def _build_routes() -> dict:
         routes["freecad.export_enclosure"] = freecad_export_enclosure
     if llm_providers is not None:
         routes["llm.chat"] = llm_chat
+        routes["llm.get_provider_records"] = llm_get_provider_records
     if component_pipeline is not None:
         routes["kicad.generate_component"] = kicad_generate_component
         routes["component.search"] = component_search

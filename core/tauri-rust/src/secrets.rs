@@ -38,17 +38,36 @@ pub fn delete_secret(key: &str) -> Result<(), String> {
     }
 }
 
-/// Rejects any key not in `KNOWN_SECRET_KEYS`, so a typo'd or unrelated
-/// keychain entry can never be written under this app's service name via
-/// `save_secret`/`clear_secret`. Split out as its own `AppHandle`-free
-/// function so the validation itself is directly unit-testable, the same
-/// split `config.rs` already uses for `ensure_output_dir`/`resolve_output_dir`.
-fn validate_known_key(key: &str) -> Result<(), String> {
-    if crate::daemon::KNOWN_SECRET_KEYS.contains(&key) {
+/// Rejects any key that is neither in `KNOWN_SECRET_KEYS` nor a currently
+/// saved provider record's own `api_key_ref` (`SPEC-321` §2.2) -- so a
+/// typo'd or unrelated keychain entry can never be written under this
+/// app's service name via `save_secret`/`clear_secret`, while a real,
+/// user-authored `SPEC-208` provider record's own key name is accepted.
+/// `AppHandle`-free so the validation logic itself is directly
+/// unit-testable, the same split `config.rs` already uses for
+/// `ensure_output_dir`/`resolve_output_dir`.
+fn validate_known_key_against(key: &str, custom_refs: &[String]) -> Result<(), String> {
+    if crate::daemon::KNOWN_SECRET_KEYS.contains(&key) || custom_refs.iter().any(|r| r == key) {
         Ok(())
     } else {
         Err(format!("Unknown secret key: {key}"))
     }
+}
+
+/// The `AppHandle`-dependent half of `validate_known_key_against` --
+/// reads the real, currently-saved `config.json` to know which custom
+/// `api_key_ref`s exist right now. A record must be saved before its own
+/// key can be (`SPEC-321` §2.2) -- there is no other source of truth for
+/// "is this a real custom ref" than the config that names it.
+fn validate_known_key(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
+    let config = crate::config::load_config(app);
+    let custom_refs: Vec<String> = config
+        .providers
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| p.api_key_ref)
+        .collect();
+    validate_known_key_against(key, &custom_refs)
 }
 
 /// Saves a provider API key and immediately pushes the complete current
@@ -56,7 +75,7 @@ fn validate_known_key(key: &str) -> Result<(), String> {
 /// counterpart to `set_secret`, reachable from the frontend.
 #[tauri::command]
 pub fn save_secret(app: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
-    validate_known_key(&key)?;
+    validate_known_key(&app, &key)?;
     set_secret(&key, &value)?;
     crate::daemon::sync_secrets_to_daemon(&app)
 }
@@ -65,7 +84,7 @@ pub fn save_secret(app: tauri::AppHandle, key: String, value: String) -> Result<
 /// now-deleted key as configured, without a restart.
 #[tauri::command]
 pub fn clear_secret(app: tauri::AppHandle, key: String) -> Result<(), String> {
-    validate_known_key(&key)?;
+    validate_known_key(&app, &key)?;
     delete_secret(&key)?;
     crate::daemon::sync_secrets_to_daemon(&app)
 }
@@ -77,14 +96,29 @@ mod tests {
     #[test]
     fn validate_known_key_accepts_every_real_provider_key() {
         for key in crate::daemon::KNOWN_SECRET_KEYS {
-            assert!(validate_known_key(key).is_ok(), "{key} should be a known key");
+            assert!(validate_known_key_against(key, &[]).is_ok(), "{key} should be a known key");
         }
     }
 
     #[test]
     fn validate_known_key_rejects_anything_not_in_the_allowlist() {
-        assert!(validate_known_key("not_a_real_provider_api_key").is_err());
-        assert!(validate_known_key("").is_err());
+        assert!(validate_known_key_against("not_a_real_provider_api_key", &[]).is_err());
+        assert!(validate_known_key_against("", &[]).is_err());
+    }
+
+    /// SPEC-321 §2.2: a custom provider record's own `api_key_ref` is
+    /// accepted once it's a real, currently-saved ref -- the whole reason
+    /// this function stopped operating over a fixed allowlist alone.
+    #[test]
+    fn validate_known_key_accepts_a_real_custom_ref() {
+        let custom_refs = vec!["my_local_server_key".to_string()];
+        assert!(validate_known_key_against("my_local_server_key", &custom_refs).is_ok());
+    }
+
+    #[test]
+    fn validate_known_key_rejects_a_ref_no_saved_record_actually_names() {
+        let custom_refs = vec!["my_local_server_key".to_string()];
+        assert!(validate_known_key_against("a_different_key_nobody_saved", &custom_refs).is_err());
     }
 
     /// SPEC-405 §2.1/§3.4: the durable guard against the central hazard
