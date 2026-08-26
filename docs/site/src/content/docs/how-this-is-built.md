@@ -75,7 +75,7 @@ separate question, and the answer is deliberate: inside the application, AI acts
 within a step you chose, never to decide which step you are on. Ambiguity
 surfaces as a choice you confirm. Nothing writes to your board without an
 explicit confirmation. See [What it is, and what it is
-not](/hardware-agent-studio/what-it-is/).
+not](/copperplane/what-it-is/).
 
 ## Contributing with AI
 

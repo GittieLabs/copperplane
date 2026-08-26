@@ -174,7 +174,7 @@ describe('copyDiagnostics', () => {
 
     expect(writeTextMock).toHaveBeenCalledTimes(1)
     const text = writeTextMock.mock.calls[0][0] as string
-    expect(text).toContain('Hardware Agent Studio v0.1.0')
+    expect(text).toContain('Copperplane v0.1.0')
     expect(text).toContain('Python: 3.12.0')
     expect(text).toContain('Log file: /var/log/daemon.log')
     expect(text).toContain('KiCad: not reachable')

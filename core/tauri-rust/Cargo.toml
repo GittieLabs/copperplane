@@ -1,10 +1,10 @@
 [package]
-name = "hardware-agent-studio-core"
+name = "copperplane-core"
 version = "0.1.3"
-description = "Rust process manager and OS-level lifecycle supervisor for Hardware Agent Studio"
-authors = ["Hardware Agent Studio contributors"]
+description = "Rust process manager and OS-level lifecycle supervisor for Copperplane"
+authors = ["Copperplane contributors"]
 license = "Apache-2.0"
-repository = "https://github.com/GittieLabs/hardware-agent-studio"
+repository = "https://github.com/GittieLabs/copperplane"
 edition = "2021"
 rust-version = "1.77.2"
 

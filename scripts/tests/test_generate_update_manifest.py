@@ -40,7 +40,7 @@ class TestGenerateManifest(unittest.TestCase):
             platforms=[(
                 'aarch64-apple-darwin',
                 'dW50cnVzdGVkIGNvbW1lbnQ6...',
-                'https://github.com/GittieLabs/hardware-agent-studio/releases/download/v0.1.0/hardware-agent-studio.app.tar.gz',
+                'https://github.com/GittieLabs/copperplane/releases/download/v0.1.0/Copperplane.app.tar.gz',
             )],
         )
 
@@ -51,7 +51,7 @@ class TestGenerateManifest(unittest.TestCase):
             manifest['platforms']['darwin-aarch64'],
             {
                 'signature': 'dW50cnVzdGVkIGNvbW1lbnQ6...',
-                'url': 'https://github.com/GittieLabs/hardware-agent-studio/releases/download/v0.1.0/hardware-agent-studio.app.tar.gz',
+                'url': 'https://github.com/GittieLabs/copperplane/releases/download/v0.1.0/Copperplane.app.tar.gz',
             },
         )
 

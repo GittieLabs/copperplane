@@ -70,5 +70,5 @@ If you uninstall this app, both are exactly as they were.
 
 Component data obtained through this app stays under its own licence, and KiCad
 library terms are not this app's terms. See
-[Attribution and licences](/hardware-agent-studio/attribution/) — particularly if
+[Attribution and licences](/copperplane/attribution/) — particularly if
 you plan to publish a design that uses imported community footprints.

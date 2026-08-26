@@ -1197,7 +1197,7 @@ def open_project_from_directory(directory: str) -> dict:
     state_path = _project_state_path(directory)
     if not os.path.isfile(state_path):
         raise ProjectNotLinkedError(
-            f"'{directory}' isn't linked to a hardware-agent-studio project yet -- "
+            f"'{directory}' isn't linked to a Copperplane project yet -- "
             f"no project.json found there."
         )
     record = _read_json(state_path)
@@ -1293,7 +1293,7 @@ def cache_datasheet(part_number: str, datasheet_url: str) -> str:
         raise DatasheetFetchError(f"'{part_number}' is not a safe part_number for a cache filename.")
 
     request = urllib.request.Request(
-        datasheet_url, headers={"User-Agent": "hardware-agent-studio/0.1"}
+        datasheet_url, headers={"User-Agent": "copperplane/0.1"}
     )
     try:
         with urllib.request.urlopen(

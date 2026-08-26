@@ -69,4 +69,4 @@ cites, and — when you tell it to — writes one specific reviewed thing. It is
 trying to design your board, and the moment it started trying, you would stop
 being able to trust the parts that work.
 
-[What it is, and what it is not →](/hardware-agent-studio/what-it-is/)
+[What it is, and what it is not →](/copperplane/what-it-is/)

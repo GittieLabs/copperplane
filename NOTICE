@@ -1,4 +1,4 @@
-Hardware Agent Studio
+Copperplane
 Copyright 2026 GittieLabs
 
 This product includes software developed by GittieLabs
@@ -11,7 +11,7 @@ included in the LICENSE file at the root of this distribution.
 Third-party notices
 --------------------------------------------------------------------------
 
-Distributed builds of Hardware Agent Studio bundle a frozen Python runtime
+Distributed builds of Copperplane bundle a frozen Python runtime
 containing the dependencies of services/python-daemon. The notices below are
 reproduced as required by Apache License 2.0 section 4(d).
 
@@ -36,7 +36,7 @@ BSD 3-Clause, ISC, MPL-2.0 and Apache-2.0 licenses. certifi is distributed
 under the Mozilla Public License 2.0 and is bundled unmodified; its source
 is available at https://github.com/certifi/python-certifi.
 
-Hardware Agent Studio interoperates with KiCad and FreeCAD as separate
+Copperplane interoperates with KiCad and FreeCAD as separate
 programs, over KiCad's IPC API and by invoking FreeCAD headlessly. Neither
 is bundled or linked. KiCad and FreeCAD are trademarks of their respective
 owners; this project is not affiliated with or endorsed by either project.

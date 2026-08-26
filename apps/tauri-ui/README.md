@@ -1,4 +1,4 @@
-# Hardware Agent Studio — Frontend
+# Copperplane — Frontend
 
 The Tauri app's UI: React 19 + TypeScript + Vite, styled with Tailwind. This is one of three real
 layers in the project — see [the root README](../../README.md) for the full picture and

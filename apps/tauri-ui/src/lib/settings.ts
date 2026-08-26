@@ -180,7 +180,7 @@ export async function copyDiagnostics(): Promise<void> {
   }
 
   const lines = [
-    `Hardware Agent Studio v${appVersion}`,
+    `Copperplane v${appVersion}`,
     `Python: ${capabilities.python_version}`,
     `Log file: ${capabilities.log_path ?? '(not available)'}`,
     `KiCad: ${kicadVersion}`,

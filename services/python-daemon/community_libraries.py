@@ -96,7 +96,7 @@ def _github_request(path: str, github_token: str | None) -> dict:
     network error, a non-200 response -- rather than returning a value
     a caller could mistake for a real, empty result."""
     headers = {
-        "User-Agent": "hardware-agent-studio/0.1",
+        "User-Agent": "copperplane/0.1",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
@@ -199,7 +199,7 @@ def fetch_raw_content(download_url: str) -> str:
     a real, different system from `api.github.com`. Reuses this module's
     own `_SSL_CONTEXT`/timeout/error-translation conventions exactly."""
     request = urllib.request.Request(
-        download_url, headers={"User-Agent": "hardware-agent-studio/0.1"}
+        download_url, headers={"User-Agent": "copperplane/0.1"}
     )
     try:
         with urllib.request.urlopen(

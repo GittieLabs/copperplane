@@ -1,13 +1,13 @@
 # Documentation site
 
-The user-facing docs for Hardware Agent Studio, built with
+The user-facing docs for Copperplane, built with
 [Astro Starlight](https://starlight.astro.build/) and published to GitHub Pages
 from `develop`.
 
 ```bash
 cd docs/site
 npm install
-npm run dev      # http://localhost:4321/hardware-agent-studio
+npm run dev      # http://localhost:4321/copperplane
 npm run build    # writes dist/
 ```
 
@@ -21,5 +21,5 @@ validator's `EXCLUDE_DIR_NAMES` as of `CTX-902.3`. A documentation fix is
 genuinely the lowest-friction way to make a first contribution here.
 
 Screenshots live in `public/images/` and are referenced as
-`/hardware-agent-studio/images/<name>.png`. Files listed in
+`/copperplane/images/<name>.png`. Files listed in
 `public/images/NEEDED.md` are still outstanding.

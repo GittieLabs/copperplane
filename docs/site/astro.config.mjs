@@ -8,22 +8,22 @@ import starlight from '@astrojs/starlight'
 // every internal link.
 export default defineConfig({
   site: 'https://gittielabs.github.io',
-  base: '/hardware-agent-studio',
+  base: '/copperplane',
   integrations: [
     starlight({
-      title: 'Hardware Agent Studio',
+      title: 'Copperplane',
       description:
         'A local-first desktop assistant that bridges KiCad and FreeCAD. It reads the datasheet and shows you the page it got that from.',
       social: [
         {
           icon: 'github',
           label: 'GitHub',
-          href: 'https://github.com/GittieLabs/hardware-agent-studio',
+          href: 'https://github.com/GittieLabs/copperplane',
         },
       ],
       editLink: {
         baseUrl:
-          'https://github.com/GittieLabs/hardware-agent-studio/edit/develop/docs/site/',
+          'https://github.com/GittieLabs/copperplane/edit/develop/docs/site/',
       },
       lastUpdated: true,
       customCss: ['./src/styles/custom.css'],

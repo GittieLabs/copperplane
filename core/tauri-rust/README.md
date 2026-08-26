@@ -1,4 +1,4 @@
-# Hardware Agent Studio — Rust Core
+# Copperplane — Rust Core
 
 The Tauri application shell: this is what actually launches, owns the Python daemon's lifecycle,
 and bridges the frontend to it. See [the root README](../../README.md) for how the three layers

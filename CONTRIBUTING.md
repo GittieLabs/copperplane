@@ -1,4 +1,4 @@
-# Contributing to Hardware Agent Studio
+# Contributing to Copperplane
 
 Thanks for being here. This project is early, actively developed, and genuinely
 open to contribution — including from people who have never touched a PCB.
