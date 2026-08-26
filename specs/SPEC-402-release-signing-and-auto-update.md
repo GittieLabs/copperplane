@@ -4,7 +4,7 @@ title: "Release, Signing & Auto-Update"
 status: Completed
 type: Module
 created: 2026-08-16
-last_updated: 2026-08-17
+last_updated: 2026-08-26
 target_version: v0.1.0
 location: "specs/SPEC-402-release-signing-and-auto-update.md"
 parent_spec: "SPEC-000-architecture-overview.md"
@@ -126,8 +126,13 @@ user_facing: true
 ```text
 [Root Spec](../../specs/SPEC-000-architecture-overview.md)
    └── [This Spec](SPEC-402-release-signing-and-auto-update.md)
-          └── [Context 402.1](../context/CTX-402.1-subfeature.md)
+          ├── [Context 402.1](../context/CTX-402.1-subfeature.md)
+          └── [SPEC-406](SPEC-406-contributor-local-builds.md)
 ```
+*   [SPEC-406](SPEC-406-contributor-local-builds.md) -- a child spec, added 2026-08-26. Moves
+    `createUpdaterArtifacts: true` out of the committed `tauri.conf.json` and into a release-only
+    overlay this pipeline merges explicitly, so a contributor's local `tauri build` no longer
+    demands `TAURI_SIGNING_PRIVATE_KEY`. Nothing this spec publishes changes.
 *   [SPEC-401](SPEC-401-python-sidecar-packaging.md) -- the real, already-shipped `.app`/sidecar
     build this spec's release pipeline packages and publishes, completely unchanged.
 *   [SPEC-403](../specs/SPEC-403-cross-platform-verification-matrix.md) -- still unspecced; its real

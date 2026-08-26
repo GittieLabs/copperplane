@@ -120,8 +120,12 @@ jobs:
       # tauri.macos.conf.json (CTX-401.2) merges automatically -- Tauri v2's
       # own platform-config-override convention picks it up because this
       # step runs on macOS, no explicit --config flag needed.
-      # createUpdaterArtifacts (tauri.conf.json, CTX-402.2) plus the two
-      # TAURI_SIGNING_* vars makes this step also produce a real
+      # createUpdaterArtifacts now defaults to false (SPEC-406) so a
+      # contributor's own local build never demands a signing key; this
+      # release leg explicitly re-enables it via --config
+      # tauri.release.conf.json (merged on top, per Tauri's own
+      # "configs merge in the order provided" contract), which combined
+      # with the two TAURI_SIGNING_* vars makes this step produce a real
       # <app>.app.tar.gz + matching .sig, signed with the real, maintainer-
       # generated Ed25519 keypair -- entirely unrelated to the
       # APPLE_*/Developer ID vars below (SPEC-402 §2: two separate trust
@@ -147,7 +151,7 @@ jobs:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx @tauri-apps/cli@2 build --target ${{ matrix.target }}
+        run: npx @tauri-apps/cli@2 build --target ${{ matrix.target }} --config tauri.release.conf.json
 
       - name: Upload this leg's real build artifacts for the publish job
         uses: actions/upload-artifact@v4
@@ -228,12 +232,15 @@ jobs:
       # runner. No APPLE_*-equivalent signing vars -- only the Tauri
       # updater keypair, shared across every platform (SPEC-402 §2: the
       # updater's own trust model was always platform-agnostic).
+      # --config tauri.release.conf.json (SPEC-406) re-enables
+      # createUpdaterArtifacts for this release leg -- see the macOS leg's
+      # comment above for the full reasoning.
       - name: Build the Tauri app bundle
         working-directory: core/tauri-rust
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx @tauri-apps/cli@2 build --target x86_64-pc-windows-msvc
+        run: npx @tauri-apps/cli@2 build --target x86_64-pc-windows-msvc --config tauri.release.conf.json
 
       - name: Upload this leg's real build artifacts for the publish job
         uses: actions/upload-artifact@v4
@@ -321,17 +328,19 @@ jobs:
         run: mv dist/hardware-agent-studio-daemon dist/hardware-agent-studio-daemon-x86_64-unknown-linux-gnu
 
       # tauri.linux.conf.json (CTX-402.5) merges automatically on this
-      # runner. createUpdaterArtifacts (tauri.conf.json) makes this also
-      # produce a real <app>_<version>_amd64.AppImage.tar.gz + matching
-      # .sig -- confirmed directly against tauri-plugin-updater's own real
-      # source (the exact version pinned in Cargo.lock) that AppImage is
-      # the real Linux updater artifact format, not .deb/.rpm.
+      # runner. --config tauri.release.conf.json (SPEC-406) re-enables
+      # createUpdaterArtifacts for this release leg (see the macOS leg's
+      # comment above), which makes this also produce a real
+      # <app>_<version>_amd64.AppImage.tar.gz + matching .sig -- confirmed
+      # directly against tauri-plugin-updater's own real source (the exact
+      # version pinned in Cargo.lock) that AppImage is the real Linux
+      # updater artifact format, not .deb/.rpm.
       - name: Build the Tauri app bundle
         working-directory: core/tauri-rust
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx @tauri-apps/cli@2 build --target x86_64-unknown-linux-gnu --bundles deb,appimage
+        run: npx @tauri-apps/cli@2 build --target x86_64-unknown-linux-gnu --bundles deb,appimage --config tauri.release.conf.json
 
       - name: Upload this leg's real build artifacts for the publish job
         uses: actions/upload-artifact@v4
