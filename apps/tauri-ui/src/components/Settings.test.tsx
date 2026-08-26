@@ -20,7 +20,6 @@ const getConfigMock = vi.fn()
 const saveConfigMock = vi.fn()
 const saveSecretMock = vi.fn()
 const clearSecretMock = vi.fn()
-const setLlmProviderAndModelMock = vi.fn()
 const copyDiagnosticsMock = vi.fn()
 const chooseStorageFolderMock = vi.fn()
 const confirmStorageLocationChangeMock = vi.fn()
@@ -37,7 +36,6 @@ vi.mock('../lib/settings', async () => {
     saveConfig: (...args: unknown[]) => saveConfigMock(...args),
     saveSecret: (...args: unknown[]) => saveSecretMock(...args),
     clearSecret: (...args: unknown[]) => clearSecretMock(...args),
-    setLlmProviderAndModel: (...args: unknown[]) => setLlmProviderAndModelMock(...args),
     copyDiagnostics: (...args: unknown[]) => copyDiagnosticsMock(...args),
     chooseStorageFolder: (...args: unknown[]) => chooseStorageFolderMock(...args),
     confirmStorageLocationChange: (...args: unknown[]) => confirmStorageLocationChangeMock(...args),
@@ -48,6 +46,35 @@ vi.mock('../lib/settings', async () => {
 vi.mock('../lib/updater', () => ({
   checkForUpdates: (...args: unknown[]) => checkForUpdatesMock(...args),
   installUpdateAndRelaunch: (...args: unknown[]) => installUpdateAndRelaunchMock(...args),
+}))
+
+// SPEC-321/CTX-321.2: ProviderConfigEditor has its own dedicated test file
+// (ProviderConfigEditor.test.tsx) -- stubbed here, matching AgentChat's own
+// precedent, so Settings' tests stay focused on its own wiring (does it
+// pass the real loaded config/capabilities, does onSaved/onCapabilitiesChange
+// reach loadConfig/refreshCapabilities) and never need to mock
+// getProviderRecords/saveProviderConfig just to render Settings at all.
+vi.mock('./ProviderConfigEditor', () => ({
+  ProviderConfigEditor: ({
+    config,
+    capabilities,
+    onSaved,
+    onCapabilitiesChange,
+  }: {
+    config: { llm_provider?: string | null }
+    capabilities: { storage_root?: string | null } | null
+    onSaved: () => Promise<void>
+    onCapabilitiesChange: () => Promise<void>
+  }) => (
+    <div>
+      <p>
+        ProviderConfigEditor stub: llm_provider={String(config.llm_provider)} storage_root=
+        {String(capabilities?.storage_root)}
+      </p>
+      <button onClick={() => void onSaved()}>stub-trigger-onSaved</button>
+      <button onClick={() => void onCapabilitiesChange()}>stub-trigger-onCapabilitiesChange</button>
+    </div>
+  ),
 }))
 
 const { Settings } = await import('./Settings')
@@ -63,6 +90,7 @@ const EMPTY_CAPABILITIES = {
   python_version: '3.12.0',
   storage_root: '/Users/test/Library/Application Support/has/storage',
   github_token_configured: false,
+  configured_secret_refs: [] as string[],
 }
 const EMPTY_CONFIG = { llm_provider: null, llm_model: null }
 
@@ -76,7 +104,6 @@ beforeEach(() => {
   saveConfigMock.mockReset().mockResolvedValue(undefined)
   saveSecretMock.mockReset().mockResolvedValue(undefined)
   clearSecretMock.mockReset().mockResolvedValue(undefined)
-  setLlmProviderAndModelMock.mockReset().mockResolvedValue(undefined)
   chooseStorageFolderMock.mockReset()
   confirmStorageLocationChangeMock.mockReset().mockResolvedValue(false)
   restartAppMock.mockReset().mockResolvedValue(undefined)
@@ -123,56 +150,51 @@ describe('Settings: Appearance (SPEC-317)', () => {
   })
 })
 
-describe('Settings: Tier 1 (provider/model/keys)', () => {
-  it('TEST-006: an unconfigured provider shows a key input and Save button', async () => {
-    render(<Settings />)
-    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalled())
-
-    expect(screen.getByLabelText('anthropic API key')).toBeTruthy()
-    expect(screen.getAllByRole('button', { name: 'Save' }).length).toBeGreaterThan(0)
-  })
-
-  it('TEST-006: saving a key calls saveSecret then refreshes capabilities, never showing the value again', async () => {
-    render(<Settings />)
-    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalledTimes(1))
-
-    fireEvent.change(screen.getByLabelText('anthropic API key'), { target: { value: 'sk-real-secret' } })
-    getCapabilitiesMock.mockResolvedValueOnce({ ...EMPTY_CAPABILITIES, llm_providers: ['anthropic'] })
-    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0])
-
-    await waitFor(() => expect(saveSecretMock).toHaveBeenCalledWith('anthropic_api_key', 'sk-real-secret'))
-    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(screen.getByText('configured')).toBeTruthy())
-
-    // The saved value must never appear anywhere in the rendered output.
-    expect(screen.queryByText('sk-real-secret')).toBeNull()
-    expect(screen.queryByDisplayValue('sk-real-secret')).toBeNull()
-  })
-
-  it('TEST-006: a configured provider shows Clear instead of a key input, and clearing refreshes capabilities', async () => {
-    getCapabilitiesMock.mockResolvedValue({ ...EMPTY_CAPABILITIES, llm_providers: ['google'] })
+describe('Settings: Provider Configuration (SPEC-321)', () => {
+  it('renders ProviderConfigEditor once config has loaded, passing the real loaded config/capabilities', async () => {
+    getConfigMock.mockResolvedValue({ llm_provider: 'anthropic', llm_model: null })
+    getCapabilitiesMock.mockResolvedValue({ ...EMPTY_CAPABILITIES, storage_root: '/real/storage/root' })
 
     render(<Settings />)
-    await waitFor(() => expect(screen.getAllByText('configured').length).toBeGreaterThan(0))
-
-    expect(screen.queryByLabelText('google API key')).toBeNull()
-
-    getCapabilitiesMock.mockResolvedValueOnce(EMPTY_CAPABILITIES)
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }))
-
-    await waitFor(() => expect(clearSecretMock).toHaveBeenCalledWith('google_api_key'))
-    await waitFor(() => expect(screen.getByLabelText('google API key')).toBeTruthy())
-  })
-
-  it("TEST-006: changing the provider select calls setLlmProviderAndModel with the current config", async () => {
-    render(<Settings />)
-    await waitFor(() => expect(getConfigMock).toHaveBeenCalled())
-
-    fireEvent.change(screen.getByLabelText('LLM provider'), { target: { value: 'perplexity' } })
 
     await waitFor(() =>
-      expect(setLlmProviderAndModelMock).toHaveBeenCalledWith('perplexity', null, EMPTY_CONFIG),
+      expect(screen.getByText(/ProviderConfigEditor stub/).textContent).toContain(
+        'llm_provider=anthropic',
+      ),
     )
+    expect(screen.getByText(/ProviderConfigEditor stub/).textContent).toContain(
+      'storage_root=/real/storage/root',
+    )
+    // The old flat picker/four hardcoded key rows are gone -- ProviderConfigEditor
+    // is the one and only place provider configuration now lives.
+    expect(screen.queryByLabelText('LLM provider')).toBeNull()
+  })
+
+  it('does not render the editor before config has loaded (avoids passing a null config)', () => {
+    getConfigMock.mockReturnValue(new Promise(() => {})) // never resolves
+    render(<Settings />)
+
+    expect(screen.queryByText(/ProviderConfigEditor stub/)).toBeNull()
+  })
+
+  it('onSaved (from the editor) reloads config via getConfig', async () => {
+    render(<Settings />)
+    await screen.findByText(/ProviderConfigEditor stub/)
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'stub-trigger-onSaved' }))
+
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalledTimes(2))
+  })
+
+  it('onCapabilitiesChange (from the editor) refreshes capabilities via getCapabilities', async () => {
+    render(<Settings />)
+    await screen.findByText(/ProviderConfigEditor stub/)
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'stub-trigger-onCapabilitiesChange' }))
+
+    await waitFor(() => expect(getCapabilitiesMock).toHaveBeenCalledTimes(2))
   })
 
   it('surfaces an error message when getCapabilities fails, without crashing the screen', async () => {
@@ -284,9 +306,11 @@ describe('Settings: Tier 2 (KiCad/FreeCAD status + paths)', () => {
     expect(
       screen.getByText('These four fields are only read at daemon startup — restart the app to apply a change.'),
     ).toBeTruthy()
-    // Tier 1's provider/model fields must not carry this notice -- they
-    // apply live, no restart needed.
-    expect(screen.getByLabelText('LLM provider').closest('section')?.textContent).not.toMatch(/restart/i)
+    // Provider configuration applies live via daemon.configure -- it must
+    // not carry this restart-required notice, unlike the path fields above.
+    expect(screen.getByText('Provider Configuration').closest('section')?.textContent).not.toMatch(
+      /restart/i,
+    )
   })
 
   it('TEST-007: saving path overrides calls saveConfig with the current config merged in, and confirms without claiming a live update', async () => {

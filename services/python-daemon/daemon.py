@@ -1782,6 +1782,13 @@ def _detect_capabilities() -> dict:
         # right now, fixed from a hardcoded [] that predated any real
         # settings surface to populate it.
         "llm_providers": [p for p in _KEY_BASED_PROVIDERS if configured_secrets.get(f"{p}_api_key")],
+        # SPEC-321 §2.5: the editor's per-record "is a key saved for this
+        # one" display needs to ask about an arbitrary custom
+        # `api_key_ref`, not just the four fixed vendor names above --
+        # `configured_secrets` already holds every key `collect_known_secrets`
+        # (Rust) found in the real keychain, vendor or custom alike, since
+        # CTX-321.1; this just stops truncating that down to the fixed list.
+        "configured_secret_refs": sorted(key for key, value in configured_secrets.items() if value),
         # SPEC-303 Tier 3: for the Settings screen's "Copy Diagnostics"
         # bundle. log_path is None if only stderr is active (e.g. a
         # read-only log dir) -- reported honestly, not papered over.
