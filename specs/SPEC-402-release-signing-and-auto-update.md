@@ -8,7 +8,7 @@ last_updated: 2026-08-17
 target_version: v0.1.0
 location: "specs/SPEC-402-release-signing-and-auto-update.md"
 parent_spec: "SPEC-000-architecture-overview.md"
-child_specs: []
+child_specs: ["SPEC-406-contributor-local-builds.md"]
 user_facing: true
 ---
 
