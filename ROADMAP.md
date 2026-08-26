@@ -827,14 +827,26 @@ string-matching prose — the same rule `PRODUCT-PLAN.md` established for user i
 vendor trouble each get a structured choice card offering real options, because a subscriber who
 hits the monthly ceiling and sees "LLM request failed" concludes the product is broken and leaves.
 
-#### SPEC-321 — Provider Configuration UI — 🔭 not written
-*Module:* `apps/tauri-ui` + `core/tauri-rust` · *Depends on:* SPEC-208, SPEC-303
+#### [SPEC-321](apps/tauri-ui/specs/SPEC-321-provider-configuration-ui.md) — Provider Configuration UI — 📋 Draft 2026-08-26
+*Module:* `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-208, SPEC-303 · *Parent:* SPEC-208
 
 `SPEC-208` deliberately stops at the daemon and the config schema, which leaves its provider records
 unreachable by a person: `SPEC-303`'s picker writes two flat fields and its
 `KEY_BASED_PROVIDERS`/`ALL_PROVIDERS` literals are hardcoded provider lists. This spec replaces that
 picker with a real editor — add, edit and remove records, bind the two roles, and see which records
 are actually usable — plus the migration display for an install arriving with the legacy fields.
+
+Three real gaps found by reading the installed code, not assumed from `SPEC-208`'s own text: the
+frontend `DaemonConfig` type never gained `providers`/`provider_roles` fields even though Rust's own
+struct has carried both since `CTX-208.1`; `daemon.py` never reads either field into `CONFIG` at
+startup or through `daemon.configure`, so `resolve()`'s own `config` parameter has had nothing real
+supplying it since it was written; and a custom record's `api_key_ref` can't actually be saved at all
+today, since `secrets.rs`'s `validate_known_key`/`collect_known_secrets` both operate over the fixed
+`KNOWN_SECRET_KEYS` allowlist `SPEC-208` §2.7 named as needing to stop being fixed, but never built.
+
+**Deliberately excludes Managed.** No hosting decided, no auth chosen, no billing built — `managed`
+does not appear as a selectable kind anywhere in this editor, by explicit product decision, not by
+placeholder. `SPEC-320` is the only spec that would ever change that.
 
 *Requirement inherited from `SPEC-208` §3, not to be rediscovered:* a record pairing a vendor
 `api_key_ref` with a non-loopback `base_url` sends the user's own key to whatever host they typed.
