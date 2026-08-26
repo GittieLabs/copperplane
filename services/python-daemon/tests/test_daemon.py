@@ -910,6 +910,29 @@ class TestDaemonCapabilities(unittest.TestCase):
 
         self.assertEqual(caps['llm_providers'], [])
 
+    def test_002b_configured_secret_refs_includes_a_custom_provider_ref_not_in_the_fixed_list(self):
+        """SPEC-321 §2.5: the editor's per-record key status needs to ask
+        about an arbitrary `api_key_ref`, not just the four fixed vendor
+        names `llm_providers` covers -- this is the field that answers
+        that for any record, custom or preset."""
+        daemon.CONFIG['secrets'] = {
+            "anthropic_api_key": "sk-1",
+            "my_local_server_key": "sk-custom",
+        }
+
+        caps = daemon._detect_capabilities()
+
+        self.assertEqual(
+            caps['configured_secret_refs'], ["anthropic_api_key", "my_local_server_key"]
+        )
+
+    def test_002c_configured_secret_refs_is_empty_when_nothing_is_configured(self):
+        daemon.CONFIG['secrets'] = {}
+
+        caps = daemon._detect_capabilities()
+
+        self.assertEqual(caps['configured_secret_refs'], [])
+
     def test_004_reports_the_real_resolved_log_path(self):
         """CTX-303.3: log_path matches whatever _configure_logging actually
         resolved for this real process -- not asserting a specific path

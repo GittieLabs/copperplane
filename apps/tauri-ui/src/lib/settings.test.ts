@@ -18,6 +18,7 @@ const {
   setLlmProviderAndModel,
   getProviderRecords,
   saveProviderConfig,
+  isNonLoopbackBaseUrl,
   secretKeyFor,
   getAppVersion,
   copyDiagnostics,
@@ -27,6 +28,26 @@ beforeEach(() => {
   invokeMock.mockReset()
   writeTextMock.mockReset()
   dispatchMock.mockReset()
+})
+
+describe('isNonLoopbackBaseUrl', () => {
+  it('a null base_url (a preset\'s own untouched default) is never a risk', () => {
+    expect(isNonLoopbackBaseUrl(null)).toBe(false)
+  })
+
+  it('localhost and 127.0.0.1 are not flagged', () => {
+    expect(isNonLoopbackBaseUrl('http://localhost:11434/v1')).toBe(false)
+    expect(isNonLoopbackBaseUrl('http://127.0.0.1:11434/v1')).toBe(false)
+  })
+
+  it('a real remote host is flagged', () => {
+    expect(isNonLoopbackBaseUrl('http://nuc.local:11434/v1')).toBe(true)
+    expect(isNonLoopbackBaseUrl('https://api.example.com')).toBe(true)
+  })
+
+  it('an unparseable base_url fails toward "warn", not "trust it"', () => {
+    expect(isNonLoopbackBaseUrl('not a url')).toBe(true)
+  })
 })
 
 describe('secretKeyFor', () => {
@@ -233,6 +254,7 @@ describe('copyDiagnostics', () => {
     python_version: '3.12.0',
     storage_root: '/Users/test/Library/Application Support/has/storage',
     github_token_configured: false,
+    configured_secret_refs: [] as string[],
   }
 
   function mockCapabilitiesAndVersion(capabilities: typeof BASE_CAPABILITIES) {

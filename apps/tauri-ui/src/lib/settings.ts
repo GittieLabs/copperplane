@@ -86,6 +86,13 @@ export interface DaemonCapabilities {
    * entry; unauthenticated community-library search still works, just
    * at GitHub's lower unauthenticated rate limit. */
   github_token_configured: boolean
+  /** SPEC-321 §2.5: every secret ref the real keychain currently has a
+   * value for -- vendor presets and custom `providers[].api_key_ref`
+   * names alike (`daemon.py`'s `_detect_capabilities`, sourced from the
+   * same `CONFIG["secrets"]` `collect_known_secrets` already populates).
+   * Lets the editor ask "is a key saved for this record" for any record,
+   * not just the four fixed vendor names `llm_providers` above covers. */
+  configured_secret_refs: string[]
 }
 
 /** Saves a provider API key to the OS keychain and pushes the complete
@@ -181,6 +188,42 @@ export async function saveProviderConfig(
   if (response.error) {
     throw new Error(response.error.message)
   }
+}
+
+/** SPEC-208 §3 / SPEC-321 §2.5: the exact exfiltration risk both specs
+ * name -- a record pairing a real `api_key_ref` with a `base_url` on some
+ * other host sends that key wherever the host names. `null` (a preset's
+ * own untouched default endpoint) is never a risk by construction. An
+ * unparseable `base_url` fails toward "warn" rather than "trust it" --
+ * the whole point of this check is not to silently miss a real risk. */
+export function isNonLoopbackBaseUrl(base_url: string | null): boolean {
+  if (!base_url) return false
+  try {
+    const hostname = new URL(base_url).hostname
+    return hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1'
+  } catch {
+    return true
+  }
+}
+
+/** SPEC-321 §3: removing a record a role is still bound to is a real,
+ * reachable misconfiguration (`resolve()` raises a real `LLMProviderError`
+ * at the next chat/extraction call, not a friendly message) -- this is
+ * the "warn before letting a save proceed" the spec calls for, the same
+ * harder-to-ignore native-modal treatment `confirmStorageLocationChange`
+ * already established for a different real risk. Returns true if the
+ * user chose to remove it anyway. */
+export async function confirmRemoveRoleBoundProvider(
+  recordId: string,
+  boundRoles: ModelRole[],
+): Promise<boolean> {
+  return ask(
+    `"${recordId}" is currently bound to the ${boundRoles.join(' and ')} role${
+      boundRoles.length > 1 ? 's' : ''
+    }. Removing it will leave that binding pointing at a provider that no longer exists, which fails ` +
+      'the next chat or extraction that uses it. Remove it anyway?',
+    { title: 'Provider still in use', kind: 'warning', okLabel: 'Remove Anyway', cancelLabel: 'Cancel' },
+  )
 }
 
 /** SPEC-110: a real native directory picker, not a raw text field --

@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react'
 import {
-  ALL_PROVIDERS,
-  KEY_BASED_PROVIDERS,
   chooseStorageFolder,
   clearSecret,
   confirmStorageLocationChange,
@@ -11,12 +9,10 @@ import {
   restartApp,
   saveConfig,
   saveSecret,
-  secretKeyFor,
-  setLlmProviderAndModel,
   type DaemonCapabilities,
   type DaemonConfig,
-  type KeyBasedProvider,
 } from '../lib/settings'
+import { ProviderConfigEditor } from './ProviderConfigEditor'
 import { checkForUpdates, installUpdateAndRelaunch, type Update } from '../lib/updater'
 import { useThemePreference, type ThemePreference } from '../lib/theme'
 
@@ -42,11 +38,8 @@ export function Settings() {
     useThemePreference()
   const [capabilities, setCapabilities] = useState<DaemonCapabilities | null>(null)
   const [config, setConfig] = useState<DaemonConfig | null>(null)
-  const [keyInputs, setKeyInputs] = useState<Record<string, string>>({})
-  const [busyProvider, setBusyProvider] = useState<string | null>(null)
   const [githubTokenInput, setGithubTokenInput] = useState('')
   const [busyGithubToken, setBusyGithubToken] = useState(false)
-  const [providerModel, setProviderModel] = useState('')
   const [pathFields, setPathFields] = useState({
     kicad_socket_path: '',
     kicad_timeout_ms: '',
@@ -79,7 +72,6 @@ export function Settings() {
     try {
       const cfg = await getConfig()
       setConfig(cfg)
-      setProviderModel(cfg.llm_model ?? '')
       setPathFields({
         kicad_socket_path: cfg.kicad_socket_path ?? '',
         kicad_timeout_ms: cfg.kicad_timeout_ms != null ? String(cfg.kicad_timeout_ms) : '',
@@ -88,35 +80,6 @@ export function Settings() {
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  async function handleSaveKey(provider: KeyBasedProvider) {
-    const value = keyInputs[provider]?.trim()
-    if (!value) return
-    setBusyProvider(provider)
-    setError(null)
-    try {
-      await saveSecret(secretKeyFor(provider), value)
-      setKeyInputs((prev) => ({ ...prev, [provider]: '' }))
-      await refreshCapabilities()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusyProvider(null)
-    }
-  }
-
-  async function handleClearKey(provider: KeyBasedProvider) {
-    setBusyProvider(provider)
-    setError(null)
-    try {
-      await clearSecret(secretKeyFor(provider))
-      await refreshCapabilities()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusyProvider(null)
     }
   }
 
@@ -150,17 +113,6 @@ export function Settings() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusyGithubToken(false)
-    }
-  }
-
-  async function handleSaveProvider(provider: string) {
-    if (!config) return
-    setError(null)
-    try {
-      await setLlmProviderAndModel(provider, providerModel.trim() || null, config)
-      await loadConfig()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
     }
   }
 
@@ -265,8 +217,6 @@ export function Settings() {
     }
   }
 
-  const configuredProviders = new Set(capabilities?.llm_providers ?? [])
-
   return (
     <div className="flex w-full max-w-4xl flex-col gap-4 text-fg">
       <h2 className="text-lg font-medium">Settings</h2>
@@ -301,73 +251,15 @@ export function Settings() {
       </section>
 
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-fg-tertiary">LLM Provider</h3>
-        <div className="flex gap-2">
-          <select
-            aria-label="LLM provider"
-            className="flex-1 rounded border border-line bg-surface px-3 py-2 text-sm"
-            value={config?.llm_provider ?? ''}
-            onChange={(e) => void handleSaveProvider(e.target.value)}
-          >
-            <option value="" disabled>
-              Select a provider
-            </option>
-            {ALL_PROVIDERS.map((provider) => (
-              <option key={provider} value={provider}>
-                {provider}
-              </option>
-            ))}
-          </select>
-          <input
-            aria-label="Model"
-            className="flex-1 rounded border border-line bg-surface px-3 py-2 text-sm"
-            placeholder="model (optional)"
-            value={providerModel}
-            onChange={(e) => setProviderModel(e.target.value)}
-            onBlur={() => config?.llm_provider && void handleSaveProvider(config.llm_provider)}
+        <h3 className="text-sm font-medium text-fg-tertiary">Provider Configuration</h3>
+        {config && (
+          <ProviderConfigEditor
+            config={config}
+            capabilities={capabilities}
+            onSaved={loadConfig}
+            onCapabilitiesChange={refreshCapabilities}
           />
-        </div>
-      </section>
-
-      <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-fg-tertiary">API Keys</h3>
-        {KEY_BASED_PROVIDERS.map((provider) => (
-          <div key={provider} className="flex items-center gap-2">
-            <span className="w-24 text-sm capitalize">{provider}</span>
-            {configuredProviders.has(provider) ? (
-              <>
-                <span className="flex-1 text-sm text-success">configured</span>
-                <button
-                  type="button"
-                  className="rounded border border-line px-3 py-1 text-sm disabled:opacity-50"
-                  onClick={() => void handleClearKey(provider)}
-                  disabled={busyProvider === provider}
-                >
-                  Clear
-                </button>
-              </>
-            ) : (
-              <>
-                <input
-                  type="password"
-                  aria-label={`${provider} API key`}
-                  className="flex-1 rounded border border-line bg-surface px-3 py-1 text-sm"
-                  placeholder="API key"
-                  value={keyInputs[provider] ?? ''}
-                  onChange={(e) => setKeyInputs((prev) => ({ ...prev, [provider]: e.target.value }))}
-                />
-                <button
-                  type="button"
-                  className="rounded bg-accent px-3 py-1 text-sm font-medium text-accent-fg disabled:opacity-50"
-                  onClick={() => void handleSaveKey(provider)}
-                  disabled={busyProvider === provider || !keyInputs[provider]?.trim()}
-                >
-                  Save
-                </button>
-              </>
-            )}
-          </div>
-        ))}
+        )}
       </section>
 
       <section className="flex flex-col gap-2">
