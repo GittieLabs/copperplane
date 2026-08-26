@@ -8,7 +8,8 @@ last_updated: 2026-08-25
 target_version: v0.4.0
 location: "services/python-daemon/specs/SPEC-208-provider-records-and-model-roles.md"
 parent_spec: "SPEC-201-llm-provider-abstraction.md"
-child_specs: []
+child_specs:
+  - "../../../apps/tauri-ui/specs/SPEC-321-provider-configuration-ui.md"
 user_facing: false
 ---
 
