@@ -956,6 +956,18 @@ identity strings along with everything else. Three identity-guard tests are the 
 independent of the managed-tier work above — no shared files, no shared dependency — and can land
 on its own branch whenever a clean 75-file diff is convenient.
 
+#### [SPEC-406](specs/SPEC-406-contributor-local-builds.md) — Contributor Local Builds & Signing Defaults — 📋 Draft 2026-08-26
+*Module:* core/tauri-rust, repo root (`.github/workflows/release.yml`, `CONTRIBUTING.md`) · *Depends on:* SPEC-402, SPEC-401 · *Parent:* SPEC-402
+
+Makes an unsigned, installable local build the **default** outcome of `tauri build`, instead of the
+release-only `createUpdaterArtifacts: true` setting living in the shared `tauri.conf.json` and
+demanding a `TAURI_SIGNING_PRIVATE_KEY` no contributor can have. Hit for real by the maintainer on
+2026-08-26 trying to check the macOS app menu bar, which only exists in a bundled `.app`, not under
+`tauri dev` — and `CONTRIBUTING.md` never documented a path past `tauri dev` at all, despite asking
+for Windows/Linux platform reports that require one. The fix: a new release-only
+`tauri.release.conf.json` overlay, merged by `--config` in `release.yml`'s three build legs only —
+CI stays the only path to a signed, update-capable build, for maintainers too. Not yet contexted.
+
 ### 3.5 `9xx` — The framework itself
 
 **All three done as of 2026-08-08.** SPEC-901/CTX-901.1, SPEC-903/CTX-903.1, and SPEC-902/CTX-902.1
