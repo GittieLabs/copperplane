@@ -35,6 +35,22 @@ class LibraryStoreTestCase(unittest.TestCase):
         self._tmpdir.cleanup()
 
 
+class TestFrozenIdentityStrings(unittest.TestCase):
+    """SPEC-405 §2.1/§3.4: the durable guard against that spec's own
+    central hazard -- a global find-and-replace during the Copperplane
+    rename silently orphaning every already-linked project (which stores
+    its state under `_PROJECT_STATE_SUBDIR`, possibly inside the user's
+    own git repo) and every previously-generated `.kicad_mod` footprint
+    (stamped with `_KICAD_MOD_GENERATOR`). Both stay exactly these
+    strings, deliberately, forever."""
+
+    def test_001_project_state_subdir_is_frozen(self):
+        self.assertEqual(store._PROJECT_STATE_SUBDIR, ".hardware-agent-studio")
+
+    def test_002_kicad_mod_generator_is_frozen(self):
+        self.assertEqual(store._KICAD_MOD_GENERATOR, "hardware-agent-studio")
+
+
 class TestStorageRootUnconfigured(unittest.TestCase):
 
     def test_001_reading_before_configure_raises_a_clean_error(self):

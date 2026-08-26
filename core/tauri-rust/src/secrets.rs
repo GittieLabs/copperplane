@@ -87,6 +87,17 @@ mod tests {
         assert!(validate_known_key("").is_err());
     }
 
+    /// SPEC-405 §2.1/§3.4: the durable guard against the central hazard
+    /// that spec names -- a global find-and-replace during the Copperplane
+    /// rename silently orphaning every already-saved key under the old
+    /// keychain service name. `SERVICE` stays exactly this string,
+    /// deliberately, forever -- this test exists to fail loudly if a
+    /// future edit (well-intentioned or not) ever touches it.
+    #[test]
+    fn service_is_the_frozen_identity_string_spec_405_requires() {
+        assert_eq!(SERVICE, "hardware-agent-studio");
+    }
+
     #[test]
     fn real_round_trip_through_the_os_keychain() {
         // Verified for real against this machine's actual OS keychain

@@ -13,6 +13,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import daemon
 from daemon import handle_request
 
+class TestFrozenLogDirName(unittest.TestCase):
+    """SPEC-405 §2.1/§3.4: the daemon's own per-OS log directory name is
+    one of the five load-bearing identity strings that must not move in
+    the Copperplane rename -- an existing install's log continuity, not
+    just its data, would otherwise silently break."""
+
+    def test_001_default_log_dir_ends_in_the_frozen_identity_string(self):
+        self.assertTrue(daemon._default_log_dir().endswith("hardware-agent-studio"))
+
+
 class TestJSONRPCDaemon(unittest.TestCase):
 
     def test_001_valid_routing(self):
