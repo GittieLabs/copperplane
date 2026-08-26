@@ -956,7 +956,7 @@ identity strings along with everything else. Three identity-guard tests are the 
 independent of the managed-tier work above — no shared files, no shared dependency — and can land
 on its own branch whenever a clean 75-file diff is convenient.
 
-#### [SPEC-406](specs/SPEC-406-contributor-local-builds.md) — Contributor Local Builds & Signing Defaults — 📋 Draft 2026-08-26
+#### [SPEC-406](specs/SPEC-406-contributor-local-builds.md) — Contributor Local Builds & Signing Defaults — ✅ done ([CTX-406.1](context/CTX-406.1-unsigned-local-build-default.md)) 2026-08-26
 *Module:* core/tauri-rust, repo root (`.github/workflows/release.yml`, `CONTRIBUTING.md`) · *Depends on:* SPEC-402, SPEC-401 · *Parent:* SPEC-402
 
 Makes an unsigned, installable local build the **default** outcome of `tauri build`, instead of the

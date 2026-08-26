@@ -1,7 +1,7 @@
 ---
 id: SPEC-406
 title: "Contributor Local Builds & Signing Defaults"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-26
 last_updated: 2026-08-26
