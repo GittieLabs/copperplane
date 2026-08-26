@@ -91,15 +91,30 @@ class TestRealProviderCalls(unittest.TestCase):
 
     _PROMPT = "Reply with exactly one word: pong"
 
+    def _assert_real_usage_shape(self, result: dict, expected_provider_default_model: bool = True) -> None:
+        """CTX-207.1 (SPEC-207 §2.2): a real, live call must report real
+        non-zero usage -- not just a well-typed empty dict. Verified live
+        rather than assumed from AgentFlow's own already-checked source,
+        since a provider's SDK version drifting could silently zero this
+        out without any test catching it."""
+        self.assertIsInstance(result, dict)
+        self.assertIsInstance(result["text"], str)
+        self.assertGreater(len(result["text"].strip()), 0)
+        self.assertIsNotNone(result["usage"], "a real call must report real usage, not None")
+        self.assertGreater(result["usage"]["input_tokens"], 0)
+        self.assertGreater(result["usage"]["output_tokens"], 0)
+        if expected_provider_default_model:
+            self.assertIsInstance(result["model"], str)
+            self.assertGreater(len(result["model"]), 0)
+
     def test_001_real_anthropic_chat(self):
         """TEST-002."""
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             self.skipTest("ANTHROPIC_API_KEY not set. Add it to .env.local to run this test for real.")
 
-        text = chat(self._PROMPT, provider="anthropic", api_key=api_key)
-        self.assertIsInstance(text, str)
-        self.assertGreater(len(text.strip()), 0)
+        result = chat(self._PROMPT, provider="anthropic", api_key=api_key)
+        self._assert_real_usage_shape(result)
 
     def test_002_real_google_chat(self):
         """TEST-002."""
@@ -107,9 +122,8 @@ class TestRealProviderCalls(unittest.TestCase):
         if not api_key:
             self.skipTest("GOOGLE_API_KEY not set. Add it to .env.local to run this test for real.")
 
-        text = chat(self._PROMPT, provider="google", api_key=api_key)
-        self.assertIsInstance(text, str)
-        self.assertGreater(len(text.strip()), 0)
+        result = chat(self._PROMPT, provider="google", api_key=api_key)
+        self._assert_real_usage_shape(result)
 
     def test_003_real_perplexity_chat(self):
         """TEST-002."""
@@ -117,9 +131,8 @@ class TestRealProviderCalls(unittest.TestCase):
         if not api_key:
             self.skipTest("PERPLEXITY_API_KEY not set. Add it to .env.local to run this test for real.")
 
-        text = chat(self._PROMPT, provider="perplexity", api_key=api_key)
-        self.assertIsInstance(text, str)
-        self.assertGreater(len(text.strip()), 0)
+        result = chat(self._PROMPT, provider="perplexity", api_key=api_key)
+        self._assert_real_usage_shape(result)
 
     def test_004_real_ollama_chat(self):
         """TEST-002: no API key needed -- a real, locally running Ollama
@@ -132,9 +145,8 @@ class TestRealProviderCalls(unittest.TestCase):
         except Exception:
             self.skipTest("No local Ollama server reachable at localhost:11434.")
 
-        text = chat(self._PROMPT, provider="ollama")
-        self.assertIsInstance(text, str)
-        self.assertGreater(len(text.strip()), 0)
+        result = chat(self._PROMPT, provider="ollama")
+        self._assert_real_usage_shape(result)
 
     def test_005_real_openai_chat_not_verified_no_key_available(self):
         """TEST-002: not verified for real in this session -- no real
@@ -145,9 +157,8 @@ class TestRealProviderCalls(unittest.TestCase):
         if len(api_key) < 20:
             self.skipTest("No real OPENAI_API_KEY available -- not verified for real in this session.")
 
-        text = chat(self._PROMPT, provider="openai", api_key=api_key)
-        self.assertIsInstance(text, str)
-        self.assertGreater(len(text.strip()), 0)
+        result = chat(self._PROMPT, provider="openai", api_key=api_key)
+        self._assert_real_usage_shape(result)
 
 
 class TestHistory(unittest.TestCase):
@@ -168,6 +179,7 @@ class TestHistory(unittest.TestCase):
             captured["messages"] = messages
             response = MagicMock()
             response.text = "ok"
+            response.usage = {"input_tokens": 5, "output_tokens": 1}
             return response
 
         mock_client = MagicMock()
@@ -224,7 +236,7 @@ class TestHistory(unittest.TestCase):
         if not api_key:
             self.skipTest("ANTHROPIC_API_KEY not set. Add it to .env.local to run this test for real.")
 
-        text = chat(
+        result = chat(
             "What is my favorite number? Reply with only the number.",
             provider="anthropic",
             api_key=api_key,
@@ -233,7 +245,7 @@ class TestHistory(unittest.TestCase):
                 {"role": "assistant", "content": "Got it, I'll remember that."},
             ],
         )
-        self.assertIn("42", text)
+        self.assertIn("42", result["text"])
 
 
 class TestPresetRecords(unittest.TestCase):

@@ -228,7 +228,9 @@ describe('App: Overview plain chat', () => {
   })
 
   it('TEST-004: an unrecognized message is a plain chat turn against llm.chat, rendering the real reply, and persists both turns', async () => {
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve('Pin 3 is a GPIO pin.')))
+    submitJobMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ text: 'Pin 3 is a GPIO pin.', usage: null, model: null })),
+    )
 
     await renderAppOnOverview()
     sendMessage('what does pin 3 do?')
@@ -249,8 +251,10 @@ describe('App: Overview plain chat', () => {
   })
 
   it('TEST-005: a second plain chat turn sends the first turn back as history', async () => {
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve('Got it, 42.')))
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve('42.')))
+    submitJobMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ text: 'Got it, 42.', usage: null, model: null })),
+    )
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({ text: '42.', usage: null, model: null })))
 
     await renderAppOnOverview()
     sendMessage('my favorite number is 42')

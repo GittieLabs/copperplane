@@ -13,6 +13,16 @@ import { OverviewDashboard } from './OverviewDashboard'
 
 type Status = 'pending' | 'done' | 'error'
 
+/** CTX-207.1 (SPEC-207 §2.2): `llm.chat`'s real job result shape -- a
+ * bare string before this. `usage`/`model` aren't rendered anywhere yet
+ * (no surface for them exists until SPEC-320), but the daemon's own
+ * per-call token accounting reaches the frontend for the first time. */
+interface LlmChatResult {
+  text: string
+  usage: { input_tokens: number; output_tokens: number } | null
+  model: string | null
+}
+
 type ChatMessage =
   | { id: string; kind: 'user'; text: string }
   | { id: string; kind: 'chat'; status: Status; text?: string; error?: string }
@@ -102,11 +112,11 @@ export function Overview({
     const id = newMessageId()
     setMessages((prev) => [...prev, { id, kind: 'chat', status: 'pending' }])
     try {
-      const handle = await submitJob<string>('llm.chat', {
+      const handle = await submitJob<LlmChatResult>('llm.chat', {
         prompt: text,
         history: chatHistory,
       })
-      const reply = await handle.result
+      const reply = (await handle.result).text
       setMessages((prev) => prev.map((m) => (m.id === id && m.kind === 'chat' ? { ...m, status: 'done', text: reply } : m)))
       // CTX-313.1: stamped once per turn and reused for both the local
       // state and the persisted call, so the Overview activity feed's
