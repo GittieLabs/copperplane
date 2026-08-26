@@ -330,11 +330,17 @@ jobs:
       # tauri.linux.conf.json (CTX-402.5) merges automatically on this
       # runner. --config tauri.release.conf.json (SPEC-406) re-enables
       # createUpdaterArtifacts for this release leg (see the macOS leg's
-      # comment above), which makes this also produce a real
-      # <app>_<version>_amd64.AppImage.tar.gz + matching .sig -- confirmed
-      # directly against tauri-plugin-updater's own real source (the exact
-      # version pinned in Cargo.lock) that AppImage is the real Linux
-      # updater artifact format, not .deb/.rpm.
+      # comment above). AppImage is the real Linux updater artifact
+      # format, not .deb/.rpm (CTX-402.5, still true). CTX-402.6: the real
+      # v0.2.0 release run showed the current @tauri-apps/cli (2.11.4,
+      # resolved fresh by npx, not pinned) signs the raw
+      # <app>_<version>_amd64.AppImage directly -- ".AppImage.sig", no
+      # ".tar.gz" wrapper -- unlike the ".app.tar.gz"/".sig" pair macOS
+      # still produces. CTX-402.5's own comment assumed the .tar.gz
+      # wrapper from whatever Tauri version was current in 2026-08-17;
+      # this is real, observed version drift, not a mistake in this leg's
+      # own build step -- only the two download-side glob patterns below
+      # (and the matching ones in the publish job) needed correcting.
       - name: Build the Tauri app bundle
         working-directory: core/tauri-rust
         env:
@@ -349,8 +355,7 @@ jobs:
           path: |
             core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
             core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
-            core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.tar.gz
-            core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.tar.gz.sig
+            core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.sig
           if-no-files-found: error
 
   # A separate job, not a third matrix leg: publishing must happen exactly
@@ -377,6 +382,11 @@ jobs:
       # leg (two macOS architectures signed/notarized -- CTX-402.4 --
       # plus unsigned Windows/Linux pre-release builds -- CTX-402.5) --
       # generate_update_manifest.py folds them all into one latest.json.
+      # Each platform's find -name '*.sig' relies on exactly one .sig
+      # file existing in that leg's downloaded artifact directory -- true
+      # for Windows (only the .exe's .sig is ever uploaded, see that leg's
+      # own upload step) and, since CTX-402.6, true for Linux too (only
+      # the AppImage's .sig is uploaded, not the .deb's).
       - name: Generate the real Tauri updater manifest (latest.json)
         run: |
           PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -418,6 +428,5 @@ jobs:
             artifacts/windows-x86_64-pc-windows-msvc/**/*.sig
             artifacts/linux-x86_64-unknown-linux-gnu/**/*.deb
             artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage
-            artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage.tar.gz
-            artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage.tar.gz.sig
+            artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage.sig
             ${{ runner.temp }}/latest.json
