@@ -73,6 +73,32 @@ cd core/tauri-rust
 npx @tauri-apps/cli@2 dev
 ```
 
+### Local builds — three honest tiers
+
+`tauri dev` (above) is fast, but it never runs a real bundle — no macOS app menu bar, no `Info.plist`
+identity, no sidecar resolution the way an installed app actually does it. When you need one of
+those, here is what a local build in `core/tauri-rust` actually gets you, and what it does not
+(SPEC-406):
+
+| Tier | Command | Gets you | Does not |
+| :--- | :--- | :--- | :--- |
+| 1 — `tauri dev` | `npx @tauri-apps/cli@2 dev` | Fast iteration | App menu bar, bundle identity, sidecar resolution |
+| 2 — unsigned bundle, placeholder daemon | `npx @tauri-apps/cli@2 build --bundles app` | A real, launchable, unsigned `.app` — no keys, no Python toolchain needed | Any real daemon behavior — the bundled sidecar is a placeholder that prints an explanation and exits if the app tries to start it |
+| 3 — unsigned bundle, real daemon | Tier 2, plus a real `pyinstaller daemon.spec` freeze in `services/python-daemon` first | Everything Tier 2 gets you, plus real daemon behavior end to end | — |
+
+**An unsigned local build runs fine.** It never receives macOS's `com.apple.quarantine` attribute
+(that only gets attached to something downloaded from the internet), so there is no Gatekeeper
+warning and no right-click-Open dance — the friction described in `SPEC-402` applies to *released*
+`.dmg` downloads, not a build you just made yourself.
+
+**Signed, update-capable builds only ever come from CI.** `core/tauri-rust/tauri.conf.json` ships
+with `createUpdaterArtifacts: false` for exactly this reason — no local build ever demands
+`TAURI_SIGNING_PRIVATE_KEY`, a secret that only exists as a GitHub Actions secret and has no local
+substitute. The release pipeline re-enables it explicitly via a `--config
+tauri.release.conf.json` overlay on its own three build legs; there is no way to produce a real
+update-capable artifact locally, by design — a contributor's own generated updater keypair would
+produce artifacts the shipped app's pinned public key correctly rejects.
+
 ### Platform reports are a contribution
 
 Every live test against real KiCad and FreeCAD has run on exactly one machine —
