@@ -827,7 +827,7 @@ string-matching prose — the same rule `PRODUCT-PLAN.md` established for user i
 vendor trouble each get a structured choice card offering real options, because a subscriber who
 hits the monthly ceiling and sees "LLM request failed" concludes the product is broken and leaves.
 
-#### [SPEC-321](apps/tauri-ui/specs/SPEC-321-provider-configuration-ui.md) — Provider Configuration UI — 📋 Draft 2026-08-26
+#### [SPEC-321](apps/tauri-ui/specs/SPEC-321-provider-configuration-ui.md) — Provider Configuration UI — ✅ done ([CTX-321.1](apps/tauri-ui/context/CTX-321.1-provider-config-backend.md), [CTX-321.2](apps/tauri-ui/context/CTX-321.2-provider-config-editor-ui.md)) 2026-08-26
 *Module:* `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-208, SPEC-303 · *Parent:* SPEC-208
 
 `SPEC-208` deliberately stops at the daemon and the config schema, which leaves its provider records
