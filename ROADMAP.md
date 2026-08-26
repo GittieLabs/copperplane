@@ -927,7 +927,7 @@ Agreement §2.2/§3.1) — building an application for your own end users is exp
 reselling account or API access is expressly prohibited, and the gateway must be funded by a paid
 API account rather than a consumer subscription.
 
-#### [SPEC-405](specs/SPEC-405-product-rename-copperplane.md) — Product Rename to Copperplane — 📋 Draft 2026-08-25
+#### [SPEC-405](specs/SPEC-405-product-rename-copperplane.md) — Product Rename to Copperplane — ✅ done ([CTX-405.3](context/CTX-405.3-identity-guard-tests.md), [CTX-405.1](context/CTX-405.1-rename-app-and-icons.md)) 2026-08-25
 *Module:* repo-wide (code, docs, icons) · *Depends on:* SPEC-402, SPEC-106 · *Parent:* SPEC-000
 
 Renames the product from Hardware Agent Studio to **Copperplane** everywhere a person can see it —
