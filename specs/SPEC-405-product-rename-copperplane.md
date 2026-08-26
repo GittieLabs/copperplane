@@ -213,9 +213,8 @@ untracked spec files. This rename touches 75 files and should start from a clean
 ```text
 [Root Spec](SPEC-000-architecture-overview.md)
    └── [This Spec](SPEC-405-product-rename-copperplane.md)
-          ├── [CTX-405.1](../context/CTX-405.1-rename-app-and-icons.md)     (proposed)
-          ├── [CTX-405.2](../context/CTX-405.2-rename-docs-site.md)         (proposed)
-          └── [CTX-405.3](../context/CTX-405.3-identity-guard-tests.md)     (proposed)
+          ├── [CTX-405.3](../context/CTX-405.3-identity-guard-tests.md)     landed first, deliberately, as the mitigation for this spec's own §3.4 hazard
+          └── [CTX-405.1](../context/CTX-405.1-rename-app-and-icons.md)     the app/icon rename AND the docs-site rename (§3.6's own sequencing meant an app that already said "Copperplane" while the docs site still said the old name was a real, confusing intermediate state worth avoiding) -- no separate CTX-405.2 was created
 ```
 
 Related: [SPEC-402](SPEC-402-release-signing-and-auto-update.md) owns the release pipeline and the
