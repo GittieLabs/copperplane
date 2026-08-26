@@ -851,6 +851,31 @@ class TestConfigureDaemonLiveUpdates(unittest.TestCase):
 
         self.assertEqual(daemon.CONFIG['secrets'], {"anthropic_api_key": "sk-existing"})
 
+    def test_004_passing_providers_and_provider_roles_updates_them_live(self):
+        """SPEC-321 §2.3: the same live-update guarantee as llm_provider/
+        llm_model, extended to the new fields."""
+        daemon.CONFIG['providers'] = None
+        daemon.CONFIG['provider_roles'] = None
+
+        providers = [{"id": "workshop", "kind": "openai_compat", "base_url": "http://localhost:11434/v1"}]
+        roles = {"reasoning": "workshop", "fast": "workshop"}
+        result = daemon.configure_daemon(providers=providers, provider_roles=roles)
+
+        self.assertEqual(result, {"configured": True})
+        self.assertEqual(daemon.CONFIG['providers'], providers)
+        self.assertEqual(daemon.CONFIG['provider_roles'], roles)
+
+    def test_005_omitting_providers_and_provider_roles_leaves_them_untouched(self):
+        """A secrets-only or llm_provider-only call must not wipe an
+        already-configured provider_roles binding."""
+        daemon.CONFIG['providers'] = [{"id": "workshop", "kind": "openai_compat"}]
+        daemon.CONFIG['provider_roles'] = {"reasoning": "workshop", "fast": "workshop"}
+
+        daemon.configure_daemon(llm_provider="anthropic")
+
+        self.assertEqual(daemon.CONFIG['providers'], [{"id": "workshop", "kind": "openai_compat"}])
+        self.assertEqual(daemon.CONFIG['provider_roles'], {"reasoning": "workshop", "fast": "workshop"})
+
 
 class TestDaemonCapabilities(unittest.TestCase):
     """CTX-303.1: daemon.get_capabilities (on-demand) and _detect_capabilities's
@@ -1988,6 +2013,85 @@ class TestChatThreadRoutes(unittest.TestCase):
         self.assertIn("chat.list_threads", routes)
         self.assertNotIn("chat.load_thread", daemon.ASYNC_ROUTES)
         self.assertNotIn("chat.list_threads", daemon.ASYNC_ROUTES)
+
+
+class TestLlmGetProviderRecordsRoute(unittest.TestCase):
+    """SPEC-321 §2.4/§2.5: the resolved provider set Settings' editor
+    renders -- presets plus config-authored records, with `managed`
+    always filtered out."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    def test_001_registered_as_a_synchronous_route(self):
+        routes = daemon._build_routes()
+        self.assertIn("llm.get_provider_records", routes)
+        self.assertNotIn("llm.get_provider_records", daemon.ASYNC_ROUTES)
+
+    def test_002_includes_every_built_in_preset(self):
+        daemon.CONFIG['providers'] = None
+        daemon.CONFIG['provider_roles'] = None
+
+        result = daemon.llm_get_provider_records()
+        ids = {record["id"] for record in result["records"]}
+        self.assertEqual(ids, {"anthropic", "google", "openai", "perplexity", "ollama"})
+
+    def test_003_managed_never_appears_even_if_config_json_somehow_named_it(self):
+        """SPEC-321 §3: this route is the one place that guarantees
+        `managed` is never rendered, independent of SPEC-208's own
+        reservation at the merge layer."""
+        daemon.CONFIG['providers'] = [{"id": "managed", "kind": "openai_compat", "base_url": "http://attacker.example"}]
+        daemon.CONFIG['provider_roles'] = None
+
+        result = daemon.llm_get_provider_records()
+        ids = {record["id"] for record in result["records"]}
+        self.assertNotIn("managed", ids)
+
+    def test_004_a_custom_config_json_record_is_included(self):
+        daemon.CONFIG['providers'] = [{
+            "id": "workshop", "kind": "openai_compat", "base_url": "http://localhost:11434/v1",
+            "api_key_ref": None, "models": {"reasoning": "big-model", "fast": "small-model"},
+            "capabilities": {"tool_use": True, "strict_json": True},
+        }]
+        daemon.CONFIG['provider_roles'] = {"reasoning": "workshop", "fast": "workshop"}
+
+        result = daemon.llm_get_provider_records()
+        ids = {record["id"] for record in result["records"]}
+        self.assertIn("workshop", ids)
+        self.assertEqual(result["provider_roles"], {"reasoning": "workshop", "fast": "workshop"})
+        self.assertTrue(result["provider_roles_saved"])
+
+    def test_005_an_unconfigured_install_reports_the_real_migrated_binding_not_an_empty_map(self):
+        """SPEC-321 §2.5's migration display: a pre-SPEC-208 install (no
+        provider_roles saved) must see what it would actually get today,
+        not a blank slate that reads as unconfigured."""
+        daemon.CONFIG['providers'] = None
+        daemon.CONFIG['provider_roles'] = None
+        daemon.CONFIG['llm_provider'] = None
+        daemon.CONFIG['llm_model'] = None
+
+        result = daemon.llm_get_provider_records()
+
+        self.assertEqual(
+            result["provider_roles"],
+            {"reasoning": daemon.llm_providers._DEFAULT_PROVIDER, "fast": daemon.llm_providers._DEFAULT_PROVIDER},
+        )
+        self.assertFalse(result["provider_roles_saved"])
+
+    def test_006_a_legacy_llm_provider_only_install_reports_the_real_migrated_binding(self):
+        daemon.CONFIG['providers'] = None
+        daemon.CONFIG['provider_roles'] = None
+        daemon.CONFIG['llm_provider'] = "google"
+        daemon.CONFIG['llm_model'] = None
+
+        result = daemon.llm_get_provider_records()
+
+        self.assertEqual(result["provider_roles"], {"reasoning": "google", "fast": "google"})
+        self.assertFalse(result["provider_roles_saved"])
 
 
 class TestChatSendRoute(unittest.TestCase):

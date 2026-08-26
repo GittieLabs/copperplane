@@ -16,6 +16,8 @@ const {
   saveConfig,
   getCapabilities,
   setLlmProviderAndModel,
+  getProviderRecords,
+  saveProviderConfig,
   secretKeyFor,
   getAppVersion,
   copyDiagnostics,
@@ -126,6 +128,87 @@ describe('setLlmProviderAndModel', () => {
 
     await expect(
       setLlmProviderAndModel('anthropic', null, { llm_provider: null, llm_model: null }),
+    ).rejects.toThrow('Invalid params')
+  })
+})
+
+describe('getProviderRecords', () => {
+  it('dispatches llm.get_provider_records and returns the result', async () => {
+    dispatchMock.mockResolvedValueOnce({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        records: [{
+          id: 'anthropic', kind: 'anthropic', base_url: null, api_key_ref: 'anthropic_api_key',
+          models: { reasoning: 'claude-sonnet-5', fast: 'claude-sonnet-5' },
+          capabilities: { tool_use: true, strict_json: true },
+        }],
+        provider_roles: { reasoning: 'anthropic', fast: 'anthropic' },
+        provider_roles_saved: false,
+      },
+    })
+
+    const result = await getProviderRecords()
+
+    expect(dispatchMock).toHaveBeenCalledWith('llm.get_provider_records', {})
+    expect(result.records).toHaveLength(1)
+    expect(result.records[0].id).toBe('anthropic')
+    expect(result.provider_roles).toEqual({ reasoning: 'anthropic', fast: 'anthropic' })
+    expect(result.provider_roles_saved).toBe(false)
+  })
+
+  it('never sees "managed" in a real response -- the daemon route filters it, not this function', async () => {
+    dispatchMock.mockResolvedValueOnce({
+      jsonrpc: '2.0',
+      id: 1,
+      result: { records: [], provider_roles: {}, provider_roles_saved: false },
+    })
+
+    const result = await getProviderRecords()
+    expect(result.records.some((r) => r.id === 'managed')).toBe(false)
+  })
+
+  it('throws when the daemon returns an error response', async () => {
+    dispatchMock.mockResolvedValueOnce({
+      jsonrpc: '2.0',
+      id: 1,
+      error: { code: -32601, message: 'Method not found' },
+    })
+
+    await expect(getProviderRecords()).rejects.toThrow('Method not found')
+  })
+})
+
+describe('saveProviderConfig', () => {
+  const record = {
+    id: 'workshop', kind: 'openai_compat' as const, base_url: 'http://localhost:11434/v1',
+    api_key_ref: null, models: { reasoning: 'big-model', fast: 'small-model' },
+    capabilities: { tool_use: true, strict_json: true },
+  }
+  const roles = { reasoning: 'workshop', fast: 'workshop' }
+
+  it('persists to config.json AND pushes live via daemon.configure, both as a complete set', async () => {
+    invokeMock.mockResolvedValueOnce(undefined)
+    dispatchMock.mockResolvedValueOnce({ jsonrpc: '2.0', id: 1, result: { configured: true } })
+
+    await saveProviderConfig([record], roles, { llm_provider: null, llm_model: null })
+
+    expect(invokeMock).toHaveBeenCalledWith('save_config_cmd', {
+      config: { llm_provider: null, llm_model: null, providers: [record], provider_roles: roles },
+    })
+    expect(dispatchMock).toHaveBeenCalledWith('daemon.configure', { providers: [record], provider_roles: roles })
+  })
+
+  it('throws when the live daemon.configure push fails, even if the config.json write already succeeded', async () => {
+    invokeMock.mockResolvedValueOnce(undefined)
+    dispatchMock.mockResolvedValueOnce({
+      jsonrpc: '2.0',
+      id: 1,
+      error: { code: -32602, message: 'Invalid params' },
+    })
+
+    await expect(
+      saveProviderConfig([record], roles, { llm_provider: null, llm_model: null }),
     ).rejects.toThrow('Invalid params')
   })
 })

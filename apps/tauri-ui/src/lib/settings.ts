@@ -20,12 +20,31 @@ export function secretKeyFor(provider: KeyBasedProvider): string {
   return `${provider}_api_key`
 }
 
+/** Mirrors `services/python-daemon/llm_providers.py`'s `ProviderRecord`
+ * (SPEC-208 §2.2.1) -- `kind` selects the SDK, never `id`. `"managed"` is
+ * never a real `kind` value a client constructs; it never appears in
+ * `getProviderRecords()`'s own response at all (SPEC-321 §2.4). */
+export interface ProviderRecord {
+  id: string
+  kind: 'anthropic' | 'openai_compat' | 'google'
+  base_url: string | null
+  api_key_ref: string | null
+  models: { reasoning?: string; fast?: string }
+  capabilities: { tool_use: boolean; strict_json: boolean }
+}
+
+export type ModelRole = 'reasoning' | 'fast'
+
 /** Mirrors `core/tauri-rust/src/config.rs`'s `DaemonConfig`. `output_dir`
  * and `storage_root` are deliberately omitted -- both are always
  * Rust-computed at spawn, never a real setting a human edits or reads
  * back from `config.json` (the real current `storage_root` is reported
  * via `DaemonCapabilities` instead). `storage_root_override` (SPEC-110)
- * is the one a human actually sets. */
+ * is the one a human actually sets.
+ *
+ * `providers`/`provider_roles` (SPEC-321 §2.3): present on the struct
+ * since `CTX-208.1`, but never round-tripped by this interface until now
+ * -- a pure TypeScript typing gap, not a missing IPC command. */
 export interface DaemonConfig {
   freecadcmd_path_override?: string | null
   kicad_socket_path?: string | null
@@ -33,6 +52,8 @@ export interface DaemonConfig {
   llm_provider?: string | null
   llm_model?: string | null
   storage_root_override?: string | null
+  providers?: ProviderRecord[] | null
+  provider_roles?: Record<ModelRole, string> | null
 }
 
 /** Mirrors `daemon.py`'s `_detect_capabilities()` shape. `log_path` is
@@ -116,6 +137,47 @@ export async function setLlmProviderAndModel(
 ): Promise<void> {
   await saveConfig({ ...currentConfig, llm_provider: provider, llm_model: model })
   const response = await dispatch('daemon.configure', { llm_provider: provider, llm_model: model })
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+}
+
+/** SPEC-321 §2.4/§2.5: the resolved provider set (presets + whatever
+ * `config.json` currently authors) for the editor to render --
+ * `records` never includes `"managed"`, and `provider_roles` is always
+ * the real, resolved binding (already run through the daemon's own
+ * `migrate_legacy_config`, never an empty map on a pre-SPEC-208 install).
+ * `provider_roles_saved` is false when that binding is only a migrated
+ * projection, not yet a real, explicit save. */
+export async function getProviderRecords(): Promise<{
+  records: ProviderRecord[]
+  provider_roles: Record<ModelRole, string>
+  provider_roles_saved: boolean
+}> {
+  const response = await dispatch('llm.get_provider_records', {})
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+  return response.result as {
+    records: ProviderRecord[]
+    provider_roles: Record<ModelRole, string>
+    provider_roles_saved: boolean
+  }
+}
+
+/** SPEC-321 §2.3: persists the complete current provider records and
+ * role bindings to `config.json` (for the next restart) and pushes them
+ * live to the running daemon via `daemon.configure`, same pattern as
+ * `setLlmProviderAndModel` -- both `providers` and `provider_roles` are
+ * always sent as a whole, never a partial delta (SPEC-208 §2.5's own
+ * contract, applied here). */
+export async function saveProviderConfig(
+  providers: ProviderRecord[],
+  providerRoles: Record<ModelRole, string>,
+  currentConfig: DaemonConfig,
+): Promise<void> {
+  await saveConfig({ ...currentConfig, providers, provider_roles: providerRoles })
+  const response = await dispatch('daemon.configure', { providers, provider_roles: providerRoles })
   if (response.error) {
     throw new Error(response.error.message)
   }
