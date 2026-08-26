@@ -1,7 +1,7 @@
 ---
 id: SPEC-207
 title: "Managed Provider Adapter"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-25
 last_updated: 2026-08-25

@@ -483,7 +483,7 @@ the first of eight slices (`CTX-206.1`–`CTX-206.8`) that shipped the full stor
 and `chat.send`/`chat.promote_turn` routes SPEC-318's five per-area agents and `AgentChat` panels
 now run on.
 
-#### [SPEC-207](services/python-daemon/specs/SPEC-207-managed-provider-adapter.md) — Managed Provider Adapter — 📋 Draft 2026-08-25
+#### [SPEC-207](services/python-daemon/specs/SPEC-207-managed-provider-adapter.md) — Managed Provider Adapter — ✅ done ([CTX-207.1](services/python-daemon/context/CTX-207.1-chat-usage-return-shape.md), [CTX-207.2](services/python-daemon/context/CTX-207.2-managed-provider-and-error-taxonomy.md)) 2026-08-25
 *Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-105, SPEC-106 · *Parent:* SPEC-404
 
 The daemon-side half of `SPEC-404`: a `managed` branch on the existing provider wrapper pointing
