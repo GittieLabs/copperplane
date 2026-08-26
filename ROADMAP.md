@@ -1,4 +1,4 @@
-# 🗺️ Hardware Agent Studio — Roadmap
+# 🗺️ Copperplane — Roadmap
 
 **Status:** Draft · **Last updated:** 2026-08-12 · **Current version:** `v0.1.0` (in progress)
 

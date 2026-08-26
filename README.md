@@ -1,6 +1,6 @@
-# 🛠️ Hardware Agent Studio
+# 🛠️ Copperplane
 
-**Hardware Agent Studio** is an open-source, local-first AI assistant for hardware engineers — one
+**Copperplane** is an open-source, local-first AI assistant for hardware engineers — one
 workspace that bridges PCB design (**KiCad**) and mechanical CAD (**FreeCAD**), instead of a pile of
 disconnected plugins.
 
@@ -15,7 +15,7 @@ your machine: your parts library, your API keys, your board files.
 > you want to help shape it before it is, this is a good time to jump in — see
 > [Contributing](#-contributing).
 
-📚 **[Full documentation](https://gittielabs.github.io/hardware-agent-studio/)** — install guide,
+📚 **[Full documentation](https://gittielabs.github.io/copperplane/)** — install guide,
 architecture, and how every feature got built.
 
 ---
@@ -51,7 +51,7 @@ architecture, and how every feature got built.
 ## 🏗️ Architecture
 
 ```text
-hardware-agent-studio/
+copperplane/
 ├── apps/tauri-ui/        React + TypeScript frontend — project shell, component discovery,
 │                          part detail, settings, 3D viewer.        → apps/tauri-ui/README.md
 ├── core/tauri-rust/       Rust process supervisor — spawns and owns the Python daemon,

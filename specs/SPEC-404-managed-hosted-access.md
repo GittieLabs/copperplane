@@ -19,7 +19,7 @@ user_facing: false
 ## 1. Executive Summary & Goals
 
 *   **High-Level Goal:** Define an optional, paid managed tier — LLM inference supplied through a
-    GittieLabs-operated gateway — so that a user can install Hardware Agent Studio and use every AI
+    GittieLabs-operated gateway — so that a user can install Copperplane and use every AI
     feature in it without first holding an account with a model vendor. The application remains
     entirely Apache-2.0 and functionally complete with a personal API key or a local Ollama model.
     **The tier sells operation, not capability.** This spec owns the offering's shape, its licence
@@ -38,7 +38,7 @@ user_facing: false
 
 *   **Non-Goals:**
     *   **Not a hosted version of the application.** The app stays a local desktop binary. A
-        browser-based Hardware Agent Studio would contradict two settled decisions at once:
+        browser-based Copperplane would contradict two settled decisions at once:
         `PRODUCT-PLAN.md`'s files-are-the-source-of-truth model, and `SPEC-103`/`SPEC-104`'s reliance
         on locally-installed KiCad and FreeCAD processes. What is hosted here is inference, and
         nothing else.
@@ -231,7 +231,7 @@ Two consequences worth stating so they are not rediscovered later:
     gateway, its keys, and its subscriber base are what is scarce, not the HTTP client that talks to
     it.
 *   **The name is not granted.** Apache-2.0 §6 explicitly withholds trademark rights. Registering and
-    consistently marking "Hardware Agent Studio" is what prevents a third party from operating a
+    consistently marking "Copperplane" is what prevents a third party from operating a
     competing hosted service under the project's own name. This is a separate action from anything
     in this repo and is the actual defensible asset.
 

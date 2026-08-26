@@ -131,7 +131,7 @@ inter-layer payload.
 | Code | What the user sees | Choices offered |
 | :--- | :--- | :--- |
 | `managed_quota_exhausted` | "You've used this month's allowance. It resets on <date>." | Switch to my own key · Manage plan (opens browser) · Dismiss |
-| `managed_auth_invalid` | "Your Hardware Agent Studio account couldn't be verified." | Sign in again · Switch to my own key |
+| `managed_auth_invalid` | "Your Copperplane account couldn't be verified." | Sign in again · Switch to my own key |
 | `managed_unreachable` | "Can't reach the managed service. Your network or the service is down." | Retry · Switch to my own key |
 | `managed_upstream_unavailable` | "The model provider is having trouble. This isn't your account." | Retry · Dismiss |
 

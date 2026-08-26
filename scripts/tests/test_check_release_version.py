@@ -25,11 +25,11 @@ class _FixtureTestCase(unittest.TestCase):
 
     def write_cargo_toml(self, version):
         with open('core/tauri-rust/Cargo.toml', 'w', encoding='utf-8') as f:
-            f.write(f'[package]\nname = "hardware-agent-studio-core"\nversion = "{version}"\n')
+            f.write(f'[package]\nname = "copperplane-core"\nversion = "{version}"\n')
 
     def write_tauri_conf(self, version):
         with open('core/tauri-rust/tauri.conf.json', 'w', encoding='utf-8') as f:
-            json.dump({"productName": "hardware-agent-studio", "version": version}, f)
+            json.dump({"productName": "Copperplane", "version": version}, f)
 
 
 class TestCargoTomlVersion(_FixtureTestCase):

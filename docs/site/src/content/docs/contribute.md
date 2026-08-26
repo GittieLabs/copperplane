@@ -7,7 +7,7 @@ This project is early, actively developed, and open to contribution — includin
 from people who have never touched a PCB. A meaningful share of the work is
 frontend, packaging, docs and platform testing.
 
-The full [`CONTRIBUTING.md`](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/CONTRIBUTING.md)
+The full [`CONTRIBUTING.md`](https://github.com/GittieLabs/copperplane/blob/develop/CONTRIBUTING.md)
 is the authority. This page is the orientation.
 
 ## The most valuable thing you can do right now
@@ -19,7 +19,7 @@ The builds compile and their test suites pass on all three platforms in CI, but
 nobody has confirmed the CAD integration actually works anywhere else. Until
 someone does, "cross-platform" is a claim rather than a fact.
 
-There is [a template for it](https://github.com/GittieLabs/hardware-agent-studio/issues/new?template=platform_report.yml),
+There is [a template for it](https://github.com/GittieLabs/copperplane/issues/new?template=platform_report.yml),
 and **a report that everything worked is just as useful as a bug report.**
 
 ## Two lanes
@@ -81,7 +81,7 @@ not work, here is why"* is worth more than a tidied narrative.
 ## Using AI to contribute
 
 Allowed, explicitly, and used heavily by the maintainer — see
-[How this codebase is written](/hardware-agent-studio/how-this-is-built/).
+[How this codebase is written](/copperplane/how-this-is-built/).
 
 One rule, about accountability rather than authorship: **you must understand
 every line you submit and be able to defend it in review.** "The model wrote it"
@@ -89,7 +89,7 @@ is not an answer to "why does this handle that case that way".
 
 ## Where to ask
 
-- **A question, or not sure it is a bug** → [Discussions](https://github.com/GittieLabs/hardware-agent-studio/discussions)
-- **A confirmed defect** → [file an issue](https://github.com/GittieLabs/hardware-agent-studio/issues/new?template=bug_report.yml)
-- **A security issue** → not a public issue; see [SECURITY.md](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/SECURITY.md)
-- **Somewhere to start** → [`good first issue`](https://github.com/GittieLabs/hardware-agent-studio/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+- **A question, or not sure it is a bug** → [Discussions](https://github.com/GittieLabs/copperplane/discussions)
+- **A confirmed defect** → [file an issue](https://github.com/GittieLabs/copperplane/issues/new?template=bug_report.yml)
+- **A security issue** → not a public issue; see [SECURITY.md](https://github.com/GittieLabs/copperplane/blob/develop/SECURITY.md)
+- **Somewhere to start** → [`good first issue`](https://github.com/GittieLabs/copperplane/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)

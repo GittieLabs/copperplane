@@ -29,7 +29,7 @@ Adjustable: wall thickness, clearance around the board, standoff height. Change
 a value and regenerate against the same board; you are not starting over each
 time.
 
-![The generated enclosure in the 3D preview](/hardware-agent-studio/images/enclosure.png)
+![The generated enclosure in the 3D preview](/copperplane/images/enclosure.png)
 
 Preview it in the 3D viewer with free orbit or camera presets, then export
 **STEP** for CAD or **GLB** for a mesh viewer.

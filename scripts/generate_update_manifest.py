@@ -14,9 +14,9 @@ Usage:
     python scripts/generate_update_manifest.py \
         --version v0.1.0 --pub-date 2026-08-16T21:00:00Z --notes-file notes.md \
         --platform aarch64-apple-darwin bundle/macos/aarch64.app.tar.gz.sig \
-            https://github.com/.../hardware-agent-studio_aarch64.app.tar.gz \
+            https://github.com/.../Copperplane_aarch64.app.tar.gz \
         --platform x86_64-apple-darwin bundle/macos/x86_64.app.tar.gz.sig \
-            https://github.com/.../hardware-agent-studio_x86_64.app.tar.gz
+            https://github.com/.../Copperplane_x86_64.app.tar.gz
 """
 import argparse
 import json

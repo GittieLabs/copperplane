@@ -86,7 +86,7 @@ pub const MENU_DESIGN_PCB_RUN_REVIEW_EVENT: &str = "menu://design/pcb/run-review
 /// Emitted when Design > Enclosure > "Run Review" is clicked (SPEC-319 §2.4).
 pub const MENU_DESIGN_ENCLOSURE_RUN_REVIEW_EVENT: &str = "menu://design/enclosure/run-review";
 
-const GITHUB_REPO_URL: &str = "https://github.com/GittieLabs/hardware-agent-studio";
+const GITHUB_REPO_URL: &str = "https://github.com/GittieLabs/copperplane";
 
 const FILE_SAVE_PROJECT_ID: &str = "file_save_project";
 const FILE_OPEN_PROJECT_ID: &str = "file_open_project";
@@ -142,7 +142,7 @@ fn build_menu_inner(app: &AppHandle<Wry>, custom_libraries: &[LibraryMenuEntry])
         None,
         Some(
             AboutMetadataBuilder::new()
-                .name(Some("Hardware Agent Studio"))
+                .name(Some("Copperplane"))
                 .version(Some(env!("CARGO_PKG_VERSION")))
                 .build(),
         ),
@@ -155,7 +155,7 @@ fn build_menu_inner(app: &AppHandle<Wry>, custom_libraries: &[LibraryMenuEntry])
     let hide_others = PredefinedMenuItem::hide_others(app, None)?;
     let show_all = PredefinedMenuItem::show_all(app, None)?;
     let quit = PredefinedMenuItem::quit(app, None)?;
-    let app_menu = SubmenuBuilder::new(app, "Hardware Agent Studio")
+    let app_menu = SubmenuBuilder::new(app, "Copperplane")
         .item(&about)
         .separator()
         .item(&settings)

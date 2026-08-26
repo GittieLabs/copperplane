@@ -9,9 +9,9 @@ Five minutes, assuming KiCad is installed. If it is not, you can still do steps
 ## 1. Open Settings
 
 Settings lives at the bottom of the left rail, and in the app menu under
-**Hardware Agent Studio → Settings…** (`Cmd+,`).
+**Copperplane → Settings…** (`Cmd+,`).
 
-![The Settings screen](/hardware-agent-studio/images/settings.png)
+![The Settings screen](/copperplane/images/settings.png)
 
 ## 2. Choose a provider and add a key
 
@@ -20,7 +20,7 @@ The app ships with no model and no key. Pick one of **Anthropic**, **OpenAI**,
 your operating system keychain, not a file on disk.
 
 Choose **Ollama** if you would rather nothing left your machine — see
-[Privacy and your data](/hardware-agent-studio/privacy/) for the trade-offs.
+[Privacy and your data](/copperplane/privacy/) for the trade-offs.
 
 The key takes effect immediately. No restart.
 
@@ -60,7 +60,7 @@ You will get ranked candidates with a confidence signal and a link to each
 datasheet. Nothing is chosen for you. If you typed something slightly wrong, you
 get a *did you mean* card rather than a silent correction.
 
-![Component search results](/hardware-agent-studio/images/component-search.png)
+![Component search results](/copperplane/images/component-search.png)
 
 Confirm the one you want.
 
@@ -85,7 +85,7 @@ footprint, once you attach one, is shared rather than duplicated.
 
 That is the loop. From here:
 
-- [Find or make a footprint](/hardware-agent-studio/guides/footprints/)
-- [Understand design guidance properly](/hardware-agent-studio/guides/design-guidance/)
-- [Check a board](/hardware-agent-studio/guides/board-checks/)
-- [Generate an enclosure](/hardware-agent-studio/guides/enclosure/)
+- [Find or make a footprint](/copperplane/guides/footprints/)
+- [Understand design guidance properly](/copperplane/guides/design-guidance/)
+- [Check a board](/copperplane/guides/board-checks/)
+- [Generate an enclosure](/copperplane/guides/enclosure/)

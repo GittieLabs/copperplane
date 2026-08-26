@@ -1,6 +1,6 @@
 ---
 title: Install
-description: How to install Hardware Agent Studio, what you need alongside it, and what to expect on each platform.
+description: How to install Copperplane, what you need alongside it, and what to expect on each platform.
 ---
 
 ## What is actually published today
@@ -18,14 +18,14 @@ page and not finding what you expected:
 Windows and Linux are real, working CI targets — the daemon and frontend test
 suites run on all three platforms on every pull request — they simply are not
 attached to a published release yet. If you need one,
-[open an issue](https://github.com/GittieLabs/hardware-agent-studio/issues/new?template=platform_report.yml)
+[open an issue](https://github.com/GittieLabs/copperplane/issues/new?template=platform_report.yml)
 so the demand is visible.
 
 ## macOS (Apple Silicon)
 
 1. Download the `.dmg` ending in `_aarch64.dmg` from
-   [Releases](https://github.com/GittieLabs/hardware-agent-studio/releases).
-2. Open it and drag **Hardware Agent Studio** into `/Applications`.
+   [Releases](https://github.com/GittieLabs/copperplane/releases).
+2. Open it and drag **Copperplane** into `/Applications`.
 3. Launch it. It should open normally.
 
 Not sure which Mac you have? **Apple menu → About This Mac**. Anything with an
@@ -34,7 +34,7 @@ certainly is.
 
 The build is signed and notarized under a real GittieLabs, LLC Apple Developer
 identity, so there should be no Gatekeeper warning. If you get one, that is a
-bug worth [reporting](https://github.com/GittieLabs/hardware-agent-studio/issues/new?template=bug_report.yml).
+bug worth [reporting](https://github.com/GittieLabs/copperplane/issues/new?template=bug_report.yml).
 
 :::note[If you are on v0.1.0]
 That release was deliberately unsigned. macOS will refuse a normal double-click.
@@ -57,8 +57,8 @@ You will need [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) 18 or
 newer, and [uv](https://github.com/astral-sh/uv).
 
 ```bash
-git clone https://github.com/GittieLabs/hardware-agent-studio.git
-cd hardware-agent-studio
+git clone https://github.com/GittieLabs/copperplane.git
+cd copperplane
 
 # Python daemon
 cd services/python-daemon
@@ -81,7 +81,7 @@ whether the *live CAD integration* works there — finding your KiCad install,
 connecting to its IPC server, locating `kicad-cli`, driving FreeCAD headlessly.
 Path resolution on those platforms is the least-exercised code in the project.
 Expect rough edges, and please
-[tell us what you hit](https://github.com/GittieLabs/hardware-agent-studio/issues/new?template=platform_report.yml)
+[tell us what you hit](https://github.com/GittieLabs/copperplane/issues/new?template=platform_report.yml)
 — including if it all just worked, which is equally useful.
 :::
 
@@ -114,6 +114,6 @@ never in a config file on disk.
 Supported: **Anthropic**, **OpenAI**, **Google**, **Perplexity**, and **Ollama**
 for a fully local model. Ollama is the option to choose if you would rather
 nothing left your machine at all; see [Privacy and your
-data](/hardware-agent-studio/privacy/) for exactly what is sent under each.
+data](/copperplane/privacy/) for exactly what is sent under each.
 
-[First run →](/hardware-agent-studio/first-run/)
+[First run →](/copperplane/first-run/)

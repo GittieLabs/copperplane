@@ -218,7 +218,7 @@ def _map_managed_error(exc: Exception) -> "ManagedProviderError | None":
         if status == 401:
             return ManagedProviderError(
                 "managed_auth_invalid",
-                "Your Hardware Agent Studio account couldn't be verified.",
+                "Your Copperplane account couldn't be verified.",
             )
         if status == 402:
             return ManagedProviderError(

@@ -9,8 +9,8 @@ That distinction is the reason this page exists.
 
 ## The application
 
-Hardware Agent Studio is licensed under the
-[Apache License 2.0](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/LICENSE).
+Copperplane is licensed under the
+[Apache License 2.0](https://github.com/GittieLabs/copperplane/blob/develop/LICENSE).
 Copyright 2026 GittieLabs.
 
 ## Bundled software
@@ -18,7 +18,7 @@ Copyright 2026 GittieLabs.
 Distributed builds include a frozen Python runtime containing the daemon's
 dependencies. Two of them ship `NOTICE` files that Apache-2.0 section 4(d)
 requires us to reproduce, and we do, in the
-[`NOTICE`](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/NOTICE)
+[`NOTICE`](https://github.com/GittieLabs/copperplane/blob/develop/NOTICE)
 file at the repository root:
 
 - **[AgentFlow](https://github.com/GittieLabs/agentflow)** (`gittielabs-agentflow`) — Apache-2.0
@@ -88,7 +88,7 @@ element14 and others were researched in depth and ruled out. Partly because they
 do not return what this tool needs (no pins, no footprints, no design guidance),
 and partly because their terms forbid what a local-first tool does: caching
 responses, building a local database, aggregating across sources. The
-[full research](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/docs/research/SPEC-203-supplier-api-exploration.md),
+[full research](https://github.com/GittieLabs/copperplane/blob/develop/docs/research/SPEC-203-supplier-api-exploration.md),
 with per-clause citations, is in the repository.
 
 Distributors appear only as links you click.
@@ -103,4 +103,4 @@ tool that talks to both as separate programs, and neither is bundled.
 
 If something on this page is inaccurate, or a licence has changed, that is worth
 an issue — licence correctness is not a detail we would rather not hear about.
-[Open one](https://github.com/GittieLabs/hardware-agent-studio/issues/new?template=bug_report.yml).
+[Open one](https://github.com/GittieLabs/copperplane/issues/new?template=bug_report.yml).
