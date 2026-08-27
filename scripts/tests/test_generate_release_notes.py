@@ -90,13 +90,19 @@ class _RealGitRepoTestCase(unittest.TestCase):
         self._git('init', '-q', '-b', 'main')
         self._git('config', 'user.email', 'test@example.com')
         self._git('config', 'user.name', 'Test')
+        # CTX-402.7: latest_tag() now orders real tags by creation date --
+        # git commit dates only have 1-second resolution, so a fast test
+        # making several commits could tie and make that order flaky.
+        # Each commit gets its own, strictly increasing date instead of
+        # relying on real wall-clock speed.
+        self._commit_counter = 0
 
     def tearDown(self):
         os.chdir(self.orig_cwd)
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _git(self, *args):
-        subprocess.run(['git', *args], check=True, capture_output=True, text=True)
+    def _git(self, *args, env=None):
+        subprocess.run(['git', *args], check=True, capture_output=True, text=True, env=env)
 
     def _commit_file(self, relpath, content, message):
         full = os.path.join(self.tmpdir, relpath)
@@ -104,7 +110,10 @@ class _RealGitRepoTestCase(unittest.TestCase):
         with open(full, 'w', encoding='utf-8') as f:
             f.write(content)
         self._git('add', relpath)
-        self._git('commit', '-q', '-m', message)
+        self._commit_counter += 1
+        commit_date = f"2026-01-{self._commit_counter:02d}T00:00:00"
+        env = dict(os.environ, GIT_AUTHOR_DATE=commit_date, GIT_COMMITTER_DATE=commit_date)
+        self._git('commit', '-q', '-m', message, env=env)
 
 
 class TestChangedCtxFiles(_RealGitRepoTestCase):
@@ -171,7 +180,32 @@ class TestLatestTagAndFirstCommit(_RealGitRepoTestCase):
 
         self.assertIsNone(grn.latest_tag('v0.1.0'))
 
-    def test_005_first_commit_returns_the_real_root_commit(self):
+    def test_005_finds_a_prior_tag_even_when_it_is_not_a_git_ancestor(self):
+        """CTX-402.7: the real production bug -- v0.1.3 (tagged from this
+        repo's frozen `main`) is not an ancestor of v0.2.0 (tagged from
+        `develop`, which diverged from `main` and was never merged back).
+        An ancestry-based lookup (git describe) finds nothing in that
+        case; a creation-date-ordered one still finds the real, most
+        recent prior tag regardless of which branch it came from."""
+        self._commit_file('README.md', 'hello', 'initial commit')
+        self._git('checkout', '-q', '-b', 'old-main')
+        self._commit_file('main-only.txt', 'a', 'main-only commit')
+        self._git('tag', 'v0.1.3')
+
+        self._git('checkout', '-q', 'main')
+        self._git('checkout', '-q', '-b', 'develop')
+        self._commit_file('develop-only.txt', 'b', 'develop-only commit')
+        self._git('tag', 'v0.2.0')
+
+        self.assertFalse(
+            subprocess.run(
+                ['git', 'merge-base', '--is-ancestor', 'v0.1.3', 'v0.2.0'],
+            ).returncode == 0,
+            'test setup invariant broken: v0.1.3 must not be an ancestor of v0.2.0',
+        )
+        self.assertEqual(grn.latest_tag('v0.2.0'), 'v0.1.3')
+
+    def test_006_first_commit_returns_the_real_root_commit(self):
         self._commit_file('README.md', 'hello', 'initial commit')
         root = grn._run_git('rev-parse', 'HEAD').strip()
         self._commit_file('a.txt', 'a', 'second commit')
