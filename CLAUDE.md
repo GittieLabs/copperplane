@@ -7,8 +7,10 @@ the gatekeeper rules — read [CONTRIBUTING.md](CONTRIBUTING.md). This file does
 ## The loop
 
 1. Pick the next item from `ROADMAP.md`'s backlog, or pick up an existing open `SPEC-*.md`.
-2. `/spec-status` — see what's specced, what has an open context, what's still unspecced. Read
-   this before choosing anything; don't rediscover the graph by grepping.
+2. `/spec-status` — see what's specced, what has an open context, what's still unspecced. Run
+   this at the start of every session, before proposing next work, even if the user didn't ask
+   for it — don't rediscover the graph by grepping, and don't trust a prior session's summary of
+   this graph without re-checking it: state drifts.
 3. No spec yet for this work? `/new-spec <id> <title>`.
 4. Spec exists and you're ready to plan implementation? `/new-context SPEC-xxx`.
 5. Implement phase by phase, committing as you go. Verify against the real thing when it's
