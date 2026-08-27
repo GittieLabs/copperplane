@@ -852,6 +852,32 @@ placeholder. `SPEC-320` is the only spec that would ever change that.
 `api_key_ref` with a non-loopback `base_url` sends the user's own key to whatever host they typed.
 That combination must warn explicitly. `managed` is not editable here at all (`SPEC-207` §2.1).
 
+#### [SPEC-322](apps/tauri-ui/specs/SPEC-322-model-role-legibility.md) — Model Role Legibility in Settings — 🚧 in progress ([CTX-322.1](apps/tauri-ui/context/CTX-322.1-model-role-legibility.md)) 2026-08-27
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-321, SPEC-208, SPEC-303 · *Parent:* SPEC-300
+
+`SPEC-321` shipped 2026-08-26 with every route real and its tests green. The maintainer opened the
+resulting screen for the first time the next day and reported: "I see a reasoning with a dropdown
+list and fast with a dropdown list. This isn't self explanatory." Nothing said what a role was,
+which features used it, or that the model itself is set one level up on the provider record — the
+screen had two levels and linked them nowhere.
+
+`SPEC-302`'s lesson repeating in a new surface, and the one `CLAUDE.md` already records: a spec can
+be mechanically perfect and still be the wrong thing to build. The difference is that this time a
+person used the surface and said so, which is the norm working rather than failing.
+
+Fixed as copy and one derived string, no schema change: each role now shows the model it actually
+resolves to, the section says what a role is and where the model comes from, and a closing line
+answers the question that was really being asked — which role a feature uses is fixed by the app,
+not configurable. Reading the component to write that also surfaced a genuinely invalid state the
+screen had been rendering as ordinary: a role bound to a provider with no model for it, which
+`SPEC-321`'s own editor permits and which fails at call time with nothing in Settings hinting why.
+It now names the provider and says the role cannot run.
+
+Two real requests from the same report are **deferred with reasons rather than absorbed**: a
+reasoning-effort control (provider records carry a model id per role and nothing else — new
+capability, needs a `SPEC-208` schema change) and per-agent model binding (contradicts `SPEC-208`
+§2.3.1's "exactly two roles, deliberately", so that argument has to be reopened first).
+
 ### 3.4 `4xx` — Distribution & operations
 
 #### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — ✅ Completed ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md), [CTX-401.2](context/CTX-401.2-tauri-sidecar-wiring.md)) 2026-08-14

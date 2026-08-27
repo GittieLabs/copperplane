@@ -424,6 +424,19 @@ export function ProviderConfigEditor({
     )
   }
 
+  /* SPEC-322 §2.1: the missing link between the two levels of this screen.
+     The dropdown names a provider record; what a user needs to know is the
+     model that record will actually serve for this role -- and, when that
+     field is blank on the record, that the role currently resolves to
+     nothing at all. Reported as "this isn't self explanatory". */
+  const describeRole = (role: ModelRole): string => {
+    const bound = records.find((record) => record.id === providerRoles[role])
+    if (!bound) return 'No provider selected.'
+    const model = bound.models[role]
+    if (!model) return `${bound.id} has no ${role} model set — this role cannot run.`
+    return `Uses ${model}`
+  }
+
   return (
     <div className="flex flex-col gap-2">
       {error && <p className="text-sm text-danger">{error}</p>}
@@ -483,38 +496,66 @@ export function ProviderConfigEditor({
         </button>
       )}
 
-      <div className="flex gap-2">
-        <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
-          Reasoning
-          <select
-            aria-label="Reasoning role provider"
-            className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-            value={providerRoles.reasoning}
-            onChange={(e) => void handleRoleChange('reasoning', e.target.value)}
-          >
-            {records.map((record) => (
-              <option key={record.id} value={record.id}>
-                {record.id}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
-          Fast
-          <select
-            aria-label="Fast role provider"
-            className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-            value={providerRoles.fast}
-            onChange={(e) => void handleRoleChange('fast', e.target.value)}
-          >
-            {records.map((record) => (
-              <option key={record.id} value={record.id}>
-                {record.id}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      {/* SPEC-322 §2.1: this block used to be two bare dropdowns labelled
+          "Reasoning" and "Fast" with no copy at all. A user who had not read
+          SPEC-208 could not tell what a role was, which agents used it, or
+          that the model itself is set per provider record above -- reported
+          directly by the maintainer on first real use of the shipped screen. */}
+      <section className="flex flex-col gap-2 border-t border-line pt-3">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-medium text-fg">Model roles</h3>
+          <p className="text-xs text-fg-muted">
+            Every AI feature in the app asks for one of two roles rather than naming a model
+            directly. Choose which provider answers each role here; the model it actually uses is
+            the one you set on that provider above.
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
+            Reasoning
+            <select
+              aria-label="Reasoning role provider"
+              className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
+              value={providerRoles.reasoning}
+              onChange={(e) => void handleRoleChange('reasoning', e.target.value)}
+            >
+              {records.map((record) => (
+                <option key={record.id} value={record.id}>
+                  {record.id}
+                </option>
+              ))}
+            </select>
+            <span className="text-fg-muted">{describeRole('reasoning')}</span>
+            <span className="text-fg-muted">
+              Part lookup, datasheet extraction, board review, connection guidance.
+            </span>
+          </label>
+          <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
+            Fast
+            <select
+              aria-label="Fast role provider"
+              className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
+              value={providerRoles.fast}
+              onChange={(e) => void handleRoleChange('fast', e.target.value)}
+            >
+              {records.map((record) => (
+                <option key={record.id} value={record.id}>
+                  {record.id}
+                </option>
+              ))}
+            </select>
+            <span className="text-fg-muted">{describeRole('fast')}</span>
+            <span className="text-fg-muted">
+              In-app chat in each area, and shorter summarising passes.
+            </span>
+          </label>
+        </div>
+
+        <p className="text-xs text-fg-muted">
+          Which role a given feature asks for is fixed by the app, not configurable here.
+        </p>
+      </section>
     </div>
   )
 }

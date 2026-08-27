@@ -24,6 +24,7 @@ child_specs:
   - "SPEC-316-native-menu-command-surface.md"
   - "SPEC-317-theme-system.md"
   - "SPEC-318-in-context-agent-chat-and-review.md"
+  - "SPEC-322-model-role-legibility.md"
 user_facing: true
 ---
 

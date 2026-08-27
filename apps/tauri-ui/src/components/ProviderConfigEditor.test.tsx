@@ -415,3 +415,59 @@ describe('ProviderConfigEditor: role binding', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
   })
 })
+
+describe('SPEC-322: the model-role section explains itself', () => {
+  it('names what a role is and where the model comes from', async () => {
+    renderEditor()
+
+    expect(await screen.findByText('Model roles')).toBeTruthy()
+    expect(
+      screen.getByText(/Choose which provider answers each role here/),
+    ).toBeTruthy()
+    // The screen must say the model lives on the provider record above --
+    // the link a user could not previously make from two bare dropdowns.
+    expect(
+      screen.getByText(/the model it actually uses is the one you set on that provider above/i),
+    ).toBeTruthy()
+  })
+
+  it('shows which model each role actually resolves to, not just the provider', async () => {
+    getProviderRecordsMock.mockResolvedValue({
+      records: [
+        { ...ANTHROPIC_RECORD, models: { reasoning: 'claude-opus-5', fast: 'claude-haiku-4-5' } },
+      ],
+      provider_roles: { reasoning: 'anthropic', fast: 'anthropic' },
+      provider_roles_saved: true,
+    })
+    renderEditor()
+
+    expect(await screen.findByText('Uses claude-opus-5')).toBeTruthy()
+    expect(screen.getByText('Uses claude-haiku-4-5')).toBeTruthy()
+  })
+
+  it('warns when a role is bound to a provider that has no model for it', async () => {
+    // The state the old screen rendered as a perfectly normal-looking
+    // dropdown: a role bound to a provider that cannot serve it, so every
+    // feature asking for that role fails at call time with nothing in the
+    // settings screen hinting why.
+    getProviderRecordsMock.mockResolvedValue({
+      records: [{ ...ANTHROPIC_RECORD, models: { fast: 'claude-haiku-4-5' } }],
+      provider_roles: { reasoning: 'anthropic', fast: 'anthropic' },
+      provider_roles_saved: true,
+    })
+    renderEditor()
+
+    expect(
+      await screen.findByText('anthropic has no reasoning model set — this role cannot run.'),
+    ).toBeTruthy()
+    expect(screen.getByText('Uses claude-haiku-4-5')).toBeTruthy()
+  })
+
+  it('states that which role a feature uses is fixed by the app', async () => {
+    renderEditor()
+
+    expect(
+      await screen.findByText(/Which role a given feature asks for is fixed by the app/),
+    ).toBeTruthy()
+  })
+})
