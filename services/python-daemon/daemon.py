@@ -62,11 +62,31 @@ def _configure_logging() -> None:
 _configure_logging()
 logger = logging.getLogger("daemon")
 
+# SPEC-407 §2.4: every optional module whose import failed, collected here at
+# import time and reported on `daemon.ready`. The per-module `try/except`
+# guards below are deliberate and stay exactly as they are -- a missing
+# optional module must never take the whole daemon down (SPEC-407 §1
+# Non-Goals). What was missing is that this state existed *only* in a log
+# file: a mis-frozen sidecar could start, answer `daemon.ready` with KiCad
+# and FreeCAD both live, heartbeat normally, and run with the entire AI
+# surface disabled while looking completely healthy. Found for real on
+# 2026-08-27 (SPEC-407 §2.1, failure mode 7).
+#
+# Never prints. `stdout` is the JSON-RPC wire (CLAUDE.md) and this runs at
+# import time, before the first frame is ever written.
+_DEGRADED_MODULES: list = []
+
+
+def _note_degraded(module: str, capability: str) -> None:
+    """Records one failed optional import for `daemon.ready` (SPEC-407 §2.4)."""
+    _DEGRADED_MODULES.append({"module": module, "capability": capability})
+
 try:
     import kicad_bridge
     from kicad_bridge import get_kicad_version
 except Exception:
     logger.exception("kicad_bridge failed to import -- kicad.* routes will be unavailable")
+    _note_degraded("kicad_bridge", "kicad.* routes")
     kicad_bridge = None
     get_kicad_version = None
 
@@ -75,6 +95,7 @@ try:
     from freecad_bridge import generate_enclosure, export_enclosure
 except Exception:
     logger.exception("freecad_bridge failed to import -- freecad.* routes will be unavailable")
+    _note_degraded("freecad_bridge", "freecad.* routes")
     freecad_bridge = None
     generate_enclosure = None
     export_enclosure = None
@@ -83,30 +104,35 @@ try:
     import llm_providers
 except Exception:
     logger.exception("llm_providers failed to import -- llm.* routes will be unavailable")
+    _note_degraded("llm_providers", "llm.* routes")
     llm_providers = None
 
 try:
     import component_pipeline
 except Exception:
     logger.exception("component_pipeline failed to import -- kicad.generate_component will be unavailable")
+    _note_degraded("component_pipeline", "kicad.generate_component")
     component_pipeline = None
 
 try:
     import library_store
 except Exception:
     logger.exception("library_store failed to import -- library.*/project.* routes will be unavailable")
+    _note_degraded("library_store", "library.*/project.* routes")
     library_store = None
 
 try:
     import tool_registry
 except Exception:
     logger.exception("tool_registry failed to import -- agent.dispatch_tool will be unavailable")
+    _note_degraded("tool_registry", "agent.dispatch_tool")
     tool_registry = None
 
 try:
     import fp_lib_table
 except Exception:
     logger.exception("fp_lib_table failed to import -- kicad.search_footprints will be unavailable")
+    _note_degraded("fp_lib_table", "kicad.search_footprints")
     fp_lib_table = None
 
 try:
@@ -115,6 +141,7 @@ except Exception:
     logger.exception(
         "kicad_write failed to import -- kicad.generate_footprint_from_part will be unavailable"
     )
+    _note_degraded("kicad_write", "kicad.generate_footprint_from_part")
     kicad_write = None
 
 try:
@@ -123,6 +150,7 @@ except Exception:
     logger.exception(
         "kicad_cli failed to import -- kicad.check_board/kicad.check_schematic will be unavailable"
     )
+    _note_degraded("kicad_cli", "kicad.check_board/kicad.check_schematic")
     kicad_cli = None
 
 try:
@@ -131,6 +159,7 @@ except Exception:
     logger.exception(
         "kicad_pcb_import failed to import -- file-based freecad.generate_enclosure will be unavailable"
     )
+    _note_degraded("kicad_pcb_import", "file-based freecad.generate_enclosure")
     kicad_pcb_import = None
 
 try:
@@ -139,30 +168,35 @@ except Exception:
     logger.exception(
         "community_libraries failed to import -- library.search_community_footprints will be unavailable"
     )
+    _note_degraded("community_libraries", "library.search_community_footprints")
     community_libraries = None
 
 try:
     import datasheet_guidance
 except Exception:
     logger.exception("datasheet_guidance failed to import -- datasheet.generate_guidance will be unavailable")
+    _note_degraded("datasheet_guidance", "datasheet.generate_guidance")
     datasheet_guidance = None
 
 try:
     import datasheet_structure
 except Exception:
     logger.exception("datasheet_structure failed to import -- datasheet.read_pages will be unavailable")
+    _note_degraded("datasheet_structure", "datasheet.read_pages")
     datasheet_structure = None
 
 try:
     import chat_agents
 except Exception:
     logger.exception("chat_agents failed to import -- chat.send will be unavailable")
+    _note_degraded("chat_agents", "chat.send")
     chat_agents = None
 
 try:
     import context_index
 except Exception:
     logger.exception("context_index failed to import -- context.search/context.rebuild_index will be unavailable")
+    _note_degraded("context_index", "context.search/context.rebuild_index")
     context_index = None
 
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
@@ -1806,6 +1840,13 @@ def _detect_capabilities() -> dict:
         # just at GitHub's lower 60-requests/hour rate limit.
         "github_token_configured": bool(configured_secrets.get("github_token")),
         "fts5_available": fts5_available,
+        # SPEC-407 §2.4: the optional modules that failed to import at
+        # startup, each with the capability it takes down. Empty on a
+        # healthy build. Non-empty means the artifact is broken -- most
+        # often a mis-frozen sidecar -- and both `verify_sidecar.py` and
+        # the app treat it as a hard failure rather than letting a daemon
+        # that answers `daemon.ready` pass for a working one.
+        "degraded_modules": list(_DEGRADED_MODULES),
     }
 
 

@@ -194,6 +194,39 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
         self.assertIn("kicad_available", caps)
         self.assertIn("llm_providers", caps)
 
+    def test_001a_detect_capabilities_reports_degraded_modules(self):
+        """SPEC-407 TEST-001: `daemon.ready` carries every optional module
+        that failed to import. Deliberately not asserting a fixed list --
+        which modules fail depends on what is installed here -- but the key
+        must always be present, and must agree exactly with the collector
+        the import guards themselves write to. That agreement is the whole
+        contract: a mis-frozen sidecar is detectable only if this payload
+        reflects what actually happened at import time."""
+        caps = daemon._detect_capabilities()
+        self.assertIn("degraded_modules", caps)
+        self.assertIsInstance(caps["degraded_modules"], list)
+        self.assertEqual(caps["degraded_modules"], daemon._DEGRADED_MODULES)
+        for entry in caps["degraded_modules"]:
+            self.assertIn("module", entry)
+            self.assertIn("capability", entry)
+
+    def test_001b_note_degraded_records_a_failed_import(self):
+        """SPEC-407 TEST-002: `_note_degraded` appends a structured entry and
+        the payload is a copy, not the live list -- so a caller mutating what
+        it got back can never corrupt the daemon's own record."""
+        before = list(daemon._DEGRADED_MODULES)
+        try:
+            daemon._note_degraded("spec_407_probe", "nothing real")
+            caps = daemon._detect_capabilities()
+            self.assertIn(
+                {"module": "spec_407_probe", "capability": "nothing real"},
+                caps["degraded_modules"],
+            )
+            caps["degraded_modules"].clear()
+            self.assertNotEqual([], daemon._DEGRADED_MODULES)
+        finally:
+            daemon._DEGRADED_MODULES[:] = before
+
     @patch('daemon.freecad_bridge.find_freecadcmd')
     def test_002_detect_capabilities_reports_freecad_unavailable_on_error(self, mock_find):
         """TEST-001: freecad_available is False when find_freecadcmd raises."""

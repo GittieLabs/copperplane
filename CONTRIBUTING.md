@@ -86,6 +86,42 @@ those, here is what a local build in `core/tauri-rust` actually gets you, and wh
 | 2 — unsigned bundle, placeholder daemon | `npx @tauri-apps/cli@2 build --bundles app` | A real, launchable, unsigned `.app` — no keys, no Python toolchain needed | Any real daemon behavior — the bundled sidecar is a placeholder that prints an explanation and exits if the app tries to start it |
 | 3 — unsigned bundle, real daemon | Tier 2, plus a real `pyinstaller daemon.spec` freeze in `services/python-daemon` first | Everything Tier 2 gets you, plus real daemon behavior end to end | — |
 
+**Tier 3 has three requirements the command alone does not tell you**, each of which produced a
+build that looked successful and then failed silently (SPEC-407):
+
+1.  **A framework-build Python.** PyInstaller refuses to run against an interpreter built without a
+    shared library, and a `pyenv`/PlatformIO interpreter is usually exactly that. On macOS use
+    python.org's universal2 3.11, the same one `release.yml` installs:
+    `/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11`. Verify with
+    `sysconfig.get_config_var('PYTHONFRAMEWORK')` — it should print `Python`. Do not check
+    `Py_ENABLE_SHARED`, which reports `0` even on a working framework build.
+2.  **One architecture, consistently.** `daemon.spec` uses `target_arch=None`, meaning "match the
+    invoking interpreter". The venv creation, the `pip install` and the `pyinstaller` run must all
+    execute under the same arch. On an Apple Silicon Mac, check your shell is not under Rosetta
+    (`uname -m` should say `arm64`); if it is, either fix the terminal or prefix *every* command
+    with `arch -arm64`. Mixing them produces a `dlopen` architecture error at runtime, and
+    PyInstaller's `build/` cache can hide the build-time error on a re-run — so clear `build/`
+    whenever you change arch.
+3.  **Rename the frozen binary to the target-triple sidecar name.** PyInstaller writes
+    `dist/hardware-agent-studio-daemon`; Tauri looks for that name plus the build target's triple,
+    which is also what the committed placeholder is called. Skip the rename and your build bundles
+    the placeholder instead — it spawns fine, exits immediately, and the app shuts down about
+    fifteen seconds later with nothing on screen explaining why.
+
+```bash
+cd services/python-daemon
+rm -rf .build-venv build dist/hardware-agent-studio-daemon
+/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 -m venv .build-venv
+.build-venv/bin/pip install -r requirements.txt -r requirements-build.txt
+.build-venv/bin/pyinstaller daemon.spec
+python3 scripts/verify_sidecar.py          # fails loudly if the freeze is broken
+mv dist/hardware-agent-studio-daemon "dist/hardware-agent-studio-daemon-$(rustc -vV | sed -n 's/host: //p')"
+```
+
+Always run `verify_sidecar.py` before bundling. It drives the real frozen binary over its real
+JSON-RPC wire and fails if any optional module did not survive the freeze — the case that otherwise
+produces an app which starts, looks healthy, and has no AI features at all.
+
 **An unsigned local build runs fine.** It never receives macOS's `com.apple.quarantine` attribute
 (that only gets attached to something downloaded from the internet), so there is no Gatekeeper
 warning and no right-click-Open dance — the friction described in `SPEC-402` applies to *released*

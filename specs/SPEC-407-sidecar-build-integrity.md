@@ -1,7 +1,7 @@
 ---
 id: SPEC-407
 title: "Sidecar Build Integrity & Fail-Loud Packaging"
-status: Draft
+status: In-Progress
 type: Feature
 created: 2026-08-27
 last_updated: 2026-08-27
