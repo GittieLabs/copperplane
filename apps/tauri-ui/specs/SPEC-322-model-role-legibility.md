@@ -79,6 +79,25 @@ report asked for "a way to address agents in general or by agent types". That is
 question (§1 Non-Goals), but leaving it unanswered on the screen means every user re-derives the
 same confusion. A sentence closes it.
 
+### 2.5 Say which providers are actually called
+
+**Decided: each provider row states the roles it serves, and an unbound record says "not in use".**
+Reported after using the `CTX-322.1` screen: *"we are misleading a user that adds multiple providers
+bc only one would be used and it is not clear as to which provider would be used."* The substance is
+right — up to **two** records are live at once, one per role, and every other configured provider,
+with its API key, is inert with nothing saying so.
+
+The rejected alternative was a boolean "active" badge. It hides the two-role structure the user was
+already confused by; listing the roles teaches it in passing.
+
+### 2.6 Name the per-provider button for what it opens
+
+**Decided: `Edit` becomes `Edit provider`.** The same report proposed "Edit Agents". That button
+opens a form holding provider id, kind, base URL, the two model ids and the two capability
+checkboxes — **no agents at all** — so "Edit Agents" would promise agent configuration and deliver a
+provider form, making the screen more misleading rather than less. The underlying want was an agent
+surface that does not exist yet, which is [SPEC-323](SPEC-323-advanced-agent-configuration.md).
+
 ### 2.4 Cross-Module Impacts
 
 *   `apps/tauri-ui` — `ProviderConfigEditor.tsx` only. Copy, layout, and one derived string.

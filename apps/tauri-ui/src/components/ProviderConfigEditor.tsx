@@ -437,6 +437,15 @@ export function ProviderConfigEditor({
     return `Uses ${model}`
   }
 
+  /* SPEC-322 §2.5: which roles, if any, this record actually serves. Empty
+     string means nothing calls it -- reported as "not in use" rather than
+     left blank, so an inert provider reads as a deliberate state and not as
+     a rendering gap. */
+  const rolesServedBy = (recordId: string): string =>
+    (['reasoning', 'fast'] as ModelRole[])
+      .filter((role) => providerRoles[role] === recordId)
+      .join(' + ')
+
   return (
     <div className="flex flex-col gap-2">
       {error && <p className="text-sm text-danger">{error}</p>}
@@ -453,14 +462,23 @@ export function ProviderConfigEditor({
           <div key={record.id} className="flex flex-col gap-1 rounded border border-line p-2">
             <div className="flex items-center gap-2">
               <span className="flex-1 text-sm font-medium">{record.id}</span>
+              {/* SPEC-322 §2.5: adding a provider does nothing on its own -- only the
+                  records bound to a role are ever called. Without this, a user who
+                  configures three providers and three API keys has no way to tell that
+                  two of them are inert, or which one is answering. */}
+              <span
+                className={rolesServedBy(record.id) ? 'text-xs text-accent' : 'text-xs text-fg-muted'}
+              >
+                {rolesServedBy(record.id) || 'not in use'}
+              </span>
               <span className="text-xs text-fg-muted">{record.kind}</span>
               <button
                 type="button"
-                aria-label={`Edit ${record.id}`}
+                aria-label={`Edit provider ${record.id}`}
                 className="rounded border border-line px-2 py-0.5 text-xs"
                 onClick={() => startEdit(record)}
               >
-                Edit
+                Edit provider
               </button>
               <button
                 type="button"
