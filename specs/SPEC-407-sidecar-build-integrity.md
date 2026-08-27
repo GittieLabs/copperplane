@@ -98,9 +98,24 @@ later `spawn_heartbeat_monitor` concludes a hard crash and calls `DaemonHandle::
 `dispatch_to_daemon` call then returns `Err` from writing to a closed pipe, so the window stays
 open and nothing works, with no explanation anywhere the user can see.
 
-**Decided: the check is a build-time file inspection, not a runtime behavioural probe.** Size and
-the shebang are enough to identify it with certainty, and a build-time failure is worth more than a
-better runtime error. The open question is where exactly it runs — see §3.
+**Decided: the check is a build-time file inspection, not a runtime behavioural probe.** All four
+committed placeholders carry a literal `PLACEHOLDER` marker and a `#!/bin/sh` shebang; a real
+PyInstaller binary is Mach-O, PE or ELF and never contains it. That makes the test exact rather
+than heuristic, and a build-time failure is worth more than a better runtime error.
+
+**Decided (revising `SPEC-406` §1): the check runs from `tauri.conf.json`'s own
+`beforeBuildCommand`, and it may fix the problem rather than only report it.** `SPEC-406` §1
+rejected "a `Makefile`, `just` file, or wrapper script" on two grounds: that a documented one-line
+command was the deliverable, and that a wrapper is "a second thing to keep in sync with
+`release.yml`". The first ground is now falsified by evidence — the documented one-line command
+produces a broken app, and did so seven different ways in a single session. The second is answered
+rather than accepted: `release.yml` calls the *same* script, so its own freeze and rename steps
+collapse into one line. This is not a second implementation to keep in sync; it is the only one,
+where previously the sequence existed twice (once in CI, once as prose in `CONTRIBUTING.md`).
+
+`beforeBuildCommand` is Tauri's own hook and already runs the frontend build, so this adds no new
+mechanism. The fast path — sidecar present, not the placeholder, right architecture — is a file
+read and exits immediately, so only a genuinely missing or broken sidecar pays for a freeze.
 
 ### 2.4 `daemon.ready` must carry degraded state
 
@@ -165,9 +180,14 @@ This is the one genuinely user-facing piece of this spec, and §5 covers it.
 *   **Every check must hold on all three platforms.** The arch checks are macOS-shaped by origin
     (universal2, Rosetta, `arch`). Windows and Linux have no equivalent and must not inherit a
     check that cannot pass there. Real verification of that is `SPEC-403`'s.
-*   **Open question — where the bundle-time check lives.** A Tauri build hook, a `build.rs`
-    addition gated on release, or a documented step. Each has a different failure mode if a
-    contributor skips it, and the choice determines whether this is enforcement or documentation.
+*   **Resolved — the bundle-time check lives in `beforeBuildCommand`** (§2.3), which also settles
+    that it is enforcement rather than documentation: a contributor cannot skip it, because it is
+    the build. The `build.rs` alternative was rejected for the reason named above — it would fire
+    on every `cargo build`/`cargo test` and make the repo un-buildable without a 32MB freeze.
+*   **The freeze needs an interpreter a contributor may not have.** The script fails with the exact
+    remedy rather than a vague error, which is strictly better than today's silent placeholder —
+    but it is still a hard stop on a machine with no framework Python, and on macOS that means a
+    `sudo installer` run before a first successful build.
 *   **Open question — whether CI needs the same checks.** CI already does all three things
     correctly, so the checks would be no-ops there. Adding them anyway guards against a future
     `release.yml` edit reintroducing the bug; not adding them keeps the pipeline simpler. Worth

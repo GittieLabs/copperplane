@@ -968,7 +968,7 @@ for Windows/Linux platform reports that require one. The fix: a new release-only
 `tauri.release.conf.json` overlay, merged by `--config` in `release.yml`'s three build legs only —
 CI stays the only path to a signed, update-capable build, for maintainers too. Not yet contexted.
 
-#### [SPEC-407](specs/SPEC-407-sidecar-build-integrity.md) — Sidecar Build Integrity & Fail-Loud Packaging — 🚧 in progress ([CTX-407.1](context/CTX-407.1-fail-loud-daemon-and-packaging-gate.md)) 2026-08-27
+#### [SPEC-407](specs/SPEC-407-sidecar-build-integrity.md) — Sidecar Build Integrity & Fail-Loud Packaging — 🚧 in progress ([CTX-407.1](context/CTX-407.1-fail-loud-daemon-and-packaging-gate.md), [CTX-407.2](context/CTX-407.2-one-command-local-build.md)) 2026-08-27
 *Module:* `services/python-daemon`, `core/tauri-rust`, `apps/tauri-ui`, `CONTRIBUTING.md` · *Depends on:* SPEC-401, SPEC-406, SPEC-107 · *Parent:* SPEC-401
 
 Written from a real, single-session failure log, not from speculation: on 2026-08-27 the maintainer
