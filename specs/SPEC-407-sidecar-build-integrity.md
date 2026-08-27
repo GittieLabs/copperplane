@@ -74,7 +74,7 @@ checking it.
 
 The through-line of all seven is distance between cause and symptom. An arch mismatch introduced at
 `pip install` surfaced as a `dlopen` failure inside a frozen binary two stages later. A missing
-`mv` surfaced as an app dying fifteen seconds after launch. The fix is not better error messages at
+`mv` surfaced as an app whose every request fails. The fix is not better error messages at
 the end; it is refusing to hand a known-bad artifact to the next stage.
 
 Three checkpoints, each owning what only it can know:
@@ -92,8 +92,11 @@ The placeholder is a 922-byte `/bin/sh` script whose only job is to satisfy `tau
 existence check. Today the only thing standing between it and a shipped bundle is a human
 remembering a `mv`. When it does get bundled, `Command::spawn` **succeeds** — it is a real,
 executable file — so nothing in the Rust supervisor treats it as an error. It exits 1 to a `stderr`
-that `Stdio::inherit()` sends nowhere visible from a `.app` launched by Finder, and fifteen seconds
-later `spawn_heartbeat_monitor` concludes a hard crash and shuts the app down.
+that `Stdio::inherit()` sends nowhere visible from a `.app` launched by Finder. Fifteen seconds
+later `spawn_heartbeat_monitor` concludes a hard crash and calls `DaemonHandle::shutdown`, which is
+`child.kill()` on a process that is already dead — **the app itself keeps running**. Every
+`dispatch_to_daemon` call then returns `Err` from writing to a closed pipe, so the window stays
+open and nothing works, with no explanation anywhere the user can see.
 
 **Decided: the check is a build-time file inspection, not a runtime behavioural probe.** Size and
 the shebang are enough to identify it with certainty, and a build-time failure is worth more than a

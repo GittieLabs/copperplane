@@ -105,8 +105,9 @@ build that looked successful and then failed silently (SPEC-407):
 3.  **Rename the frozen binary to the target-triple sidecar name.** PyInstaller writes
     `dist/hardware-agent-studio-daemon`; Tauri looks for that name plus the build target's triple,
     which is also what the committed placeholder is called. Skip the rename and your build bundles
-    the placeholder instead — it spawns fine, exits immediately, and the app shuts down about
-    fifteen seconds later with nothing on screen explaining why.
+    the placeholder instead — it spawns fine and exits immediately, and the app then runs with a
+    dead daemon: the window opens normally and every request fails, with nothing on screen
+    explaining why.
 
 ```bash
 cd services/python-daemon

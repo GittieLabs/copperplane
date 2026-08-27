@@ -978,7 +978,8 @@ reason this spec exists.
 
 The first silent one: the committed placeholder sidecar bundles cleanly, `Command::spawn` succeeds
 because it is a real executable file, it exits 1 to a `stderr` no Finder-launched `.app` shows, and
-`SPEC-107`'s heartbeat monitor shuts the app down fifteen seconds later with nothing user-facing.
+`SPEC-107`'s heartbeat monitor kills an already-dead child fifteen seconds later while the app
+itself keeps running, so the window stays open and every request fails with nothing user-facing.
 The second, and worse: a mis-frozen sidecar (arch mismatch surviving PyInstaller's own `build/`
 cache) **starts successfully**, answers `daemon.ready` with KiCad and FreeCAD both live, heartbeats
 normally — and runs with `chat.send`, `agent.dispatch_tool`, `kicad.generate_component` and
