@@ -852,6 +852,35 @@ placeholder. `SPEC-320` is the only spec that would ever change that.
 `api_key_ref` with a non-loopback `base_url` sends the user's own key to whatever host they typed.
 That combination must warn explicitly. `managed` is not editable here at all (`SPEC-207` §2.1).
 
+#### [SPEC-323](apps/tauri-ui/specs/SPEC-323-advanced-agent-configuration.md) — Advanced Per-Agent Configuration — 📋 Draft 2026-08-27
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-208, SPEC-321, SPEC-322, SPEC-106 · *Parent:* SPEC-300
+
+What the maintainer actually wanted when he asked to "address agents by type", separated from
+`SPEC-322`'s legibility fix because it is new capability rather than copy: bind an individual agent
+to a specific provider, model and reasoning effort, behind an Advanced toggle that is off by
+default, with reset back to the role defaults.
+
+The tiering is the design constraint, in his own words: managed users would not care, a
+bring-your-own-key user cares little, and it is the contributor fine-tuning the product who needs
+it — so per-agent config is an advanced option and nothing else changes. `SPEC-208` §2.3.1's
+"exactly two roles, deliberately" is **extended, not reopened**: an agent with no override resolves
+exactly as it does today, on the same code path.
+
+Deliberately left undecided rather than guessed: how reasoning effort is represented portably.
+Anthropic takes a token budget, OpenAI an effort level, Google its own thinking config. The
+proposal is a small ordered enum mapped per provider `kind` in the daemon, with a raw per-vendor
+value rejected because it leaks vendor shape into a provider-agnostic UI and silently means nothing
+when an agent's provider changes. That needs checking against what each `kind` can actually send.
+
+Three named risks carry real weight: `SPEC-208` §2.4's capability preflight must run on overrides
+too or the advanced path becomes the one place that skips the safety check; provider deletion
+already warns when a record is role-bound and must learn about overrides or it silently breaks an
+agent; and twelve agents is already a lot of settings surface that grows with every new agent.
+
+Worth recording that this is the third consecutive spec in this area written from the maintainer's
+own use of the product — `SPEC-321` shipped correct and unreadable, `SPEC-322` made it readable,
+this adds what was wanted. None of the three would have been caught by a test.
+
 #### [SPEC-322](apps/tauri-ui/specs/SPEC-322-model-role-legibility.md) — Model Role Legibility in Settings — 🚧 in progress ([CTX-322.1](apps/tauri-ui/context/CTX-322.1-model-role-legibility.md)) 2026-08-27
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-321, SPEC-208, SPEC-303 · *Parent:* SPEC-300
 
