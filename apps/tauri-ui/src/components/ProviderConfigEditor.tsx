@@ -5,12 +5,15 @@ import {
   confirmRemoveRoleBoundProvider,
   getProviderRecords,
   isNonLoopbackBaseUrl,
+  listProviderModels,
   saveProviderConfig,
   saveSecret,
   type DaemonCapabilities,
   type DaemonConfig,
   type ModelRole,
+  type ModelListing,
   type ProviderRecord,
+  validateProviderModel,
 } from '../lib/settings'
 
 /** SPEC-321 §2.1-2.5: replaces the old flat provider `<select>` + free-text
@@ -292,6 +295,78 @@ export function ProviderConfigEditor({
     )
   }
 
+  /* SPEC-324: the models a provider reports, fetched only when asked
+     (§2.3 -- no startup fetch, none on save, so nothing spends a user's
+     quota without them acting). `supported: false` is surfaced as a reason
+     rather than swallowed: an openai_compat record may point at a server
+     with no /v1/models, which is ordinary rather than broken. */
+  const [listing, setListing] = useState<ModelListing | null>(null)
+  const [listingBusy, setListingBusy] = useState(false)
+  const [modelCheck, setModelCheck] = useState<Record<string, string>>({})
+
+  const loadModelList = async () => {
+    if (!draft.id.trim()) return
+    setListingBusy(true)
+    try {
+      setListing(await listProviderModels(draft.id.trim()))
+    } catch (e) {
+      setListing({ supported: false, models: [], reason: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setListingBusy(false)
+    }
+  }
+
+  const checkModel = async (role: ModelRole, model: string) => {
+    setModelCheck((prev) => ({ ...prev, [role]: 'checking...' }))
+    try {
+      const result = await validateProviderModel(draft.id.trim(), model)
+      setModelCheck((prev) => ({ ...prev, [role]: result.reason }))
+    } catch (e) {
+      setModelCheck((prev) => ({ ...prev, [role]: e instanceof Error ? e.message : String(e) }))
+    }
+  }
+
+  /* SPEC-324 §2.2: a combobox, not a dropdown. The list is a suggestion and
+     the field stays typeable, so a private deployment, a model newer than the
+     provider's own list, or a compat server with its own naming all still
+     work. With no list available this degrades to exactly the plain text
+     field that shipped before -- never worse than today. */
+  const renderModelField = (role: ModelRole, value: string, onChange: (v: string) => void) => {
+    const label = role === 'reasoning' ? 'Reasoning model' : 'Fast model'
+    return (
+      <>
+        <div className="flex gap-1">
+          <input
+            aria-label={label}
+            list={`models-${role}`}
+            className="flex-1 rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
+            placeholder="(blank = can't serve this role)"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onFocus={() => {
+              if (!listing && !listingBusy) void loadModelList()
+            }}
+          />
+          <button
+            type="button"
+            aria-label={`Validate ${label}`}
+            className="rounded border border-line px-2 py-0.5 text-xs"
+            onClick={() => void checkModel(role, value)}
+            disabled={!value.trim()}
+          >
+            Validate
+          </button>
+        </div>
+        <datalist id={`models-${role}`}>
+          {(listing?.models ?? []).map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+        {modelCheck[role] && <span className="text-fg-muted">{modelCheck[role]}</span>}
+      </>
+    )
+  }
+
   function renderDraftForm() {
     const isNew = editingId === NEW_RECORD_SENTINEL
     return (
@@ -348,25 +423,23 @@ export function ProviderConfigEditor({
         <div className="flex gap-2">
           <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
             Reasoning model
-            <input
-              aria-label="Reasoning model"
-              className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-              placeholder="(blank = can't serve this role)"
-              value={draft.reasoningModel}
-              onChange={(e) => setDraft((prev) => ({ ...prev, reasoningModel: e.target.value }))}
-            />
+            {renderModelField('reasoning', draft.reasoningModel, (v) =>
+              setDraft((prev) => ({ ...prev, reasoningModel: v })))}
           </label>
           <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
             Fast model
-            <input
-              aria-label="Fast model"
-              className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-              placeholder="(blank = can't serve this role)"
-              value={draft.fastModel}
-              onChange={(e) => setDraft((prev) => ({ ...prev, fastModel: e.target.value }))}
-            />
+            {renderModelField('fast', draft.fastModel, (v) =>
+              setDraft((prev) => ({ ...prev, fastModel: v })))}
           </label>
         </div>
+        {/* SPEC-324: listing is per PROVIDER, not per field, so its status
+            belongs here once rather than duplicated under both models. */}
+        {listingBusy && <p className="text-xs text-fg-muted">Loading models…</p>}
+        {listing && !listing.supported && (
+          <p className="text-xs text-fg-muted">
+            Could not list models ({listing.reason}). Type the id yourself — it will still be saved.
+          </p>
+        )}
         <label className="flex items-center gap-2 text-xs text-fg-tertiary">
           <input
             type="checkbox"

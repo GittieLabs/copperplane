@@ -852,7 +852,7 @@ placeholder. `SPEC-320` is the only spec that would ever change that.
 `api_key_ref` with a non-loopback `base_url` sends the user's own key to whatever host they typed.
 That combination must warn explicitly. `managed` is not editable here at all (`SPEC-207` §2.1).
 
-#### [SPEC-324](apps/tauri-ui/specs/SPEC-324-model-identity-verification.md) — Model Identity Verification — 📋 Draft 2026-08-27
+#### [SPEC-324](apps/tauri-ui/specs/SPEC-324-model-identity-verification.md) — Model Identity Verification — 🚧 in progress ([CTX-324.1](apps/tauri-ui/context/CTX-324.1-model-listing-and-validate.md)) 2026-08-27
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-321, SPEC-208, SPEC-106 · *Parent:* SPEC-300
 
 The model field is a bare text box. A typo saves cleanly, the record looks configured, and the

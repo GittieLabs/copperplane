@@ -1,7 +1,7 @@
 ---
 id: SPEC-324
 title: "Model Identity Verification"
-status: Draft
+status: In-Progress
 type: Feature
 created: 2026-08-27
 last_updated: 2026-08-27

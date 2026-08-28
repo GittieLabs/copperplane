@@ -969,6 +969,41 @@ def llm_get_provider_records() -> dict:
     }
 
 
+def _resolve_record_and_key(provider_id: str):
+    """SPEC-324: the record a route was asked about, plus the real key for
+    it. Resolves through `migrate_legacy_config`/`_resolve_provider_records`
+    exactly as `llm.get_provider_records` does, so the editor and these
+    routes can never disagree about what a record is."""
+    migrated = llm_providers.migrate_legacy_config(CONFIG)
+    records = llm_providers._resolve_provider_records(migrated)
+    record = records.get(provider_id)
+    if record is None:
+        raise LLMProviderError(f"No such provider record: {provider_id!r}")
+    ref = record.get("api_key_ref")
+    return record, (CONFIG["secrets"].get(ref) or "" if ref else "")
+
+
+def llm_list_models(provider_id: str) -> dict:
+    """The llm.list_models route (SPEC-324 §2.1). A real network call to
+    the vendor, so ASYNC_ROUTES-registered -- CTX-314.2 records the real
+    bug from getting that wrong, where a GitHub-calling route left out of
+    that set blocked the daemon's whole request path.
+
+    Never raises for an unreachable or non-listing provider: "cannot list"
+    is a first-class answer (SPEC-324 §2.1), because an `openai_compat`
+    record may legitimately point at a server with no `/v1/models`."""
+    record, api_key = _resolve_record_and_key(provider_id)
+    return llm_providers.list_models(record, api_key)
+
+
+def llm_validate_model(provider_id: str, model: str) -> dict:
+    """The llm.validate_model route (SPEC-324 §2.3). On demand only --
+    nothing calls this on save or at startup, so it never spends a user's
+    quota without them asking."""
+    record, api_key = _resolve_record_and_key(provider_id)
+    return llm_providers.validate_model(record, api_key, model)
+
+
 def cancel_job(job_id: str) -> dict:
     """Signals a running async job to cancel. Real cancellation (actually
     killing the underlying work, not just stopping its being reported on)
@@ -1442,6 +1477,8 @@ def _build_routes() -> dict:
     if llm_providers is not None:
         routes["llm.chat"] = llm_chat
         routes["llm.get_provider_records"] = llm_get_provider_records
+        routes["llm.list_models"] = llm_list_models
+        routes["llm.validate_model"] = llm_validate_model
     if component_pipeline is not None:
         routes["kicad.generate_component"] = kicad_generate_component
         routes["component.search"] = component_search
@@ -1535,6 +1572,11 @@ ASYNC_ROUTES = {
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
     "datasheet.read_pages", "library.render_symbol_preview", "library.render_footprint_preview",
     "chat.send", "chat.review", "context.rebuild_index",
+    # SPEC-324: both reach a vendor over the network. Sync routes run
+    # inline in the request path, so leaving these out would block every
+    # other request while a slow or hanging provider is waited on -- the
+    # exact bug CTX-314.2 found and fixed for the community-library routes.
+    "llm.list_models", "llm.validate_model",
     # CTX-314.2: both make real GitHub network calls (community_libraries.py's
     # own _github_request/fetch_raw_content) -- a real bug in CTX-314.1's own
     # shipped code (search_community_footprints was never added here) meant

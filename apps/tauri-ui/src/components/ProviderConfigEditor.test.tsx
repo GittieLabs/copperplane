@@ -6,6 +6,8 @@ const saveProviderConfigMock = vi.fn()
 const saveSecretMock = vi.fn()
 const clearSecretMock = vi.fn()
 const askMock = vi.fn()
+const listProviderModelsMock = vi.fn()
+const validateProviderModelMock = vi.fn()
 
 vi.mock('../lib/settings', async () => {
   const actual = await vi.importActual<typeof import('../lib/settings')>('../lib/settings')
@@ -15,6 +17,8 @@ vi.mock('../lib/settings', async () => {
     saveProviderConfig: (...args: unknown[]) => saveProviderConfigMock(...args),
     saveSecret: (...args: unknown[]) => saveSecretMock(...args),
     clearSecret: (...args: unknown[]) => clearSecretMock(...args),
+    listProviderModels: (...args: unknown[]) => listProviderModelsMock(...args),
+    validateProviderModel: (...args: unknown[]) => validateProviderModelMock(...args),
   }
 })
 
@@ -85,6 +89,8 @@ beforeEach(() => {
   saveSecretMock.mockReset().mockResolvedValue(undefined)
   clearSecretMock.mockReset().mockResolvedValue(undefined)
   askMock.mockReset().mockResolvedValue(true)
+  listProviderModelsMock.mockReset().mockResolvedValue({ supported: true, models: [], reason: null })
+  validateProviderModelMock.mockReset().mockResolvedValue({ valid: true, reason: 'ok' })
 })
 
 describe('ProviderConfigEditor: list + migration display', () => {
@@ -513,5 +519,72 @@ describe('SPEC-322 §2.5: which provider is actually in use', () => {
     renderEditor()
 
     expect(await screen.findByRole('button', { name: 'Edit provider anthropic' })).toBeTruthy()
+  })
+})
+
+describe('SPEC-324: model identity verification', () => {
+  async function openEditor() {
+    renderEditor()
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit provider anthropic' }))
+    return await screen.findByLabelText('Reasoning model')
+  }
+
+  it('does not call the provider until the user acts', async () => {
+    // SPEC-324 §2.3: no startup fetch, none on save. Opening the editor is
+    // not "asking" -- quota is a real cost even for a cheap check.
+    await openEditor()
+    expect(listProviderModelsMock).not.toHaveBeenCalled()
+    expect(validateProviderModelMock).not.toHaveBeenCalled()
+  })
+
+  it('offers the models a provider reports as suggestions', async () => {
+    listProviderModelsMock.mockResolvedValue({
+      supported: true, models: ['claude-opus-5', 'claude-haiku-4-5'], reason: null,
+    })
+    const field = await openEditor()
+    fireEvent.focus(field)
+
+    await waitFor(() => expect(listProviderModelsMock).toHaveBeenCalledWith('anthropic'))
+    await waitFor(() => {
+      const list = document.getElementById('models-reasoning')
+      expect(list?.querySelectorAll('option').length).toBe(2)
+    })
+  })
+
+  it('keeps the field typeable and says so when a provider cannot list', async () => {
+    // The openai_compat case: a server with no /v1/models is ordinary, not
+    // broken, and free text stays the floor (SPEC-324 §2.2).
+    listProviderModelsMock.mockResolvedValue({
+      supported: false, models: [], reason: '404 page not found',
+    })
+    const field = await openEditor()
+    fireEvent.focus(field)
+
+    expect(await screen.findByText(/Could not list models \(404 page not found\)/)).toBeTruthy()
+    expect(screen.getByText(/it will still be saved/)).toBeTruthy()
+
+    fireEvent.change(field, { target: { value: 'my-private-deployment' } })
+    expect((field as HTMLInputElement).value).toBe('my-private-deployment')
+  })
+
+  it('validates only on demand, and reports the reason verbatim', async () => {
+    validateProviderModelMock.mockResolvedValue({
+      valid: false, reason: 'anthropic did not list nope. It may still work',
+    })
+    const field = await openEditor()
+    fireEvent.change(field, { target: { value: 'nope' } })
+    expect(validateProviderModelMock).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Validate Reasoning model' }))
+    await waitFor(() => expect(validateProviderModelMock).toHaveBeenCalledWith('anthropic', 'nope'))
+    expect(await screen.findByText(/did not list nope\. It may still work/)).toBeTruthy()
+  })
+
+  it('disables Validate when there is nothing to check', async () => {
+    const field = await openEditor()
+    fireEvent.change(field, { target: { value: '   ' } })
+    const button = screen.getByRole('button', { name: 'Validate Reasoning model' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
   })
 })
