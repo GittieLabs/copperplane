@@ -57,7 +57,7 @@ ALLOWED_SPEC_STATUSES = {'Draft', 'Approved', 'In-Progress', 'Completed', 'Depre
 
 # Specs deliberately not children of SPEC-000 (framework/meta specs, not
 # product architecture) -- excluded from the "orphan root spec" info note.
-KNOWN_PARENTLESS_SPEC_IDS = {'SPEC-000', 'SPEC-901', 'SPEC-902', 'SPEC-903'}
+KNOWN_PARENTLESS_SPEC_IDS = {'SPEC-000', 'SPEC-901', 'SPEC-902', 'SPEC-903', 'SPEC-904'}
 
 
 def run_git_cmd(args):

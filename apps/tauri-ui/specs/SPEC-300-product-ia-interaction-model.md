@@ -1,10 +1,10 @@
 ---
 id: SPEC-300
 title: "Product IA & Interaction Model"
-status: Draft
+status: Completed
 type: System
 created: 2026-08-11
-last_updated: 2026-08-11
+last_updated: 2026-08-27
 target_version: v0.1.0
 location: "apps/tauri-ui/specs/SPEC-300-product-ia-interaction-model.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"

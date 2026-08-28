@@ -146,6 +146,15 @@ class TestSpecGraphInformationalFindings(SpecGraphFixtureTestCase):
         _errors, info = vsc.validate_spec_graph()
         self.assertTrue(any('ORPHAN ROOT SPEC' in n for n in info), info)
 
+    def test_004_spec_904_is_a_known_parentless_framework_spec(self):
+        """CTX-902.4: SPEC-904 is a 9xx framework spec exactly like 901/902/903
+        and carries no parent_spec by design, but was missing from
+        KNOWN_PARENTLESS_SPEC_IDS -- so every single run reported it as an
+        orphan root. Pinned here so the omission can't silently return."""
+        self.write_spec('specs/SPEC-904-license-attribution-consistency.md', 'SPEC-904')
+        _errors, info = vsc.validate_spec_graph()
+        self.assertFalse(any('ORPHAN ROOT SPEC' in n for n in info), info)
+
 
 class TestUserFacingFieldRequired(SpecGraphFixtureTestCase):
     """CTX-901.2 TEST-007: user_facing missing entirely is a repo-wide hard

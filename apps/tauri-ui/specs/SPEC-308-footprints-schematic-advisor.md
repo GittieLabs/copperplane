@@ -7,7 +7,7 @@ created: 2026-08-14
 last_updated: 2026-08-24
 target_version: v0.1.0
 location: "apps/tauri-ui/specs/SPEC-308-footprints-schematic-advisor.md"
-parent_spec: "../../../apps/tauri-ui/specs/SPEC-300-product-ia-interaction-model.md"
+parent_spec: "SPEC-300-product-ia-interaction-model.md"
 child_specs: []
 user_facing: true
 ---
