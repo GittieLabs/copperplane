@@ -852,6 +852,36 @@ placeholder. `SPEC-320` is the only spec that would ever change that.
 `api_key_ref` with a non-loopback `base_url` sends the user's own key to whatever host they typed.
 That combination must warn explicitly. `managed` is not editable here at all (`SPEC-207` §2.1).
 
+#### [SPEC-324](apps/tauri-ui/specs/SPEC-324-model-identity-verification.md) — Model Identity Verification — 📋 Draft 2026-08-27
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-321, SPEC-208, SPEC-106 · *Parent:* SPEC-300
+
+The model field is a bare text box. A typo saves cleanly, the record looks configured, and the
+first sign of trouble is a vendor error inside an AI feature — the same "looks fine, fails later"
+shape as `SPEC-407`'s sidecar, one layer up. A dropdown of what the provider actually offers, free
+text for everything else, and an on-demand Validate that works either way.
+
+**Exists because `SPEC-322` §1's non-goal was built on a premise nobody checked.** That spec
+declined validation on the grounds that "the app does not know a vendor's model list". Probed
+against the real installed SDKs: `anthropic`, `openai_compat` and `google` can all list models, and
+two can retrieve one by id — so the app can know, and an existence check costs no tokens. The
+non-goal is marked superseded in `SPEC-322` itself with that correction, rather than deleted.
+
+Three decisions carry the design. Listing runs in the **daemon**, reusing `SPEC-208`'s existing
+per-`kind` client construction, because doing it from the renderer would put the API key there and
+bypass `SPEC-106`'s secret channel — the same reason `CTX-320.1` rejected a renderer-side account
+read. The control is a **combobox, not a dropdown**: a private deployment, a model newer than the
+SDK's list, or a compat server with its own naming must all still work, so free text is the floor
+and the list is a suggestion. And **nothing calls a vendor unless asked** — no startup fetch, no
+validation on save — because `SPEC-107` §3 already holds that line for capability probes and
+automatic validation would spend real quota to catch a typo a second earlier.
+
+Named risks with weight: `openai_compat` is the widest kind and behaves differently per server
+(Ollama lists *locally pulled* models, which is local availability rather than entitlement); vendor
+lists can run to hundreds of entries so filtering is a requirement rather than polish; `retrieve`
+semantics differ per vendor and Google's was not probed; and a model that exists is not a model
+that works — `SPEC-208` §2.4's capability preflight remains the check that decides whether an agent
+can actually run on it.
+
 #### [SPEC-323](apps/tauri-ui/specs/SPEC-323-advanced-agent-configuration.md) — Advanced Per-Agent Configuration — 📋 Draft 2026-08-27
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-208, SPEC-321, SPEC-322, SPEC-106 · *Parent:* SPEC-300
 

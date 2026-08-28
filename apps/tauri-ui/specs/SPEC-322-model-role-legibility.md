@@ -49,6 +49,12 @@ user_facing: true
         exist and work. What was missing is the connection between them and the role dropdowns.
     *   **Not validation that a model id is real.** The app does not know a vendor's model list,
         and guessing would be worse than the honest text field `SPEC-321` already ships.
+        **Superseded by [SPEC-324](SPEC-324-model-identity-verification.md) on 2026-08-27, because
+        the premise was false and unchecked.** Probed directly against the installed SDKs: all
+        three provider `kind`s this repo has (`anthropic`, `openai_compat`, `google`) can list
+        models, and two can retrieve one by id. The app *can* know, and `retrieve` makes an
+        existence check cost nothing. Left in place rather than deleted — the conclusion followed
+        from the premise; the premise was simply never verified before being written down.
 
 ## 2. System Architecture & Design Choices
 

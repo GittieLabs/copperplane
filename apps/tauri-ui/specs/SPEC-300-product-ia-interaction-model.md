@@ -26,6 +26,7 @@ child_specs:
   - "SPEC-318-in-context-agent-chat-and-review.md"
   - "SPEC-322-model-role-legibility.md"
   - "SPEC-323-advanced-agent-configuration.md"
+  - "SPEC-324-model-identity-verification.md"
 user_facing: true
 ---
 
