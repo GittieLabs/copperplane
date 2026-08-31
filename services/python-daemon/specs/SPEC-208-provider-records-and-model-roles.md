@@ -4,12 +4,13 @@ title: "Provider Records & Model Role Resolution"
 status: Completed
 type: Feature
 created: 2026-08-25
-last_updated: 2026-08-25
+last_updated: 2026-08-31
 target_version: v0.4.0
 location: "services/python-daemon/specs/SPEC-208-provider-records-and-model-roles.md"
 parent_spec: "SPEC-201-llm-provider-abstraction.md"
 child_specs:
   - "../../../apps/tauri-ui/specs/SPEC-321-provider-configuration-ui.md"
+  - "SPEC-209-provider-parameter-contract-and-model-defaults.md"
 user_facing: false
 ---
 
