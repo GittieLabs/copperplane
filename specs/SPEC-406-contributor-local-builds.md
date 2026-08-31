@@ -4,7 +4,7 @@ title: "Contributor Local Builds & Signing Defaults"
 status: Completed
 type: Feature
 created: 2026-08-26
-last_updated: 2026-08-27
+last_updated: 2026-08-31
 target_version: v0.1.4
 location: "specs/SPEC-406-contributor-local-builds.md"
 parent_spec: "SPEC-402-release-signing-and-auto-update.md"
@@ -44,6 +44,16 @@ user_facing: true
     *   **Not making the frozen Python daemon a prerequisite of a local build.** `SPEC-401`'s
         committed placeholder sidecars already let the Rust crate compile and bundle without
         PyInstaller. This spec documents that boundary honestly; it does not move it.
+        **Superseded by [SPEC-407](SPEC-407-sidecar-build-integrity.md) §2.3 on 2026-08-31**, the
+        same way the wrapper non-goal below it was, and for the same reason: the evidence changed,
+        not the argument. `beforeBuildCommand` now runs `ensure_sidecar.py` on every `tauri build`
+        including `--bundles app`, so a local build freezes a real daemon rather than bundling the
+        placeholder. The boundary this non-goal declined to move was moved deliberately, because
+        the thing it protected -- a build with no Python toolchain -- turned out to produce an app
+        that launches, looks healthy, and does nothing. `CONTRIBUTING.md`'s tier table went on
+        describing the old boundary until `CTX-406.2`; a contributor reading it would have been
+        told no Python toolchain was needed and that the sidecar would be a placeholder, and both
+        had stopped being true.
     *   **Not a `Makefile`, `just` file, or wrapper script.** A documented one-line command is the
         deliverable. A wrapper is a second thing to keep in sync with `release.yml`.
         **Superseded by [SPEC-407](SPEC-407-sidecar-build-integrity.md) §2.3 on 2026-08-27.** The

@@ -70,7 +70,7 @@ npm install && npm test
 
 # The whole app, in dev mode
 cd core/tauri-rust
-npx @tauri-apps/cli@2 dev
+npx @tauri-apps/cli@2.11.4 dev
 ```
 
 ### Local builds — three honest tiers
@@ -82,14 +82,27 @@ those, here is what a local build in `core/tauri-rust` actually gets you, and wh
 
 | Tier | Command | Gets you | Does not |
 | :--- | :--- | :--- | :--- |
-| 1 — `tauri dev` | `npx @tauri-apps/cli@2 dev` | Fast iteration | App menu bar, bundle identity, sidecar resolution |
-| 2 — unsigned bundle, placeholder daemon | `npx @tauri-apps/cli@2 build --bundles app` | A real, launchable, unsigned `.app` — no keys, no Python toolchain needed | Any real daemon behavior — the bundled sidecar is a placeholder that prints an explanation and exits if the app tries to start it |
-| 3 — unsigned bundle, real daemon | Tier 2, plus a real `pyinstaller daemon.spec` freeze in `services/python-daemon` first | Everything Tier 2 gets you, plus real daemon behavior end to end | — |
+| 1 — `tauri dev` | `npx @tauri-apps/cli@2.11.4 dev` | Fast iteration | App menu bar, bundle identity, sidecar resolution |
+| 2 — unsigned `.app`, real daemon | `npx @tauri-apps/cli@2.11.4 build --bundles app` | A real, launchable, unsigned `.app` with real daemon behavior end to end | A `.dmg`, and anything signed or update-capable |
+| 3 — unsigned `.dmg` too | `npx @tauri-apps/cli@2.11.4 build` | Everything Tier 2 gets you, plus a `.dmg` | Signing, notarization, updater artifacts — CI is the only path to those |
 
-**Tier 3 is one command.** `tauri build` runs `ensure_sidecar.py` for you (via Tauri's own
-`beforeBuildCommand`): if the frozen daemon is already present, real, and the right architecture it
+**Pin the CLI version.** Every command above names an exact `@tauri-apps/cli` version rather than
+`@2`, which silently resolves to whatever 2.x is newest at build time. `release.yml` pins the same
+version deliberately — `CTX-402.6`'s Linux updater-artifact regression was caused by exactly that
+drift. Keep them equal; bump both together, verifying a real release run.
+
+**Tiers 2 and 3 are one command each, and both give you a real daemon.** `tauri build` runs
+`ensure_sidecar.py` for you (via Tauri's own
+`beforeBuildCommand`): if the frozen daemon is already present, real, current, and the right
+architecture it
 does nothing and the build proceeds; otherwise it freezes, names and verifies it first. The same
 script is what `release.yml` calls, so a local build and a release cannot drift apart.
+
+There is no longer a tier that bundles the placeholder on purpose. `SPEC-407` §2.3 made that
+impossible — `beforeBuildCommand` runs on **every** `tauri build`, `--bundles app` included, so a
+build either carries a real, current daemon or stops and says why. The trade this removes is real:
+a first build now needs a Python interpreter PyInstaller can freeze with, where it previously did
+not. That cost buys an app that cannot silently launch with a dead daemon.
 
 The first build on a new machine needs an interpreter PyInstaller can freeze with, and will stop
 with the exact command to install one if you do not have it. On macOS that is python.org's
