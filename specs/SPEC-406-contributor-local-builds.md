@@ -4,7 +4,7 @@ title: "Contributor Local Builds & Signing Defaults"
 status: Completed
 type: Feature
 created: 2026-08-26
-last_updated: 2026-08-26
+last_updated: 2026-08-27
 target_version: v0.1.4
 location: "specs/SPEC-406-contributor-local-builds.md"
 parent_spec: "SPEC-402-release-signing-and-auto-update.md"
@@ -46,6 +46,12 @@ user_facing: true
         PyInstaller. This spec documents that boundary honestly; it does not move it.
     *   **Not a `Makefile`, `just` file, or wrapper script.** A documented one-line command is the
         deliverable. A wrapper is a second thing to keep in sync with `release.yml`.
+        **Superseded by [SPEC-407](SPEC-407-sidecar-build-integrity.md) §2.3 on 2026-08-27.** The
+        first half was falsified by evidence: the documented one-line command produces a broken
+        app, seven different ways in one session. The second half is answered rather than
+        overruled -- `release.yml` calls the same script, so it is the only implementation, not a
+        second one. Left in place rather than deleted: the reasoning was sound when written, and
+        what changed is the evidence, not the argument.
 
 ## 2. System Architecture & Design Choices
 *   **Invert the default, don't document the override.** The alternative considered first was

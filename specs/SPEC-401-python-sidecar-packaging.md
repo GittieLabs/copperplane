@@ -4,11 +4,12 @@ title: "Python Sidecar Packaging"
 status: Completed
 type: Module
 created: 2026-08-13
-last_updated: 2026-08-13
+last_updated: 2026-08-27
 target_version: v0.1.0
 location: "specs/SPEC-401-python-sidecar-packaging.md"
 parent_spec: "SPEC-000-architecture-overview.md"
-child_specs: []
+child_specs:
+  - "SPEC-407-sidecar-build-integrity.md"
 user_facing: false
 ---
 

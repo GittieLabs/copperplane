@@ -74,6 +74,17 @@ def main():
     out_q = queue.Queue()
     threading.Thread(target=_reader_thread, args=(proc.stdout, out_q), daemon=True).start()
 
+    # SPEC-407 §2.1 (failure mode 6): `stderr` used to be piped and never
+    # read. That hid the only useful diagnostic this script can produce --
+    # a real freeze failure showed up here as three content-free timeouts --
+    # and an undrained pipe blocks the child outright once the buffer fills,
+    # so a chatty failure deadlocked the daemon rather than merely being
+    # invisible. Drained on its own thread and replayed on failure.
+    stderr_lines = []
+    threading.Thread(
+        target=lambda: stderr_lines.extend(iter(proc.stderr.readline, "")), daemon=True,
+    ).start()
+
     failures = 0
     try:
         ready = _wait_for(out_q, lambda m: m.get("method") == "daemon.ready", 20.0, "daemon.ready")
@@ -83,6 +94,22 @@ def main():
             caps = ready["params"]
             print(f"PASS: daemon.ready -- python_version={caps['python_version']}, "
                   f"kicad_available={caps['kicad_available']}, freecad_available={caps['freecad_available']}")
+
+            # SPEC-407 §2.4: the check this gate was missing. A mis-frozen
+            # sidecar starts, answers daemon.ready with KiCad and FreeCAD
+            # live, and heartbeats normally while every AI route is dead --
+            # so "it replied" was never proof the artifact is good. Any
+            # failed optional import means a broken build, not a degraded
+            # environment: this binary is supposed to carry its own deps.
+            degraded = caps.get("degraded_modules") or []
+            if degraded:
+                print(f"FAIL: daemon started with {len(degraded)} module(s) that failed to import "
+                      f"-- this binary is broken, not merely unconfigured:")
+                for entry in degraded:
+                    print(f"        {entry['module']} -- {entry['capability']} unavailable")
+                failures += 1
+            else:
+                print("PASS: no degraded modules -- every optional import survived the freeze")
 
         if ready is not None and ready["params"]["kicad_available"]:
             proc.stdin.write(json.dumps(
@@ -105,7 +132,13 @@ def main():
             "params": {"secrets": {"anthropic_api_key": "sk-fake-verification-key"}}, "id": 2,
         }) + "\n")
         proc.stdin.flush()
-        _wait_for(out_q, lambda m: m.get("id") == 2, 5.0, "daemon.configure result")
+        # SPEC-407 §2.1 (failure mode 6): this call's result used to be
+        # discarded, so a daemon.configure timeout printed FAIL and never
+        # incremented the counter -- a run where only this check failed
+        # reported "All checks passed" and exited 0. A packaging gate that
+        # can fail and exit 0 has the same defect it exists to catch.
+        if _wait_for(out_q, lambda m: m.get("id") == 2, 5.0, "daemon.configure result") is None:
+            failures += 1
 
         proc.stdin.write(json.dumps({
             "jsonrpc": "2.0", "method": "llm.chat",
@@ -147,6 +180,10 @@ def main():
 
     if failures:
         print(f"\n{failures} check(s) failed.")
+        if stderr_lines:
+            print("\n--- daemon stderr (the reason, captured rather than discarded) ---")
+            for line in stderr_lines:
+                print(f"  {line.rstrip()}")
         return 1
     print("\nAll checks passed.")
     return 0

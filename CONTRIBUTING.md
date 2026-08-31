@@ -86,6 +86,29 @@ those, here is what a local build in `core/tauri-rust` actually gets you, and wh
 | 2 — unsigned bundle, placeholder daemon | `npx @tauri-apps/cli@2 build --bundles app` | A real, launchable, unsigned `.app` — no keys, no Python toolchain needed | Any real daemon behavior — the bundled sidecar is a placeholder that prints an explanation and exits if the app tries to start it |
 | 3 — unsigned bundle, real daemon | Tier 2, plus a real `pyinstaller daemon.spec` freeze in `services/python-daemon` first | Everything Tier 2 gets you, plus real daemon behavior end to end | — |
 
+**Tier 3 is one command.** `tauri build` runs `ensure_sidecar.py` for you (via Tauri's own
+`beforeBuildCommand`): if the frozen daemon is already present, real, and the right architecture it
+does nothing and the build proceeds; otherwise it freezes, names and verifies it first. The same
+script is what `release.yml` calls, so a local build and a release cannot drift apart.
+
+The first build on a new machine needs an interpreter PyInstaller can freeze with, and will stop
+with the exact command to install one if you do not have it. On macOS that is python.org's
+universal2 Python 3.11 — not Homebrew's, which is single-arch. Everything after that first freeze
+is a no-op costing about a second.
+
+If you want to freeze or check by hand:
+
+```bash
+cd services/python-daemon
+python3 scripts/ensure_sidecar.py               # freeze if needed, then verify
+python3 scripts/ensure_sidecar.py --check-only  # report only, never freeze
+```
+
+Do not rename the frozen binary yourself. Tauri looks for the base name plus the build target's
+triple, which is also what the committed placeholder is called — get it wrong and your build bundles
+the placeholder, which spawns fine, exits immediately, and leaves the app running with a dead daemon
+and no explanation.
+
 **An unsigned local build runs fine.** It never receives macOS's `com.apple.quarantine` attribute
 (that only gets attached to something downloaded from the internet), so there is no Gatekeeper
 warning and no right-click-Open dance — the friction described in `SPEC-402` applies to *released*

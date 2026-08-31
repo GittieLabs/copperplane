@@ -1,0 +1,46 @@
+diff --git a/.github/workflows/release.yml b/.github/workflows/release.yml
+index 482f212..66517b6 100644
+--- a/.github/workflows/release.yml
++++ b/.github/workflows/release.yml
+@@ -86,19 +86,17 @@ jobs:
+           curl -fsSL -o "$RUNNER_TEMP/python311.pkg" https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg
+           sudo installer -pkg "$RUNNER_TEMP/python311.pkg" -target /
+ 
+-      - name: Install daemon runtime + build dependencies
+-        working-directory: services/python-daemon
+-        env:
+-          ARCH_PREFIX: ${{ matrix.target == 'x86_64-apple-darwin' && 'arch -x86_64' || 'arch -arm64' }}
+-        run: |
+-          $ARCH_PREFIX /Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 -m venv .build-venv
+-          $ARCH_PREFIX .build-venv/bin/pip install -r requirements.txt -r requirements-build.txt
+-
+-      - name: Freeze the Python daemon (SPEC-401's committed daemon.spec)
++      # SPEC-407 §2.3: the venv/pip/pyinstaller/rename sequence lives in
++      # freeze_sidecar.py, which `beforeBuildCommand` also calls. One
++      # implementation, so a contributor's local build and this release leg
++      # cannot drift apart -- which is what SPEC-406 §1 was worried about
++      # when it rejected a wrapper, answered by making this the only copy
++      # rather than a second one. The arch prefix and the target-triple
++      # rename are inside the script (both keyed off --target-triple, never
++      # off `rustc -vV`'s host -- CTX-402.4).
++      - name: Freeze the Python daemon and name it for this target
+         working-directory: services/python-daemon
+-        env:
+-          ARCH_PREFIX: ${{ matrix.target == 'x86_64-apple-darwin' && 'arch -x86_64' || 'arch -arm64' }}
+-        run: $ARCH_PREFIX .build-venv/bin/pyinstaller daemon.spec
++        run: python3 scripts/freeze_sidecar.py --target-triple ${{ matrix.target }}
+ 
+       # Tauri's externalBin convention appends the real BUILD-TARGET's
+       # triple to the sidecar's base name, not the build HOST's -- using
+@@ -108,9 +106,9 @@ jobs:
+       # triple never changes on this arm64 runner even when cross-
+       # compiling. Keying off matrix.target directly is the real fix
+       # (CTX-402.4 Plan Drift).
+-      - name: Rename the frozen binary to Tauri's real target-triple sidecar convention
++      - name: Verify the frozen sidecar is real and the right architecture
+         working-directory: services/python-daemon
+-        run: mv dist/hardware-agent-studio-daemon "dist/hardware-agent-studio-daemon-${{ matrix.target }}"
++        run: python3 scripts/ensure_sidecar.py --check-only --target-triple ${{ matrix.target }}
+ 
+       # The App Store Connect API key (CTX-402.3) is stored as a GitHub
+       # secret holding the real .p8 file *content* -- notarytool (invoked

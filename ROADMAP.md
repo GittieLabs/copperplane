@@ -1070,6 +1070,42 @@ for Windows/Linux platform reports that require one. The fix: a new release-only
 CI stays the only path to a signed, update-capable build, for maintainers too. Shipped in a single
 context ([CTX-406.1](context/CTX-406.1-unsigned-local-build-default.md), 2026-08-26).
 
+#### [SPEC-407](specs/SPEC-407-sidecar-build-integrity.md) — Sidecar Build Integrity & Fail-Loud Packaging — 🚧 in progress ([CTX-407.1](context/CTX-407.1-fail-loud-daemon-and-packaging-gate.md), [CTX-407.2](context/CTX-407.2-one-command-local-build.md)) 2026-08-27
+*Module:* `services/python-daemon`, `core/tauri-rust`, `apps/tauri-ui`, `CONTRIBUTING.md` · *Depends on:* SPEC-401, SPEC-406, SPEC-107 · *Parent:* SPEC-401
+
+Written from a real, single-session failure log, not from speculation: on 2026-08-27 the maintainer
+built the app from a clean checkout and hit **seven** distinct failure modes in sequence, every one
+of which produced a green build. Five were loud and cost minutes. Two were silent and are the
+reason this spec exists.
+
+The first silent one: the committed placeholder sidecar bundles cleanly, `Command::spawn` succeeds
+because it is a real executable file, it exits 1 to a `stderr` no Finder-launched `.app` shows, and
+`SPEC-107`'s heartbeat monitor kills an already-dead child fifteen seconds later while the app
+itself keeps running, so the window stays open and every request fails with nothing user-facing.
+The second, and worse: a mis-frozen sidecar (arch mismatch surviving PyInstaller's own `build/`
+cache) **starts successfully**, answers `daemon.ready` with KiCad and FreeCAD both live, heartbeats
+normally — and runs with `chat.send`, `agent.dispatch_tool`, `kicad.generate_component` and
+`datasheet.generate_guidance` all disabled by `daemon.py`'s own import guards. A crash sends you to
+the packaging; a healthy-looking daemon with no AI sends you hunting a UI bug that does not exist.
+
+The through-line is distance between cause and symptom — an arch mismatch introduced at `pip
+install` surfaced as a `dlopen` failure two stages later. So the design is three checkpoints, each
+owning what only it can know: freeze time (framework interpreter, binary arch matches the
+interpreter), bundle time (not the placeholder, arch matches the Tauri target), run time
+(`daemon.ready` carries the list of optional modules that failed to import, and the app says so).
+
+Also corrects two pieces of documentation that actively mislead: `CONTRIBUTING.md`'s Tier 3 row
+never states the framework-Python requirement at all, and `daemon.spec`'s header still recommends
+the Homebrew interpreter that `CTX-402.4` superseded with python.org universal2. And two real bugs
+in `scripts/verify_sidecar.py` — it pipes the child's `stderr` and never drains it (hiding every
+error, and deadlocking the daemon outright if the buffer fills), and its `daemon.configure` check
+prints `FAIL` without incrementing the failure counter, so the packaging gate can print a failure
+and still exit 0.
+
+Explicitly **not** a change to `daemon.py`'s graceful degradation, which is correct and stays; not
+signing or updater work (`SPEC-402`); not cross-platform proof (`SPEC-403`); and not a build
+wrapper, which `SPEC-406` §1 already rejected.
+
 ### 3.5 `9xx` — The framework itself
 
 **All three done as of 2026-08-08.** SPEC-901/CTX-901.1, SPEC-903/CTX-903.1, and SPEC-902/CTX-902.1

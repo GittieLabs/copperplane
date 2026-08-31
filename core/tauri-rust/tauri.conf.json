@@ -7,7 +7,7 @@
     "frontendDist": "../../apps/tauri-ui/dist",
     "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev --prefix ../apps/tauri-ui",
-    "beforeBuildCommand": "npm run build --prefix ../apps/tauri-ui"
+    "beforeBuildCommand": "python3 ../services/python-daemon/scripts/ensure_sidecar.py && npm run build --prefix ../apps/tauri-ui"
   },
   "app": {
     "windows": [
