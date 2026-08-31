@@ -302,7 +302,13 @@ export function ProviderConfigEditor({
      with no /v1/models, which is ordinary rather than broken. */
   const [listing, setListing] = useState<ModelListing | null>(null)
   const [listingBusy, setListingBusy] = useState(false)
-  const [modelCheck, setModelCheck] = useState<Record<string, string>>({})
+  /* CTX-324.2: the outcome travels with the text. CTX-324.1 rendered every
+     result -- a pass, an unlisted id, and a hard "Method not found" from the
+     daemon -- in the same text-fg-muted as the hint line under it, so a real
+     failure was visually indistinguishable from help text. Reporting the
+     daemon's reason verbatim stays right; giving every outcome the same
+     colour was the bug. `ok: null` is the in-flight state. */
+  const [modelCheck, setModelCheck] = useState<Record<string, { ok: boolean | null; text: string }>>({})
 
   const loadModelList = async () => {
     if (!draft.id.trim()) return
@@ -317,12 +323,18 @@ export function ProviderConfigEditor({
   }
 
   const checkModel = async (role: ModelRole, model: string) => {
-    setModelCheck((prev) => ({ ...prev, [role]: 'checking...' }))
+    setModelCheck((prev) => ({ ...prev, [role]: { ok: null, text: 'checking...' } }))
     try {
       const result = await validateProviderModel(draft.id.trim(), model)
-      setModelCheck((prev) => ({ ...prev, [role]: result.reason }))
+      setModelCheck((prev) => ({ ...prev, [role]: { ok: result.valid, text: result.reason } }))
     } catch (e) {
-      setModelCheck((prev) => ({ ...prev, [role]: e instanceof Error ? e.message : String(e) }))
+      /* A thrown error is a failure of the check itself -- an unreachable
+         daemon, or a route this build does not have. It is never a passing
+         model, so it is never styled as one. */
+      setModelCheck((prev) => ({
+        ...prev,
+        [role]: { ok: false, text: e instanceof Error ? e.message : String(e) },
+      }))
     }
   }
 
@@ -362,7 +374,19 @@ export function ProviderConfigEditor({
             <option key={m} value={m} />
           ))}
         </datalist>
-        {modelCheck[role] && <span className="text-fg-muted">{modelCheck[role]}</span>}
+        {modelCheck[role] && (
+          <span
+            className={
+              modelCheck[role].ok === null
+                ? 'text-fg-muted'
+                : modelCheck[role].ok
+                  ? 'text-success'
+                  : 'text-danger'
+            }
+          >
+            {modelCheck[role].text}
+          </span>
+        )}
       </>
     )
   }

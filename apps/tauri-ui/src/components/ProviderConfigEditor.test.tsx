@@ -587,4 +587,44 @@ describe('SPEC-324: model identity verification', () => {
     const button = screen.getByRole('button', { name: 'Validate Reasoning model' }) as HTMLButtonElement
     expect(button.disabled).toBe(true)
   })
+
+  /* CTX-324.2. The reason text was already verbatim and already correct; it
+     was rendered in the same muted grey as the hint line beneath it, so a
+     real failure read as help. These assert the outcome is visible, not just
+     present. */
+  it('styles a failed validation as an error rather than as a hint', async () => {
+    validateProviderModelMock.mockResolvedValue({
+      valid: false, reason: 'anthropic did not list nope. It may still work',
+    })
+    const field = await openEditor()
+    fireEvent.change(field, { target: { value: 'nope' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Validate Reasoning model' }))
+    const shown = await screen.findByText(/did not list nope/)
+    expect(shown.className).toContain('text-danger')
+    expect(shown.className).not.toContain('text-fg-muted')
+  })
+
+  it('styles a passing validation as a pass, distinctly from a failure', async () => {
+    validateProviderModelMock.mockResolvedValue({
+      valid: true, reason: 'claude-sonnet-5 is available on anthropic',
+    })
+    const field = await openEditor()
+    fireEvent.change(field, { target: { value: 'claude-sonnet-5' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Validate Reasoning model' }))
+    const shown = await screen.findByText(/is available on anthropic/)
+    expect(shown.className).toContain('text-success')
+    expect(shown.className).not.toContain('text-danger')
+  })
+
+  it('styles a thrown route error as an error, the real 2026-08-31 case', async () => {
+    /* A build whose bundled sidecar predates the route answers -32601, which
+       reaches the UI as a thrown Error rather than a {valid,reason} pair.
+       That is what shipped looking like a hint. */
+    validateProviderModelMock.mockRejectedValue(new Error('Method not found: llm.validate_model'))
+    const field = await openEditor()
+    fireEvent.change(field, { target: { value: 'llama3.2:1b' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Validate Reasoning model' }))
+    const shown = await screen.findByText(/Method not found: llm\.validate_model/)
+    expect(shown.className).toContain('text-danger')
+  })
 })
