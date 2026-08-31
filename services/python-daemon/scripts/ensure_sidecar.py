@@ -92,6 +92,64 @@ def macho_arches(path: str) -> set:
     return set()
 
 
+# The sources PyInstaller actually freezes: daemon.py plus every top-level
+# module it imports, the spec file that drives the build, and the dependency
+# pin list. Deliberately NOT scripts/ (build tooling, never frozen in) and
+# NOT tests/ (never imported by daemon.py), so editing this script or a test
+# does not cost anyone a multi-minute re-freeze.
+_FROZEN_SOURCE_EXTRAS = ("daemon.spec", "requirements.txt")
+
+
+def newest_source_mtime(daemon_dir: str):
+    """(mtime, filename) of the most recently modified frozen source, or
+    (None, None) if none can be read.
+
+    mtime rather than a content hash on purpose. A hash would need a
+    manifest written next to the binary, and release.yml freezes with raw
+    `pyinstaller` rather than through freeze_sidecar -- it would never write
+    that manifest, so every CI leg would read "no manifest", call a
+    just-built sidecar stale, and re-freeze it for nothing. mtime is
+    self-recording: CI checks out sources and *then* builds, so the binary
+    is always newer there and the check is inert. Locally, dist/ survives
+    `git pull`, which is exactly the case this catches."""
+    newest, which = None, None
+    names = [n for n in os.listdir(daemon_dir) if n.endswith(".py")]
+    names += [n for n in _FROZEN_SOURCE_EXTRAS if os.path.isfile(os.path.join(daemon_dir, n))]
+    for name in names:
+        try:
+            stamp = os.path.getmtime(os.path.join(daemon_dir, name))
+        except OSError:
+            continue
+        if newest is None or stamp > newest:
+            newest, which = stamp, name
+    return newest, which
+
+
+def staleness(path: str, daemon_dir: str):
+    """(is_stale, reason). SPEC-407 s2.2 checks that a sidecar is real and
+    the right architecture, but never that it is CURRENT -- so a binary
+    frozen before a source change bundles cleanly, starts, reports ready,
+    and answers -32601 Method not found for every route added since. That
+    is failure mode 7's shape exactly (a healthy-looking daemon with routes
+    missing), reached by a different road."""
+    newest, which = newest_source_mtime(daemon_dir)
+    if newest is None:
+        return False, None
+    try:
+        built = os.path.getmtime(path)
+    except OSError:
+        return False, None
+    if newest <= built:
+        return False, None
+    from datetime import datetime as _dt
+    fmt = "%Y-%m-%d %H:%M:%S"
+    return True, (
+        f"stale -- frozen {_dt.fromtimestamp(built).strftime(fmt)}, but {which} "
+        f"changed {_dt.fromtimestamp(newest).strftime(fmt)}. Routes or fixes added "
+        f"since the freeze are absent from this binary."
+    )
+
+
 def overwrites_tracked_placeholder(path: str) -> bool:
     """SPEC-407 §2.1 (failure mode 8): the four placeholders are TRACKED --
     `.gitignore` ignores `dist/` broadly and then explicitly un-ignores
@@ -116,9 +174,16 @@ def overwrites_tracked_placeholder(path: str) -> bool:
     return out.returncode == 0 and bool(out.stdout.strip())
 
 
-def inspect(path: str, triple: str):
+def inspect(path: str, triple: str, daemon_dir: str = None):
     """(ok, reason). The single place that decides whether a sidecar is
-    usable, so the check-only mode and the freeze path can never disagree."""
+    usable, so the check-only mode and the freeze path can never disagree.
+
+    `daemon_dir` is where the frozen sources live, defaulting to this
+    checkout's own. It is a parameter rather than a module global so a test
+    can point the currency check at a fixture directory instead of silently
+    comparing a temp file against the real repo."""
+    if daemon_dir is None:
+        daemon_dir = DAEMON_DIR
     if not os.path.isfile(path):
         return False, "no sidecar at the target-triple name"
     if is_placeholder(path):
@@ -131,7 +196,10 @@ def inspect(path: str, triple: str):
                 f"architecture mismatch -- the build target needs {expected}, "
                 f"this binary is {'/'.join(sorted(arches))}"
             )
-    return True, "present, real, and the right architecture"
+    is_stale, why = staleness(path, daemon_dir)
+    if is_stale:
+        return False, why
+    return True, "present, real, current, and the right architecture"
 
 
 def resolve_triple(explicit=None) -> str:

@@ -39,6 +39,21 @@ def _fat(path, cputypes):
             handle.write(b"\x00" * 16)
 
 
+def _committed_bytes(repo_relative_path):
+    """The blob git has for a path, or None if git or the path is unavailable.
+    Used so a working tree carrying a real freeze does not change what the
+    placeholder tests are actually testing."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "show", f"HEAD:{repo_relative_path}"],
+            capture_output=True, cwd=os.path.dirname(DIST), timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout if out.returncode == 0 else None
+
+
 class TestSidecarNaming(unittest.TestCase):
     def test_001_appends_the_target_triple_and_exe_only_on_windows(self):
         """TEST-001: Tauri's externalBin convention. Getting this wrong is
@@ -55,19 +70,33 @@ class TestSidecarNaming(unittest.TestCase):
 
 class TestPlaceholderDetection(unittest.TestCase):
     def test_002_every_committed_placeholder_is_detected_for_real(self):
-        """TEST-002: run against the four REAL committed placeholders on
-        disk, not a fixture -- if any stops matching, this fails."""
+        """TEST-002: run against the four REAL committed placeholders, not a
+        fixture -- if any stops matching, this fails.
+
+        CTX-407.3: read each one from git rather than the working tree. A
+        real local freeze overwrites the host's placeholder in dist/ -- that
+        is the documented, expected state (ensure_sidecar prints a NOTE
+        about it), but it used to make this test fail on any machine that
+        had actually built the app, which is every machine a contributor
+        runs it on. The committed blob is what this test means by
+        "committed".
+        """
         checked = 0
         for triple in ("aarch64-apple-darwin", "x86_64-apple-darwin",
                        "x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"):
-            path = os.path.join(DIST, es.sidecar_name(triple))
-            if not os.path.isfile(path):
+            name = es.sidecar_name(triple)
+            blob = _committed_bytes(f"services/python-daemon/dist/{name}")
+            if blob is None:
                 continue
             checked += 1
-            self.assertTrue(es.is_placeholder(path), f"{triple} placeholder not detected")
-            ok, reason = es.inspect(path, triple)
-            self.assertFalse(ok)
-            self.assertIn("placeholder", reason)
+            with tempfile.TemporaryDirectory() as tmp:
+                path = os.path.join(tmp, name)
+                with open(path, "wb") as handle:
+                    handle.write(blob)
+                self.assertTrue(es.is_placeholder(path), f"{triple} placeholder not detected")
+                ok, reason = es.inspect(path, triple, daemon_dir=tmp)
+                self.assertFalse(ok)
+                self.assertIn("placeholder", reason)
         self.assertGreater(checked, 0, "no committed placeholders found to check")
 
     def test_003_a_real_binary_is_not_mistaken_for_a_placeholder(self):
@@ -189,3 +218,106 @@ class TestPlaceholderOverwriteWarning(unittest.TestCase):
             self.assertFalse(es.overwrites_tracked_placeholder("dist/whatever"))
         finally:
             sp.run = real
+
+
+def _sources(tmp, names=("daemon.py", "llm_providers.py"), extras=("daemon.spec", "requirements.txt")):
+    """A minimal stand-in for services/python-daemon's frozen sources."""
+    for name in list(names) + list(extras):
+        with open(os.path.join(tmp, name), "w", encoding="utf-8") as handle:
+            handle.write("# fixture\n")
+
+
+def _stamp(path, when):
+    os.utime(path, (when, when))
+
+
+class TestStaleness(unittest.TestCase):
+    """CTX-407.3. SPEC-407 §2.2's bundle-time checkpoint asks whether the
+    sidecar is real and the right architecture, never whether it is CURRENT.
+    A binary frozen before a source change bundles cleanly, starts, reports
+    ready, and answers -32601 for every route added since -- failure mode 7's
+    shape reached by a different road. Found for real on 2026-08-31: a build
+    on develop bundled a sidecar frozen four days earlier, and SPEC-324's
+    llm.list_models and llm.validate_model were simply absent from it.
+    """
+
+    def test_013_a_sidecar_older_than_a_source_is_stale_and_names_the_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _sources(tmp)
+            binary = os.path.join(tmp, "daemon-bin")
+            _macho(binary, _ARM64)
+            for name in os.listdir(tmp):
+                if name != "daemon-bin":
+                    _stamp(os.path.join(tmp, name), 500_000)
+            _stamp(binary, 1_000_000)
+            _stamp(os.path.join(tmp, "llm_providers.py"), 2_000_000)
+            is_stale, why = es.staleness(binary, tmp)
+            self.assertTrue(is_stale)
+            self.assertIn("llm_providers.py", why)
+            self.assertIn("stale", why)
+
+    def test_014_a_sidecar_newer_than_every_source_is_current(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _sources(tmp)
+            binary = os.path.join(tmp, "daemon-bin")
+            _macho(binary, _ARM64)
+            for name in os.listdir(tmp):
+                if name != "daemon-bin":
+                    _stamp(os.path.join(tmp, name), 1_000_000)
+            _stamp(binary, 2_000_000)
+            self.assertEqual(es.staleness(binary, tmp), (False, None))
+
+    def test_015_editing_a_script_or_a_test_does_not_force_a_refreeze(self):
+        """scripts/ is build tooling and tests/ is never imported by
+        daemon.py, so neither is frozen in. Counting them would charge a
+        contributor several minutes for editing a comment in this file --
+        exactly the friction CTX-407.2 was written to remove."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _sources(tmp)
+            binary = os.path.join(tmp, "daemon-bin")
+            _macho(binary, _ARM64)
+            for name in os.listdir(tmp):
+                if name != "daemon-bin":
+                    _stamp(os.path.join(tmp, name), 1_000_000)
+            _stamp(binary, 2_000_000)
+            for sub in ("scripts", "tests"):
+                os.mkdir(os.path.join(tmp, sub))
+                later = os.path.join(tmp, sub, "whatever.py")
+                with open(later, "w", encoding="utf-8") as handle:
+                    handle.write("# much newer\n")
+                _stamp(later, 3_000_000)
+            self.assertEqual(es.staleness(binary, tmp), (False, None))
+
+    def test_016_no_readable_sources_never_reports_stale(self):
+        """A source tarball or a vendored copy with no .py files present must
+        not fail a build over a question it cannot answer."""
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = os.path.join(tmp, "daemon-bin")
+            _macho(binary, _ARM64)
+            self.assertEqual(es.staleness(binary, tmp), (False, None))
+
+    def test_017_inspect_surfaces_staleness_so_both_modes_agree(self):
+        """check-only and the freeze path both route through inspect(), so
+        currency has to be decided there rather than in main()."""
+        with tempfile.TemporaryDirectory() as tmp:
+            _sources(tmp)
+            binary = os.path.join(tmp, "daemon-bin")
+            _macho(binary, _ARM64)
+            _stamp(binary, 1_000_000)
+            _stamp(os.path.join(tmp, "daemon.py"), 2_000_000)
+            ok, reason = es.inspect(binary, "aarch64-apple-darwin", daemon_dir=tmp)
+            self.assertFalse(ok)
+            self.assertIn("stale", reason)
+
+    def test_018_a_current_sidecar_still_passes_inspect_end_to_end(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _sources(tmp)
+            binary = os.path.join(tmp, "daemon-bin")
+            _macho(binary, _ARM64)
+            for name in os.listdir(tmp):
+                if name != "daemon-bin":
+                    _stamp(os.path.join(tmp, name), 1_000_000)
+            _stamp(binary, 2_000_000)
+            ok, reason = es.inspect(binary, "aarch64-apple-darwin", daemon_dir=tmp)
+            self.assertTrue(ok)
+            self.assertIn("current", reason)
