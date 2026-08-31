@@ -138,3 +138,54 @@ class TestTripleResolution(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPlaceholderOverwriteWarning(unittest.TestCase):
+    """SPEC-407 §2.1 failure mode 8, found on a real machine: a real freeze
+    overwrites a TRACKED placeholder, so git reports a permanent ~50MB
+    modification. `git add -A` would commit it; `git checkout -- .` would
+    destroy the freeze. Neither is guarded, so the least this can do is say
+    so."""
+
+    def test_010_reports_true_when_git_calls_the_file_modified(self):
+        import subprocess as sp
+        real = sp.run
+
+        class Result:
+            returncode = 0
+            stdout = " M services/python-daemon/dist/hardware-agent-studio-daemon-aarch64-apple-darwin\n"
+
+        sp.run = lambda *a, **k: Result()
+        try:
+            self.assertTrue(es.overwrites_tracked_placeholder("dist/whatever"))
+        finally:
+            sp.run = real
+
+    def test_011_reports_false_on_a_clean_file(self):
+        import subprocess as sp
+        real = sp.run
+
+        class Result:
+            returncode = 0
+            stdout = ""
+
+        sp.run = lambda *a, **k: Result()
+        try:
+            self.assertFalse(es.overwrites_tracked_placeholder("dist/whatever"))
+        finally:
+            sp.run = real
+
+    def test_012_never_raises_when_git_is_unavailable(self):
+        """A source tarball or a vendored copy has no git. The warning is a
+        courtesy and must never be a reason a build fails."""
+        import subprocess as sp
+        real = sp.run
+
+        def boom(*a, **k):
+            raise OSError("git not found")
+
+        sp.run = boom
+        try:
+            self.assertFalse(es.overwrites_tracked_placeholder("dist/whatever"))
+        finally:
+            sp.run = real

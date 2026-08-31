@@ -67,6 +67,7 @@ checking it.
 | 5 | Frozen binary is never renamed to the target-triple sidecar name | Nowhere; the placeholder is bundled instead |
 | 6 | `verify_sidecar.py` discards the child's `stderr`, and one check prints FAIL without counting it | Nowhere; the gate can print FAIL and exit 0 |
 | 7 | A mis-frozen sidecar starts, reports ready, and runs with every AI route disabled | Only in a log file nobody opens |
+| 8 | A real freeze overwrites a TRACKED placeholder, leaving a permanent ~50MB git modification | Nowhere; `git add -A` would commit the binary and `git checkout -- .` would destroy the freeze |
 
 ### 2.2 Fail at the stage that knows, not the stage that suffers
 

@@ -92,6 +92,30 @@ def macho_arches(path: str) -> set:
     return set()
 
 
+def overwrites_tracked_placeholder(path: str) -> bool:
+    """SPEC-407 §2.1 (failure mode 8): the four placeholders are TRACKED --
+    `.gitignore` ignores `dist/` broadly and then explicitly un-ignores
+    them -- so a real freeze leaves git reporting a ~50MB modification to a
+    committed file, permanently, on every branch.
+
+    Two ways that bites, both found on a real machine: `git add -A` commits
+    a 50MB binary into history, and `git checkout -- .` silently destroys a
+    freeze that took minutes. Neither is guarded anywhere, so this at least
+    says so out loud.
+
+    Returns False rather than raising when git is unavailable or this is not
+    a checkout (a source tarball, a vendored copy) -- the warning is a
+    courtesy, never a reason to fail a build."""
+    try:
+        out = subprocess.run(
+            ["git", "status", "--porcelain", "--", path],
+            capture_output=True, text=True, cwd=os.path.dirname(path) or ".", timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.returncode == 0 and bool(out.stdout.strip())
+
+
 def inspect(path: str, triple: str):
     """(ok, reason). The single place that decides whether a sidecar is
     usable, so the check-only mode and the freeze path can never disagree."""
@@ -148,6 +172,14 @@ def main() -> int:
     print(f"ensure_sidecar: {os.path.relpath(path, DAEMON_DIR)} -- {reason}")
 
     if ok:
+        if overwrites_tracked_placeholder(path):
+            print(
+                "ensure_sidecar: NOTE -- this real sidecar sits on top of the tracked placeholder,\n"
+                "                so git reports it permanently modified (~50MB). Do NOT run\n"
+                "                `git add -A` here (it would commit the binary), and note that\n"
+                "                `git checkout -- .` would destroy this freeze.",
+                file=sys.stderr,
+            )
         return 0
 
     if args.check_only:
