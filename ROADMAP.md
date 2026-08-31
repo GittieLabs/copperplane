@@ -953,6 +953,91 @@ placeholder. `SPEC-320` is the only spec that would ever change that.
 `api_key_ref` with a non-loopback `base_url` sends the user's own key to whatever host they typed.
 That combination must warn explicitly. `managed` is not editable here at all (`SPEC-207` §2.1).
 
+#### [SPEC-324](apps/tauri-ui/specs/SPEC-324-model-identity-verification.md) — Model Identity Verification — 🚧 in progress ([CTX-324.1](apps/tauri-ui/context/CTX-324.1-model-listing-and-validate.md)) 2026-08-27
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-321, SPEC-208, SPEC-106 · *Parent:* SPEC-300
+
+The model field is a bare text box. A typo saves cleanly, the record looks configured, and the
+first sign of trouble is a vendor error inside an AI feature — the same "looks fine, fails later"
+shape as `SPEC-407`'s sidecar, one layer up. A dropdown of what the provider actually offers, free
+text for everything else, and an on-demand Validate that works either way.
+
+**Exists because `SPEC-322` §1's non-goal was built on a premise nobody checked.** That spec
+declined validation on the grounds that "the app does not know a vendor's model list". Probed
+against the real installed SDKs: `anthropic`, `openai_compat` and `google` can all list models, and
+two can retrieve one by id — so the app can know, and an existence check costs no tokens. The
+non-goal is marked superseded in `SPEC-322` itself with that correction, rather than deleted.
+
+Three decisions carry the design. Listing runs in the **daemon**, reusing `SPEC-208`'s existing
+per-`kind` client construction, because doing it from the renderer would put the API key there and
+bypass `SPEC-106`'s secret channel — the same reason `CTX-320.1` rejected a renderer-side account
+read. The control is a **combobox, not a dropdown**: a private deployment, a model newer than the
+SDK's list, or a compat server with its own naming must all still work, so free text is the floor
+and the list is a suggestion. And **nothing calls a vendor unless asked** — no startup fetch, no
+validation on save — because `SPEC-107` §3 already holds that line for capability probes and
+automatic validation would spend real quota to catch a typo a second earlier.
+
+Named risks with weight: `openai_compat` is the widest kind and behaves differently per server
+(Ollama lists *locally pulled* models, which is local availability rather than entitlement); vendor
+lists can run to hundreds of entries so filtering is a requirement rather than polish; `retrieve`
+semantics differ per vendor and Google's was not probed; and a model that exists is not a model
+that works — `SPEC-208` §2.4's capability preflight remains the check that decides whether an agent
+can actually run on it.
+
+#### [SPEC-323](apps/tauri-ui/specs/SPEC-323-advanced-agent-configuration.md) — Advanced Per-Agent Configuration — 📋 Draft 2026-08-27
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-208, SPEC-321, SPEC-322, SPEC-106 · *Parent:* SPEC-300
+
+What the maintainer actually wanted when he asked to "address agents by type", separated from
+`SPEC-322`'s legibility fix because it is new capability rather than copy: bind an individual agent
+to a specific provider, model and reasoning effort, behind an Advanced toggle that is off by
+default, with reset back to the role defaults.
+
+The tiering is the design constraint, in his own words: managed users would not care, a
+bring-your-own-key user cares little, and it is the contributor fine-tuning the product who needs
+it — so per-agent config is an advanced option and nothing else changes. `SPEC-208` §2.3.1's
+"exactly two roles, deliberately" is **extended, not reopened**: an agent with no override resolves
+exactly as it does today, on the same code path.
+
+Deliberately left undecided rather than guessed: how reasoning effort is represented portably.
+Anthropic takes a token budget, OpenAI an effort level, Google its own thinking config. The
+proposal is a small ordered enum mapped per provider `kind` in the daemon, with a raw per-vendor
+value rejected because it leaks vendor shape into a provider-agnostic UI and silently means nothing
+when an agent's provider changes. That needs checking against what each `kind` can actually send.
+
+Three named risks carry real weight: `SPEC-208` §2.4's capability preflight must run on overrides
+too or the advanced path becomes the one place that skips the safety check; provider deletion
+already warns when a record is role-bound and must learn about overrides or it silently breaks an
+agent; and twelve agents is already a lot of settings surface that grows with every new agent.
+
+Worth recording that this is the third consecutive spec in this area written from the maintainer's
+own use of the product — `SPEC-321` shipped correct and unreadable, `SPEC-322` made it readable,
+this adds what was wanted. None of the three would have been caught by a test.
+
+#### [SPEC-322](apps/tauri-ui/specs/SPEC-322-model-role-legibility.md) — Model Role Legibility in Settings — 🚧 in progress ([CTX-322.1](apps/tauri-ui/context/CTX-322.1-model-role-legibility.md)) 2026-08-27
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-321, SPEC-208, SPEC-303 · *Parent:* SPEC-300
+
+`SPEC-321` shipped 2026-08-26 with every route real and its tests green. The maintainer opened the
+resulting screen for the first time the next day and reported: "I see a reasoning with a dropdown
+list and fast with a dropdown list. This isn't self explanatory." Nothing said what a role was,
+which features used it, or that the model itself is set one level up on the provider record — the
+screen had two levels and linked them nowhere.
+
+`SPEC-302`'s lesson repeating in a new surface, and the one `CLAUDE.md` already records: a spec can
+be mechanically perfect and still be the wrong thing to build. The difference is that this time a
+person used the surface and said so, which is the norm working rather than failing.
+
+Fixed as copy and one derived string, no schema change: each role now shows the model it actually
+resolves to, the section says what a role is and where the model comes from, and a closing line
+answers the question that was really being asked — which role a feature uses is fixed by the app,
+not configurable. Reading the component to write that also surfaced a genuinely invalid state the
+screen had been rendering as ordinary: a role bound to a provider with no model for it, which
+`SPEC-321`'s own editor permits and which fails at call time with nothing in Settings hinting why.
+It now names the provider and says the role cannot run.
+
+Two real requests from the same report are **deferred with reasons rather than absorbed**: a
+reasoning-effort control (provider records carry a model id per role and nothing else — new
+capability, needs a `SPEC-208` schema change) and per-agent model binding (contradicts `SPEC-208`
+§2.3.1's "exactly two roles, deliberately", so that argument has to be reopened first).
+
 ### 3.4 `4xx` — Distribution & operations
 
 #### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — ✅ Completed ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md), [CTX-401.2](context/CTX-401.2-tauri-sidecar-wiring.md)) 2026-08-14

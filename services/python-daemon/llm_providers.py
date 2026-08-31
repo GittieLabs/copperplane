@@ -657,3 +657,117 @@ def chat(
         "usage": usage,
         "model": _resolved_model_for(provider, model),
     }
+
+
+# ---------------------------------------------------------------------------
+# SPEC-324: model identity verification.
+#
+# SPEC-322 §1 declined this on the grounds that "the app does not know a
+# vendor's model list". That premise was false and unchecked: probed
+# directly against the installed SDKs on 2026-08-27, every `kind` this
+# repo has can list models, and anthropic/openai can retrieve one by id --
+# an existence check that costs no tokens, unlike a completion.
+#
+# Every function here is reached only from an ASYNC_ROUTES-registered
+# route. These make real network calls, and CTX-314.2 records the real bug
+# from getting that wrong: a GitHub-calling route left out of ASYNC_ROUTES
+# blocks the daemon's whole request path while it runs.
+#
+# SDK imports are lazy and every failure is caught, because a missing SDK,
+# a bad key, an unreachable host and a server with no /v1/models endpoint
+# are all ordinary states this must report rather than raise on. The UI
+# needs the reason, not a stack trace.
+# ---------------------------------------------------------------------------
+
+
+def _list_anthropic(api_key: str, base_url: str | None) -> list[str]:
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key, **({"base_url": base_url} if base_url else {}))
+    return [m.id for m in client.models.list()]
+
+
+def _list_openai_compat(api_key: str, base_url: str | None) -> list[str]:
+    import openai
+
+    client = openai.OpenAI(api_key=api_key, **({"base_url": base_url} if base_url else {}))
+    return [m.id for m in client.models.list()]
+
+
+def _list_google(api_key: str, base_url: str | None) -> list[str]:
+    from google import genai
+
+    # `name` comes back fully qualified ("models/gemini-..."); the bare id is
+    # what a user types and what `models` on a record holds, so strip it.
+    return [
+        (m.name or "").removeprefix("models/")
+        for m in genai.Client(api_key=api_key).models.list()
+        if m.name
+    ]
+
+
+# Kept as a dict rather than an if-chain so a test can substitute one entry
+# without patching import machinery, and so an unknown kind is a data
+# question rather than a missing branch.
+_MODEL_LISTERS = {
+    "anthropic": _list_anthropic,
+    "openai_compat": _list_openai_compat,
+    "google": _list_google,
+}
+
+
+def list_models(record: "ProviderRecord", api_key: str) -> dict:
+    """Models this provider actually reports.
+
+    Returns `{"supported": bool, "models": [...], "reason": str | None}`.
+    `supported: False` is a real answer, never an exception -- an
+    `openai_compat` record may point at a server with no `/v1/models` at
+    all, which is ordinary and must not read as a failure of the app.
+    """
+    lister = _MODEL_LISTERS.get(record["kind"])
+    if lister is None:
+        return {"supported": False, "models": [], "reason": f"unknown provider kind {record['kind']!r}"}
+
+    if not api_key and record["id"] != "ollama":
+        return {"supported": False, "models": [], "reason": "no API key is configured for this provider"}
+
+    try:
+        models = sorted({m for m in lister(api_key or _OLLAMA_PLACEHOLDER_API_KEY, record["base_url"]) if m})
+    except ImportError as exc:
+        return {"supported": False, "models": [], "reason": f"the SDK for this provider is not installed ({exc})"}
+    except Exception as exc:  # noqa: BLE001 -- every failure is a reportable state
+        return {"supported": False, "models": [], "reason": f"{type(exc).__name__}: {exc}"}
+
+    return {"supported": True, "models": models, "reason": None}
+
+
+def validate_model(record: "ProviderRecord", api_key: str, model: str) -> dict:
+    """Whether `model` resolves on this provider.
+
+    Returns `{"valid": bool, "reason": str}`. Deliberately does NOT send a
+    completion: `models.list` is an existence check that costs no tokens,
+    and SPEC-324 §3 names quota as a real cost even for a cheap check.
+
+    A provider that cannot list is reported as unknown rather than invalid.
+    Claiming a model is wrong because the server has no `/v1/models` would
+    be worse than saying nothing -- SPEC-324 §2.2 keeps free text as the
+    floor precisely for that case.
+    """
+    model = (model or "").strip()
+    if not model:
+        return {"valid": False, "reason": "no model id given"}
+
+    listed = list_models(record, api_key)
+    if not listed["supported"]:
+        return {"valid": False, "reason": f"could not check: {listed['reason']}"}
+
+    if model in listed["models"]:
+        return {"valid": True, "reason": f"{model} is available on {record['id']}"}
+
+    return {
+        "valid": False,
+        "reason": (
+            f"{record['id']} did not list {model}. It may still work -- a private deployment or a "
+            f"model newer than this provider's own list will not appear here."
+        ),
+    }

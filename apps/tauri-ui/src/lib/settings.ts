@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { ask, open } from '@tauri-apps/plugin-dialog'
 import { relaunch } from '@tauri-apps/plugin-process'
-import { dispatch } from './ipc'
+import { dispatch, submitJob } from './ipc'
 
 /** Must match `daemon.py`'s `_KEY_BASED_PROVIDERS` and
  * `core/tauri-rust/src/daemon.rs`'s `KNOWN_SECRET_KEYS` allowlist. Ollama
@@ -170,6 +170,46 @@ export async function getProviderRecords(): Promise<{
     provider_roles: Record<ModelRole, string>
     provider_roles_saved: boolean
   }
+}
+
+/** SPEC-324 §2.1: the models a provider actually reports.
+ *
+ * `submitJob`, not `dispatch` -- this is a real network call to the vendor
+ * and is ASYNC_ROUTES-registered for it. CTX-314.2 records the real bug
+ * from getting that wrong: a sync route runs inline in the daemon's
+ * request path, so a slow provider would block every other request.
+ *
+ * `supported: false` is a real answer, not an error -- an openai_compat
+ * record may point at a server with no /v1/models at all. Callers show the
+ * reason and keep the field typeable (SPEC-324 §2.2). */
+export interface ModelListing {
+  supported: boolean
+  models: string[]
+  reason: string | null
+}
+
+export async function listProviderModels(providerId: string): Promise<ModelListing> {
+  const handle = await submitJob<ModelListing>('llm.list_models', { provider_id: providerId })
+  return handle.result
+}
+
+/** SPEC-324 §2.3: an on-demand existence check. Never called on save or at
+ * startup -- quota is a real cost even for a cheap check, and SPEC-107 §3
+ * already holds that line for capability probes. */
+export interface ModelValidation {
+  valid: boolean
+  reason: string
+}
+
+export async function validateProviderModel(
+  providerId: string,
+  model: string,
+): Promise<ModelValidation> {
+  const handle = await submitJob<ModelValidation>('llm.validate_model', {
+    provider_id: providerId,
+    model,
+  })
+  return handle.result
 }
 
 /** SPEC-321 §2.3: persists the complete current provider records and

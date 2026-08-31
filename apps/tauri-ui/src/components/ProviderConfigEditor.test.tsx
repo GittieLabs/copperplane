@@ -6,6 +6,8 @@ const saveProviderConfigMock = vi.fn()
 const saveSecretMock = vi.fn()
 const clearSecretMock = vi.fn()
 const askMock = vi.fn()
+const listProviderModelsMock = vi.fn()
+const validateProviderModelMock = vi.fn()
 
 vi.mock('../lib/settings', async () => {
   const actual = await vi.importActual<typeof import('../lib/settings')>('../lib/settings')
@@ -15,6 +17,8 @@ vi.mock('../lib/settings', async () => {
     saveProviderConfig: (...args: unknown[]) => saveProviderConfigMock(...args),
     saveSecret: (...args: unknown[]) => saveSecretMock(...args),
     clearSecret: (...args: unknown[]) => clearSecretMock(...args),
+    listProviderModels: (...args: unknown[]) => listProviderModelsMock(...args),
+    validateProviderModel: (...args: unknown[]) => validateProviderModelMock(...args),
   }
 })
 
@@ -85,6 +89,8 @@ beforeEach(() => {
   saveSecretMock.mockReset().mockResolvedValue(undefined)
   clearSecretMock.mockReset().mockResolvedValue(undefined)
   askMock.mockReset().mockResolvedValue(true)
+  listProviderModelsMock.mockReset().mockResolvedValue({ supported: true, models: [], reason: null })
+  validateProviderModelMock.mockReset().mockResolvedValue({ valid: true, reason: 'ok' })
 })
 
 describe('ProviderConfigEditor: list + migration display', () => {
@@ -92,7 +98,7 @@ describe('ProviderConfigEditor: list + migration display', () => {
     render(<ProviderConfigEditor config={EMPTY_CONFIG} capabilities={EMPTY_CAPABILITIES} onSaved={vi.fn()} onCapabilitiesChange={vi.fn()} />)
 
     await waitFor(() => expect(getProviderRecordsMock).toHaveBeenCalled())
-    expect(await screen.findByRole('button', { name: 'Edit anthropic' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: 'Edit provider anthropic' })).toBeTruthy()
   })
 
   it('shows the migration note when provider_roles_saved is false, not when true', async () => {
@@ -110,13 +116,13 @@ describe('ProviderConfigEditor: list + migration display', () => {
   it('hides the migration note once provider_roles_saved is true', async () => {
     renderEditor()
 
-    await screen.findByRole('button', { name: 'Edit anthropic' })
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
     expect(screen.queryByText(/Not yet saved/)).toBeNull()
   })
 
   it('never renders "managed" as a kind option, even in the add-provider form', async () => {
     renderEditor()
-    await screen.findByRole('button', { name: 'Edit anthropic' })
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Add provider' }))
 
@@ -169,7 +175,7 @@ describe('ProviderConfigEditor: per-record key management', () => {
     })
     renderEditor()
 
-    await screen.findByRole('button', { name: 'Edit ollama' })
+    await screen.findByRole('button', { name: 'Edit provider ollama' })
     expect(screen.queryByText('API key')).toBeNull()
     expect(screen.queryByLabelText('ollama API key')).toBeNull()
   })
@@ -237,7 +243,7 @@ describe('ProviderConfigEditor: add/edit a record', () => {
     expect(roles).toEqual({ reasoning: 'anthropic', fast: 'anthropic' })
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
     // The form closes and the new record now appears in the list.
-    expect(screen.getByRole('button', { name: 'Edit my-server' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Edit provider my-server' })).toBeTruthy()
   })
 
   it('unchecking "Requires an API key" on a new record saves a null api_key_ref', async () => {
@@ -266,8 +272,8 @@ describe('ProviderConfigEditor: add/edit a record', () => {
 
   it('editing an existing record keeps its id immutable and saves the updated fields in place', async () => {
     const { onSaved } = renderEditor()
-    await screen.findByRole('button', { name: 'Edit anthropic' })
-    fireEvent.click(screen.getByRole('button', { name: 'Edit anthropic' }))
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit provider anthropic' }))
 
     const idInput = screen.getByLabelText('Provider id') as HTMLInputElement
     expect(idInput.disabled).toBe(true)
@@ -286,16 +292,16 @@ describe('ProviderConfigEditor: add/edit a record', () => {
 
   it('editing a preset shows a note that saving overrides its default', async () => {
     renderEditor()
-    await screen.findByRole('button', { name: 'Edit anthropic' })
-    fireEvent.click(screen.getByRole('button', { name: 'Edit anthropic' }))
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit provider anthropic' }))
 
     expect(screen.getByText(/permanently overrides its default/)).toBeTruthy()
   })
 
   it('a non-loopback base URL paired with a required API key shows the exfiltration warning inline', async () => {
     renderEditor()
-    await screen.findByRole('button', { name: 'Edit anthropic' })
-    fireEvent.click(screen.getByRole('button', { name: 'Edit anthropic' }))
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit provider anthropic' }))
 
     fireEvent.change(screen.getByLabelText('Base URL'), { target: { value: 'https://evil.example.com' } })
 
@@ -304,8 +310,8 @@ describe('ProviderConfigEditor: add/edit a record', () => {
 
   it('cancelling the edit form discards changes without saving', async () => {
     renderEditor()
-    await screen.findByRole('button', { name: 'Edit anthropic' })
-    fireEvent.click(screen.getByRole('button', { name: 'Edit anthropic' }))
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit provider anthropic' }))
     fireEvent.change(screen.getByLabelText('Base URL'), { target: { value: 'https://should-not-save.example' } })
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
@@ -336,7 +342,7 @@ describe('ProviderConfigEditor: deleting a record', () => {
       provider_roles_saved: true,
     })
     const { onSaved } = renderEditor()
-    await screen.findByRole('button', { name: 'Edit ollama' })
+    await screen.findByRole('button', { name: 'Edit provider ollama' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete ollama' }))
 
@@ -354,7 +360,7 @@ describe('ProviderConfigEditor: deleting a record', () => {
   it('deleting a role-bound record prompts for confirmation first', async () => {
     askMock.mockResolvedValueOnce(false)
     renderEditor()
-    await screen.findByRole('button', { name: 'Edit anthropic' })
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete anthropic' }))
 
@@ -365,7 +371,7 @@ describe('ProviderConfigEditor: deleting a record', () => {
   it('confirming the role-bound deletion proceeds, leaving the dangling role binding as-is', async () => {
     askMock.mockResolvedValueOnce(true)
     const { onSaved } = renderEditor()
-    await screen.findByRole('button', { name: 'Edit anthropic' })
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete anthropic' }))
 
@@ -388,7 +394,7 @@ describe('ProviderConfigEditor: role binding', () => {
       provider_roles_saved: true,
     })
     renderEditor()
-    await screen.findByRole('button', { name: 'Edit anthropic' })
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
 
     const reasoningSelect = screen.getByLabelText('Reasoning role provider') as HTMLSelectElement
     expect(Array.from(reasoningSelect.options).map((o) => o.value)).toEqual(['anthropic', 'ollama'])
@@ -401,7 +407,7 @@ describe('ProviderConfigEditor: role binding', () => {
       provider_roles_saved: true,
     })
     const { onSaved } = renderEditor()
-    await screen.findByRole('button', { name: 'Edit anthropic' })
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
 
     fireEvent.change(screen.getByLabelText('Fast role provider'), { target: { value: 'ollama' } })
 
@@ -413,5 +419,172 @@ describe('ProviderConfigEditor: role binding', () => {
       ),
     )
     await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  })
+})
+
+describe('SPEC-322: the model-role section explains itself', () => {
+  it('names what a role is and where the model comes from', async () => {
+    renderEditor()
+
+    expect(await screen.findByText('Model roles')).toBeTruthy()
+    expect(
+      screen.getByText(/Choose which provider answers each role here/),
+    ).toBeTruthy()
+    // The screen must say the model lives on the provider record above --
+    // the link a user could not previously make from two bare dropdowns.
+    expect(
+      screen.getByText(/the model it actually uses is the one you set on that provider above/i),
+    ).toBeTruthy()
+  })
+
+  it('shows which model each role actually resolves to, not just the provider', async () => {
+    getProviderRecordsMock.mockResolvedValue({
+      records: [
+        { ...ANTHROPIC_RECORD, models: { reasoning: 'claude-opus-5', fast: 'claude-haiku-4-5' } },
+      ],
+      provider_roles: { reasoning: 'anthropic', fast: 'anthropic' },
+      provider_roles_saved: true,
+    })
+    renderEditor()
+
+    expect(await screen.findByText('Uses claude-opus-5')).toBeTruthy()
+    expect(screen.getByText('Uses claude-haiku-4-5')).toBeTruthy()
+  })
+
+  it('warns when a role is bound to a provider that has no model for it', async () => {
+    // The state the old screen rendered as a perfectly normal-looking
+    // dropdown: a role bound to a provider that cannot serve it, so every
+    // feature asking for that role fails at call time with nothing in the
+    // settings screen hinting why.
+    getProviderRecordsMock.mockResolvedValue({
+      records: [{ ...ANTHROPIC_RECORD, models: { fast: 'claude-haiku-4-5' } }],
+      provider_roles: { reasoning: 'anthropic', fast: 'anthropic' },
+      provider_roles_saved: true,
+    })
+    renderEditor()
+
+    expect(
+      await screen.findByText('anthropic has no reasoning model set — this role cannot run.'),
+    ).toBeTruthy()
+    expect(screen.getByText('Uses claude-haiku-4-5')).toBeTruthy()
+  })
+
+  it('states that which role a feature uses is fixed by the app', async () => {
+    renderEditor()
+
+    expect(
+      await screen.findByText(/Which role a given feature asks for is fixed by the app/),
+    ).toBeTruthy()
+  })
+})
+
+describe('SPEC-322 §2.5: which provider is actually in use', () => {
+  it('marks the roles each provider serves, and says when one serves none', async () => {
+    // The state that prompted this: a user adds several providers and several
+    // API keys, and nothing on the list says only the role-bound ones are
+    // ever called. Two of three here are inert.
+    getProviderRecordsMock.mockResolvedValue({
+      records: [
+        ANTHROPIC_RECORD,
+        OLLAMA_RECORD,
+        { ...ANTHROPIC_RECORD, id: 'spare', api_key_ref: 'spare_api_key' },
+      ],
+      provider_roles: { reasoning: 'anthropic', fast: 'ollama' },
+      provider_roles_saved: true,
+    })
+    renderEditor()
+
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
+    expect(screen.getByText('reasoning')).toBeTruthy()
+    expect(screen.getByText('fast')).toBeTruthy()
+    // Two records are configured but never called; say so rather than leaving it blank.
+    expect(screen.getAllByText('not in use').length).toBe(1)
+  })
+
+  it('shows both roles on one provider when it serves both', async () => {
+    getProviderRecordsMock.mockResolvedValue({
+      records: [ANTHROPIC_RECORD],
+      provider_roles: { reasoning: 'anthropic', fast: 'anthropic' },
+      provider_roles_saved: true,
+    })
+    renderEditor()
+
+    expect(await screen.findByText('reasoning + fast')).toBeTruthy()
+  })
+
+  it('labels the per-provider button for what it actually edits', async () => {
+    // It opens a provider form -- id, kind, base URL, models, capabilities --
+    // and touches no agents at all, so "Edit Agents" would have been a worse
+    // name than the bare "Edit" it replaces.
+    renderEditor()
+
+    expect(await screen.findByRole('button', { name: 'Edit provider anthropic' })).toBeTruthy()
+  })
+})
+
+describe('SPEC-324: model identity verification', () => {
+  async function openEditor() {
+    renderEditor()
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit provider anthropic' }))
+    return await screen.findByLabelText('Reasoning model')
+  }
+
+  it('does not call the provider until the user acts', async () => {
+    // SPEC-324 §2.3: no startup fetch, none on save. Opening the editor is
+    // not "asking" -- quota is a real cost even for a cheap check.
+    await openEditor()
+    expect(listProviderModelsMock).not.toHaveBeenCalled()
+    expect(validateProviderModelMock).not.toHaveBeenCalled()
+  })
+
+  it('offers the models a provider reports as suggestions', async () => {
+    listProviderModelsMock.mockResolvedValue({
+      supported: true, models: ['claude-opus-5', 'claude-haiku-4-5'], reason: null,
+    })
+    const field = await openEditor()
+    fireEvent.focus(field)
+
+    await waitFor(() => expect(listProviderModelsMock).toHaveBeenCalledWith('anthropic'))
+    await waitFor(() => {
+      const list = document.getElementById('models-reasoning')
+      expect(list?.querySelectorAll('option').length).toBe(2)
+    })
+  })
+
+  it('keeps the field typeable and says so when a provider cannot list', async () => {
+    // The openai_compat case: a server with no /v1/models is ordinary, not
+    // broken, and free text stays the floor (SPEC-324 §2.2).
+    listProviderModelsMock.mockResolvedValue({
+      supported: false, models: [], reason: '404 page not found',
+    })
+    const field = await openEditor()
+    fireEvent.focus(field)
+
+    expect(await screen.findByText(/Could not list models \(404 page not found\)/)).toBeTruthy()
+    expect(screen.getByText(/it will still be saved/)).toBeTruthy()
+
+    fireEvent.change(field, { target: { value: 'my-private-deployment' } })
+    expect((field as HTMLInputElement).value).toBe('my-private-deployment')
+  })
+
+  it('validates only on demand, and reports the reason verbatim', async () => {
+    validateProviderModelMock.mockResolvedValue({
+      valid: false, reason: 'anthropic did not list nope. It may still work',
+    })
+    const field = await openEditor()
+    fireEvent.change(field, { target: { value: 'nope' } })
+    expect(validateProviderModelMock).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Validate Reasoning model' }))
+    await waitFor(() => expect(validateProviderModelMock).toHaveBeenCalledWith('anthropic', 'nope'))
+    expect(await screen.findByText(/did not list nope\. It may still work/)).toBeTruthy()
+  })
+
+  it('disables Validate when there is nothing to check', async () => {
+    const field = await openEditor()
+    fireEvent.change(field, { target: { value: '   ' } })
+    const button = screen.getByRole('button', { name: 'Validate Reasoning model' }) as HTMLButtonElement
+    expect(button.disabled).toBe(true)
   })
 })

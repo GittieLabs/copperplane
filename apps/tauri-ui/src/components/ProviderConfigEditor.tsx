@@ -5,12 +5,15 @@ import {
   confirmRemoveRoleBoundProvider,
   getProviderRecords,
   isNonLoopbackBaseUrl,
+  listProviderModels,
   saveProviderConfig,
   saveSecret,
   type DaemonCapabilities,
   type DaemonConfig,
   type ModelRole,
+  type ModelListing,
   type ProviderRecord,
+  validateProviderModel,
 } from '../lib/settings'
 
 /** SPEC-321 §2.1-2.5: replaces the old flat provider `<select>` + free-text
@@ -292,6 +295,78 @@ export function ProviderConfigEditor({
     )
   }
 
+  /* SPEC-324: the models a provider reports, fetched only when asked
+     (§2.3 -- no startup fetch, none on save, so nothing spends a user's
+     quota without them acting). `supported: false` is surfaced as a reason
+     rather than swallowed: an openai_compat record may point at a server
+     with no /v1/models, which is ordinary rather than broken. */
+  const [listing, setListing] = useState<ModelListing | null>(null)
+  const [listingBusy, setListingBusy] = useState(false)
+  const [modelCheck, setModelCheck] = useState<Record<string, string>>({})
+
+  const loadModelList = async () => {
+    if (!draft.id.trim()) return
+    setListingBusy(true)
+    try {
+      setListing(await listProviderModels(draft.id.trim()))
+    } catch (e) {
+      setListing({ supported: false, models: [], reason: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setListingBusy(false)
+    }
+  }
+
+  const checkModel = async (role: ModelRole, model: string) => {
+    setModelCheck((prev) => ({ ...prev, [role]: 'checking...' }))
+    try {
+      const result = await validateProviderModel(draft.id.trim(), model)
+      setModelCheck((prev) => ({ ...prev, [role]: result.reason }))
+    } catch (e) {
+      setModelCheck((prev) => ({ ...prev, [role]: e instanceof Error ? e.message : String(e) }))
+    }
+  }
+
+  /* SPEC-324 §2.2: a combobox, not a dropdown. The list is a suggestion and
+     the field stays typeable, so a private deployment, a model newer than the
+     provider's own list, or a compat server with its own naming all still
+     work. With no list available this degrades to exactly the plain text
+     field that shipped before -- never worse than today. */
+  const renderModelField = (role: ModelRole, value: string, onChange: (v: string) => void) => {
+    const label = role === 'reasoning' ? 'Reasoning model' : 'Fast model'
+    return (
+      <>
+        <div className="flex gap-1">
+          <input
+            aria-label={label}
+            list={`models-${role}`}
+            className="flex-1 rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
+            placeholder="(blank = can't serve this role)"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onFocus={() => {
+              if (!listing && !listingBusy) void loadModelList()
+            }}
+          />
+          <button
+            type="button"
+            aria-label={`Validate ${label}`}
+            className="rounded border border-line px-2 py-0.5 text-xs"
+            onClick={() => void checkModel(role, value)}
+            disabled={!value.trim()}
+          >
+            Validate
+          </button>
+        </div>
+        <datalist id={`models-${role}`}>
+          {(listing?.models ?? []).map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
+        {modelCheck[role] && <span className="text-fg-muted">{modelCheck[role]}</span>}
+      </>
+    )
+  }
+
   function renderDraftForm() {
     const isNew = editingId === NEW_RECORD_SENTINEL
     return (
@@ -348,25 +423,23 @@ export function ProviderConfigEditor({
         <div className="flex gap-2">
           <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
             Reasoning model
-            <input
-              aria-label="Reasoning model"
-              className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-              placeholder="(blank = can't serve this role)"
-              value={draft.reasoningModel}
-              onChange={(e) => setDraft((prev) => ({ ...prev, reasoningModel: e.target.value }))}
-            />
+            {renderModelField('reasoning', draft.reasoningModel, (v) =>
+              setDraft((prev) => ({ ...prev, reasoningModel: v })))}
           </label>
           <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
             Fast model
-            <input
-              aria-label="Fast model"
-              className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-              placeholder="(blank = can't serve this role)"
-              value={draft.fastModel}
-              onChange={(e) => setDraft((prev) => ({ ...prev, fastModel: e.target.value }))}
-            />
+            {renderModelField('fast', draft.fastModel, (v) =>
+              setDraft((prev) => ({ ...prev, fastModel: v })))}
           </label>
         </div>
+        {/* SPEC-324: listing is per PROVIDER, not per field, so its status
+            belongs here once rather than duplicated under both models. */}
+        {listingBusy && <p className="text-xs text-fg-muted">Loading models…</p>}
+        {listing && !listing.supported && (
+          <p className="text-xs text-fg-muted">
+            Could not list models ({listing.reason}). Type the id yourself — it will still be saved.
+          </p>
+        )}
         <label className="flex items-center gap-2 text-xs text-fg-tertiary">
           <input
             type="checkbox"
@@ -424,6 +497,28 @@ export function ProviderConfigEditor({
     )
   }
 
+  /* SPEC-322 §2.1: the missing link between the two levels of this screen.
+     The dropdown names a provider record; what a user needs to know is the
+     model that record will actually serve for this role -- and, when that
+     field is blank on the record, that the role currently resolves to
+     nothing at all. Reported as "this isn't self explanatory". */
+  const describeRole = (role: ModelRole): string => {
+    const bound = records.find((record) => record.id === providerRoles[role])
+    if (!bound) return 'No provider selected.'
+    const model = bound.models[role]
+    if (!model) return `${bound.id} has no ${role} model set — this role cannot run.`
+    return `Uses ${model}`
+  }
+
+  /* SPEC-322 §2.5: which roles, if any, this record actually serves. Empty
+     string means nothing calls it -- reported as "not in use" rather than
+     left blank, so an inert provider reads as a deliberate state and not as
+     a rendering gap. */
+  const rolesServedBy = (recordId: string): string =>
+    (['reasoning', 'fast'] as ModelRole[])
+      .filter((role) => providerRoles[role] === recordId)
+      .join(' + ')
+
   return (
     <div className="flex flex-col gap-2">
       {error && <p className="text-sm text-danger">{error}</p>}
@@ -440,14 +535,23 @@ export function ProviderConfigEditor({
           <div key={record.id} className="flex flex-col gap-1 rounded border border-line p-2">
             <div className="flex items-center gap-2">
               <span className="flex-1 text-sm font-medium">{record.id}</span>
+              {/* SPEC-322 §2.5: adding a provider does nothing on its own -- only the
+                  records bound to a role are ever called. Without this, a user who
+                  configures three providers and three API keys has no way to tell that
+                  two of them are inert, or which one is answering. */}
+              <span
+                className={rolesServedBy(record.id) ? 'text-xs text-accent' : 'text-xs text-fg-muted'}
+              >
+                {rolesServedBy(record.id) || 'not in use'}
+              </span>
               <span className="text-xs text-fg-muted">{record.kind}</span>
               <button
                 type="button"
-                aria-label={`Edit ${record.id}`}
+                aria-label={`Edit provider ${record.id}`}
                 className="rounded border border-line px-2 py-0.5 text-xs"
                 onClick={() => startEdit(record)}
               >
-                Edit
+                Edit provider
               </button>
               <button
                 type="button"
@@ -483,38 +587,66 @@ export function ProviderConfigEditor({
         </button>
       )}
 
-      <div className="flex gap-2">
-        <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
-          Reasoning
-          <select
-            aria-label="Reasoning role provider"
-            className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-            value={providerRoles.reasoning}
-            onChange={(e) => void handleRoleChange('reasoning', e.target.value)}
-          >
-            {records.map((record) => (
-              <option key={record.id} value={record.id}>
-                {record.id}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
-          Fast
-          <select
-            aria-label="Fast role provider"
-            className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-            value={providerRoles.fast}
-            onChange={(e) => void handleRoleChange('fast', e.target.value)}
-          >
-            {records.map((record) => (
-              <option key={record.id} value={record.id}>
-                {record.id}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      {/* SPEC-322 §2.1: this block used to be two bare dropdowns labelled
+          "Reasoning" and "Fast" with no copy at all. A user who had not read
+          SPEC-208 could not tell what a role was, which agents used it, or
+          that the model itself is set per provider record above -- reported
+          directly by the maintainer on first real use of the shipped screen. */}
+      <section className="flex flex-col gap-2 border-t border-line pt-3">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-medium text-fg">Model roles</h3>
+          <p className="text-xs text-fg-muted">
+            Every AI feature in the app asks for one of two roles rather than naming a model
+            directly. Choose which provider answers each role here; the model it actually uses is
+            the one you set on that provider above.
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
+            Reasoning
+            <select
+              aria-label="Reasoning role provider"
+              className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
+              value={providerRoles.reasoning}
+              onChange={(e) => void handleRoleChange('reasoning', e.target.value)}
+            >
+              {records.map((record) => (
+                <option key={record.id} value={record.id}>
+                  {record.id}
+                </option>
+              ))}
+            </select>
+            <span className="text-fg-muted">{describeRole('reasoning')}</span>
+            <span className="text-fg-muted">
+              Part lookup, datasheet extraction, board review, connection guidance.
+            </span>
+          </label>
+          <label className="flex flex-1 flex-col gap-1 text-xs text-fg-tertiary">
+            Fast
+            <select
+              aria-label="Fast role provider"
+              className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
+              value={providerRoles.fast}
+              onChange={(e) => void handleRoleChange('fast', e.target.value)}
+            >
+              {records.map((record) => (
+                <option key={record.id} value={record.id}>
+                  {record.id}
+                </option>
+              ))}
+            </select>
+            <span className="text-fg-muted">{describeRole('fast')}</span>
+            <span className="text-fg-muted">
+              In-app chat in each area, and shorter summarising passes.
+            </span>
+          </label>
+        </div>
+
+        <p className="text-xs text-fg-muted">
+          Which role a given feature asks for is fixed by the app, not configurable here.
+        </p>
+      </section>
     </div>
   )
 }
