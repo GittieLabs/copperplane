@@ -741,6 +741,43 @@ def list_models(record: "ProviderRecord", api_key: str) -> dict:
     return {"supported": True, "models": models, "reason": None}
 
 
+# CTX-321.3: the common local endpoint. Named as a constant rather than
+# typed into the UI so the editor's suggestion and the ollama preset's own
+# base_url cannot drift apart.
+LOCAL_OLLAMA_BASE_URL = _OLLAMA_BASE_URL
+
+
+def probe_endpoint(base_url: str) -> dict:
+    """Is something OpenAI-compatible answering at `base_url`?
+
+    Returns `{"reachable": bool, "models": [...], "reason": str | None}`.
+
+    Exists because a NEW `openai_compat` record starts with a blank base
+    URL, and blank means the OpenAI SDK's own default -- api.openai.com.
+    Nothing told a user that a local server lives somewhere else, so the
+    editor could not offer what `list_models` would happily have listed.
+
+    Takes a URL rather than a provider id on purpose: the record being
+    configured does not exist yet, so `_resolve_record_and_key` has
+    nothing to resolve. No API key is sent -- this probes unauthenticated
+    local servers, and a placeholder key is used exactly as the ollama
+    record does.
+
+    Never raises. An unreachable host is the ordinary answer here, not an
+    error: most of the time nothing is listening and the editor simply
+    says nothing."""
+    base_url = (base_url or "").strip()
+    if not base_url:
+        return {"reachable": False, "models": [], "reason": "no base URL given"}
+    try:
+        models = sorted({m for m in _list_openai_compat(_OLLAMA_PLACEHOLDER_API_KEY, base_url) if m})
+    except ImportError as exc:
+        return {"reachable": False, "models": [], "reason": f"the OpenAI SDK is not installed ({exc})"}
+    except Exception as exc:  # noqa: BLE001 -- nothing listening is an ordinary state
+        return {"reachable": False, "models": [], "reason": f"{type(exc).__name__}: {exc}"}
+    return {"reachable": True, "models": models, "reason": None}
+
+
 def validate_model(record: "ProviderRecord", api_key: str, model: str) -> dict:
     """Whether `model` resolves on this provider.
 

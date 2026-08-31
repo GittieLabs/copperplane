@@ -5,13 +5,16 @@ import {
   confirmRemoveRoleBoundProvider,
   getProviderRecords,
   isNonLoopbackBaseUrl,
+  LOCAL_OLLAMA_BASE_URL,
   listProviderModels,
+  probeEndpoint,
   saveProviderConfig,
   saveSecret,
   type DaemonCapabilities,
   type DaemonConfig,
   type ModelRole,
   type ModelListing,
+  type EndpointProbe,
   type ProviderRecord,
   validateProviderModel,
 } from '../lib/settings'
@@ -135,6 +138,15 @@ export function ProviderConfigEditor({
     setError(null)
     setDraft(BLANK_DRAFT)
     setEditingId(NEW_RECORD_SENTINEL)
+    /* CTX-321.3: one unauthenticated probe of the common local endpoint,
+       fired only when a NEW record's form opens. Nothing probes at startup
+       or on save, following SPEC-324 §2.3's on-demand rule -- and a failed
+       probe is silent, so a machine with nothing listening sees no change
+       at all. */
+    setLocalProbe(null)
+    void probeEndpoint(LOCAL_OLLAMA_BASE_URL)
+      .then(setLocalProbe)
+      .catch(() => setLocalProbe(null))
   }
 
   function startEdit(record: ProviderRecord) {
@@ -309,6 +321,12 @@ export function ProviderConfigEditor({
      daemon's reason verbatim stays right; giving every outcome the same
      colour was the bug. `ok: null` is the in-flight state. */
   const [modelCheck, setModelCheck] = useState<Record<string, { ok: boolean | null; text: string }>>({})
+  /* CTX-321.3: a NEW openai_compat record starts with a blank base URL, and
+     blank means the OpenAI SDK's own default -- api.openai.com. Nothing told
+     a user that a local server lives elsewhere, so the editor could not offer
+     what list_models would happily have listed. Probed once per editor
+     opening, never on save and never at startup. */
+  const [localProbe, setLocalProbe] = useState<EndpointProbe | null>(null)
 
   const loadModelList = async () => {
     if (!draft.id.trim()) return
@@ -352,7 +370,7 @@ export function ProviderConfigEditor({
             aria-label={label}
             list={`models-${role}`}
             className="flex-1 rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-            placeholder="(blank = can't serve this role)"
+            placeholder={listing?.models?.[0] ? `e.g. ${listing.models[0]}` : 'e.g. llama3.2:1b'}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onFocus={() => {
@@ -374,6 +392,12 @@ export function ProviderConfigEditor({
             <option key={m} value={m} />
           ))}
         </datalist>
+        {/* CTX-321.3: this text was the field's placeholder, which put an
+            explanation in the one place the fetched model suggestions are
+            most useful, and read as an instruction rather than a note. */}
+        {!value.trim() && (
+          <span className="text-fg-muted">Leave blank if this provider can't serve this role.</span>
+        )}
         {modelCheck[role] && (
           <span
             className={
@@ -394,7 +418,17 @@ export function ProviderConfigEditor({
   function renderDraftForm() {
     const isNew = editingId === NEW_RECORD_SENTINEL
     return (
-      <div className="flex flex-col gap-2 rounded border border-line p-3">
+      <div
+        className={`flex flex-col gap-2 rounded border p-3 ${
+          isNew ? 'border-accent bg-surface-alt' : 'border-line'
+        }`}
+      >
+        {/* CTX-321.3: this form replaces the "Add provider" button, which sits
+            directly under the last provider row -- so a blank new-record form
+            rendered as though it belonged to that provider. It said nothing
+            about being new; the maintainer read one as the ollama record and
+            reported that ollama "didn't attempt to populate anything". */}
+        {isNew && <p className="text-sm font-medium text-fg">New provider</p>}
         <label className="flex flex-col gap-1 text-xs text-fg-tertiary">
           Id
           <input
@@ -433,11 +467,30 @@ export function ProviderConfigEditor({
           <input
             aria-label="Base URL"
             className="rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-            placeholder="(leave blank for the vendor's default)"
+            placeholder={`blank = the vendor's default, e.g. ${LOCAL_OLLAMA_BASE_URL} for a local Ollama`}
             value={draft.base_url}
             onChange={(e) => setDraft((prev) => ({ ...prev, base_url: e.target.value }))}
           />
         </label>
+        {/* CTX-321.3: only offered when a real server actually answered the
+            probe. An unreachable endpoint says nothing at all rather than
+            suggesting a URL that would not work -- the same rule SPEC-324
+            §2.1 applies to a provider that cannot list. */}
+        {isNew && !draft.base_url.trim() && localProbe?.reachable && (
+          <p className="text-xs text-fg-muted">
+            An OpenAI-compatible server is answering at {LOCAL_OLLAMA_BASE_URL}
+            {localProbe.models.length > 0 && ` (${localProbe.models.join(', ')})`}.{' '}
+            <button
+              type="button"
+              className="underline"
+              onClick={() =>
+                setDraft((prev) => ({ ...prev, base_url: LOCAL_OLLAMA_BASE_URL, needsApiKey: false }))
+              }
+            >
+              Use it
+            </button>
+          </p>
+        )}
         {draft.needsApiKey && isNonLoopbackBaseUrl(draft.base_url.trim() || null) && (
           <p className="text-xs text-warning">
             This sends this provider's API key to {draft.base_url.trim()}. Only point this at a host

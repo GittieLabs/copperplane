@@ -212,6 +212,28 @@ export async function validateProviderModel(
   return handle.result
 }
 
+/** CTX-321.3: is an OpenAI-compatible server answering at a URL the user
+ * has not saved yet? Takes a URL rather than a provider id because the
+ * record being configured does not exist yet -- `llm.list_models` needs a
+ * resolvable record and a new draft has none.
+ *
+ * `reachable: false` is the ordinary answer, not an error: most of the
+ * time nothing is listening and the editor says nothing at all. */
+export interface EndpointProbe {
+  reachable: boolean
+  models: string[]
+  reason: string | null
+}
+
+/** The local endpoint the editor offers. Mirrors the daemon's own
+ * `LOCAL_OLLAMA_BASE_URL`, which is the ollama preset's `base_url`. */
+export const LOCAL_OLLAMA_BASE_URL = 'http://localhost:11434/v1'
+
+export async function probeEndpoint(baseUrl: string): Promise<EndpointProbe> {
+  const handle = await submitJob<EndpointProbe>('llm.probe_endpoint', { base_url: baseUrl })
+  return handle.result
+}
+
 /** SPEC-321 §2.3: persists the complete current provider records and
  * role bindings to `config.json` (for the next restart) and pushes them
  * live to the running daemon via `daemon.configure`, same pattern as

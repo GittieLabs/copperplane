@@ -138,5 +138,87 @@ class TestValidateModel(unittest.TestCase):
         self.assertEqual([], calls, "validate_model must not send a completion")
 
 
+class TestProbeEndpoint(unittest.TestCase):
+    """CTX-321.3. A NEW openai_compat record starts with a blank base URL,
+    and blank means the OpenAI SDK's own default -- api.openai.com. Nothing
+    told a user a local server lives elsewhere, so the editor could not
+    offer what list_models would happily have listed.
+
+    Takes a URL rather than a provider id because the record being
+    configured does not exist yet: _resolve_record_and_key has nothing to
+    resolve for a draft.
+    """
+
+    def setUp(self):
+        self._saved = lp._list_openai_compat
+
+    def tearDown(self):
+        lp._list_openai_compat = self._saved  # type: ignore[assignment]
+
+    def test_013_a_reachable_endpoint_reports_its_models(self):
+        lp._list_openai_compat = lambda key, base: ["llama3.2:1b", "qwen3:4b"]  # type: ignore[assignment]
+        out = lp.probe_endpoint(lp.LOCAL_OLLAMA_BASE_URL)
+        self.assertTrue(out["reachable"])
+        self.assertEqual(["llama3.2:1b", "qwen3:4b"], out["models"])
+        self.assertIsNone(out["reason"])
+
+    def test_014_nothing_listening_is_an_ordinary_answer_not_a_raise(self):
+        """The common case by far. A machine with no local server must see
+        no error, because the editor stays silent rather than suggesting a
+        URL that would not work."""
+        def boom(key, base):
+            raise ConnectionError("connection refused")
+
+        lp._list_openai_compat = boom  # type: ignore[assignment]
+        out = lp.probe_endpoint("http://localhost:11434/v1")
+        self.assertFalse(out["reachable"])
+        self.assertEqual([], out["models"])
+        self.assertIn("connection refused", out["reason"])
+
+    def test_015_a_blank_url_never_reaches_the_network(self):
+        calls = []
+        lp._list_openai_compat = lambda key, base: calls.append(base) or []  # type: ignore[assignment]
+        for value in ("", "   ", None):
+            out = lp.probe_endpoint(value)
+            self.assertFalse(out["reachable"])
+            self.assertEqual("no base URL given", out["reason"])
+        self.assertEqual([], calls, "a blank URL must not be probed")
+
+    def test_016_no_api_key_is_sent(self):
+        """This probes unauthenticated local servers. It must never reach
+        for a configured key -- there is no record to take one from, and a
+        local endpoint does not want one."""
+        seen = []
+        lp._list_openai_compat = lambda key, base: seen.append(key) or ["m"]  # type: ignore[assignment]
+        lp.probe_endpoint(lp.LOCAL_OLLAMA_BASE_URL)
+        self.assertEqual([lp._OLLAMA_PLACEHOLDER_API_KEY], seen)
+
+    def test_017_the_offered_url_is_the_ollama_preset_s_own(self):
+        """The editor's suggestion and the preset's base_url are the same
+        constant, so they cannot drift apart."""
+        self.assertEqual(lp._OLLAMA_BASE_URL, lp.LOCAL_OLLAMA_BASE_URL)
+
+
+class TestNetworkRoutesAreAsync(unittest.TestCase):
+    """CTX-314.2 found this the expensive way: a route that makes a real
+    network call but is left out of ASYNC_ROUTES runs inline in the
+    daemon's stdin read loop and blocks every other request while it
+    waits. It was true of a GitHub-calling route for a whole release.
+
+    Nothing asserted the property afterwards, so the next route to make a
+    network call could reintroduce it silently. CTX-321.3 added one, which
+    is why this guard exists now rather than as a comment.
+    """
+
+    def test_018_every_vendor_calling_llm_route_is_async_registered(self):
+        import daemon
+
+        for route in ("llm.list_models", "llm.validate_model", "llm.probe_endpoint"):
+            self.assertIn(
+                route, daemon.ASYNC_ROUTES,
+                f"{route} makes a real network call and must not run inline in the request path",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

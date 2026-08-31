@@ -8,6 +8,7 @@ const clearSecretMock = vi.fn()
 const askMock = vi.fn()
 const listProviderModelsMock = vi.fn()
 const validateProviderModelMock = vi.fn()
+const probeEndpointMock = vi.fn()
 
 vi.mock('../lib/settings', async () => {
   const actual = await vi.importActual<typeof import('../lib/settings')>('../lib/settings')
@@ -19,6 +20,7 @@ vi.mock('../lib/settings', async () => {
     clearSecret: (...args: unknown[]) => clearSecretMock(...args),
     listProviderModels: (...args: unknown[]) => listProviderModelsMock(...args),
     validateProviderModel: (...args: unknown[]) => validateProviderModelMock(...args),
+    probeEndpoint: (...args: unknown[]) => probeEndpointMock(...args),
   }
 })
 
@@ -91,6 +93,7 @@ beforeEach(() => {
   askMock.mockReset().mockResolvedValue(true)
   listProviderModelsMock.mockReset().mockResolvedValue({ supported: true, models: [], reason: null })
   validateProviderModelMock.mockReset().mockResolvedValue({ valid: true, reason: 'ok' })
+  probeEndpointMock.mockReset().mockResolvedValue({ reachable: false, models: [], reason: 'nothing there' })
 })
 
 describe('ProviderConfigEditor: list + migration display', () => {
@@ -614,6 +617,78 @@ describe('SPEC-324: model identity verification', () => {
     const shown = await screen.findByText(/is available on anthropic/)
     expect(shown.className).toContain('text-success')
     expect(shown.className).not.toContain('text-danger')
+  })
+
+  /* CTX-321.3. The new-record form replaces the "Add provider" button, which
+     sits directly beneath the last provider row -- so a blank form rendered as
+     though it belonged to that provider, and was read as one. */
+  it('names the new-record form, so it is not read as the row above it', async () => {
+    renderEditor()
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
+    expect(screen.queryByText('New provider')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }))
+    expect(screen.getByText('New provider')).toBeTruthy()
+  })
+
+  it('does not label an existing record as new', async () => {
+    renderEditor()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit provider anthropic' }))
+    expect(screen.queryByText('New provider')).toBeNull()
+  })
+
+  it('offers the local endpoint only when something actually answers there', async () => {
+    probeEndpointMock.mockResolvedValue({
+      reachable: true, models: ['llama3.2:1b'], reason: null,
+    })
+    renderEditor()
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }))
+
+    expect(probeEndpointMock).toHaveBeenCalledWith('http://localhost:11434/v1')
+    const offer = await screen.findByText(/An OpenAI-compatible server is answering/)
+    expect(offer.textContent).toContain('llama3.2:1b')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use it' }))
+    expect((screen.getByLabelText('Base URL') as HTMLInputElement).value).toBe(
+      'http://localhost:11434/v1',
+    )
+  })
+
+  it('says nothing at all when nothing is listening locally', async () => {
+    probeEndpointMock.mockResolvedValue({ reachable: false, models: [], reason: 'refused' })
+    renderEditor()
+    await screen.findByRole('button', { name: 'Edit provider anthropic' })
+    fireEvent.click(screen.getByRole('button', { name: 'Add provider' }))
+
+    await waitFor(() => expect(probeEndpointMock).toHaveBeenCalled())
+    expect(screen.queryByText(/An OpenAI-compatible server is answering/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Use it' })).toBeNull()
+  })
+
+  it('never probes when opening an existing record', async () => {
+    renderEditor()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit provider anthropic' }))
+    expect(probeEndpointMock).not.toHaveBeenCalled()
+  })
+
+  it('moves "can\'t serve this role" out of the placeholder into a real hint', async () => {
+    const field = await openEditor()
+    // The placeholder is now an example, not an instruction.
+    expect(field.getAttribute('placeholder')).not.toContain("can't serve this role")
+    expect(field.getAttribute('placeholder')).toContain('e.g.')
+
+    // The explanation appears as a hint, and only while the field is blank --
+    // which is the only state in which it says anything useful.
+    fireEvent.change(field, { target: { value: '' } })
+    expect(
+      await screen.findByText(/Leave blank if this provider can't serve this role/),
+    ).toBeTruthy()
+
+    fireEvent.change(field, { target: { value: 'llama3.2:1b' } })
+    await waitFor(() =>
+      expect(screen.queryByText(/Leave blank if this provider can't serve this role/)).toBeNull(),
+    )
   })
 
   it('styles a thrown route error as an error, the real 2026-08-31 case', async () => {
