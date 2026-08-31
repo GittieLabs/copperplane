@@ -1038,6 +1038,17 @@ def llm_validate_model(provider_id: str, model: str) -> dict:
     return llm_providers.validate_model(record, api_key, model)
 
 
+def llm_probe_endpoint(base_url: str) -> dict:
+    """The llm.probe_endpoint route (CTX-321.3). Asks whether an
+    OpenAI-compatible server is answering at a URL the user has not saved
+    yet, so the editor can offer a local endpoint it can actually see.
+
+    ASYNC_ROUTES-registered for the same reason as llm.list_models: it is
+    a real network call, and a sync route runs inline in the daemon's
+    request path (CTX-314.2)."""
+    return llm_providers.probe_endpoint(base_url)
+
+
 def cancel_job(job_id: str) -> dict:
     """Signals a running async job to cancel. Real cancellation (actually
     killing the underlying work, not just stopping its being reported on)
@@ -1513,6 +1524,7 @@ def _build_routes() -> dict:
         routes["llm.get_provider_records"] = llm_get_provider_records
         routes["llm.list_models"] = llm_list_models
         routes["llm.validate_model"] = llm_validate_model
+        routes["llm.probe_endpoint"] = llm_probe_endpoint
     if component_pipeline is not None:
         routes["kicad.generate_component"] = kicad_generate_component
         routes["component.search"] = component_search
@@ -1611,6 +1623,9 @@ ASYNC_ROUTES = {
     # other request while a slow or hanging provider is waited on -- the
     # exact bug CTX-314.2 found and fixed for the community-library routes.
     "llm.list_models", "llm.validate_model",
+    # CTX-321.3: same reasoning -- a real socket connect to a URL that may
+    # simply have nothing listening, which must not block the request path.
+    "llm.probe_endpoint",
     # CTX-314.2: both make real GitHub network calls (community_libraries.py's
     # own _github_request/fetch_raw_content) -- a real bug in CTX-314.1's own
     # shipped code (search_community_footprints was never added here) meant
