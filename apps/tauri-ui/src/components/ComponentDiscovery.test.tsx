@@ -88,8 +88,60 @@ describe('ComponentDiscovery', () => {
     screen.getByText(/confidence: high/)
     expect(searchComponentsMock).toHaveBeenCalledWith('atiny85')
 
-    fireEvent.click(screen.getByRole('button', { name: 'view datasheet' }))
-    expect(openMock).toHaveBeenCalledWith('https://example.com/attiny85.pdf')
+    /* CTX-306.8: the link no longer hands the raw URL to the OS. It fetches
+       first and opens the LOCAL cached path, because `datasheet_url` is a model
+       guess -- the prompt asks for a "best real guess" -- and opening it blind
+       drops the user into a browser error page with nothing in the app saying
+       why. PartDetail.handleOpenCitation has always worked this way. */
+    cacheDatasheetMock.mockResolvedValueOnce('/cache/ATtiny85.pdf')
+    fireEvent.click(screen.getByRole('button', { name: /view datasheet/ }))
+    await waitFor(() =>
+      expect(cacheDatasheetMock).toHaveBeenCalledWith('ATtiny85', 'https://example.com/attiny85.pdf'),
+    )
+    await waitFor(() => expect(openMock).toHaveBeenCalledWith('/cache/ATtiny85.pdf'))
+  })
+
+  it('says the datasheet URL is unverified before anything has fetched it', async () => {
+    // `confidence` describes the part identity, not the URL -- but sitting
+    // directly above this link it reads as covering both.
+    searchComponentsMock.mockResolvedValueOnce([
+      {
+        part_number: 'CR2032', manufacturer: 'Panasonic', package: 'Coin Cell 20.0mm x 3.2mm',
+        datasheet_url: 'https://industrial.panasonic.com/cdbs/www-data/pdf/AAA4000/AAA4000C417.pdf',
+        confidence: 'high', rationale: 'Exact match.',
+      },
+    ])
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('Cr2032')
+
+    await waitFor(() => screen.getByText('CR2032', { exact: false }))
+    screen.getByRole('button', { name: 'view datasheet (unverified)' })
+  })
+
+  it('reports a dead datasheet URL in the app, and never opens it', async () => {
+    /* The real report: a CR2032 search produced a Panasonic URL that 404s.
+       Clicking it opened a browser error page and the app said nothing. Note
+       that 404 returns Content-Type: application/pdf with Content-Length: 0 --
+       a content-type check passes it, only the status catches it. */
+    searchComponentsMock.mockResolvedValueOnce([
+      {
+        part_number: 'CR2032', manufacturer: 'Panasonic', package: 'Coin Cell 20.0mm x 3.2mm',
+        datasheet_url: 'https://industrial.panasonic.com/cdbs/www-data/pdf/AAA4000/AAA4000C417.pdf',
+        confidence: 'high', rationale: 'Exact match.',
+      },
+    ])
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('Cr2032')
+
+    await waitFor(() => screen.getByText('CR2032', { exact: false }))
+    cacheDatasheetMock.mockRejectedValueOnce(
+      new Error("Datasheet fetch for 'CR2032' failed: HTTP Error 404: Not Found"),
+    )
+    fireEvent.click(screen.getByRole('button', { name: /view datasheet/ }))
+
+    expect(await screen.findByText(/HTTP Error 404/)).toBeTruthy()
+    expect(screen.getByText(/best guess/)).toBeTruthy()
+    expect(openMock).not.toHaveBeenCalled()
   })
 
   it('never auto-selects, even when exactly one high-confidence candidate is returned', async () => {

@@ -52,6 +52,13 @@ export function ComponentDiscovery({
   } | null>(null)
   const [confirmingPartNumber, setConfirmingPartNumber] = useState<string | null>(null)
   const [pathCopied, setPathCopied] = useState(false)
+  /* CTX-306.8: `datasheet_url` is a model guess -- component_search.prompt.md
+     asks for a "best real guess" and calls a wrong one "normal, recoverable".
+     Opening it blind drops the user into a browser error page with nothing in
+     the app explaining why, which is what a real CR2032 search did. Keyed by
+     part_number so one dead link does not blank another card's state. */
+  const [openingDatasheet, setOpeningDatasheet] = useState<string | null>(null)
+  const [datasheetError, setDatasheetError] = useState<Record<string, string>>({})
   // CTX-318.6: SPEC-318 §2.6's rehome of the old Overview chat's
   // `generate <part>` command -- a real, separate fallback next to
   // search, not a replacement for it. `kicad.generate_component` (search's
@@ -155,6 +162,36 @@ export function ComponentDiscovery({
   // tauri-plugin-shell's open() hands both cases to the OS directly.
   async function handleOpen(target: string) {
     await open(target)
+  }
+
+  /* CTX-306.8: fetch before opening, so a URL the model invented fails in the
+     app with a real message instead of in the user's browser with none. This
+     is PartDetail.handleOpenCitation's existing pattern -- cache, then open
+     the local path -- applied to the surface that was still handing an
+     unverified URL straight to the OS. Caching is the check: cache_datasheet
+     already rejects a non-200 and writes nothing partial.
+
+     Status is what catches it. The real 404 that prompted this returns
+     Content-Type: application/pdf with Content-Length: 0, so a content-type
+     check would have passed it. */
+  async function handleOpenDatasheet(candidate: ComponentCandidate) {
+    setOpeningDatasheet(candidate.part_number)
+    setDatasheetError((prev) => {
+      const next = { ...prev }
+      delete next[candidate.part_number]
+      return next
+    })
+    try {
+      const path = await cacheDatasheet(candidate.part_number, candidate.datasheet_url)
+      await open(path)
+    } catch (err) {
+      setDatasheetError((prev) => ({
+        ...prev,
+        [candidate.part_number]: err instanceof Error ? err.message : String(err),
+      }))
+    } finally {
+      setOpeningDatasheet(null)
+    }
   }
 
   async function handleSearch() {
@@ -471,11 +508,20 @@ export function ComponentDiscovery({
                 </p>
                 <button
                   type="button"
-                  className="self-start text-xs text-fg-tertiary underline"
-                  onClick={() => handleOpen(candidate.datasheet_url)}
+                  className="self-start text-xs text-fg-tertiary underline disabled:opacity-50"
+                  onClick={() => void handleOpenDatasheet(candidate)}
+                  disabled={openingDatasheet === candidate.part_number}
                 >
-                  view datasheet
+                  {openingDatasheet === candidate.part_number
+                    ? 'checking datasheet…'
+                    : 'view datasheet (unverified)'}
                 </button>
+                {datasheetError[candidate.part_number] && (
+                  <p className="text-xs text-danger">
+                    {datasheetError[candidate.part_number]} — this URL is the model's best guess at
+                    where the manufacturer hosts this document, not a checked fact.
+                  </p>
+                )}
               </div>
               <button
                 type="button"

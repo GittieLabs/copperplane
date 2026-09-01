@@ -4,7 +4,7 @@ title: "Component Discovery"
 status: Completed
 type: Feature
 created: 2026-08-12
-last_updated: 2026-08-12
+last_updated: 2026-09-01
 target_version: v0.1.0
 location: "apps/tauri-ui/specs/SPEC-306-component-discovery.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
@@ -121,6 +121,27 @@ user_facing: true
         Matching the existing bridge-module convention (`kicad_bridge`/`freecad_bridge`): a
         confirmed candidate whose datasheet can't be fetched should say so, not quietly hand off a
         candidate with a dead or missing local cache.
+
+        **Amended 2026-09-01 (`CTX-306.8`): this applies to every surface that offers the
+        datasheet, not only to confirmation.** The rule was implemented for the confirm path --
+        `cacheDatasheet` runs on "This one" and its failure is captured as `cacheError` -- but the
+        candidate card's own "view datasheet" link handed `datasheet_url` straight to the OS
+        unverified. A real search for `CR2032` produced
+        `https://industrial.panasonic.com/cdbs/www-data/pdf/AAA4000/AAA4000C417.pdf`, which 404s;
+        clicking the link dropped the user into a browser error page with nothing in the app
+        explaining why. Every path that opens a datasheet now goes through the same fetch, and
+        reports failure in the app.
+
+        A detail worth recording because it defeats the obvious check: that 404 returns
+        `Content-Type: application/pdf` with `Content-Length: 0`. **A content-type check passes
+        it.** Only the response status catches it.
+    *   **`datasheet_url` is a model guess and the UI must not present it as a verified fact.**
+        `component_search.prompt.md` explicitly asks for a "best real guess" and calls a wrong one
+        "a normal, recoverable outcome" -- which is the right call for a *guess*, and the reason
+        `§3`'s no-ground-truth constraint exists at all. What is not right is rendering that guess
+        identically to a checked fact. `confidence` on the card describes the **part identity**,
+        not the URL, but sitting directly above a "view datasheet" link it reads as covering both.
+        The link states that it is unverified until something actually fetches it.
     *   **Extending `library_store.py` for datasheet caching must not touch Part's existing
         provenance contract.** `CTX-304.1` already validates that `datasheet_url` has a provenance
         entry; a cached local PDF path is a new, additional fact about a Part, not a replacement for
