@@ -1,31 +1,36 @@
-# CTX-209.1 §4 Deviation 4: pinning the vendor SDKs closed a real hole --
-# v0.3.0's release CI resolved an `anthropic` whose API had changed, and
-# shipped a build where every Anthropic call failed. Pins stop that. What
-# pins do NOT do is move themselves, and nothing here prompted anyone to
-# look, so a stale pin would sit until it became its own problem.
+# CTX-209.1 §4 Deviation 4 asked for this: pinning stops a release from
+# silently acquiring an incompatible dependency, but pins do not move
+# themselves, and nothing here prompted anyone to look. Every update now
+# arrives as a PR the existing checks run against, so a bump becomes a
+# reviewed, tested event rather than whatever pip or npm resolved that
+# morning.
 #
-# This is that prompt. Every update arrives as a PR the existing checks
-# run against, which is the point: a dependency bump becomes a reviewed,
-# tested event rather than whatever `pip` or `npm` resolved that morning.
+# GROUPED, one PR per ecosystem per week. The first configuration opened
+# one PR per package and 25 landed in an afternoon -- each burning a full
+# macOS/Windows/Ubuntu CI run, and collectively creating exactly the
+# pressure that gets things merged without being read. #317 is what that
+# costs: cryptography was bumped past a boundary CTX-402.6 had pinned it
+# below, breaking Intel macOS releases, and merged with the explanatory
+# comment still sitting directly above it.
 #
-# `github-actions` is included deliberately. The v0.3.0 and v0.3.1 release
-# runs both warned that actions/checkout@v4, actions/setup-node@v4,
-# actions/setup-python@v5 and actions/upload-artifact@v4 target Node.js 20,
-# which GitHub has deprecated and is force-running on Node 24. That will
-# eventually break the release pipeline, and release.yml is the one
-# workflow no CI can exercise -- it fires only on a pushed tag -- so a
-# surprise there is discovered during a release rather than before one.
+# Majors are separated rather than ignored. A major bump is usually the
+# one worth having -- actions/checkout 4->7 is what clears the Node 20
+# deprecation warning on every release leg -- but it should be read, not
+# swept along with a patch bump. Minor and patch group together; majors
+# arrive on their own so a breaking change cannot hide in a batch.
 version: 2
 updates:
-  # The Python daemon: the vendor SDKs, AgentFlow itself, and the pinned
-  # transitive deps CTX-402.6 and CTX-209.1 both had to nail down by hand.
   - package-ecosystem: "pip"
     directory: "/services/python-daemon"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      python-minor-and-patch:
+        applies-to: version-updates
+        update-types: ["minor", "patch"]
     ignore:
       # cryptography dropped macOS x86_64 wheels entirely at 49.0.0 -- from
       # there on only macosx_11_0_arm64 ships. 48.0.0 is the newest release
@@ -37,11 +42,18 @@ updates:
       # regression here until a release is already going out.
       #
       # This ignore exists because that is exactly what happened: #317
-      # bumped it to 50.0.1 and it merged, leaving CTX-402.6's own
-      # explanation sitting directly above a version contradicting it.
-      # Re-checked against PyPI on 2026-09-01: still arm64-only at 50.0.1.
-      # Revisit only when cryptography ships an x86_64 or universal2 macOS
-      # wheel again, or when SPEC-402 stops building an Intel macOS leg.
+      # bumped it to 50.0.1 and it merged. Re-checked against PyPI on
+      # 2026-09-01: still arm64-only at 50.0.1. Revisit only when
+      # cryptography ships an x86_64 or universal2 macOS wheel again, or
+      # when SPEC-402 stops building an Intel macOS leg.
+      #
+      # Deliberately the ONLY ignored package. anthropic, openai and
+      # google-genai stay open even though CTX-209.1 pinned them after a
+      # floating SDK shipped a broken v0.3.0 -- those bumps are verifiable
+      # by the test suite and a release, so they should be proposed and
+      # reviewed. cryptography is different in kind: no check in this repo
+      # can see its breakage, which is what earns a rule instead of a
+      # reviewer's memory.
       - dependency-name: "cryptography"
     labels:
       - "dependencies"
@@ -55,9 +67,13 @@ updates:
     directory: "/apps/tauri-ui"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      frontend-minor-and-patch:
+        applies-to: version-updates
+        update-types: ["minor", "patch"]
     labels:
       - "dependencies"
       - "trivial-fix"
@@ -66,9 +82,13 @@ updates:
     directory: "/core/tauri-rust"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      rust-minor-and-patch:
+        applies-to: version-updates
+        update-types: ["minor", "patch"]
     labels:
       - "dependencies"
       - "trivial-fix"
@@ -77,9 +97,13 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      actions-minor-and-patch:
+        applies-to: version-updates
+        update-types: ["minor", "patch"]
     labels:
       - "dependencies"
       - "trivial-fix"
