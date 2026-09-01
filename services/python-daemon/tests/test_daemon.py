@@ -894,9 +894,39 @@ class TestConfigureDaemonLiveUpdates(unittest.TestCase):
         roles = {"reasoning": "workshop", "fast": "workshop"}
         result = daemon.configure_daemon(providers=providers, provider_roles=roles)
 
-        self.assertEqual(result, {"configured": True})
+        # CTX-209.2: the route now also returns each record reduced to what
+        # differs from its shipped preset, so the caller persists exactly
+        # that. `workshop` has no preset -- it is a user-added record -- so
+        # there is nothing to differ from and it comes back whole.
+        self.assertEqual(result, {"configured": True, "providers": providers})
         self.assertEqual(daemon.CONFIG['providers'], providers)
         self.assertEqual(daemon.CONFIG['provider_roles'], roles)
+
+    def test_004b_a_preset_record_is_stored_as_a_delta_not_a_whole_record(self):
+        """CTX-209.2, the actual defect. Storing the whole record froze every
+        shipped default into the install, so no release could ever move one.
+        Verified against a real config.json on 2026-08-31: all five presets
+        written out verbatim, 1038 bytes of values identical to the
+        defaults they shadowed."""
+        daemon.CONFIG['providers'] = None
+        presets = daemon.llm_providers._resolve_provider_records({})
+        whole = dict(presets['google'])
+
+        result = daemon.configure_daemon(providers=[whole])
+
+        self.assertEqual([{"id": "google"}], result["providers"])
+        self.assertEqual([{"id": "google"}], daemon.CONFIG['providers'])
+
+    def test_004c_an_overridden_field_survives_the_reduction(self):
+        daemon.CONFIG['providers'] = None
+        presets = daemon.llm_providers._resolve_provider_records({})
+        edited = {**presets['google'],
+                  "models": {**presets['google']["models"], "reasoning": "gemini-3-pro"}}
+
+        result = daemon.configure_daemon(providers=[edited])
+
+        self.assertEqual([{"id": "google", "models": {"reasoning": "gemini-3-pro"}}],
+                         result["providers"])
 
     def test_005_omitting_providers_and_provider_roles_leaves_them_untouched(self):
         """A secrets-only or llm_provider-only call must not wipe an

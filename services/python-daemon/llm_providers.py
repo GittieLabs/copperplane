@@ -362,6 +362,57 @@ def _build_provider(provider: str, api_key: str, model: str | None):
     return _build_provider_from_record(record, api_key, model)
 
 
+# SPEC-209 §2.3: the nested dicts inside a record. These merge per KEY,
+# never wholesale -- replacing `models` outright would re-freeze the role
+# a user never touched, which is the very defect this fixes, one level
+# down.
+_NESTED_RECORD_FIELDS = ("models", "capabilities", "params")
+
+
+def _merge_over_preset(preset: dict, entry: dict) -> dict:
+    """A config entry laid over its shipped preset, field by field.
+
+    An absent field means "use the shipped value", which is what makes a
+    default movable: a release can change a preset and every install that
+    never overrode it picks the change up, with no migration and no
+    version stamp to keep in sync.
+    """
+    merged = dict(preset)
+    for key, value in entry.items():
+        if key in _NESTED_RECORD_FIELDS and isinstance(value, dict):
+            merged[key] = {**(preset.get(key) or {}), **value}
+        else:
+            merged[key] = value
+    return merged
+
+
+def provider_delta(entry: dict, preset: dict | None) -> dict:
+    """Only the fields of `entry` that differ from `preset`, plus `id`.
+
+    The inverse of `_merge_over_preset`, and the shape written to
+    `config.json` (SPEC-209 §2.3). A record identical to its preset
+    reduces to just `{"id": ...}`, so "identical to shipped" has exactly
+    one representation rather than several.
+
+    A record with no preset -- a user-added provider -- is returned whole,
+    because there is nothing for it to differ from.
+    """
+    if preset is None:
+        return dict(entry)
+    delta: dict = {"id": entry.get("id")}
+    for key, value in entry.items():
+        if key == "id":
+            continue
+        if key in _NESTED_RECORD_FIELDS and isinstance(value, dict):
+            shipped = preset.get(key) or {}
+            inner = {k: v for k, v in value.items() if shipped.get(k) != v}
+            if inner:
+                delta[key] = inner
+        elif preset.get(key) != value:
+            delta[key] = value
+    return delta
+
+
 def _resolve_provider_records(config: dict | None) -> dict[str, "ProviderRecord"]:
     """Preset records, overlaid with any `config.json`-authored `providers`
     entries (SPEC-208 §2.2.1) -- a user record can add a new id or replace
@@ -379,7 +430,12 @@ def _resolve_provider_records(config: dict | None) -> dict[str, "ProviderRecord"
                 "config.json provider record id=%r is reserved and was ignored (not merged)", record_id
             )
             continue
-        records[record_id] = entry
+        # SPEC-209 §2.3: merge over the preset rather than replacing it.
+        # Before this, a config entry replaced the whole record, so the
+        # first Settings save froze every shipped default into an
+        # install permanently and no release could ever move one.
+        preset = records.get(record_id)
+        records[record_id] = _merge_over_preset(preset, entry) if preset else entry
     return records
 
 
