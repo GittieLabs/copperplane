@@ -47,8 +47,23 @@ Full sequence diagram, including why each command is scoped the way it is:
   thing) is satisfied by proving a route returns the right value. This one is only satisfied by a
   human actually using the surface the way a user would, with the outcome recorded. `SPEC-302`'s
   capability tests all passed; nobody tried to look up a part before it shipped.
+- **Verify the artifact, not the source it was built from.** For anything the Python sidecar
+  carries, the frozen binary *is* the real thing — the module it was built from is not. This has
+  now cost four separate defects, three of them within two days, and every one shipped:
+  `CTX-407.3` (a sidecar frozen four days before the routes it was missing — the source had them),
+  `CTX-209.1` (an `anthropic` SDK that removed `temperature`, live in v0.3.0), and `CTX-407.4`
+  (`daemon.spec`'s `datas=[]`, so **every AI feature failed in every packaged build since
+  v0.1.0** while working perfectly from source). Each was invisible to the whole test suite and
+  obvious within seconds of running the frozen binary. If a change touches anything the sidecar
+  bundles — routes, dependencies, prompts, data files — drive a real request into
+  `dist/hardware-agent-studio-daemon-*` over JSON-RPC before believing it works.
+- **A check that cannot fail is not evidence, even when its conclusion is right.** `CTX-407.3`
+  Deviation 2 "confirmed" a stale sidecar by grepping `strings` for route names — but PyInstaller
+  stores compiled `.pyc` and `datas` compressed, so that grep returns nothing for a *healthy*
+  binary too. The conclusion happened to be correct and the method proved nothing. When a check
+  passes, ask what a failure would have looked like; if the answer is "the same", it is not a check.
 
-## Three traps that will bite you
+## Four traps that will bite you
 
 1. **Testing Requirements Matrix paths are relative to the repo root, not to the `CTX-*.md` file's
    own directory.** `scripts/validate_spec_context.py` checks each path with `os.path.exists(path)`
@@ -59,7 +74,14 @@ Full sequence diagram, including why each command is scoped the way it is:
    `line.split('|')` and does not understand Markdown's `\|` escape. One stray pipe in a Test
    Description shifts every column after it, and the file-existence check silently validates the
    wrong cell. Rephrase around it; don't try to escape it.
-3. **A scaffolding command must fail loudly on a name collision, never overwrite.** `/new-spec` and
+3. **The interpreter you test with is not the interpreter that ships.** `python3` on this machine
+   and `services/python-daemon/.build-venv/bin/python` resolve different dependency sets, and the
+   venv is the one `freeze_sidecar.py` builds the shipped binary from. On 2026-09-01 the full
+   daemon suite passed on `python3` (carrying `anthropic` 0.121.0) while every Anthropic call in
+   the shipped app was already failing on the venv's 1.2.0 — same repo, same tests, opposite
+   results, decided entirely by which interpreter ran them. Run the suite with
+   `.build-venv/bin/python -m unittest discover -s tests`, not bare `python3`.
+4. **A scaffolding command must fail loudly on a name collision, never overwrite.** `/new-spec` and
    `/new-context` create new files. If the target ID already exists — a typo, a re-run, a stale
    argument — stop and report the conflict instead of clobbering an in-progress spec or context.
 
