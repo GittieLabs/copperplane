@@ -333,3 +333,70 @@ class TestRealExportFootprintSvg(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestSchematicBom(unittest.TestCase):
+    """SPEC-325 §2.2: components read from a CLOSED .kicad_sch.
+
+    kicad-cli's BOM groups identical parts onto one row with a
+    comma-separated `Refs` field -- a BOM's shape, not a component list's.
+    Ungrouped here so callers can key by reference designator.
+    """
+
+    def _bom(self, rows, header="Refs,Value,Footprint,Qty,DNP"):
+        import tempfile
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, "bom.csv")
+        with open(p, "w", encoding="utf-8") as h:
+            h.write(header + "\n")
+            for r in rows:
+                h.write(r + "\n")
+        return p
+
+    def _run_with_bom(self, bom_path, sch="/tmp/x.kicad_sch"):
+        """Substitutes the subprocess and the produced file, so the
+        parsing contract is tested without depending on a KiCad install."""
+        import shutil
+        real_run, real_find, real_exists = (
+            kicad_cli.subprocess.run, kicad_cli.find_kicad_cli, kicad_cli.os.path.exists,
+        )
+        try:
+            kicad_cli.find_kicad_cli = lambda: "/fake/kicad-cli"
+            kicad_cli.os.path.exists = lambda p: True
+
+            def fake_run(cmd, **kw):
+                out = cmd[cmd.index("--output") + 1]
+                shutil.copyfile(bom_path, out)
+                class R: returncode = 0; stderr = ""
+                return R()
+            kicad_cli.subprocess.run = fake_run
+            return kicad_cli.export_schematic_bom(sch)
+        finally:
+            kicad_cli.subprocess.run = real_run
+            kicad_cli.find_kicad_cli = real_find
+            kicad_cli.os.path.exists = real_exists
+
+    def test_020_a_grouped_row_becomes_one_entry_per_reference(self):
+        out = self._run_with_bom(self._bom(['"R1,R2,R3","1K","Resistor_THT:R_Axial","3",""']))
+        self.assertEqual(["R1", "R2", "R3"], [c["reference"] for c in out])
+        self.assertTrue(all(c["value"] == "1K" for c in out))
+
+    def test_021_a_component_with_no_footprint_reports_none_not_empty_string(self):
+        out = self._run_with_bom(self._bom(['"U1","NE555P","","1",""']))
+        self.assertIsNone(out[0]["footprint"])
+
+    def test_022_dnp_is_carried_through(self):
+        out = self._run_with_bom(self._bom(['"R9","0R","Resistor_THT:R_Axial","1","DNP"']))
+        self.assertTrue(out[0]["dnp"])
+
+    def test_023_an_unrecognised_bom_shape_fails_loudly(self):
+        """SPEC-325 §3's named risk. kicad-cli's columns are a CLI contract
+        that can change between KiCad majors, and returning an empty list
+        would read to a user as 'your schematic has no components' -- a
+        silent wrong answer."""
+        with self.assertRaises(kicad_cli.KicadCliError) as ctx:
+            self._run_with_bom(self._bom(['"x","y"'], header="Designator,Comment"))
+        self.assertIn("Refs", str(ctx.exception))
+
+    def test_024_a_genuinely_empty_schematic_is_an_empty_list_not_an_error(self):
+        self.assertEqual([], self._run_with_bom(self._bom([])))

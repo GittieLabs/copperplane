@@ -3064,3 +3064,63 @@ class TestFreeCADVersionDiagnostics(unittest.TestCase):
         wrong for a network-calling route."""
         self.assertIn("freecad.get_version", daemon.ASYNC_ROUTES)
         self.assertIn("freecad.get_version", daemon.ROUTES)
+
+
+class TestSchematicComponentRoutes(unittest.TestCase):
+    """SPEC-325 §2.3/§2.4: the component table's routes."""
+
+    def test_025_list_schematic_components_is_async_registered(self):
+        """It runs kicad-cli, a real subprocess. SPEC-107 §3 requires a
+        slow call to stay out of the request path, and CTX-107.2 records
+        what happened when a freecadcmd call was added to the capability
+        probe."""
+        self.assertIn("kicad.list_schematic_components", daemon.ASYNC_ROUTES)
+        self.assertIn("kicad.list_schematic_components", daemon.ROUTES)
+
+    def test_026_resolve_project_is_sync_because_it_only_reads_a_file(self):
+        """One small JSON read and two stats. Making it async would cost a
+        job round trip for nothing."""
+        self.assertIn("kicad.resolve_project", daemon.ROUTES)
+        self.assertNotIn("kicad.resolve_project", daemon.ASYNC_ROUTES)
+
+    def test_027_a_footprint_with_a_dangling_model_reports_has_model_false(self):
+        """The finding SPEC-325 §2.4 exists for: a footprint's (model ...)
+        line is a claim, not evidence. KiCad's own Battery library ships 53
+        footprints against 29 STEP models, so trusting that line would be
+        wrong 25 times out of 53."""
+        with patch('daemon.kicad_cli.export_schematic_bom', return_value=[
+            {"reference": "BT1", "value": "Battery_Cell",
+             "footprint": "Battery:Nope_CR2032", "dnp": False},
+        ]), patch('daemon.kicad_bridge.resolve_footprint_model', return_value={
+            "footprint_id": "Battery:Nope_CR2032", "footprint_found": True,
+            "model_ref": "${KICAD10_3DMODEL_DIR}/Battery.3dshapes/Nope.step",
+            "model_path": None,
+        }):
+            out = daemon.kicad_list_schematic_components("/tmp/x.kicad_sch")
+
+        component = out["components"][0]
+        self.assertTrue(component["footprint_found"])
+        self.assertIsNotNone(component["model_ref"])
+        self.assertFalse(component["has_model"])
+
+    def test_028_one_unresolvable_footprint_never_costs_the_whole_table(self):
+        with patch('daemon.kicad_cli.export_schematic_bom', return_value=[
+            {"reference": "R1", "value": "1K", "footprint": "Bad:One", "dnp": False},
+            {"reference": "R2", "value": "1K", "footprint": "Good:Two", "dnp": False},
+        ]), patch('daemon.kicad_bridge.resolve_footprint_model',
+                  side_effect=[RuntimeError("boom"),
+                               {"footprint_id": "Good:Two", "footprint_found": True,
+                                "model_ref": "m", "model_path": "/real/m.step"}]):
+            out = daemon.kicad_list_schematic_components("/tmp/x.kicad_sch")
+
+        self.assertEqual(2, len(out["components"]))
+        self.assertFalse(out["components"][0]["has_model"])
+        self.assertTrue(out["components"][1]["has_model"])
+
+    def test_029_the_result_says_what_it_read_and_when(self):
+        """The file can lag an editor holding unsaved changes, so this must
+        never imply live sync (SPEC-325 §3)."""
+        with patch('daemon.kicad_cli.export_schematic_bom', return_value=[]):
+            out = daemon.kicad_list_schematic_components("/tmp/board.kicad_sch")
+        self.assertEqual("/tmp/board.kicad_sch", out["source_path"])
+        self.assertIn("T", out["read_at"])

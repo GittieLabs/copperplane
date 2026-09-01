@@ -8,6 +8,8 @@ import glob
 import logging
 import os
 import platform
+
+import fp_lib_table
 import re
 
 from kipy import KiCad
@@ -88,6 +90,67 @@ def _resolve_3d_model_path(filename: str) -> str:
                 return candidate
 
     return None
+
+
+_FOOTPRINT_MODEL_RE = re.compile(r'\(model\s+"([^"]+)"')
+
+
+def resolve_footprint_model(footprint_id: str) -> dict:
+    """Whether a `Lib:Name` footprint exists, and whether its 3D model
+    file is actually on disk (SPEC-325 §2.4).
+
+    Returns `{"footprint_id", "footprint_found", "model_ref",
+    "model_path"}`. `model_path` is `None` when the footprint names a
+    model that is not installed.
+
+    **The check is the file, not the reference.** A footprint's own
+    `(model ...)` line is a claim, not evidence: KiCad's own `Battery`
+    library ships 53 footprints against 29 STEP models, with no `.wrl`
+    fallbacks -- so reporting "has a model" from that line would be wrong
+    25 times out of 53, and a real project's CR2032 footprint
+    (`Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles`) is one of
+    the wrong ones.
+
+    Never raises for an unresolvable footprint. A library this install
+    does not have, or a footprint that is not in it, is an ordinary
+    state a user needs told about -- not an error that stops a whole
+    component table from rendering.
+    """
+    result = {
+        "footprint_id": footprint_id,
+        "footprint_found": False,
+        "model_ref": None,
+        "model_path": None,
+    }
+    if not footprint_id or ":" not in footprint_id:
+        return result
+
+    library, _, name = footprint_id.partition(":")
+    try:
+        table_path = fp_lib_table.default_fp_lib_table_path()
+        entries = fp_lib_table.parse_fp_lib_table(table_path) if table_path else []
+    except Exception:  # noqa: BLE001 -- an unreadable table is "cannot resolve", not a crash
+        return result
+
+    for entry in entries:
+        if entry.get("name") != library:
+            continue
+        mod_path = os.path.join(entry.get("uri") or "", f"{name}.kicad_mod")
+        if not os.path.isfile(mod_path):
+            continue
+        result["footprint_found"] = True
+        try:
+            with open(mod_path, encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+        except OSError:
+            return result
+        match = _FOOTPRINT_MODEL_RE.search(text)
+        if match:
+            result["model_ref"] = match.group(1)
+            result["model_path"] = _resolve_3d_model_path(match.group(1))
+        return result
+
+    return result
 
 
 class KiCadUnavailableError(Exception):

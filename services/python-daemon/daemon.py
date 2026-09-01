@@ -6,6 +6,7 @@ import platform
 import re
 import sys
 import json
+from datetime import datetime, timezone
 import threading
 import time
 import uuid
@@ -152,6 +153,15 @@ except Exception:
     )
     _note_degraded("kicad_cli", "kicad.check_board/kicad.check_schematic")
     kicad_cli = None
+
+try:
+    import kicad_project
+except Exception:
+    logger.exception(
+        "kicad_project failed to import -- kicad.resolve_project will be unavailable"
+    )
+    _note_degraded("kicad_project", "kicad.resolve_project")
+    kicad_project = None
 
 try:
     import kicad_pcb_import
@@ -950,6 +960,70 @@ def get_daemon_capabilities() -> dict:
     return _detect_capabilities()
 
 
+def kicad_resolve_project(pro_path: str) -> dict:
+    """The kicad.resolve_project route (SPEC-325 §2.1).
+
+    A `.kicad_pro` in, the schematic and PCB it owns out. Replaces
+    "whatever board KiCad currently has open" as the way this app learns
+    which files a project is made of -- that needed KiCad running, its
+    API enabled, and the right document focused, for a fact sitting in a
+    file.
+
+    Sync: reads one small JSON file and stats two siblings. No
+    subprocess, no network."""
+    if kicad_project is None:
+        raise RuntimeError("Project resolution requires kicad_project, which failed to import.")
+    return kicad_project.resolve_project(pro_path)
+
+
+def kicad_list_schematic_components(sch_path: str) -> dict:
+    """The kicad.list_schematic_components route (SPEC-325 §2.3/§2.4).
+
+    Every component in a schematic, each with whether its footprint
+    resolves in this install and whether that footprint's 3D model file
+    actually exists.
+
+    Async: `kicad-cli` is a real subprocess, and SPEC-107 §3 is explicit
+    that a slow call must not sit in the request path -- CTX-107.2
+    records what happened when a `freecadcmd` call was added to the
+    capability probe.
+
+    Derived fresh on every call, never cached. A stored copy of a
+    schematic's contents is a second source of truth that goes stale the
+    moment the user edits in KiCad -- and KiCad is usually open next to
+    this app (SPEC-325 §2.3).
+
+    Reports `read_at` so a caller can say what it read and when, rather
+    than implying live sync with an editor that may hold unsaved
+    changes."""
+    if kicad_cli is None:
+        raise RuntimeError("Reading a schematic requires kicad_cli, which failed to import.")
+
+    components = kicad_cli.export_schematic_bom(sch_path)
+
+    # Footprint/model resolution is best-effort per component: one
+    # unresolvable footprint must not cost the user the whole table.
+    for component in components:
+        resolved = {"footprint_found": False, "model_ref": None, "model_path": None}
+        if kicad_bridge is not None and component.get("footprint"):
+            try:
+                resolved = kicad_bridge.resolve_footprint_model(component["footprint"])
+            except Exception as exc:  # noqa: BLE001 -- reportable, never fatal to the table
+                logger.warning(
+                    "footprint resolution failed for %s: %s", component["footprint"], exc
+                )
+        component["footprint_found"] = resolved["footprint_found"]
+        component["model_ref"] = resolved["model_ref"]
+        component["model_path"] = resolved["model_path"]
+        component["has_model"] = bool(resolved["model_path"])
+
+    return {
+        "source_path": sch_path,
+        "read_at": datetime.now(timezone.utc).isoformat(),
+        "components": components,
+    }
+
+
 def freecad_get_version() -> dict:
     """The freecad.get_version route (SPEC-107/CTX-107.2, closing issue #249).
 
@@ -1554,6 +1628,8 @@ def _build_routes() -> dict:
         "daemon.configure": configure_daemon,
         "daemon.get_capabilities": get_daemon_capabilities,
         "freecad.get_version": freecad_get_version,
+        "kicad.resolve_project": kicad_resolve_project,
+        "kicad.list_schematic_components": kicad_list_schematic_components,
     }
     if get_kicad_version is not None:
         routes["kicad.get_version"] = get_kicad_version
@@ -1670,6 +1746,8 @@ ASYNC_ROUTES = {
     # CTX-107.2: spawns `freecadcmd --version`. Same reasoning -- a
     # subprocess must not run inline in the request path.
     "freecad.get_version",
+    # SPEC-325: runs `kicad-cli`, a real subprocess.
+    "kicad.list_schematic_components",
     # CTX-321.3: same reasoning -- a real socket connect to a URL that may
     # simply have nothing listening, which must not block the request path.
     "llm.probe_endpoint",

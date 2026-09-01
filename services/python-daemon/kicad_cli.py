@@ -9,6 +9,7 @@ mirroring `freecad_bridge.py`'s own subprocess/binary-location pattern
 for `freecadcmd` rather than inventing a second one.
 """
 import glob
+import csv
 import json
 import os
 import platform
@@ -124,6 +125,65 @@ def _run_report(subcommand: list, input_path: str) -> dict:
             )
         with open(report_path, encoding="utf-8") as f:
             return json.load(f)
+
+
+def export_schematic_bom(sch_path: str) -> list:
+    """Every component in a schematic, read from the FILE (SPEC-325 §2.2).
+
+    `kicad-cli sch export bom` works on a closed `.kicad_sch` -- no GUI,
+    no IPC, no running KiCad. That matters: `kicad_bridge`'s existing
+    path derives a schematic from whatever board KiCad currently has
+    open, and KiCad's IPC server has never implemented a
+    schematic-listing handler at all (see `list_project_schematics`).
+
+    Returns `[{"reference", "value", "footprint", "quantity", "dnp"}, ...]`,
+    one entry per reference -- kicad-cli groups identical parts onto one
+    row with a comma-separated `Refs` field, which is a BOM's shape, not
+    a component list's. Ungrouped here so a caller can key by reference
+    designator, which is what every downstream consumer actually wants.
+
+    Fails loudly on an unrecognised shape rather than returning an empty
+    list. `kicad-cli`'s CSV columns are a CLI contract that can change
+    between KiCad majors, and an empty list would read to a user as
+    "your schematic has no components" -- a silent wrong answer, which
+    SPEC-325 §3 names as the specific risk here.
+    """
+    cli = find_kicad_cli()
+    if not os.path.exists(sch_path):
+        raise KicadCliError(f"Schematic file does not exist: {sch_path}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = os.path.join(tmpdir, "bom.csv")
+        result = subprocess.run(
+            [cli, "sch", "export", "bom", "--output", out, sch_path],
+            capture_output=True, text=True, timeout=120,
+        )
+        if not os.path.exists(out):
+            raise KicadCliError(
+                f"kicad-cli produced no BOM (exit {result.returncode}): {result.stderr.strip()}"
+            )
+        with open(out, encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+
+    if rows:
+        missing = {"Refs", "Value", "Footprint"} - set(rows[0].keys())
+        if missing:
+            raise KicadCliError(
+                f"kicad-cli's BOM is missing expected column(s): {', '.join(sorted(missing))}. "
+                f"Got: {', '.join(rows[0].keys())}. This KiCad version's BOM format is not the "
+                f"one this app knows how to read."
+            )
+
+    components = []
+    for row in rows:
+        for reference in [r.strip() for r in (row.get("Refs") or "").split(",") if r.strip()]:
+            components.append({
+                "reference": reference,
+                "value": (row.get("Value") or "").strip() or None,
+                "footprint": (row.get("Footprint") or "").strip() or None,
+                "dnp": bool((row.get("DNP") or "").strip()),
+            })
+    return components
 
 
 def run_erc(sch_path: str) -> dict:
