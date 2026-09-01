@@ -1140,6 +1140,36 @@ class TestCacheDatasheet(LibraryStoreTestCase):
 
         self.assertFalse(os.path.exists(os.path.join(store._datasheets_dir(), "ATtiny85.pdf")))
 
+    def test_002b_an_html_error_page_served_with_200_is_refused(self):
+        """CTX-306.8, found for real on 2026-09-01. keyelco.com answers a
+        missing PDF with its own HTML page and HTTP 200, so `3003.pdf` and
+        `1060.pdf` cached BYTE-IDENTICAL HTML -- same sha256 -- and every
+        downstream consumer would have been reading a web page. Worse than
+        the 403s and 404s beside it, which at least fail loudly."""
+        server = _OneShotServer(200, b'<!DOCTYPE html><html><body>Not found</body></html>')
+        try:
+            with self.assertRaises(store.DatasheetFetchError) as ctx:
+                store.cache_datasheet("3003", server.url)
+        finally:
+            server.stop()
+
+        self.assertIn("not a PDF", str(ctx.exception))
+        self.assertFalse(os.path.exists(os.path.join(store._datasheets_dir(), "3003.pdf")))
+
+    def test_002c_an_empty_body_served_as_application_pdf_is_refused(self):
+        """The header cannot be trusted either: a real 404 observed the same
+        day (industrial.panasonic.com) returned Content-Type: application/pdf
+        with Content-Length: 0. A content-type check passes exactly the case
+        it is meant to catch, which is why this validates magic bytes."""
+        server = _OneShotServer(200, b"", content_type="application/pdf")
+        try:
+            with self.assertRaises(store.DatasheetFetchError):
+                store.cache_datasheet("CR2032", server.url)
+        finally:
+            server.stop()
+
+        self.assertFalse(os.path.exists(os.path.join(store._datasheets_dir(), "CR2032.pdf")))
+
     def test_003_an_unreachable_host_raises_a_clean_error(self):
         with self.assertRaises(store.DatasheetFetchError):
             store.cache_datasheet("ATtiny85", "http://127.0.0.1:1/nope.pdf")

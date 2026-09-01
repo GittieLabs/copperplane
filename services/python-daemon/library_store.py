@@ -1312,6 +1312,26 @@ def cache_datasheet(part_number: str, datasheet_url: str) -> str:
         # OSError instead, which URLError alone does not catch.
         raise DatasheetFetchError(f"Datasheet fetch for '{part_number}' failed: {e}") from e
 
+    # CTX-306.8: HTTP 200 is not evidence the body is a datasheet. Found
+    # for real on 2026-09-01: keyelco.com serves its own HTML page with a
+    # 200 for a missing PDF, so `3003.pdf` and `1060.pdf` cached
+    # BYTE-IDENTICAL HTML -- same sha256 -- and every downstream consumer
+    # (SPEC-205's text extraction, its page citations) would have been
+    # reading a web page. That is worse than the 403s and 404s beside it,
+    # which at least fail loudly.
+    #
+    # The magic bytes, not the Content-Type header: a real 404 observed the
+    # same day (industrial.panasonic.com) returned `Content-Type:
+    # application/pdf` with `Content-Length: 0`, so a header check passes
+    # exactly the case it is supposed to catch.
+    if not content.startswith(b"%PDF-"):
+        preview = content[:40].decode("utf-8", "replace").strip()
+        raise DatasheetFetchError(
+            f"Datasheet fetch for '{part_number}' returned {len(content)} bytes that are not a "
+            f"PDF (starts with {preview!r}). The server answered, but with something other than "
+            f"the document -- commonly an error page served with HTTP 200."
+        )
+
     path = datasheet_cache_path(part_number)
     with open(path, "wb") as f:
         f.write(content)
