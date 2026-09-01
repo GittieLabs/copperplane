@@ -497,7 +497,14 @@ async def _dispatch(
         config=config, model_role=agent_role.get("model_role"),
         agent_name=routing.target, requires=agent_role.get("requires"),
     )
-    agent_config = agent_config.model_copy(update={"provider": resolved_provider, "model": resolved_model})
+    # SPEC-209 §2.1: the record's vendor params ride on AgentConfig, which is
+    # AgentFlow 0.11.0's own per-agent channel for them -- so this repo adds no
+    # second mechanism for something the framework already carries.
+    agent_config = agent_config.model_copy(update={
+        "provider": resolved_provider,
+        "model": resolved_model,
+        "params": llm_providers.record_params(config, resolved_provider),
+    })
 
     executor = AgentExecutor(
         config=agent_config, prompt_body=prompt_body, llm=provider_client,
