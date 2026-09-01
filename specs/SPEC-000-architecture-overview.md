@@ -1,6 +1,6 @@
 ---
 id: SPEC-000
-title: "Root Architecture: Hardware Agent Studio"
+title: "Root Architecture: Copperplane"
 status: Approved
 type: System
 created: 2026-08-07
@@ -30,10 +30,12 @@ child_specs:
   - "../services/python-daemon/specs/SPEC-203-supplier-api-integration.md"
   - "../specs/SPEC-402-release-signing-and-auto-update.md"
   - "../services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md"
+  - "../specs/SPEC-404-managed-hosted-access.md"
+  - "../specs/SPEC-405-product-rename-copperplane.md"
 user_facing: false
 ---
 
-# SPEC-000: Root Architecture: Hardware Agent Studio
+# SPEC-000: Root Architecture: Copperplane
 
 ## 1. Executive Summary & Goals
 *   **High-Level Goal:** Build a unified, local-first AI assistant that bridges the gap between PCB design (KiCad) and Mechanical CAD (FreeCAD). The application acts as a master orchestrator, manipulating active CAD canvases via background processes and IPC APIs.

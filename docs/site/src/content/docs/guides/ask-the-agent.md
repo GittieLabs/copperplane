@@ -28,13 +28,13 @@ Each agent is grounded in different real state, and can call different tools:
 | **Enclosure** | Board outline, mounting holes, component heights | Search, component-height lookups |
 
 On Components, the chat is scoped to the **part**, not the project — a Part is
-a real object you own (see [Find a part](/hardware-agent-studio/guides/find-a-part/)),
+a real object you own (see [Find a part](/copperplane/guides/find-a-part/)),
 so its history follows it everywhere, into every project it is used in. Every
 other chat is scoped to the project.
 
 ## Every answer carries its sources, or says it does not
 
-The same contract [design guidance](/hardware-agent-studio/guides/design-guidance/)
+The same contract [design guidance](/copperplane/guides/design-guidance/)
 already makes: an answer renders clickable source chips beneath it. A datasheet
 chip opens your cached PDF at the exact page. Content the model is offering as
 general engineering practice — not something your specific datasheet says — is
@@ -42,7 +42,7 @@ visually marked as such, never blended in with a cited fact.
 
 Nothing here is described as "verified." The chip is one click from the real
 page precisely so your own eye can be the last check, in about five seconds —
-the same discipline [design guidance](/hardware-agent-studio/guides/design-guidance/)
+the same discipline [design guidance](/copperplane/guides/design-guidance/)
 uses.
 
 ## Answers arrive whole, not token by token
@@ -55,7 +55,7 @@ animation implying a token stream that is not actually happening.
 
 Found an answer worth keeping? **Save as note** promotes it to a durable,
 cited record on the part or the project — the same kind of real object the
-[library](/hardware-agent-studio/guides/find-a-part/) already is, not
+[library](/copperplane/guides/find-a-part/) already is, not
 something you have to scroll back through a transcript to find again. The next
 conversation starts from it instead of re-deriving the same answer.
 
@@ -73,7 +73,7 @@ treated as a verified fact about the design. It is what lets an answer be about
 
 An earlier version of Overview's chat recognized two typed commands —
 `generate <part>` and `inject` — alongside plain questions. That design is
-gone; see [What it is, and what it is not](/hardware-agent-studio/what-it-is/)
+gone; see [What it is, and what it is not](/copperplane/what-it-is/)
 for why. The capabilities moved to where they actually belong:
 
 - **Generating a component directly from a part number**, for when search

@@ -26,7 +26,7 @@ re-derived, so what you keep is what they published.
 
 :::caution[Attribution]
 SparkFun's libraries are CC-BY-4.0, which requires attribution if you publish a
-design using them. See [Attribution and licences](/hardware-agent-studio/attribution/).
+design using them. See [Attribution and licences](/copperplane/attribution/).
 :::
 
 ## Generating one

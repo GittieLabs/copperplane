@@ -9,12 +9,12 @@ body:
         Thanks for taking the time to report this.
 
         **If you just have a question, or you are not sure whether something is a bug**, please
-        start a [Discussion](https://github.com/GittieLabs/hardware-agent-studio/discussions)
+        start a [Discussion](https://github.com/GittieLabs/copperplane/discussions)
         instead — it is a better place for it and you will get a faster answer.
 
         **If you think you have found a security vulnerability**, do not file it here. Use
-        [private vulnerability reporting](https://github.com/GittieLabs/hardware-agent-studio/security/advisories/new)
-        instead. See [SECURITY.md](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/SECURITY.md).
+        [private vulnerability reporting](https://github.com/GittieLabs/copperplane/security/advisories/new)
+        instead. See [SECURITY.md](https://github.com/GittieLabs/copperplane/blob/develop/SECURITY.md).
 
   - type: textarea
     id: diagnostics

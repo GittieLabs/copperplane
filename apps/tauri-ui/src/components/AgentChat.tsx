@@ -1,9 +1,7 @@
-import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import type { Area } from '../lib/areas'
 import { loadChatThread, promoteChatTurn, sendChatMessage, type ChatScope, type ChatTurn, type SourceRef } from '../lib/chat'
-import { cacheDatasheet } from '../lib/components'
-import { loadPart } from '../lib/partDetail'
+import { isOpenableSource, openSource, sourceChipLabel } from '../lib/sourceRefs'
 
 /** SPEC-318 §2.2/§2.7: the one shared chat panel every area mounts --
  * Overview, Components, Schematic, PCB, Enclosure each supply their
@@ -42,39 +40,6 @@ export interface AgentChatProps {
 
 function collapsedStorageKey(area: Area): string {
   return `agent-chat-collapsed:${area}`
-}
-
-function sourceChipLabel(ref: SourceRef): string {
-  switch (ref.kind) {
-    case 'datasheet_page':
-      return `Datasheet page ${ref.page}`
-    case 'guidance_item':
-      return `Design guidance: ${ref.category}`
-    case 'connection_guidance':
-      return `Pin ${ref.pin_number} guidance`
-    case 'part_field':
-      return `Part: ${ref.field}`
-    case 'project_intent':
-      return 'Project intent'
-    case 'chat_turn':
-      return 'Earlier answer'
-    case 'note':
-      return 'Saved note'
-    case 'check_finding':
-      return 'Check finding'
-    default:
-      return 'Source'
-  }
-}
-
-/** Only these two kinds carry (or can resolve) a real, direct
- * open-the-document target -- `connection_guidance`/`part_field`/
- * `project_intent`/`chat_turn`/`note` all cite pre-assembled context or
- * a conversational fact with no document location to jump to, and
- * `check_finding` never actually resolves today (its own backend
- * resolver is still the deliberate `_resolve_deferred` stub). */
-function isOpenableSource(ref: SourceRef): boolean {
-  return ref.kind === 'datasheet_page' || ref.kind === 'guidance_item'
 }
 
 export function AgentChat({ area, scope, scopeId, title, projectName, promotionTargets }: AgentChatProps) {
@@ -164,29 +129,11 @@ export function AgentChat({ area, scope, scopeId, title, projectName, promotionT
     }
   }
 
-  /** Generalizes PartDetail.tsx's own `handleOpenCitation` -- that one
-   * is hardcoded to the single Part already open in that view.
-   * `datasheet_page` already carries its own real `page`; `guidance_item`
-   * doesn't (the chunk index's own SourceRef for it deliberately omits
-   * one -- see CTX-206.7), so this resolves it by loading the real Part
-   * and matching `category`+`quote` against its stored `design_guidance`
-   * before falling through to the same cache-then-open flow. */
   async function handleOpenSource(ref: SourceRef, key: string) {
-    if (!ref.part_id) return
     setOpeningSourceKey(key)
     setOpenSourceError(null)
     try {
-      const part = await loadPart(ref.part_id)
-      let page = ref.page
-      if (ref.kind === 'guidance_item' && page === undefined) {
-        const items = part.design_guidance?.categories[ref.category ?? ''] ?? []
-        page = items.find((item) => item.quote === ref.quote)?.page
-      }
-      if (page === undefined) {
-        throw new Error('Could not resolve a real page for this source.')
-      }
-      const path = await cacheDatasheet(part.part_id, part.datasheet_url)
-      await open(`${path}#page=${page}`)
+      await openSource(ref)
     } catch (err) {
       setOpenSourceError(err instanceof Error ? err.message : String(err))
     } finally {

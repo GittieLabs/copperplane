@@ -4,11 +4,12 @@ title: "LLM Provider Abstraction"
 status: Completed
 type: Feature
 created: 2026-08-09
-last_updated: 2026-08-09
+last_updated: 2026-08-25
 target_version: v0.1.0
 location: "services/python-daemon/specs/SPEC-201-llm-provider-abstraction.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
-child_specs: []
+child_specs:
+  - "SPEC-208-provider-records-and-model-roles.md"
 user_facing: false
 ---
 

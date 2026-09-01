@@ -1,8 +1,8 @@
 ---
 name: component_extraction
 description: Extracts a structured component schema from a part number or datasheet excerpt
-provider: anthropic
-model: claude-sonnet-4-6
+model_role: reasoning
+requires: [strict_json]
 temperature: 0.2
 max_tokens: 2048
 ---

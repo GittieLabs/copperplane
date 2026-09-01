@@ -1,4 +1,4 @@
-# 🐍 Hardware Agent Studio — Python Daemon
+# 🐍 Copperplane — Python Daemon
 
 The local AI and CAD orchestration backend. It runs as a real child process of the Tauri app (see
 [the root README](../../README.md) for how the three layers fit together), speaking a

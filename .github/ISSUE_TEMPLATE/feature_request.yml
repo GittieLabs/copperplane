@@ -8,12 +8,12 @@ body:
       value: |
         Before writing, two things worth knowing — they will save you time:
 
-        - **[PRODUCT-PLAN.md](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/PRODUCT-PLAN.md)**
+        - **[PRODUCT-PLAN.md](https://github.com/GittieLabs/copperplane/blob/develop/PRODUCT-PLAN.md)**
           describes what this app is trying to be. It is an *advisor with hands*, not a replacement
           CAD tool: it explains what a datasheet requires and shows you where it says so. Automatic
           placement and routing are explicitly out of scope, and schematic and PCB *editing* are not
           planned.
-        - **[ROADMAP.md](https://github.com/GittieLabs/hardware-agent-studio/blob/develop/ROADMAP.md)**
+        - **[ROADMAP.md](https://github.com/GittieLabs/copperplane/blob/develop/ROADMAP.md)**
           lists what is already specced or built. Your idea may already be in there.
 
         A request that is out of scope is not a wasted request — say it anyway. Knowing what people

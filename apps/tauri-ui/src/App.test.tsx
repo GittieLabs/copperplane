@@ -40,6 +40,9 @@ vi.mock('./lib/ipc', () => ({
   MENU_DESIGN_ENCLOSURE_OPEN_KICAD_EVENT: 'menu://design/enclosure/open-kicad',
   MENU_DESIGN_ENCLOSURE_PICK_PCB_EVENT: 'menu://design/enclosure/pick-pcb',
   MENU_DESIGN_ENCLOSURE_GENERATE_EVENT: 'menu://design/enclosure/generate',
+  MENU_DESIGN_SCHEMATIC_RUN_REVIEW_EVENT: 'menu://design/schematic/run-review',
+  MENU_DESIGN_PCB_RUN_REVIEW_EVENT: 'menu://design/pcb/run-review',
+  MENU_DESIGN_ENCLOSURE_RUN_REVIEW_EVENT: 'menu://design/enclosure/run-review',
   MENU_OPEN_LIBRARY_EVENT: 'menu://open-library',
 }))
 
@@ -148,6 +151,28 @@ vi.mock('./components/AgentChat', () => ({
   ),
 }))
 
+// CTX-319.3: same real reason as the AgentChat stub immediately above --
+// SchematicAdvisor/BoardAdvisor are real and unmocked here, and now both
+// mount a real ReviewPanel too. Stubbed module-level so it (and every
+// future consumer) is covered without a fix per area, matching what
+// CTX-318.4 already confirmed about this exact stub pattern.
+vi.mock('./components/ReviewPanel', () => ({
+  ReviewPanel: ({
+    area,
+    scopeId,
+    menuCommand,
+  }: {
+    area: string
+    scopeId: string
+    menuCommand?: { area: string; command: string; nonce: number } | null
+  }) => (
+    <p>
+      ReviewPanel stub: area={area} scopeId={scopeId}
+      {menuCommand && ` menuCommand=${menuCommand.area}:${menuCommand.command}:${menuCommand.nonce}`}
+    </p>
+  ),
+}))
+
 const { default: App } = await import('./App')
 
 // CTX-316.2: App.tsx now calls `listLibraries()` unconditionally on every
@@ -203,7 +228,9 @@ describe('App: Overview plain chat', () => {
   })
 
   it('TEST-004: an unrecognized message is a plain chat turn against llm.chat, rendering the real reply, and persists both turns', async () => {
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve('Pin 3 is a GPIO pin.')))
+    submitJobMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ text: 'Pin 3 is a GPIO pin.', usage: null, model: null })),
+    )
 
     await renderAppOnOverview()
     sendMessage('what does pin 3 do?')
@@ -224,8 +251,10 @@ describe('App: Overview plain chat', () => {
   })
 
   it('TEST-005: a second plain chat turn sends the first turn back as history', async () => {
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve('Got it, 42.')))
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve('42.')))
+    submitJobMock.mockResolvedValueOnce(
+      fakeJobHandle(Promise.resolve({ text: 'Got it, 42.', usage: null, model: null })),
+    )
+    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({ text: '42.', usage: null, model: null })))
 
     await renderAppOnOverview()
     sendMessage('my favorite number is 42')
@@ -631,6 +660,24 @@ describe('App: Enclosure tab persists across area switches', () => {
 
     await waitFor(() => expect(screen.getByTestId('pcb-area').className).not.toContain('hidden'))
     await waitFor(() => expect(openKicadMock).toHaveBeenCalled())
+  })
+
+  it('CTX-319.6: a Design > PCB > Run Review menu event switches to PCB and forwards the real menuCommand to ReviewPanel', async () => {
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
+    expect(screen.getByTestId('pcb-area').className).toContain('hidden')
+
+    const [, menuHandler] = listenMock.mock.calls.findLast(
+      ([event]) => event === 'menu://design/pcb/run-review',
+    )!
+    act(() => menuHandler())
+
+    await waitFor(() => expect(screen.getByTestId('pcb-area').className).not.toContain('hidden'))
+    await waitFor(() =>
+      expect(within(screen.getByTestId('pcb-area')).getByText(/ReviewPanel stub/).textContent).toContain(
+        'menuCommand=pcb:run_review:0',
+      ),
+    )
   })
 
   it('CTX-305.4: every area wrapper stretches full width when active, not just visible', async () => {

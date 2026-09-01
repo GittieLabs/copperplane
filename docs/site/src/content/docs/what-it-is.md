@@ -88,4 +88,4 @@ manufacturer chose to mention the brown-out threshold.
 If you want something that designs the board for you, this is not it, and it is
 not trying to become it.
 
-[Install →](/hardware-agent-studio/install/)
+[Install →](/copperplane/install/)

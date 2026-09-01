@@ -1,8 +1,7 @@
 ---
 name: datasheet_guidance_synthesis
 description: Writes a short plain-language summary of one category's already-cited, already-validated datasheet excerpts
-provider: anthropic
-model: claude-sonnet-5
+model_role: fast
 temperature: 0.3
 max_tokens: 512
 ---

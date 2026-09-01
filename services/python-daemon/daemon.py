@@ -62,11 +62,31 @@ def _configure_logging() -> None:
 _configure_logging()
 logger = logging.getLogger("daemon")
 
+# SPEC-407 §2.4: every optional module whose import failed, collected here at
+# import time and reported on `daemon.ready`. The per-module `try/except`
+# guards below are deliberate and stay exactly as they are -- a missing
+# optional module must never take the whole daemon down (SPEC-407 §1
+# Non-Goals). What was missing is that this state existed *only* in a log
+# file: a mis-frozen sidecar could start, answer `daemon.ready` with KiCad
+# and FreeCAD both live, heartbeat normally, and run with the entire AI
+# surface disabled while looking completely healthy. Found for real on
+# 2026-08-27 (SPEC-407 §2.1, failure mode 7).
+#
+# Never prints. `stdout` is the JSON-RPC wire (CLAUDE.md) and this runs at
+# import time, before the first frame is ever written.
+_DEGRADED_MODULES: list = []
+
+
+def _note_degraded(module: str, capability: str) -> None:
+    """Records one failed optional import for `daemon.ready` (SPEC-407 §2.4)."""
+    _DEGRADED_MODULES.append({"module": module, "capability": capability})
+
 try:
     import kicad_bridge
     from kicad_bridge import get_kicad_version
 except Exception:
     logger.exception("kicad_bridge failed to import -- kicad.* routes will be unavailable")
+    _note_degraded("kicad_bridge", "kicad.* routes")
     kicad_bridge = None
     get_kicad_version = None
 
@@ -75,6 +95,7 @@ try:
     from freecad_bridge import generate_enclosure, export_enclosure
 except Exception:
     logger.exception("freecad_bridge failed to import -- freecad.* routes will be unavailable")
+    _note_degraded("freecad_bridge", "freecad.* routes")
     freecad_bridge = None
     generate_enclosure = None
     export_enclosure = None
@@ -83,30 +104,35 @@ try:
     import llm_providers
 except Exception:
     logger.exception("llm_providers failed to import -- llm.* routes will be unavailable")
+    _note_degraded("llm_providers", "llm.* routes")
     llm_providers = None
 
 try:
     import component_pipeline
 except Exception:
     logger.exception("component_pipeline failed to import -- kicad.generate_component will be unavailable")
+    _note_degraded("component_pipeline", "kicad.generate_component")
     component_pipeline = None
 
 try:
     import library_store
 except Exception:
     logger.exception("library_store failed to import -- library.*/project.* routes will be unavailable")
+    _note_degraded("library_store", "library.*/project.* routes")
     library_store = None
 
 try:
     import tool_registry
 except Exception:
     logger.exception("tool_registry failed to import -- agent.dispatch_tool will be unavailable")
+    _note_degraded("tool_registry", "agent.dispatch_tool")
     tool_registry = None
 
 try:
     import fp_lib_table
 except Exception:
     logger.exception("fp_lib_table failed to import -- kicad.search_footprints will be unavailable")
+    _note_degraded("fp_lib_table", "kicad.search_footprints")
     fp_lib_table = None
 
 try:
@@ -115,6 +141,7 @@ except Exception:
     logger.exception(
         "kicad_write failed to import -- kicad.generate_footprint_from_part will be unavailable"
     )
+    _note_degraded("kicad_write", "kicad.generate_footprint_from_part")
     kicad_write = None
 
 try:
@@ -123,6 +150,7 @@ except Exception:
     logger.exception(
         "kicad_cli failed to import -- kicad.check_board/kicad.check_schematic will be unavailable"
     )
+    _note_degraded("kicad_cli", "kicad.check_board/kicad.check_schematic")
     kicad_cli = None
 
 try:
@@ -131,6 +159,7 @@ except Exception:
     logger.exception(
         "kicad_pcb_import failed to import -- file-based freecad.generate_enclosure will be unavailable"
     )
+    _note_degraded("kicad_pcb_import", "file-based freecad.generate_enclosure")
     kicad_pcb_import = None
 
 try:
@@ -139,30 +168,35 @@ except Exception:
     logger.exception(
         "community_libraries failed to import -- library.search_community_footprints will be unavailable"
     )
+    _note_degraded("community_libraries", "library.search_community_footprints")
     community_libraries = None
 
 try:
     import datasheet_guidance
 except Exception:
     logger.exception("datasheet_guidance failed to import -- datasheet.generate_guidance will be unavailable")
+    _note_degraded("datasheet_guidance", "datasheet.generate_guidance")
     datasheet_guidance = None
 
 try:
     import datasheet_structure
 except Exception:
     logger.exception("datasheet_structure failed to import -- datasheet.read_pages will be unavailable")
+    _note_degraded("datasheet_structure", "datasheet.read_pages")
     datasheet_structure = None
 
 try:
     import chat_agents
 except Exception:
     logger.exception("chat_agents failed to import -- chat.send will be unavailable")
+    _note_degraded("chat_agents", "chat.send")
     chat_agents = None
 
 try:
     import context_index
 except Exception:
     logger.exception("context_index failed to import -- context.search/context.rebuild_index will be unavailable")
+    _note_degraded("context_index", "context.search/context.rebuild_index")
     context_index = None
 
 # Env var Rust's spawn_daemon (CTX-106.1) sets non-secret config on --
@@ -176,7 +210,7 @@ _DAEMON_CONFIG_ENV_VAR = "HAS_DAEMON_CONFIG"
 # never written to disk, never logged (SPEC-106 §3). llm_provider/
 # llm_model existed on Rust's DaemonConfig since CTX-106.1 but were never
 # read on this side until SPEC-201 -- its first real consumer.
-CONFIG = {"secrets": {}, "llm_provider": None, "llm_model": None}
+CONFIG = {"secrets": {}, "llm_provider": None, "llm_model": None, "providers": None, "provider_roles": None}
 
 # Providers that need a stored API key to be usable (SPEC-303) -- matches
 # core/tauri-rust/src/daemon.rs's KNOWN_SECRET_KEYS allowlist and
@@ -217,6 +251,13 @@ def _apply_env_config() -> None:
 
     CONFIG["llm_provider"] = env_config.get("llm_provider")
     CONFIG["llm_model"] = env_config.get("llm_model")
+    # SPEC-321 §2.3: threads the two fields llm_providers.resolve()'s own
+    # `config` parameter has been able to read since CTX-208.2, but which
+    # nothing supplied until this route existed to write them. Both
+    # default to None/absent exactly like a pre-SPEC-208 install --
+    # migrate_legacy_config() already handles that case correctly.
+    CONFIG["providers"] = env_config.get("providers")
+    CONFIG["provider_roles"] = env_config.get("provider_roles")
 
 
 _apply_env_config()
@@ -239,6 +280,7 @@ def kicad_generate_component(part_number: str) -> dict:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
 
 
@@ -254,6 +296,7 @@ def component_search(query: str) -> list:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
 
 
@@ -778,6 +821,21 @@ def chat_send(scope: str, scope_id: str, area: str, message: str, project_name: 
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        config=CONFIG,
+    )
+
+
+def chat_review(scope: str, scope_id: str, area: str, project_name: str = None) -> list:
+    """The chat.review route (CTX-319.1, SPEC-319 §2.1): the seam
+    SPEC-318 §2.5 defined but did not build. Real LLM call (reuses
+    chat_agents._dispatch(), same as chat.send), so registered in
+    ASYNC_ROUTES below."""
+    return chat_agents.review(
+        scope, scope_id, area, project_name=project_name,
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+        config=CONFIG,
     )
 
 
@@ -831,12 +889,15 @@ class JobNotFoundError(Exception):
 # supply directly over the wire.
 _INTERNAL_ONLY_PARAMS = {"cancel_event"}
 
-def configure_daemon(secrets: dict = None, llm_provider: str = None, llm_model: str = None) -> dict:
-    """The daemon.configure route (SPEC-106 §2, extended by SPEC-303):
-    merges secrets Rust hands over on the daemon's very first request into
-    CONFIG. Ordinary route, dispatched through the normal ROUTES registry
-    like anything else -- Rust's spawn_daemon (CTX-106.1) is what
-    guarantees this line reaches stdin before any other, not any
+def configure_daemon(
+    secrets: dict = None, llm_provider: str = None, llm_model: str = None,
+    providers: list = None, provider_roles: dict = None,
+) -> dict:
+    """The daemon.configure route (SPEC-106 §2, extended by SPEC-303, then
+    SPEC-321): merges secrets Rust hands over on the daemon's very first
+    request into CONFIG. Ordinary route, dispatched through the normal
+    ROUTES registry like anything else -- Rust's spawn_daemon (CTX-106.1)
+    is what guarantees this line reaches stdin before any other, not any
     special-casing here.
 
     Also callable again later, live, from the Settings UI (SPEC-303) --
@@ -845,13 +906,23 @@ def configure_daemon(secrets: dict = None, llm_provider: str = None, llm_model: 
     replacing CONFIG["secrets"] wholesale is correct either way, not a
     partial-update bug. `llm_provider`/`llm_model` default to None meaning
     "leave unchanged" -- Rust's spawn-time call never passes them, so this
-    extension can't regress that call."""
+    extension can't regress that call.
+
+    `providers`/`provider_roles` (SPEC-321 §2.3) follow the identical
+    "None means leave unchanged, otherwise replace wholesale" contract --
+    SPEC-208 §2.5's own rule that a role-binding update is always the
+    complete current pair, never a partial delta, applied at the CONFIG
+    layer exactly like `secrets` already is."""
     if secrets is not None:
         CONFIG["secrets"] = dict(secrets)
     if llm_provider is not None:
         CONFIG["llm_provider"] = llm_provider
     if llm_model is not None:
         CONFIG["llm_model"] = llm_model
+    if providers is not None:
+        CONFIG["providers"] = list(providers)
+    if provider_roles is not None:
+        CONFIG["provider_roles"] = dict(provider_roles)
     return {"configured": True}
 
 
@@ -865,7 +936,7 @@ def get_daemon_capabilities() -> dict:
 
 def llm_chat(
     prompt: str, provider: str = None, model: str = None, system: str = "", history: list = None
-) -> str:
+) -> dict:
     """The llm.chat route (SPEC-201): resolves the configured provider/
     model from CONFIG (SPEC-106's daemon.configure/env-config handshake)
     and the matching secret, then delegates to llm_providers.chat.
@@ -880,7 +951,13 @@ def llm_chat(
     explicit `provider` nor CONFIG["llm_provider"] is set (SPEC-303's
     settings UI, which would let a human choose, doesn't exist yet --
     found by actually running the real chat surface against a real,
-    never-configured install, CTX-302.1 Plan Drift)."""
+    never-configured install, CTX-302.1 Plan Drift).
+
+    CTX-207.1 (SPEC-207 §2.2): returns `llm_providers.chat`'s own real
+    `{"text", "usage", "model"}` dict as the job result, not just a bare
+    string -- the free build's first real per-call token accounting.
+    `Overview.tsx`'s `llm.chat` call site is this route's only real
+    frontend consumer and was updated alongside this change."""
     provider_name = provider or CONFIG.get("llm_provider") or llm_providers._DEFAULT_PROVIDER
 
     model_name = model or CONFIG.get("llm_model")
@@ -889,6 +966,87 @@ def llm_chat(
     return llm_providers.chat(
         prompt, provider=provider_name, api_key=api_key, model=model_name, system=system, history=history
     )
+
+
+def llm_get_provider_records() -> dict:
+    """The llm.get_provider_records route (SPEC-321 §2.4/§2.5): the
+    resolved provider set -- the five built-in presets plus whatever
+    custom records `CONFIG["providers"]` currently carries -- for
+    Settings' editor to render. Reuses `llm_providers
+    ._resolve_provider_records` (real and tested since CTX-208.1) rather
+    than duplicating preset knowledge in TypeScript, which would drift
+    the moment either side changed a default.
+
+    `managed` is filtered out here, unconditionally -- SPEC-208 §2.2.3
+    already stops a config.json entry from *claiming* that id, but this
+    route is the one place that stops it from ever being *rendered*, a
+    distinct guarantee that spec's own contract never made on its own
+    (SPEC-321 §3).
+
+    `provider_roles` in the response is always the real, resolved
+    binding -- run through `migrate_legacy_config` first, so a
+    pre-SPEC-208 install (no `provider_roles` saved at all) sees what it
+    would actually get today, not an empty map that reads as
+    unconfigured. `provider_roles_saved` distinguishes that from a real,
+    explicit save, so the editor's migration display (SPEC-321 §2.5) can
+    say "currently bound to X, not yet saved" instead of implying the
+    user already made this choice.
+
+    Synchronous: a dict lookup and a filter, no network, no LLM call --
+    not registered in ASYNC_ROUTES."""
+    migrated = llm_providers.migrate_legacy_config(CONFIG)
+    records = llm_providers._resolve_provider_records(migrated)
+    return {
+        "records": [record for record_id, record in records.items() if record_id != "managed"],
+        "provider_roles": migrated.get("provider_roles") or {},
+        "provider_roles_saved": bool(CONFIG.get("provider_roles")),
+    }
+
+
+def _resolve_record_and_key(provider_id: str):
+    """SPEC-324: the record a route was asked about, plus the real key for
+    it. Resolves through `migrate_legacy_config`/`_resolve_provider_records`
+    exactly as `llm.get_provider_records` does, so the editor and these
+    routes can never disagree about what a record is."""
+    migrated = llm_providers.migrate_legacy_config(CONFIG)
+    records = llm_providers._resolve_provider_records(migrated)
+    record = records.get(provider_id)
+    if record is None:
+        raise LLMProviderError(f"No such provider record: {provider_id!r}")
+    ref = record.get("api_key_ref")
+    return record, (CONFIG["secrets"].get(ref) or "" if ref else "")
+
+
+def llm_list_models(provider_id: str) -> dict:
+    """The llm.list_models route (SPEC-324 §2.1). A real network call to
+    the vendor, so ASYNC_ROUTES-registered -- CTX-314.2 records the real
+    bug from getting that wrong, where a GitHub-calling route left out of
+    that set blocked the daemon's whole request path.
+
+    Never raises for an unreachable or non-listing provider: "cannot list"
+    is a first-class answer (SPEC-324 §2.1), because an `openai_compat`
+    record may legitimately point at a server with no `/v1/models`."""
+    record, api_key = _resolve_record_and_key(provider_id)
+    return llm_providers.list_models(record, api_key)
+
+
+def llm_validate_model(provider_id: str, model: str) -> dict:
+    """The llm.validate_model route (SPEC-324 §2.3). On demand only --
+    nothing calls this on save or at startup, so it never spends a user's
+    quota without them asking."""
+    record, api_key = _resolve_record_and_key(provider_id)
+    return llm_providers.validate_model(record, api_key, model)
+
+
+def llm_probe_endpoint(base_url: str) -> dict:
+    """The llm.probe_endpoint route (CTX-321.3). Asks whether an
+    OpenAI-compatible server is answering at a URL the user has not saved
+    yet, so the editor can offer a local endpoint it can actually see.
+
+    ASYNC_ROUTES-registered for the same reason as llm.list_models: it is
+    a real network call, and a sync route runs inline in the daemon's
+    request path (CTX-314.2)."""
+    return llm_providers.probe_endpoint(base_url)
 
 
 def cancel_job(job_id: str) -> dict:
@@ -1027,6 +1185,7 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
     library_store.save_part_connection_guidance(
         part_id,
@@ -1050,6 +1209,7 @@ def kicad_suggest_footprint_query(part_id: str) -> dict:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
 
 
@@ -1078,6 +1238,7 @@ def datasheet_generate_guidance(part_id: str, cancel_event=None) -> dict:
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
         cancel_event=cancel_event,
+        app_config=CONFIG,
     )
     content_hash = library_store.content_hash_of_file(pdf_path)
     return library_store.save_part_design_guidance(
@@ -1152,6 +1313,7 @@ def kicad_check_board(pcb_path: str) -> dict:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
     result["source_path"] = pcb_path
     result["status"] = "ok"
@@ -1210,6 +1372,7 @@ def kicad_check_schematic(sch_path: str) -> dict:
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
     )
     result["source_path"] = sch_path
     return result
@@ -1358,6 +1521,10 @@ def _build_routes() -> dict:
         routes["freecad.export_enclosure"] = freecad_export_enclosure
     if llm_providers is not None:
         routes["llm.chat"] = llm_chat
+        routes["llm.get_provider_records"] = llm_get_provider_records
+        routes["llm.list_models"] = llm_list_models
+        routes["llm.validate_model"] = llm_validate_model
+        routes["llm.probe_endpoint"] = llm_probe_endpoint
     if component_pipeline is not None:
         routes["kicad.generate_component"] = kicad_generate_component
         routes["component.search"] = component_search
@@ -1399,6 +1566,7 @@ def _build_routes() -> dict:
         routes["chat.list_threads"] = chat_list_threads
     if chat_agents is not None and library_store is not None and tool_registry is not None:
         routes["chat.send"] = chat_send
+        routes["chat.review"] = chat_review
     if chat_agents is not None and library_store is not None:
         # CTX-206.8: unlike chat.send, promote_turn never touches the
         # tool registry at all (it's plain local read/write, no agent
@@ -1449,7 +1617,15 @@ ASYNC_ROUTES = {
     "kicad.generate_connection_guidance", "kicad.suggest_footprint_query", "kicad.check_board", "kicad.check_schematic",
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
     "datasheet.read_pages", "library.render_symbol_preview", "library.render_footprint_preview",
-    "chat.send", "context.rebuild_index",
+    "chat.send", "chat.review", "context.rebuild_index",
+    # SPEC-324: both reach a vendor over the network. Sync routes run
+    # inline in the request path, so leaving these out would block every
+    # other request while a slow or hanging provider is waited on -- the
+    # exact bug CTX-314.2 found and fixed for the community-library routes.
+    "llm.list_models", "llm.validate_model",
+    # CTX-321.3: same reasoning -- a real socket connect to a URL that may
+    # simply have nothing listening, which must not block the request path.
+    "llm.probe_endpoint",
     # CTX-314.2: both make real GitHub network calls (community_libraries.py's
     # own _github_request/fetch_raw_content) -- a real bug in CTX-314.1's own
     # shipped code (search_community_footprints was never added here) meant
@@ -1528,7 +1704,20 @@ def _run_job(job_id: str, method: str, params: dict, cancel_event: threading.Eve
         if cancel_event.is_set():
             emit({"jsonrpc": "2.0", "method": "job.cancelled", "params": {"job_id": job_id}})
         else:
-            emit({"jsonrpc": "2.0", "method": "job.failed", "params": {"job_id": job_id, "error": str(e)}})
+            failure = {"job_id": job_id, "error": str(e)}
+            # SPEC-207 §2.3: a structured `code` (e.g. `managed_quota_exhausted`)
+            # alongside its own real extra fields (`reset_at`/`retry_after`),
+            # duck-typed via getattr rather than importing
+            # llm_providers.ManagedProviderError here -- this function stays
+            # decoupled from any one bridge module's exception classes, same
+            # as the cancellation check above. Absent for every other
+            # exception, so this is a strictly additive, backward-compatible
+            # payload change.
+            code = getattr(e, "code", None)
+            if code:
+                failure["code"] = code
+                failure.update(getattr(e, "extra", None) or {})
+            emit({"jsonrpc": "2.0", "method": "job.failed", "params": failure})
     finally:
         JOBS.pop(job_id, None)
 
@@ -1687,6 +1876,13 @@ def _detect_capabilities() -> dict:
         # right now, fixed from a hardcoded [] that predated any real
         # settings surface to populate it.
         "llm_providers": [p for p in _KEY_BASED_PROVIDERS if configured_secrets.get(f"{p}_api_key")],
+        # SPEC-321 §2.5: the editor's per-record "is a key saved for this
+        # one" display needs to ask about an arbitrary custom
+        # `api_key_ref`, not just the four fixed vendor names above --
+        # `configured_secrets` already holds every key `collect_known_secrets`
+        # (Rust) found in the real keychain, vendor or custom alike, since
+        # CTX-321.1; this just stops truncating that down to the fixed list.
+        "configured_secret_refs": sorted(key for key, value in configured_secrets.items() if value),
         # SPEC-303 Tier 3: for the Settings screen's "Copy Diagnostics"
         # bundle. log_path is None if only stderr is active (e.g. a
         # read-only log dir) -- reported honestly, not papered over.
@@ -1704,6 +1900,13 @@ def _detect_capabilities() -> dict:
         # just at GitHub's lower 60-requests/hour rate limit.
         "github_token_configured": bool(configured_secrets.get("github_token")),
         "fts5_available": fts5_available,
+        # SPEC-407 §2.4: the optional modules that failed to import at
+        # startup, each with the capability it takes down. Empty on a
+        # healthy build. Non-empty means the artifact is broken -- most
+        # often a mis-frozen sidecar -- and both `verify_sidecar.py` and
+        # the app treat it as a hard failure rather than letting a daemon
+        # that answers `daemon.ready` pass for a working one.
+        "degraded_modules": list(_DEGRADED_MODULES),
     }
 
 

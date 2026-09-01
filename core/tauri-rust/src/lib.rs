@@ -108,4 +108,17 @@ mod tests {
     fn get_app_version_is_not_empty() {
         assert!(!get_app_version().is_empty());
     }
+
+    /// SPEC-405 §2.1/§3.4: `tauri.conf.json`'s `identifier` is load-bearing
+    /// -- Tauri derives `app_data_dir`/`app_config_dir` from it, which is
+    /// where the storage root, project library, and config.json all
+    /// live. The Copperplane rename changes `productName` and window
+    /// title (presentation), never this. Reads the real file at compile
+    /// time rather than trusting a copy, so it can't drift silently.
+    #[test]
+    fn tauri_conf_json_identifier_is_the_frozen_identity_string_spec_405_requires() {
+        let raw = include_str!("../tauri.conf.json");
+        let parsed: serde_json::Value = serde_json::from_str(raw).expect("tauri.conf.json must be valid JSON");
+        assert_eq!(parsed["identifier"], "com.gittielabs.hardware-agent-studio");
+    }
 }

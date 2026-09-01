@@ -16,6 +16,9 @@ const {
   saveConfig,
   getCapabilities,
   setLlmProviderAndModel,
+  getProviderRecords,
+  saveProviderConfig,
+  isNonLoopbackBaseUrl,
   secretKeyFor,
   getAppVersion,
   copyDiagnostics,
@@ -25,6 +28,26 @@ beforeEach(() => {
   invokeMock.mockReset()
   writeTextMock.mockReset()
   dispatchMock.mockReset()
+})
+
+describe('isNonLoopbackBaseUrl', () => {
+  it('a null base_url (a preset\'s own untouched default) is never a risk', () => {
+    expect(isNonLoopbackBaseUrl(null)).toBe(false)
+  })
+
+  it('localhost and 127.0.0.1 are not flagged', () => {
+    expect(isNonLoopbackBaseUrl('http://localhost:11434/v1')).toBe(false)
+    expect(isNonLoopbackBaseUrl('http://127.0.0.1:11434/v1')).toBe(false)
+  })
+
+  it('a real remote host is flagged', () => {
+    expect(isNonLoopbackBaseUrl('http://nuc.local:11434/v1')).toBe(true)
+    expect(isNonLoopbackBaseUrl('https://api.example.com')).toBe(true)
+  })
+
+  it('an unparseable base_url fails toward "warn", not "trust it"', () => {
+    expect(isNonLoopbackBaseUrl('not a url')).toBe(true)
+  })
 })
 
 describe('secretKeyFor', () => {
@@ -130,6 +153,87 @@ describe('setLlmProviderAndModel', () => {
   })
 })
 
+describe('getProviderRecords', () => {
+  it('dispatches llm.get_provider_records and returns the result', async () => {
+    dispatchMock.mockResolvedValueOnce({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        records: [{
+          id: 'anthropic', kind: 'anthropic', base_url: null, api_key_ref: 'anthropic_api_key',
+          models: { reasoning: 'claude-sonnet-5', fast: 'claude-sonnet-5' },
+          capabilities: { tool_use: true, strict_json: true },
+        }],
+        provider_roles: { reasoning: 'anthropic', fast: 'anthropic' },
+        provider_roles_saved: false,
+      },
+    })
+
+    const result = await getProviderRecords()
+
+    expect(dispatchMock).toHaveBeenCalledWith('llm.get_provider_records', {})
+    expect(result.records).toHaveLength(1)
+    expect(result.records[0].id).toBe('anthropic')
+    expect(result.provider_roles).toEqual({ reasoning: 'anthropic', fast: 'anthropic' })
+    expect(result.provider_roles_saved).toBe(false)
+  })
+
+  it('never sees "managed" in a real response -- the daemon route filters it, not this function', async () => {
+    dispatchMock.mockResolvedValueOnce({
+      jsonrpc: '2.0',
+      id: 1,
+      result: { records: [], provider_roles: {}, provider_roles_saved: false },
+    })
+
+    const result = await getProviderRecords()
+    expect(result.records.some((r) => r.id === 'managed')).toBe(false)
+  })
+
+  it('throws when the daemon returns an error response', async () => {
+    dispatchMock.mockResolvedValueOnce({
+      jsonrpc: '2.0',
+      id: 1,
+      error: { code: -32601, message: 'Method not found' },
+    })
+
+    await expect(getProviderRecords()).rejects.toThrow('Method not found')
+  })
+})
+
+describe('saveProviderConfig', () => {
+  const record = {
+    id: 'workshop', kind: 'openai_compat' as const, base_url: 'http://localhost:11434/v1',
+    api_key_ref: null, models: { reasoning: 'big-model', fast: 'small-model' },
+    capabilities: { tool_use: true, strict_json: true },
+  }
+  const roles = { reasoning: 'workshop', fast: 'workshop' }
+
+  it('persists to config.json AND pushes live via daemon.configure, both as a complete set', async () => {
+    invokeMock.mockResolvedValueOnce(undefined)
+    dispatchMock.mockResolvedValueOnce({ jsonrpc: '2.0', id: 1, result: { configured: true } })
+
+    await saveProviderConfig([record], roles, { llm_provider: null, llm_model: null })
+
+    expect(invokeMock).toHaveBeenCalledWith('save_config_cmd', {
+      config: { llm_provider: null, llm_model: null, providers: [record], provider_roles: roles },
+    })
+    expect(dispatchMock).toHaveBeenCalledWith('daemon.configure', { providers: [record], provider_roles: roles })
+  })
+
+  it('throws when the live daemon.configure push fails, even if the config.json write already succeeded', async () => {
+    invokeMock.mockResolvedValueOnce(undefined)
+    dispatchMock.mockResolvedValueOnce({
+      jsonrpc: '2.0',
+      id: 1,
+      error: { code: -32602, message: 'Invalid params' },
+    })
+
+    await expect(
+      saveProviderConfig([record], roles, { llm_provider: null, llm_model: null }),
+    ).rejects.toThrow('Invalid params')
+  })
+})
+
 describe('getAppVersion', () => {
   it('invokes get_app_version and returns its result', async () => {
     invokeMock.mockResolvedValueOnce('0.1.0')
@@ -150,6 +254,7 @@ describe('copyDiagnostics', () => {
     python_version: '3.12.0',
     storage_root: '/Users/test/Library/Application Support/has/storage',
     github_token_configured: false,
+    configured_secret_refs: [] as string[],
   }
 
   function mockCapabilitiesAndVersion(capabilities: typeof BASE_CAPABILITIES) {
@@ -174,7 +279,7 @@ describe('copyDiagnostics', () => {
 
     expect(writeTextMock).toHaveBeenCalledTimes(1)
     const text = writeTextMock.mock.calls[0][0] as string
-    expect(text).toContain('Hardware Agent Studio v0.1.0')
+    expect(text).toContain('Copperplane v0.1.0')
     expect(text).toContain('Python: 3.12.0')
     expect(text).toContain('Log file: /var/log/daemon.log')
     expect(text).toContain('KiCad: not reachable')

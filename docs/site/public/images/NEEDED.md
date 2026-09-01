@@ -16,4 +16,4 @@ Still needed:
 project names are visible.
 
 Save as PNG, ideally under 400 KB each. Reference them from a page as
-`/hardware-agent-studio/images/<name>.png`.
+`/copperplane/images/<name>.png`.

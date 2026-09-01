@@ -5,7 +5,7 @@
 **Please do not report security issues in a public issue or discussion.**
 
 Use GitHub's private vulnerability reporting:
-[**Report a vulnerability**](https://github.com/GittieLabs/hardware-agent-studio/security/advisories/new).
+[**Report a vulnerability**](https://github.com/GittieLabs/copperplane/security/advisories/new).
 It is private between you and the maintainer, and it lets us prepare a fix
 before anything is disclosed.
 

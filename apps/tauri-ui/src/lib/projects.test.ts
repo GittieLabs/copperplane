@@ -73,10 +73,10 @@ describe('saveProject / loadProject', () => {
   })
 
   it('openProjectFromDirectory throws the real ProjectNotLinkedError message, not a silent failure', async () => {
-    dispatchMock.mockResolvedValueOnce(fail("'/real/empty' isn't linked to a hardware-agent-studio project yet"))
+    dispatchMock.mockResolvedValueOnce(fail("'/real/empty' isn't linked to a Copperplane project yet"))
 
     await expect(openProjectFromDirectory('/real/empty')).rejects.toThrow(
-      "isn't linked to a hardware-agent-studio project yet",
+      "isn't linked to a Copperplane project yet",
     )
   })
 })

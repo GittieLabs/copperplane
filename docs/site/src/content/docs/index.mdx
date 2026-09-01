@@ -1,18 +1,18 @@
 ---
-title: Hardware Agent Studio
+title: Copperplane
 description: A local-first desktop assistant that bridges KiCad and FreeCAD. It reads the datasheet and shows you the page it got that from.
 template: splash
 hero:
   tagline: One workspace across KiCad and FreeCAD, with an AI layer that cites its sources. Your parts, your keys, your board files — all on your machine.
   actions:
     - text: Why this exists
-      link: /hardware-agent-studio/why/
+      link: /copperplane/why/
       icon: right-arrow
     - text: Install
-      link: /hardware-agent-studio/install/
+      link: /copperplane/install/
       variant: minimal
     - text: View on GitHub
-      link: https://github.com/GittieLabs/hardware-agent-studio
+      link: https://github.com/GittieLabs/copperplane
       icon: external
       variant: minimal
 ---
@@ -24,7 +24,7 @@ The current release is **v0.1.1**, and it publishes **one macOS build, for Apple
 Silicon only**. There is no published Intel macOS, Windows or Linux build yet —
 those are working CI targets that have not been attached to a release. Every
 live test against real KiCad and FreeCAD has run on exactly one machine. If you
-try it on Windows or Linux, [telling us what happened](https://github.com/GittieLabs/hardware-agent-studio/issues/new?template=platform_report.yml)
+try it on Windows or Linux, [telling us what happened](https://github.com/GittieLabs/copperplane/issues/new?template=platform_report.yml)
 is the single most useful thing you can do for this project right now.
 </Aside>
 
@@ -58,7 +58,7 @@ is the single most useful thing you can do for this project right now.
 
 It is an **advisor with hands, not a replacement CAD tool**. It does not draw
 your schematic, place your components, or route your board, and none of that is
-planned. [The full boundary is written down](/hardware-agent-studio/what-it-is/)
+planned. [The full boundary is written down](/copperplane/what-it-is/)
 — worth two minutes before you install anything.
 
 ## Where your data goes
@@ -66,10 +66,10 @@ planned. [The full boundary is written down](/hardware-agent-studio/what-it-is/)
 Your parts library is readable JSON on your own disk. Your API keys are in the
 operating system keychain, never in a config file. The only thing that leaves
 your machine is the prompt you send to the model provider you chose — and you
-can choose a local one. [The specifics](/hardware-agent-studio/privacy/).
+can choose a local one. [The specifics](/copperplane/privacy/).
 
 ## Built on
 
 KiCad and FreeCAD do the actual engineering. This app talks to KiCad over its
 own IPC API and drives FreeCAD headlessly — it bundles neither and replaces
-neither. [How that works, and what we owe them](/hardware-agent-studio/built-on/).
+neither. [How that works, and what we owe them](/copperplane/built-on/).

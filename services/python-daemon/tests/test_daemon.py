@@ -13,6 +13,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import daemon
 from daemon import handle_request
 
+class TestFrozenLogDirName(unittest.TestCase):
+    """SPEC-405 §2.1/§3.4: the daemon's own per-OS log directory name is
+    one of the five load-bearing identity strings that must not move in
+    the Copperplane rename -- an existing install's log continuity, not
+    just its data, would otherwise silently break."""
+
+    def test_001_default_log_dir_ends_in_the_frozen_identity_string(self):
+        self.assertTrue(daemon._default_log_dir().endswith("hardware-agent-studio"))
+
+
 class TestJSONRPCDaemon(unittest.TestCase):
 
     def test_001_valid_routing(self):
@@ -183,6 +193,39 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
         self.assertEqual(caps["freecad_available"], expected)
         self.assertIn("kicad_available", caps)
         self.assertIn("llm_providers", caps)
+
+    def test_001a_detect_capabilities_reports_degraded_modules(self):
+        """SPEC-407 TEST-001: `daemon.ready` carries every optional module
+        that failed to import. Deliberately not asserting a fixed list --
+        which modules fail depends on what is installed here -- but the key
+        must always be present, and must agree exactly with the collector
+        the import guards themselves write to. That agreement is the whole
+        contract: a mis-frozen sidecar is detectable only if this payload
+        reflects what actually happened at import time."""
+        caps = daemon._detect_capabilities()
+        self.assertIn("degraded_modules", caps)
+        self.assertIsInstance(caps["degraded_modules"], list)
+        self.assertEqual(caps["degraded_modules"], daemon._DEGRADED_MODULES)
+        for entry in caps["degraded_modules"]:
+            self.assertIn("module", entry)
+            self.assertIn("capability", entry)
+
+    def test_001b_note_degraded_records_a_failed_import(self):
+        """SPEC-407 TEST-002: `_note_degraded` appends a structured entry and
+        the payload is a copy, not the live list -- so a caller mutating what
+        it got back can never corrupt the daemon's own record."""
+        before = list(daemon._DEGRADED_MODULES)
+        try:
+            daemon._note_degraded("spec_407_probe", "nothing real")
+            caps = daemon._detect_capabilities()
+            self.assertIn(
+                {"module": "spec_407_probe", "capability": "nothing real"},
+                caps["degraded_modules"],
+            )
+            caps["degraded_modules"].clear()
+            self.assertNotEqual([], daemon._DEGRADED_MODULES)
+        finally:
+            daemon._DEGRADED_MODULES[:] = before
 
     @patch('daemon.freecad_bridge.find_freecadcmd')
     def test_002_detect_capabilities_reports_freecad_unavailable_on_error(self, mock_find):
@@ -841,6 +884,31 @@ class TestConfigureDaemonLiveUpdates(unittest.TestCase):
 
         self.assertEqual(daemon.CONFIG['secrets'], {"anthropic_api_key": "sk-existing"})
 
+    def test_004_passing_providers_and_provider_roles_updates_them_live(self):
+        """SPEC-321 §2.3: the same live-update guarantee as llm_provider/
+        llm_model, extended to the new fields."""
+        daemon.CONFIG['providers'] = None
+        daemon.CONFIG['provider_roles'] = None
+
+        providers = [{"id": "workshop", "kind": "openai_compat", "base_url": "http://localhost:11434/v1"}]
+        roles = {"reasoning": "workshop", "fast": "workshop"}
+        result = daemon.configure_daemon(providers=providers, provider_roles=roles)
+
+        self.assertEqual(result, {"configured": True})
+        self.assertEqual(daemon.CONFIG['providers'], providers)
+        self.assertEqual(daemon.CONFIG['provider_roles'], roles)
+
+    def test_005_omitting_providers_and_provider_roles_leaves_them_untouched(self):
+        """A secrets-only or llm_provider-only call must not wipe an
+        already-configured provider_roles binding."""
+        daemon.CONFIG['providers'] = [{"id": "workshop", "kind": "openai_compat"}]
+        daemon.CONFIG['provider_roles'] = {"reasoning": "workshop", "fast": "workshop"}
+
+        daemon.configure_daemon(llm_provider="anthropic")
+
+        self.assertEqual(daemon.CONFIG['providers'], [{"id": "workshop", "kind": "openai_compat"}])
+        self.assertEqual(daemon.CONFIG['provider_roles'], {"reasoning": "workshop", "fast": "workshop"})
+
 
 class TestDaemonCapabilities(unittest.TestCase):
     """CTX-303.1: daemon.get_capabilities (on-demand) and _detect_capabilities's
@@ -874,6 +942,29 @@ class TestDaemonCapabilities(unittest.TestCase):
         caps = daemon._detect_capabilities()
 
         self.assertEqual(caps['llm_providers'], [])
+
+    def test_002b_configured_secret_refs_includes_a_custom_provider_ref_not_in_the_fixed_list(self):
+        """SPEC-321 §2.5: the editor's per-record key status needs to ask
+        about an arbitrary `api_key_ref`, not just the four fixed vendor
+        names `llm_providers` covers -- this is the field that answers
+        that for any record, custom or preset."""
+        daemon.CONFIG['secrets'] = {
+            "anthropic_api_key": "sk-1",
+            "my_local_server_key": "sk-custom",
+        }
+
+        caps = daemon._detect_capabilities()
+
+        self.assertEqual(
+            caps['configured_secret_refs'], ["anthropic_api_key", "my_local_server_key"]
+        )
+
+    def test_002c_configured_secret_refs_is_empty_when_nothing_is_configured(self):
+        daemon.CONFIG['secrets'] = {}
+
+        caps = daemon._detect_capabilities()
+
+        self.assertEqual(caps['configured_secret_refs'], [])
 
     def test_004_reports_the_real_resolved_log_path(self):
         """CTX-303.3: log_path matches whatever _configure_logging actually
@@ -1980,6 +2071,85 @@ class TestChatThreadRoutes(unittest.TestCase):
         self.assertNotIn("chat.list_threads", daemon.ASYNC_ROUTES)
 
 
+class TestLlmGetProviderRecordsRoute(unittest.TestCase):
+    """SPEC-321 §2.4/§2.5: the resolved provider set Settings' editor
+    renders -- presets plus config-authored records, with `managed`
+    always filtered out."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    def test_001_registered_as_a_synchronous_route(self):
+        routes = daemon._build_routes()
+        self.assertIn("llm.get_provider_records", routes)
+        self.assertNotIn("llm.get_provider_records", daemon.ASYNC_ROUTES)
+
+    def test_002_includes_every_built_in_preset(self):
+        daemon.CONFIG['providers'] = None
+        daemon.CONFIG['provider_roles'] = None
+
+        result = daemon.llm_get_provider_records()
+        ids = {record["id"] for record in result["records"]}
+        self.assertEqual(ids, {"anthropic", "google", "openai", "perplexity", "ollama"})
+
+    def test_003_managed_never_appears_even_if_config_json_somehow_named_it(self):
+        """SPEC-321 §3: this route is the one place that guarantees
+        `managed` is never rendered, independent of SPEC-208's own
+        reservation at the merge layer."""
+        daemon.CONFIG['providers'] = [{"id": "managed", "kind": "openai_compat", "base_url": "http://attacker.example"}]
+        daemon.CONFIG['provider_roles'] = None
+
+        result = daemon.llm_get_provider_records()
+        ids = {record["id"] for record in result["records"]}
+        self.assertNotIn("managed", ids)
+
+    def test_004_a_custom_config_json_record_is_included(self):
+        daemon.CONFIG['providers'] = [{
+            "id": "workshop", "kind": "openai_compat", "base_url": "http://localhost:11434/v1",
+            "api_key_ref": None, "models": {"reasoning": "big-model", "fast": "small-model"},
+            "capabilities": {"tool_use": True, "strict_json": True},
+        }]
+        daemon.CONFIG['provider_roles'] = {"reasoning": "workshop", "fast": "workshop"}
+
+        result = daemon.llm_get_provider_records()
+        ids = {record["id"] for record in result["records"]}
+        self.assertIn("workshop", ids)
+        self.assertEqual(result["provider_roles"], {"reasoning": "workshop", "fast": "workshop"})
+        self.assertTrue(result["provider_roles_saved"])
+
+    def test_005_an_unconfigured_install_reports_the_real_migrated_binding_not_an_empty_map(self):
+        """SPEC-321 §2.5's migration display: a pre-SPEC-208 install (no
+        provider_roles saved) must see what it would actually get today,
+        not a blank slate that reads as unconfigured."""
+        daemon.CONFIG['providers'] = None
+        daemon.CONFIG['provider_roles'] = None
+        daemon.CONFIG['llm_provider'] = None
+        daemon.CONFIG['llm_model'] = None
+
+        result = daemon.llm_get_provider_records()
+
+        self.assertEqual(
+            result["provider_roles"],
+            {"reasoning": daemon.llm_providers._DEFAULT_PROVIDER, "fast": daemon.llm_providers._DEFAULT_PROVIDER},
+        )
+        self.assertFalse(result["provider_roles_saved"])
+
+    def test_006_a_legacy_llm_provider_only_install_reports_the_real_migrated_binding(self):
+        daemon.CONFIG['providers'] = None
+        daemon.CONFIG['provider_roles'] = None
+        daemon.CONFIG['llm_provider'] = "google"
+        daemon.CONFIG['llm_model'] = None
+
+        result = daemon.llm_get_provider_records()
+
+        self.assertEqual(result["provider_roles"], {"reasoning": "google", "fast": "google"})
+        self.assertFalse(result["provider_roles_saved"])
+
+
 class TestChatSendRoute(unittest.TestCase):
     """CTX-206.6 (SPEC-206 §2.5): the real thing TestChatThreadRoutes's
     own docstring named as "a later, separate slice" -- a thin wrapper
@@ -2007,6 +2177,7 @@ class TestChatSendRoute(unittest.TestCase):
         mock_send.assert_called_once_with(
             "project", "weather-pcb:overview", "overview", "hello", project_name="weather-pcb",
             secrets={"google_api_key": "fake"}, provider="google", model="gemini-flash",
+            config=daemon.CONFIG,
         )
         self.assertEqual(result, {"turn_id": "t1", "role": "assistant", "content": "hi"})
 
@@ -2022,6 +2193,51 @@ class TestChatSendRoute(unittest.TestCase):
 
     def test_003_registered_as_an_async_route(self):
         self.assertIn("chat.send", daemon.ASYNC_ROUTES)
+
+
+class TestChatReviewRoute(unittest.TestCase):
+    """CTX-319.1 (SPEC-319 §2.1): the AI Review seam SPEC-318 §2.5
+    defined but did not build -- a thin wrapper matching
+    TestChatSendRoute's own precedent exactly. The real review()
+    extraction/validation logic is covered in
+    services/python-daemon/tests/test_chat_agents.py; this only
+    verifies daemon-level wiring."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    @patch('daemon.chat_agents.review')
+    def test_001_threads_config_provider_model_and_secrets_through(self, mock_review):
+        daemon.CONFIG['llm_provider'] = "google"
+        daemon.CONFIG['llm_model'] = "gemini-flash"
+        daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
+        mock_review.return_value = [{"severity": "info", "title": "x", "detail": "y"}]
+
+        result = daemon.chat_review("project", "weather-pcb:overview", "overview", project_name="weather-pcb")
+
+        mock_review.assert_called_once_with(
+            "project", "weather-pcb:overview", "overview", project_name="weather-pcb",
+            secrets={"google_api_key": "fake"}, provider="google", model="gemini-flash",
+            config=daemon.CONFIG,
+        )
+        self.assertEqual(result, [{"severity": "info", "title": "x", "detail": "y"}])
+
+    def test_002_registered_only_when_chat_agents_library_store_and_tool_registry_are_all_real(self):
+        original = daemon.chat_agents
+        daemon.chat_agents = None
+        try:
+            routes = daemon._build_routes()
+            self.assertNotIn("chat.review", routes)
+            self.assertIn("job.cancel", routes)
+        finally:
+            daemon.chat_agents = original
+
+    def test_003_registered_as_an_async_route(self):
+        self.assertIn("chat.review", daemon.ASYNC_ROUTES)
 
 
 class TestContextSearchRoute(unittest.TestCase):

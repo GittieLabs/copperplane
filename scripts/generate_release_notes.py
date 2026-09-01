@@ -35,22 +35,39 @@ def _run_git(*args: str) -> str:
 
 
 def latest_tag(before_ref: str = 'HEAD') -> str:
-    """The most recent real git tag reachable *before* before_ref, or None
-    if none exists yet -- a real, expected state for this pipeline's
-    first-ever release, not an error.
+    """The most recent real git tag other than before_ref itself, ordered
+    by tag creation date -- not git ancestry, or None if no other tag
+    exists yet (a real, expected state for this pipeline's first-ever
+    release, not an error).
 
-    Deliberately describes `{before_ref}^`, not before_ref itself: a real
-    bug found in production (v0.1.1's release notes) was `git describe
-    --tags --abbrev=0` called with no ref at all, which describes HEAD --
-    and in CI, HEAD *is* the commit the just-pushed tag points at, so it
-    returned that same tag back, producing a null from_ref==to_ref diff.
-    Walking to the parent commit first guarantees the tag on to_ref itself
-    is never the answer."""
+    CTX-402.7: the original implementation used `git describe --tags
+    --abbrev=0 {before_ref}^` (walking to the parent commit specifically
+    to dodge a real production bug -- v0.1.1's release notes -- where
+    describing before_ref itself returned its own tag back, a null
+    from_ref==to_ref diff). That fix assumed every prior tag lives on the
+    same branch history as before_ref. It doesn't: this repo's `main` was
+    frozen on 2026-08-19 while all real work continued on `develop` alone,
+    so `v0.1.3` (tagged from `main`) is not a git ancestor of `v0.2.0`
+    (tagged from `develop`) at all -- `git describe` correctly found
+    nothing, and release notes for `v0.2.0` came back empty despite ~140
+    real commits since the last release. Comparing tags by creation date
+    instead of ancestry is what "since the last release" actually means
+    to a human, regardless of which branch produced either tag, and
+    doesn't require before_ref to be a descendant of anything."""
+    before_sha = _run_git('rev-parse', before_ref).strip()
     result = subprocess.run(
-        ['git', 'describe', '--tags', '--abbrev=0', f'{before_ref}^'],
+        ['git', 'tag', '--sort=-creatordate'],
         capture_output=True, text=True,
     )
-    return result.stdout.strip() if result.returncode == 0 else None
+    if result.returncode != 0:
+        return None
+    for tag in (t.strip() for t in result.stdout.splitlines() if t.strip()):
+        tag_sha = subprocess.run(
+            ['git', 'rev-parse', tag], capture_output=True, text=True,
+        ).stdout.strip()
+        if tag_sha and tag_sha != before_sha:
+            return tag
+    return None
 
 
 def first_commit(ref: str = 'HEAD') -> str:

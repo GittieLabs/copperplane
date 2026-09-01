@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { ask, open } from '@tauri-apps/plugin-dialog'
 import { relaunch } from '@tauri-apps/plugin-process'
-import { dispatch } from './ipc'
+import { dispatch, submitJob } from './ipc'
 
 /** Must match `daemon.py`'s `_KEY_BASED_PROVIDERS` and
  * `core/tauri-rust/src/daemon.rs`'s `KNOWN_SECRET_KEYS` allowlist. Ollama
@@ -20,12 +20,31 @@ export function secretKeyFor(provider: KeyBasedProvider): string {
   return `${provider}_api_key`
 }
 
+/** Mirrors `services/python-daemon/llm_providers.py`'s `ProviderRecord`
+ * (SPEC-208 §2.2.1) -- `kind` selects the SDK, never `id`. `"managed"` is
+ * never a real `kind` value a client constructs; it never appears in
+ * `getProviderRecords()`'s own response at all (SPEC-321 §2.4). */
+export interface ProviderRecord {
+  id: string
+  kind: 'anthropic' | 'openai_compat' | 'google'
+  base_url: string | null
+  api_key_ref: string | null
+  models: { reasoning?: string; fast?: string }
+  capabilities: { tool_use: boolean; strict_json: boolean }
+}
+
+export type ModelRole = 'reasoning' | 'fast'
+
 /** Mirrors `core/tauri-rust/src/config.rs`'s `DaemonConfig`. `output_dir`
  * and `storage_root` are deliberately omitted -- both are always
  * Rust-computed at spawn, never a real setting a human edits or reads
  * back from `config.json` (the real current `storage_root` is reported
  * via `DaemonCapabilities` instead). `storage_root_override` (SPEC-110)
- * is the one a human actually sets. */
+ * is the one a human actually sets.
+ *
+ * `providers`/`provider_roles` (SPEC-321 §2.3): present on the struct
+ * since `CTX-208.1`, but never round-tripped by this interface until now
+ * -- a pure TypeScript typing gap, not a missing IPC command. */
 export interface DaemonConfig {
   freecadcmd_path_override?: string | null
   kicad_socket_path?: string | null
@@ -33,6 +52,8 @@ export interface DaemonConfig {
   llm_provider?: string | null
   llm_model?: string | null
   storage_root_override?: string | null
+  providers?: ProviderRecord[] | null
+  provider_roles?: Record<ModelRole, string> | null
 }
 
 /** Mirrors `daemon.py`'s `_detect_capabilities()` shape. `log_path` is
@@ -65,6 +86,13 @@ export interface DaemonCapabilities {
    * entry; unauthenticated community-library search still works, just
    * at GitHub's lower unauthenticated rate limit. */
   github_token_configured: boolean
+  /** SPEC-321 §2.5: every secret ref the real keychain currently has a
+   * value for -- vendor presets and custom `providers[].api_key_ref`
+   * names alike (`daemon.py`'s `_detect_capabilities`, sourced from the
+   * same `CONFIG["secrets"]` `collect_known_secrets` already populates).
+   * Lets the editor ask "is a key saved for this record" for any record,
+   * not just the four fixed vendor names `llm_providers` above covers. */
+  configured_secret_refs: string[]
 }
 
 /** Saves a provider API key to the OS keychain and pushes the complete
@@ -119,6 +147,145 @@ export async function setLlmProviderAndModel(
   if (response.error) {
     throw new Error(response.error.message)
   }
+}
+
+/** SPEC-321 §2.4/§2.5: the resolved provider set (presets + whatever
+ * `config.json` currently authors) for the editor to render --
+ * `records` never includes `"managed"`, and `provider_roles` is always
+ * the real, resolved binding (already run through the daemon's own
+ * `migrate_legacy_config`, never an empty map on a pre-SPEC-208 install).
+ * `provider_roles_saved` is false when that binding is only a migrated
+ * projection, not yet a real, explicit save. */
+export async function getProviderRecords(): Promise<{
+  records: ProviderRecord[]
+  provider_roles: Record<ModelRole, string>
+  provider_roles_saved: boolean
+}> {
+  const response = await dispatch('llm.get_provider_records', {})
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+  return response.result as {
+    records: ProviderRecord[]
+    provider_roles: Record<ModelRole, string>
+    provider_roles_saved: boolean
+  }
+}
+
+/** SPEC-324 §2.1: the models a provider actually reports.
+ *
+ * `submitJob`, not `dispatch` -- this is a real network call to the vendor
+ * and is ASYNC_ROUTES-registered for it. CTX-314.2 records the real bug
+ * from getting that wrong: a sync route runs inline in the daemon's
+ * request path, so a slow provider would block every other request.
+ *
+ * `supported: false` is a real answer, not an error -- an openai_compat
+ * record may point at a server with no /v1/models at all. Callers show the
+ * reason and keep the field typeable (SPEC-324 §2.2). */
+export interface ModelListing {
+  supported: boolean
+  models: string[]
+  reason: string | null
+}
+
+export async function listProviderModels(providerId: string): Promise<ModelListing> {
+  const handle = await submitJob<ModelListing>('llm.list_models', { provider_id: providerId })
+  return handle.result
+}
+
+/** SPEC-324 §2.3: an on-demand existence check. Never called on save or at
+ * startup -- quota is a real cost even for a cheap check, and SPEC-107 §3
+ * already holds that line for capability probes. */
+export interface ModelValidation {
+  valid: boolean
+  reason: string
+}
+
+export async function validateProviderModel(
+  providerId: string,
+  model: string,
+): Promise<ModelValidation> {
+  const handle = await submitJob<ModelValidation>('llm.validate_model', {
+    provider_id: providerId,
+    model,
+  })
+  return handle.result
+}
+
+/** CTX-321.3: is an OpenAI-compatible server answering at a URL the user
+ * has not saved yet? Takes a URL rather than a provider id because the
+ * record being configured does not exist yet -- `llm.list_models` needs a
+ * resolvable record and a new draft has none.
+ *
+ * `reachable: false` is the ordinary answer, not an error: most of the
+ * time nothing is listening and the editor says nothing at all. */
+export interface EndpointProbe {
+  reachable: boolean
+  models: string[]
+  reason: string | null
+}
+
+/** The local endpoint the editor offers. Mirrors the daemon's own
+ * `LOCAL_OLLAMA_BASE_URL`, which is the ollama preset's `base_url`. */
+export const LOCAL_OLLAMA_BASE_URL = 'http://localhost:11434/v1'
+
+export async function probeEndpoint(baseUrl: string): Promise<EndpointProbe> {
+  const handle = await submitJob<EndpointProbe>('llm.probe_endpoint', { base_url: baseUrl })
+  return handle.result
+}
+
+/** SPEC-321 §2.3: persists the complete current provider records and
+ * role bindings to `config.json` (for the next restart) and pushes them
+ * live to the running daemon via `daemon.configure`, same pattern as
+ * `setLlmProviderAndModel` -- both `providers` and `provider_roles` are
+ * always sent as a whole, never a partial delta (SPEC-208 §2.5's own
+ * contract, applied here). */
+export async function saveProviderConfig(
+  providers: ProviderRecord[],
+  providerRoles: Record<ModelRole, string>,
+  currentConfig: DaemonConfig,
+): Promise<void> {
+  await saveConfig({ ...currentConfig, providers, provider_roles: providerRoles })
+  const response = await dispatch('daemon.configure', { providers, provider_roles: providerRoles })
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+}
+
+/** SPEC-208 §3 / SPEC-321 §2.5: the exact exfiltration risk both specs
+ * name -- a record pairing a real `api_key_ref` with a `base_url` on some
+ * other host sends that key wherever the host names. `null` (a preset's
+ * own untouched default endpoint) is never a risk by construction. An
+ * unparseable `base_url` fails toward "warn" rather than "trust it" --
+ * the whole point of this check is not to silently miss a real risk. */
+export function isNonLoopbackBaseUrl(base_url: string | null): boolean {
+  if (!base_url) return false
+  try {
+    const hostname = new URL(base_url).hostname
+    return hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '::1'
+  } catch {
+    return true
+  }
+}
+
+/** SPEC-321 §3: removing a record a role is still bound to is a real,
+ * reachable misconfiguration (`resolve()` raises a real `LLMProviderError`
+ * at the next chat/extraction call, not a friendly message) -- this is
+ * the "warn before letting a save proceed" the spec calls for, the same
+ * harder-to-ignore native-modal treatment `confirmStorageLocationChange`
+ * already established for a different real risk. Returns true if the
+ * user chose to remove it anyway. */
+export async function confirmRemoveRoleBoundProvider(
+  recordId: string,
+  boundRoles: ModelRole[],
+): Promise<boolean> {
+  return ask(
+    `"${recordId}" is currently bound to the ${boundRoles.join(' and ')} role${
+      boundRoles.length > 1 ? 's' : ''
+    }. Removing it will leave that binding pointing at a provider that no longer exists, which fails ` +
+      'the next chat or extraction that uses it. Remove it anyway?',
+    { title: 'Provider still in use', kind: 'warning', okLabel: 'Remove Anyway', cancelLabel: 'Cancel' },
+  )
 }
 
 /** SPEC-110: a real native directory picker, not a raw text field --
@@ -180,7 +347,7 @@ export async function copyDiagnostics(): Promise<void> {
   }
 
   const lines = [
-    `Hardware Agent Studio v${appVersion}`,
+    `Copperplane v${appVersion}`,
     `Python: ${capabilities.python_version}`,
     `Log file: ${capabilities.log_path ?? '(not available)'}`,
     `KiCad: ${kicadVersion}`,

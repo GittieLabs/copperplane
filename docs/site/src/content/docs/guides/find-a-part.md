@@ -50,5 +50,5 @@ will not get design guidance until a datasheet is reachable.
 **"Extraction did not return valid JSON"** means the model's response was
 malformed or truncated. Retrying often works. If it is reproducible for a
 specific part, that is worth
-[an issue](https://github.com/GittieLabs/hardware-agent-studio/issues/new?template=bug_report.yml)
+[an issue](https://github.com/GittieLabs/copperplane/issues/new?template=bug_report.yml)
 — include the part number.

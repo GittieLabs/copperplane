@@ -1,4 +1,4 @@
-# 🗺️ Hardware Agent Studio — Roadmap
+# 🗺️ Copperplane — Roadmap
 
 **Status:** Draft · **Last updated:** 2026-08-12 · **Current version:** `v0.1.0` (in progress)
 
@@ -316,7 +316,7 @@ plain deep link; and design/application guidance (decoupling, pull-ups, protecti
 its own new spec, [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md),
 below.
 
-#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress, Class B + plain-language synthesis usable end-to-end ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md), [CTX-205.4](apps/tauri-ui/context/CTX-205.4-design-requirements-ui.md), [CTX-205.5](services/python-daemon/context/CTX-205.5-structure-pass-heading-detection.md), [CTX-205.6](services/python-daemon/context/CTX-205.6-heading-noise-and-symbol-encoding.md), [CTX-205.7](services/python-daemon/context/CTX-205.7-guidance-synthesis.md), [CTX-205.8](apps/tauri-ui/context/CTX-205.8-guidance-synthesis-ui.md) done, Class A/C planned) 2026-08-20
+#### [SPEC-205](services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md) — Datasheet-Driven Design Guidance — 🚧 in progress, Class B + plain-language synthesis usable end-to-end ([CTX-205.1](services/python-daemon/context/CTX-205.1-datasheet-structure-pass.md), [CTX-205.2](services/python-daemon/context/CTX-205.2-datasheet-guidance-extraction.md), [CTX-205.3](services/python-daemon/context/CTX-205.3-datasheet-guidance-storage-route.md), [CTX-205.4](apps/tauri-ui/context/CTX-205.4-design-requirements-ui.md), [CTX-205.5](services/python-daemon/context/CTX-205.5-structure-pass-heading-detection.md), [CTX-205.6](services/python-daemon/context/CTX-205.6-heading-noise-and-symbol-encoding.md), [CTX-205.7](services/python-daemon/context/CTX-205.7-guidance-synthesis.md), [CTX-205.8](apps/tauri-ui/context/CTX-205.8-guidance-synthesis-ui.md), [CTX-205.9](apps/tauri-ui/context/CTX-205.9-citation-page-label-clarity.md) done, Class A/C planned) 2026-08-20
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-105, SPEC-202, SPEC-304, SPEC-306, SPEC-307
 
@@ -462,7 +462,7 @@ streaming, bespoke UI rendering). That decision is about the *wire protocol*; Ag
 schema shape (`name`/`description`/`input_schema`) already resembles MCP's tool-description
 conventions closely enough that no separate borrowing decision is needed here.
 
-#### [SPEC-206](services/python-daemon/specs/SPEC-206-agent-context-store.md) — Agent Context Store, Retrieval & Conversation Persistence — 🔲 not started 2026-08-21
+#### [SPEC-206](services/python-daemon/specs/SPEC-206-agent-context-store.md) — Agent Context Store, Retrieval & Conversation Persistence — ✅ done 2026-08-24
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-205, SPEC-204, SPEC-304, SPEC-105, SPEC-201
 · *Parent:* [SPEC-318](apps/tauri-ui/specs/SPEC-318-in-context-agent-chat-and-review.md) (3xx, not
@@ -475,10 +475,58 @@ tool-call-blind `MultiUserHistory`), a validated `SourceRef` model extending SPE
 drop-not-repair citation contract to chat, a rebuildable FTS5 retrieval index over
 `PRODUCT-PLAN.md` §4's long-unbuilt `.index/` (with a `LikeScanRetriever` fallback and no vector
 store — see its own §2.6 for the argument), a promotion path from resolved conversation to durable
-cited note, and router-based agent dispatch with no LLM on the routing path. Also closes a real
-prerequisite gap: SPEC-308's connection guidance is generated today and discarded
-(`kicad.generate_connection_guidance` returns its result; nothing persists it) — persisting it is
-`CTX-206.1`, the first slice.
+cited note, and router-based agent dispatch with no LLM on the routing path. Also closed a real
+prerequisite gap: SPEC-308's connection guidance used to be generated and discarded
+(`kicad.generate_connection_guidance` returned its result; nothing persisted it) —
+[CTX-206.1](services/python-daemon/context/CTX-206.1-persist-connection-guidance.md) persisted it,
+the first of eight slices (`CTX-206.1`–`CTX-206.8`) that shipped the full store, retrieval index,
+and `chat.send`/`chat.promote_turn` routes SPEC-318's five per-area agents and `AgentChat` panels
+now run on.
+
+#### [SPEC-207](services/python-daemon/specs/SPEC-207-managed-provider-adapter.md) — Managed Provider Adapter — ✅ done ([CTX-207.1](services/python-daemon/context/CTX-207.1-chat-usage-return-shape.md), [CTX-207.2](services/python-daemon/context/CTX-207.2-managed-provider-and-error-taxonomy.md)) 2026-08-25
+*Module:* `services/python-daemon` · *Depends on:* SPEC-201, SPEC-105, SPEC-106 · *Parent:* SPEC-404
+
+The daemon-side half of `SPEC-404`: a `managed` branch on the existing provider wrapper pointing
+`OpenAICompatProvider` at the gateway, plus a structured error taxonomy so "your allowance ran out",
+"your token was revoked" and "the service is down" reach the UI as distinct codes rather than one
+string.
+
+Two findings from reading the installed source rather than assuming, both of which changed the spec.
+**AgentFlow already returns token usage on every provider** — `providers/openai_compat.py`,
+`anthropic.py` and `google_genai.py` all normalise to `{input_tokens, output_tokens}`, so no
+AgentFlow change is needed; what loses it is `llm_providers.chat()` ending in `return response.text`.
+Widening that return shape is a breaking change to every caller, should land as its own context
+first, and is worth doing for the free build regardless — a project premised on provenance for every
+field currently cannot say what any AI call cost. And **no naked vendor-SDK calls exist anywhere in
+daemon application code**; the real hazard is one layer in, where `chat_agents.py` and
+`component_pipeline.py` build a provider via `_build_provider()` and call `.chat()` directly, so
+anything added only to `chat()` is invisible to two of the three paths.
+
+#### [SPEC-208](services/python-daemon/specs/SPEC-208-provider-records-and-model-roles.md) — Provider Records & Model Role Resolution — ✅ done ([CTX-208.1](services/python-daemon/context/CTX-208.1-provider-records-and-resolver.md), [CTX-208.2](services/python-daemon/context/CTX-208.2-model-roles-across-prompt-files.md), [CTX-208.3](services/python-daemon/context/CTX-208.3-capability-preflight.md)) 2026-08-25
+*Module:* `services/python-daemon` + `core/tauri-rust` · *Depends on:* SPEC-201, SPEC-106 · *Parent:* SPEC-201
+
+Closes three couplings `SPEC-201` left behind, found by reading the code rather than from a failure
+report. A provider is a *name* matched against a hardcoded if-chain with a hardcoded endpoint, so
+"plug in local models" means exactly one shape — Ollama, this machine, port 11434 — and an Ollama
+server on another box, LM Studio, `llama.cpp` or vLLM has no config field that could reach it. The
+Settings override is one global provider+model pair applied to every agent, so the per-agent
+differentiation the twelve `.prompt.md` files already encode is destroyed the moment anyone sets a
+model: bring-your-own-model and right-model-per-job are mutually exclusive today. And an agent's real
+requirements are undeclared, so a model that cannot tool-call returns text on round 1, the executor
+loop simply ends, and the answer arrives ungrounded with every citation dropped — no error anywhere.
+
+The design: provider *records* (`{id, kind, base_url, api_key_ref, models}`) with construction
+switching on `kind` rather than vendor name, today's five providers reseeded as editable presets;
+`.prompt.md` naming a **role** (`reasoning`/`fast`) that each record resolves to its own model; and
+`requires:` declarations checked before the first call. **`managed` stays locked** — `SPEC-207` §2.1
+rules a settable managed endpoint an exfiltration surface, and this spec honours it by construction.
+
+*Sequencing:* both this and `SPEC-207` edit the same three call sites and the same function. Landing
+this first makes `SPEC-207` smaller; landing `SPEC-207` first means writing an if-branch this spec
+then deletes. *Known gotcha, verified in the installed source:* AgentFlow's `AgentConfig` is a
+pydantic model with `extra` defaulting to `"ignore"`, so `model_role`/`requires` are parsed and
+silently dropped — the daemon needs its own small sidecar reader, and a typo in either key is
+discarded just as quietly.
 
 #### Open questions for this layer — both resolved by `SPEC-201`/`CTX-201.1`
 
@@ -498,9 +546,12 @@ prerequisite gap: SPEC-308's connection guidance is generated today and discarde
 ### 3.3 `3xx` — Product surface
 
 **Superseded by [PRODUCT-PLAN.md](PRODUCT-PLAN.md), approved 2026-08-11, for everything from
-SPEC-300 onward.** Its own §5.2 re-scopes SPEC-301/302; its §5.1 adds SPEC-300/304-310. The four
-entries below are kept for historical record, not as the current backlog — read PRODUCT-PLAN.md
-§5 before picking up any 3xx work. The SPEC-304 ID conflict this section originally flagged was
+SPEC-300 onward.** Its own §5.2 re-scopes SPEC-301/302; its §5.1 adds SPEC-300/304-310. The
+SPEC-301–SPEC-304 entries below are kept for historical record, not the current backlog — read
+PRODUCT-PLAN.md §5 before picking up any 3xx work. Everything from SPEC-308 onward is a record of
+work already shipped, added as it landed. SPEC-300 itself has no entry of its own: it is the
+umbrella every 3xx spec below hangs off, and is marked Completed now that all fifteen of its
+`child_specs` have shipped. The SPEC-304 ID conflict this section originally flagged was
 resolved 2026-08-11 (see that entry). SPEC-303 is now written but still isn't addressed by the plan
 — its own spec names the open shell-entry-point question rather than resolving it here. That
 question is resolved now: `SPEC-305` (see §1.1) builds the real shell and anchors Settings behind
@@ -589,6 +640,75 @@ and import/export to KiCad's own `.kicad_sym`/`.pretty` library formats.
 `SPEC-300` only. That means the schema and index can be written before `SPEC-109`
 (enclosure-from-geometry) exists — the schema doesn't need `SPEC-109` done, only to eventually
 produce `Artifact`s it stores.
+
+#### [SPEC-308](apps/tauri-ui/specs/SPEC-308-footprints-schematic-advisor.md) — Footprints & Schematic Advisor — ✅ done (twelve contexts, `CTX-308.1`–`CTX-308.12`) 2026-08-24
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-300, SPEC-304, SPEC-307, SPEC-202
+
+Makes the Footprint a first-class object with its own find-or-create flow, per `PRODUCT-PLAN.md`
+§5.1 — find one in the user's installed KiCad libraries, or build one from datasheet package
+dimensions, export it to a real `.pretty` library, and link it to an already-real Part. `SPEC-304`
+had already reserved the storage (`library_store.save_footprint`/`load_footprint`, `CTX-304.1`), so
+this spec is the flow on top of it, not new persistence. Shipped as twelve small contexts rather
+than one drop, the same way `SPEC-311` did: installed-library search (`CTX-308.1`) and its UI
+(`CTX-308.2`), KiCad's bundled libraries (`CTX-308.3`), saved-footprint search (`CTX-308.4`),
+generation from datasheet package dimensions (`CTX-308.5`), real `.pretty` export (`CTX-308.6`),
+and connection guidance (`CTX-308.7`).
+
+Two honest caveats worth keeping visible. The connection guidance this spec generated was
+**generated and discarded** — `kicad.generate_connection_guidance` returned a result and nothing
+persisted it — a real prerequisite gap not closed until `SPEC-206`'s
+[CTX-206.1](services/python-daemon/context/CTX-206.1-persist-connection-guidance.md). And five of
+the twelve contexts are fixes found only by live use, not by tests: a through-hole footprint
+attribute written wrong (`CTX-308.8`), a missing per-project override (`CTX-308.9`), agent-guided
+search (`CTX-308.10`), and two preview defects — scaling plus project wiring (`CTX-308.11`) and
+zoom-on-scroll (`CTX-308.12`).
+
+#### [SPEC-309](apps/tauri-ui/specs/SPEC-309-board-advisor.md) — Board Advisor — ✅ done ([CTX-309.1](services/python-daemon/context/CTX-309.1-board-advisor-backend.md), [CTX-309.2](apps/tauri-ui/context/CTX-309.2-board-advisor-ui.md), [CTX-309.3](apps/tauri-ui/context/CTX-309.3-board-open-state-guidance.md)) 2026-08-24
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-300, SPEC-304, SPEC-103, SPEC-110
+
+Runs KiCad's own Electrical Rules Check and Design Rules Check and turns each real, structured
+violation list into plain-language explanation and suggested fixes via an LLM call. It deliberately
+does not reimplement rule-checking — KiCad's engine is already correct, just terse, assuming the
+reader knows what `pin_to_pin` or `invalid_outline` implies about the fix. Strictly read-only: run
+the check, explain the results, suggest what a human might do; never auto-fix. That non-goal is a
+direct consequence of `SPEC-204`'s confirmation-gate model, so no gate was needed here. `CTX-309.3`
+is the live-use follow-up — the advisor needed to say something useful when no board is open,
+rather than failing opaquely.
+
+#### [SPEC-310](apps/tauri-ui/specs/SPEC-310-enclosure-from-board-profile.md) — Enclosure from Board Profile — ✅ done ([CTX-310.1](services/python-daemon/context/CTX-310.1-board-profile-import-backend.md), [CTX-310.2](apps/tauri-ui/context/CTX-310.2-board-profile-import-ui.md), [CTX-310.3](apps/tauri-ui/context/CTX-310.3-enclosure-board-picker-ux.md)) 2026-08-24
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-300, SPEC-109, SPEC-104
+
+Generates a real parametric enclosure from a `.kicad_pcb` **file**, with no live KiCad connection
+required. `SPEC-109`'s board-driven mode was already real, but it only ever read whatever board
+KiCad currently had open over IPC — so a user wanting an enclosure for someone else's design, an
+old project, or a board on another machine's KiCad session had no path at all.
+`freecad_bridge.generate_enclosure` was already source-agnostic, so this is a new input path, not a
+new geometry pipeline. `CTX-310.3` fixed the board-picker UX found in live use, and its own Plan
+Drift is what established that the fixed-shape bounding-box output had become the real limit — the
+finding `SPEC-311` was then written to address.
+
+#### [SPEC-311](apps/tauri-ui/specs/SPEC-311-enclosure-refinement-interactive-preview.md) — Enclosure Refinement & Interactive Preview — ✅ done (sixteen contexts, `CTX-311.1`–`CTX-311.16`) 2026-08-24
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-300, SPEC-109, SPEC-310, SPEC-202, SPEC-301
+
+Turns enclosure generation from a one-shot, blind form submission into a real iterative workflow:
+derive shape and required interior height from the actual board and its actual placed component
+heights rather than defaults, generate, show an interactive 3D preview the user can navigate,
+adjust and regenerate against the same board without starting over, and decide how a lid gets built
+and shown alongside the base. **This is the spec that now owns `SPEC-111`'s scope** (§3.1 above),
+expanded well beyond lid-and-outline once actually written up.
+
+Sixteen contexts is the honest number, and their shape is the point. Two were design decisions
+recorded before any code (`CTX-311.2` lid/body and persistence, `CTX-311.13` export and save), and
+most of the rest are defects only a human looking at a rendered 3D preview could have found:
+camera framing wrong after unit scale (`CTX-311.4`), a material that wasn't actually matte
+(`CTX-311.7`), a default camera that hid the interior (`CTX-311.8`), near-plane clipping
+(`CTX-311.11`), and a board overlay whose click-through was wrong (`CTX-311.16`). A direct and
+expensive illustration of this repo's own "verify as the user, not just as the capability" norm:
+every one of these would have passed a capability test.
 
 #### [SPEC-312](apps/tauri-ui/specs/SPEC-312-application-shell-project-portability-persistence.md) — Application Shell, Project Portability & Persistence Model — ✅ done (items 1-3) 2026-08-19
 
@@ -741,23 +861,182 @@ whenever no project is open. One deliberate, one-off break from `CTX-316.1`'s ow
 one-const-per-action event convention: a custom library's identity can't be a compile-time const,
 so `menu://open-library` carries a real payload instead.
 
-#### [SPEC-318](apps/tauri-ui/specs/SPEC-318-in-context-agent-chat-and-review.md) — In-Context Agent Chat, Project Intent & AI Review — 🔲 not started 2026-08-21
+#### [SPEC-317](apps/tauri-ui/specs/SPEC-317-theme-system.md) — Theme System: Light, Dark & System — ✅ done ([CTX-317.1](apps/tauri-ui/context/CTX-317.1-theme-system.md)) 2026-08-24
+
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-300, SPEC-303
+
+Lets the user choose Light, Dark, or System appearance instead of being locked into the dark-only
+design, with System following the OS preference live. Real, user-stated starting point: "not
+everyone will want the dark mode design." The implementation also pays down the "every color is a
+raw Tailwind literal" debt found during the pre-planning audit, by introducing a semantic token
+layer. Two scope decisions were confirmed with the user rather than assumed: native Tauri window
+chrome (the titlebar) is not synced to the theme, so `core/tauri-rust`/`tauri.conf.json` are
+untouched; and the preference lives in `localStorage`, not `SPEC-106`'s Rust-owned config store,
+since it carries no secrecy or daemon need. The Appearance control itself lives in `SPEC-303`'s
+Settings UI.
+
+#### [SPEC-318](apps/tauri-ui/specs/SPEC-318-in-context-agent-chat-and-review.md) — In-Context Agent Chat, Project Intent & AI Review — ✅ done 2026-08-24
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` (via SPEC-206) · *Depends on:* SPEC-206,
 SPEC-205, SPEC-308, SPEC-309, SPEC-313, SPEC-204
 
 Gives every working area (Overview, Components, Schematic, PCB, Enclosure) its own scoped agent
 chat, grounded in what that area actually knows -- SPEC-205's cited guidance, SPEC-308's connection
-guidance (once SPEC-206 persists it), SPEC-309's ERC/DRC findings -- selected deterministically by
+guidance (persisted by SPEC-206), SPEC-309's ERC/DRC findings -- selected deterministically by
 the tab, never by a model (`PRODUCT-PLAN.md` §3.2 unchanged). Adds an optional project-intent field
 every agent reads as the user's stated goal, never a verified fact. Every answer carries validated
 source chips or is marked general-practice; nothing is described as "verified." Also finally
 deletes `parseCommand` (§2.6), rehoming the two capabilities it currently gates -- component
 generation and `SPEC-108`'s inject flow -- into real homes rather than dropping them silently.
 Deliberately amends `PRODUCT-PLAN.md` §3.3/§2.1 and `SPEC-300` §2 (see its own §2.1 for the full
-argument) and deliberately does not ship the AI Review buttons yet -- it defines the seam (a typed
+argument) and deliberately did not ship the AI Review buttons -- it defines the seam (a typed
 `ReviewFinding[]`, the same agent/tools/scope as chat) so building them later is additive, not a
-rewrite.
+rewrite. Shipped across six contexts (`CTX-318.1`–`CTX-318.6`): the shared `AgentChat` component,
+mounted in Components/Schematic/PCB/Enclosure/Overview; a real, editable project-intent field;
+`parseCommand`/`lib/commands.ts` deleted, with `kicad.generate_component` rehomed to a "Generate
+directly from a part number" fallback in Components and `SPEC-108`'s inject flow rehomed to a real
+"Inject into open board" action on `PartDetail`. The AI Review buttons themselves remain unbuilt --
+that is this spec's own deliberate scope boundary, not debt.
+
+#### [SPEC-319](apps/tauri-ui/specs/SPEC-319-ai-review.md) — AI Review — ✅ done ([CTX-319.1](apps/tauri-ui/context/CTX-319.1-review-backend-foundation.md), [CTX-319.2](apps/tauri-ui/context/CTX-319.2-review-panel-components.md), [CTX-319.3](apps/tauri-ui/context/CTX-319.3-review-panel-schematic-pcb.md), [CTX-319.4](apps/tauri-ui/context/CTX-319.4-review-panel-enclosure.md), [CTX-319.5](apps/tauri-ui/context/CTX-319.5-review-panel-overview.md), [CTX-319.6](apps/tauri-ui/context/CTX-319.6-review-design-menu.md)) 2026-08-25
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-318, SPEC-206, SPEC-204, SPEC-316 · *Parent:* SPEC-318
+
+Builds the seam `SPEC-318` §2.5 deliberately defined but did not build: a **Run Review** action in
+each area that invokes that area's own chat agent — same tools, same retrieval scope, same source
+contract — with a fixed internal prompt instead of a user question, rendering a typed list of
+review findings instead of a conversational answer. No new agent, no new tool, no new retrieval
+scope: the cheapest real capability available given what `SPEC-318` already shipped, and the reason
+that seam was designed at all. A review reads and never writes, exactly like `SPEC-309`'s ERC/DRC
+advisor it sits alongside — which is why `SPEC-204`'s confirmation-gate tool list is excluded here
+rather than relied on. Shipped one area at a time (`CTX-319.3`–`CTX-319.5`) after the backend
+foundation and the shared panel components, with the three real Design submenu items from
+`SPEC-316` wired last (`CTX-319.6`).
+
+#### [SPEC-320](apps/tauri-ui/specs/SPEC-320-managed-account-signin-and-usage.md) — Managed Account Sign-In & Usage — 📋 Draft 2026-08-25
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-303, SPEC-300, SPEC-106 · *Parent:* SPEC-404
+
+The only part of `SPEC-404` a person touches. Managed appears in `SPEC-303`'s existing provider
+dropdown beside Anthropic/OpenAI/Google/Ollama — a peer of Ollama, not a tier above the product —
+and nowhere else: no nag banners, no upgrade badges, no upsell surface anywhere in the app. Sign-in
+is paste-a-token for v1, since an open-source binary cannot hold a client secret; PKCE with a
+loopback redirect is the named successor, revisitable once `SPEC-403` closes.
+
+The weight is in the four failure states, each selected by `SPEC-207`'s structured code and never by
+string-matching prose — the same rule `PRODUCT-PLAN.md` established for user input after
+`parseCommand` was deleted. Quota exhaustion, token revocation, an unreachable gateway and upstream
+vendor trouble each get a structured choice card offering real options, because a subscriber who
+hits the monthly ceiling and sees "LLM request failed" concludes the product is broken and leaves.
+
+#### [SPEC-321](apps/tauri-ui/specs/SPEC-321-provider-configuration-ui.md) — Provider Configuration UI — ✅ done ([CTX-321.1](apps/tauri-ui/context/CTX-321.1-provider-config-backend.md), [CTX-321.2](apps/tauri-ui/context/CTX-321.2-provider-config-editor-ui.md)) 2026-08-26
+*Module:* `apps/tauri-ui` + `core/tauri-rust` + `services/python-daemon` · *Depends on:* SPEC-208, SPEC-303 · *Parent:* SPEC-208
+
+`SPEC-208` deliberately stops at the daemon and the config schema, which leaves its provider records
+unreachable by a person: `SPEC-303`'s picker writes two flat fields and its
+`KEY_BASED_PROVIDERS`/`ALL_PROVIDERS` literals are hardcoded provider lists. This spec replaces that
+picker with a real editor — add, edit and remove records, bind the two roles, and see which records
+are actually usable — plus the migration display for an install arriving with the legacy fields.
+
+Three real gaps found by reading the installed code, not assumed from `SPEC-208`'s own text: the
+frontend `DaemonConfig` type never gained `providers`/`provider_roles` fields even though Rust's own
+struct has carried both since `CTX-208.1`; `daemon.py` never reads either field into `CONFIG` at
+startup or through `daemon.configure`, so `resolve()`'s own `config` parameter has had nothing real
+supplying it since it was written; and a custom record's `api_key_ref` can't actually be saved at all
+today, since `secrets.rs`'s `validate_known_key`/`collect_known_secrets` both operate over the fixed
+`KNOWN_SECRET_KEYS` allowlist `SPEC-208` §2.7 named as needing to stop being fixed, but never built.
+
+**Deliberately excludes Managed.** No hosting decided, no auth chosen, no billing built — `managed`
+does not appear as a selectable kind anywhere in this editor, by explicit product decision, not by
+placeholder. `SPEC-320` is the only spec that would ever change that.
+
+*Requirement inherited from `SPEC-208` §3, not to be rediscovered:* a record pairing a vendor
+`api_key_ref` with a non-loopback `base_url` sends the user's own key to whatever host they typed.
+That combination must warn explicitly. `managed` is not editable here at all (`SPEC-207` §2.1).
+
+#### [SPEC-324](apps/tauri-ui/specs/SPEC-324-model-identity-verification.md) — Model Identity Verification — 🚧 in progress ([CTX-324.1](apps/tauri-ui/context/CTX-324.1-model-listing-and-validate.md)) 2026-08-27
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-321, SPEC-208, SPEC-106 · *Parent:* SPEC-300
+
+The model field is a bare text box. A typo saves cleanly, the record looks configured, and the
+first sign of trouble is a vendor error inside an AI feature — the same "looks fine, fails later"
+shape as `SPEC-407`'s sidecar, one layer up. A dropdown of what the provider actually offers, free
+text for everything else, and an on-demand Validate that works either way.
+
+**Exists because `SPEC-322` §1's non-goal was built on a premise nobody checked.** That spec
+declined validation on the grounds that "the app does not know a vendor's model list". Probed
+against the real installed SDKs: `anthropic`, `openai_compat` and `google` can all list models, and
+two can retrieve one by id — so the app can know, and an existence check costs no tokens. The
+non-goal is marked superseded in `SPEC-322` itself with that correction, rather than deleted.
+
+Three decisions carry the design. Listing runs in the **daemon**, reusing `SPEC-208`'s existing
+per-`kind` client construction, because doing it from the renderer would put the API key there and
+bypass `SPEC-106`'s secret channel — the same reason `CTX-320.1` rejected a renderer-side account
+read. The control is a **combobox, not a dropdown**: a private deployment, a model newer than the
+SDK's list, or a compat server with its own naming must all still work, so free text is the floor
+and the list is a suggestion. And **nothing calls a vendor unless asked** — no startup fetch, no
+validation on save — because `SPEC-107` §3 already holds that line for capability probes and
+automatic validation would spend real quota to catch a typo a second earlier.
+
+Named risks with weight: `openai_compat` is the widest kind and behaves differently per server
+(Ollama lists *locally pulled* models, which is local availability rather than entitlement); vendor
+lists can run to hundreds of entries so filtering is a requirement rather than polish; `retrieve`
+semantics differ per vendor and Google's was not probed; and a model that exists is not a model
+that works — `SPEC-208` §2.4's capability preflight remains the check that decides whether an agent
+can actually run on it.
+
+#### [SPEC-323](apps/tauri-ui/specs/SPEC-323-advanced-agent-configuration.md) — Advanced Per-Agent Configuration — 📋 Draft 2026-08-27
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-208, SPEC-321, SPEC-322, SPEC-106 · *Parent:* SPEC-300
+
+What the maintainer actually wanted when he asked to "address agents by type", separated from
+`SPEC-322`'s legibility fix because it is new capability rather than copy: bind an individual agent
+to a specific provider, model and reasoning effort, behind an Advanced toggle that is off by
+default, with reset back to the role defaults.
+
+The tiering is the design constraint, in his own words: managed users would not care, a
+bring-your-own-key user cares little, and it is the contributor fine-tuning the product who needs
+it — so per-agent config is an advanced option and nothing else changes. `SPEC-208` §2.3.1's
+"exactly two roles, deliberately" is **extended, not reopened**: an agent with no override resolves
+exactly as it does today, on the same code path.
+
+Deliberately left undecided rather than guessed: how reasoning effort is represented portably.
+Anthropic takes a token budget, OpenAI an effort level, Google its own thinking config. The
+proposal is a small ordered enum mapped per provider `kind` in the daemon, with a raw per-vendor
+value rejected because it leaks vendor shape into a provider-agnostic UI and silently means nothing
+when an agent's provider changes. That needs checking against what each `kind` can actually send.
+
+Three named risks carry real weight: `SPEC-208` §2.4's capability preflight must run on overrides
+too or the advanced path becomes the one place that skips the safety check; provider deletion
+already warns when a record is role-bound and must learn about overrides or it silently breaks an
+agent; and twelve agents is already a lot of settings surface that grows with every new agent.
+
+Worth recording that this is the third consecutive spec in this area written from the maintainer's
+own use of the product — `SPEC-321` shipped correct and unreadable, `SPEC-322` made it readable,
+this adds what was wanted. None of the three would have been caught by a test.
+
+#### [SPEC-322](apps/tauri-ui/specs/SPEC-322-model-role-legibility.md) — Model Role Legibility in Settings — 🚧 in progress ([CTX-322.1](apps/tauri-ui/context/CTX-322.1-model-role-legibility.md)) 2026-08-27
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-321, SPEC-208, SPEC-303 · *Parent:* SPEC-300
+
+`SPEC-321` shipped 2026-08-26 with every route real and its tests green. The maintainer opened the
+resulting screen for the first time the next day and reported: "I see a reasoning with a dropdown
+list and fast with a dropdown list. This isn't self explanatory." Nothing said what a role was,
+which features used it, or that the model itself is set one level up on the provider record — the
+screen had two levels and linked them nowhere.
+
+`SPEC-302`'s lesson repeating in a new surface, and the one `CLAUDE.md` already records: a spec can
+be mechanically perfect and still be the wrong thing to build. The difference is that this time a
+person used the surface and said so, which is the norm working rather than failing.
+
+Fixed as copy and one derived string, no schema change: each role now shows the model it actually
+resolves to, the section says what a role is and where the model comes from, and a closing line
+answers the question that was really being asked — which role a feature uses is fixed by the app,
+not configurable. Reading the component to write that also surfaced a genuinely invalid state the
+screen had been rendering as ordinary: a role bound to a provider with no model for it, which
+`SPEC-321`'s own editor permits and which fails at call time with nothing in Settings hinting why.
+It now names the provider and says the role cannot run.
+
+Two real requests from the same report are **deferred with reasons rather than absorbed**: a
+reasoning-effort control (provider records carry a model id per role and nothing else — new
+capability, needs a `SPEC-208` schema change) and per-agent model binding (contradicts `SPEC-208`
+§2.3.1's "exactly two roles, deliberately", so that argument has to be reopened first).
 
 ### 3.4 `4xx` — Distribution & operations
 
@@ -816,6 +1095,102 @@ the two most fragile integration points in the codebase. `SPEC-402`'s `CTX-402.5
 shipped real Windows/Linux *builds*, still explicitly pre-release for exactly this reason — this
 spec is what would move them past that label.
 
+
+#### [SPEC-404](specs/SPEC-404-managed-hosted-access.md) — Managed Hosted Access — 📋 Draft 2026-08-25
+*Module:* repo-wide + an external gateway service · *Depends on:* SPEC-201, SPEC-106, SPEC-402
+
+An optional paid tier supplying LLM inference through a GittieLabs-operated gateway, so a user can
+install the app and use every AI feature without holding an account with a model vendor. Today's
+first run sends them out of the product for five steps — vendor account, payment method, API key —
+which is where the funnel ends for anyone who wanted to look up a part rather than become an
+LLM-API customer.
+
+**The tier sells operation, not capability, and no source is ever withheld from this repository** —
+not temporarily, not behind an early-access window. Subscribers receive earlier *builds* of source
+that is already public, through a second `SPEC-402` updater channel; anyone building from source has
+the same feature the same day. That early-access fleet is also the closest thing to a real answer
+for `SPEC-403`'s problem, which is that every live CAD test to date has run on one machine.
+
+Managed is one more entry in `SPEC-201`'s provider abstraction — a base URL and a bearer token — not
+a hosted version of the app, which would contradict `PRODUCT-PLAN.md`'s files-as-source-of-truth
+model and the local KiCad/FreeCAD process dependency. The gateway is an external system; this spec
+carries only the wire contract the client is written against.
+
+Two things it settles rather than defers. **Updates are not sold** — `SPEC-402` already ships
+auto-update free to every installed copy, so selling updates would require degrading the free build.
+And the contributor policy is **DCO, not CLA**: the cost is that the project can no longer be
+relicensed without contributor consent, which is the intended outcome, not an oversight. Vendor
+terms were verified rather than assumed (Anthropic Commercial Terms §A.1/§D.4, OpenAI Services
+Agreement §2.2/§3.1) — building an application for your own end users is expressly permitted,
+reselling account or API access is expressly prohibited, and the gateway must be funded by a paid
+API account rather than a consumer subscription.
+
+#### [SPEC-405](specs/SPEC-405-product-rename-copperplane.md) — Product Rename to Copperplane — ✅ done ([CTX-405.3](context/CTX-405.3-identity-guard-tests.md), [CTX-405.1](context/CTX-405.1-rename-app-and-icons.md)) 2026-08-25
+*Module:* repo-wide (code, docs, icons) · *Depends on:* SPEC-402, SPEC-106 · *Parent:* SPEC-000
+
+Renames the product from Hardware Agent Studio to **Copperplane** everywhere a person can see it —
+window title, menu, About box, docs site, app icon — while freezing the five on-disk identity
+strings (bundle identifier, keychain service, both daemon data-directory constants, the
+`.kicad_mod` generator stamp) exactly as they are, so a `v0.1.3` user's library, keys and linked
+projects survive the update untouched. "Agent Studio" collides with Oracle, Google, Automation
+Anywhere and others; Copperplane is clean on USPTO and pulls the name out of AI-tooling vocabulary
+into the user's own — the solid ground layer of a PCB.
+
+The real hazard the spec is built around: a global find-and-replace would appear to work, keep CI
+green, and silently orphan every existing user's keys and linked projects by renaming the frozen
+identity strings along with everything else. Three identity-guard tests are the mitigation. Fully
+independent of the managed-tier work above — no shared files, no shared dependency — and can land
+on its own branch whenever a clean 75-file diff is convenient.
+
+#### [SPEC-406](specs/SPEC-406-contributor-local-builds.md) — Contributor Local Builds & Signing Defaults — ✅ done ([CTX-406.1](context/CTX-406.1-unsigned-local-build-default.md)) 2026-08-26
+*Module:* core/tauri-rust, repo root (`.github/workflows/release.yml`, `CONTRIBUTING.md`) · *Depends on:* SPEC-402, SPEC-401 · *Parent:* SPEC-402
+
+Makes an unsigned, installable local build the **default** outcome of `tauri build`, instead of the
+release-only `createUpdaterArtifacts: true` setting living in the shared `tauri.conf.json` and
+demanding a `TAURI_SIGNING_PRIVATE_KEY` no contributor can have. Hit for real by the maintainer on
+2026-08-26 trying to check the macOS app menu bar, which only exists in a bundled `.app`, not under
+`tauri dev` — and `CONTRIBUTING.md` never documented a path past `tauri dev` at all, despite asking
+for Windows/Linux platform reports that require one. The fix: a new release-only
+`tauri.release.conf.json` overlay, merged by `--config` in `release.yml`'s three build legs only —
+CI stays the only path to a signed, update-capable build, for maintainers too. Shipped in a single
+context ([CTX-406.1](context/CTX-406.1-unsigned-local-build-default.md), 2026-08-26).
+
+#### [SPEC-407](specs/SPEC-407-sidecar-build-integrity.md) — Sidecar Build Integrity & Fail-Loud Packaging — 🚧 in progress ([CTX-407.1](context/CTX-407.1-fail-loud-daemon-and-packaging-gate.md), [CTX-407.2](context/CTX-407.2-one-command-local-build.md)) 2026-08-27
+*Module:* `services/python-daemon`, `core/tauri-rust`, `apps/tauri-ui`, `CONTRIBUTING.md` · *Depends on:* SPEC-401, SPEC-406, SPEC-107 · *Parent:* SPEC-401
+
+Written from a real, single-session failure log, not from speculation: on 2026-08-27 the maintainer
+built the app from a clean checkout and hit **seven** distinct failure modes in sequence, every one
+of which produced a green build. Five were loud and cost minutes. Two were silent and are the
+reason this spec exists.
+
+The first silent one: the committed placeholder sidecar bundles cleanly, `Command::spawn` succeeds
+because it is a real executable file, it exits 1 to a `stderr` no Finder-launched `.app` shows, and
+`SPEC-107`'s heartbeat monitor kills an already-dead child fifteen seconds later while the app
+itself keeps running, so the window stays open and every request fails with nothing user-facing.
+The second, and worse: a mis-frozen sidecar (arch mismatch surviving PyInstaller's own `build/`
+cache) **starts successfully**, answers `daemon.ready` with KiCad and FreeCAD both live, heartbeats
+normally — and runs with `chat.send`, `agent.dispatch_tool`, `kicad.generate_component` and
+`datasheet.generate_guidance` all disabled by `daemon.py`'s own import guards. A crash sends you to
+the packaging; a healthy-looking daemon with no AI sends you hunting a UI bug that does not exist.
+
+The through-line is distance between cause and symptom — an arch mismatch introduced at `pip
+install` surfaced as a `dlopen` failure two stages later. So the design is three checkpoints, each
+owning what only it can know: freeze time (framework interpreter, binary arch matches the
+interpreter), bundle time (not the placeholder, arch matches the Tauri target), run time
+(`daemon.ready` carries the list of optional modules that failed to import, and the app says so).
+
+Also corrects two pieces of documentation that actively mislead: `CONTRIBUTING.md`'s Tier 3 row
+never states the framework-Python requirement at all, and `daemon.spec`'s header still recommends
+the Homebrew interpreter that `CTX-402.4` superseded with python.org universal2. And two real bugs
+in `scripts/verify_sidecar.py` — it pipes the child's `stderr` and never drains it (hiding every
+error, and deadlocking the daemon outright if the buffer fills), and its `daemon.configure` check
+prints `FAIL` without incrementing the failure counter, so the packaging gate can print a failure
+and still exit 0.
+
+Explicitly **not** a change to `daemon.py`'s graceful degradation, which is correct and stays; not
+signing or updater work (`SPEC-402`); not cross-platform proof (`SPEC-403`); and not a build
+wrapper, which `SPEC-406` §1 already rejected.
+
 ### 3.5 `9xx` — The framework itself
 
 **All three done as of 2026-08-08.** SPEC-901/CTX-901.1, SPEC-903/CTX-903.1, and SPEC-902/CTX-902.1
@@ -868,6 +1243,21 @@ not a caught bug.
 OSes running `python -m unittest discover tests/`, with expected-skip verification for the live
 CAD tests) and `frontend-ci.yml` (`vitest` plus `oxlint` plus `tsc -b`), following the pattern
 `rust-core-ci.yml` already established.
+
+#### [SPEC-904](specs/SPEC-904-license-attribution-consistency.md) — Repository License & Attribution Consistency — ✅ done ([CTX-904.1](context/CTX-904.1-license-attribution-consistency.md)) 2026-08-24
+
+*Module:* repo root (`LICENSE`, `NOTICE`), `core/tauri-rust/Cargo.toml`, `apps/tauri-ui/package.json` · *Depends on:* nothing
+
+Makes every machine-readable license declaration agree with the actual grant. `Cargo.toml` declared
+`license = "MIT"`, a leftover from the Tauri scaffold, while the repo's real `LICENSE` is
+Apache-2.0 — and that field is precisely what crates.io and automated license scanners read: the
+version of the truth a machine is most likely to believe, and it was wrong. `package.json` had no
+`license` field at all, which npm tooling reads as "no license asserted" rather than inheriting the
+repo's. `LICENSE` itself still carried the unfilled Apache-2.0 appendix boilerplate, so the license
+text never named a copyright holder anywhere in the repo. Not a relicense — the repo was already
+Apache-2.0; this only makes the metadata match what was already true, and adds the missing
+`NOTICE`. This spec's own norm is what later ruled `pymupdf`/`fitz` (AGPL-3.0) out of `SPEC-205` in
+favour of `pdfplumber` (MIT).
 
 ---
 

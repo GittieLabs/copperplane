@@ -3,7 +3,32 @@ pynng==0.9.0
 trimesh==5.0.0
 pyyaml==6.0.3
 certifi==2026.4.22
-gittielabs-agentflow[anthropic,openai,google]==0.10.0
+gittielabs-agentflow[anthropic,openai,google]==0.11.1
+# CTX-209.1: the three vendor SDKs AgentFlow's extras pull in, pinned
+# explicitly rather than left to float. They were the only unpinned direct
+# dependencies in this file, and the float shipped a real bug: v0.3.0's
+# release CI resolved anthropic 1.2.0, which had REMOVED `temperature` from
+# messages.create, so every Anthropic call in that build raised TypeError
+# client-side before reaching the network. It went unseen because a local
+# interpreter still carried anthropic 0.121.0, where the parameter works --
+# same repo, same tests, opposite results, decided by which SDK pip happened
+# to resolve. Fixed upstream in agentflow 0.11.1; pinned here so a release
+# cannot acquire an incompatible SDK again without someone choosing to.
+#
+# CTX-402.6 already pinned `cryptography` for exactly this reason, naming
+# these same three SDKs as the source of the float. This is that fix one
+# level up.
+#
+# Pinning bounds PARAMETERS, not models. A model is a runtime string passed
+# straight through, so any pinned SDK accepts any model a user types. But
+# none of these three accept `**kwargs` -- checked directly -- so an unknown
+# argument is rejected client-side, which means SPEC-209's `params`
+# passthrough can only send what the pinned SDK's own signature allows.
+# Reaching a newly-added vendor parameter therefore needs a deliberate bump
+# here, verified by a real release, which is the intended trade.
+anthropic==1.2.0
+openai==3.6.0
+google-genai==2.20.0
 
 # CTX-205.1: real PDF text/page extraction for the datasheet structure
 # pass (SPEC-205) -- MIT-licensed (its own deps, pdfminer-six/pillow/

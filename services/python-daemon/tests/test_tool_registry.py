@@ -24,6 +24,26 @@ class TestBuildToolRegistry(unittest.TestCase):
         # fully-imported daemon module -- not a hypothetical route.
         self.assertTrue(expected_names, "expected at least one real route to be registered")
 
+    def test_002_exclude_leaves_every_other_route_registered(self):
+        """CTX-319.1 (SPEC-319 §2.2): review()'s own real call shape --
+        excluding CONFIRMATION_REQUIRED_TOOLS must not affect any other
+        registered tool."""
+        full = tool_registry.build_tool_registry()
+        filtered = tool_registry.build_tool_registry(exclude=tool_registry.CONFIRMATION_REQUIRED_TOOLS)
+
+        full_names = {t["name"] for t in full.list_tools()}
+        filtered_names = {t["name"] for t in filtered.list_tools()}
+
+        self.assertEqual(full_names - filtered_names, tool_registry.CONFIRMATION_REQUIRED_TOOLS & full_names)
+        self.assertTrue(filtered_names, "expected at least one real route to survive the exclusion")
+
+    def test_003_exclude_a_name_that_is_not_registered_at_all_is_a_harmless_no_op(self):
+        registry = tool_registry.build_tool_registry(exclude={"not.a.real.tool"})
+        self.assertEqual(
+            {t["name"] for t in registry.list_tools()},
+            set(tool_registry.TOOL_DEFINITIONS) & set(daemon.ROUTES),
+        )
+
 
 class TestConfirmationGating(unittest.IsolatedAsyncioTestCase):
     """TEST-002/TEST-004: kicad.inject_component is gated; other tools are not."""

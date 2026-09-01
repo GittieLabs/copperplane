@@ -48,6 +48,30 @@ vi.mock('./AgentChat', () => ({
   ),
 }))
 
+// CTX-319.5: ReviewPanel has its own dedicated test file
+// (ReviewPanel.test.tsx) -- stubbed here, matching AgentChat's own
+// precedent immediately above.
+vi.mock('./ReviewPanel', () => ({
+  ReviewPanel: ({
+    area,
+    scope,
+    scopeId,
+    title,
+    projectName,
+  }: {
+    area: string
+    scope: string
+    scopeId: string
+    title: string
+    projectName?: string
+  }) => (
+    <p>
+      ReviewPanel stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
+      {projectName && ` projectName=${projectName}`}
+    </p>
+  ),
+}))
+
 const { Overview } = await import('./Overview')
 
 beforeEach(() => {
@@ -87,11 +111,52 @@ describe('Overview: CTX-318.5 AgentChat wiring', () => {
     await waitFor(() => expect(screen.getByText(/AgentChat stub/).textContent).toContain('scopeId=project-b:overview'))
   })
 
+  it('CTX-207.1: renders the real reply text out of llm.chat\'s {text, usage, model} result, not the whole object', async () => {
+    submitJobMock.mockResolvedValue({
+      result: Promise.resolve({
+        text: 'Sure, here is an answer.',
+        usage: { input_tokens: 12, output_tokens: 6 },
+        model: 'claude-sonnet-5',
+      }),
+    })
+    await renderOverview()
+
+    fireEvent.change(screen.getByPlaceholderText(/ask a question about this project/), {
+      target: { value: 'what should I do next?' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+    await waitFor(() => screen.getByText('Sure, here is an answer.'))
+    expect(screen.queryByText(/\[object Object\]/)).toBeNull()
+  })
+
   it('the plain llm.chat surface still coexists alongside the new AgentChat panel (CTX-318.6 only removed the generate/inject branches)', async () => {
     await renderOverview()
 
     screen.getByPlaceholderText(/ask a question about this project/)
     screen.getByText(/AgentChat stub/)
+  })
+})
+
+describe('Overview: CTX-319.5 ReviewPanel wiring', () => {
+  it('mounts ReviewPanel scoped to the project overview area', async () => {
+    await renderOverview()
+
+    const stub = screen.getByText(/ReviewPanel stub/)
+    expect(stub.textContent).toContain('area=overview')
+    expect(stub.textContent).toContain('scope=project')
+    expect(stub.textContent).toContain('scopeId=weather-pcb:overview')
+    expect(stub.textContent).toContain('title="Review this project"')
+    expect(stub.textContent).toContain('projectName=weather-pcb')
+  })
+
+  it('re-scopes ReviewPanel when the project changes', async () => {
+    const { rerender } = render(<Overview projectName="project-a" project={{ name: 'project-a' }} />)
+    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+
+    rerender(<Overview projectName="project-b" project={{ name: 'project-b' }} />)
+
+    await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:overview'))
   })
 })
 

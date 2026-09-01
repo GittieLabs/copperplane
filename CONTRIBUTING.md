@@ -1,4 +1,4 @@
-# Contributing to Hardware Agent Studio
+# Contributing to Copperplane
 
 Thanks for being here. This project is early, actively developed, and genuinely
 open to contribution — including from people who have never touched a PCB.
@@ -70,8 +70,70 @@ npm install && npm test
 
 # The whole app, in dev mode
 cd core/tauri-rust
-npx @tauri-apps/cli@2 dev
+npx @tauri-apps/cli@2.11.4 dev
 ```
+
+### Local builds — three honest tiers
+
+`tauri dev` (above) is fast, but it never runs a real bundle — no macOS app menu bar, no `Info.plist`
+identity, no sidecar resolution the way an installed app actually does it. When you need one of
+those, here is what a local build in `core/tauri-rust` actually gets you, and what it does not
+(SPEC-406):
+
+| Tier | Command | Gets you | Does not |
+| :--- | :--- | :--- | :--- |
+| 1 — `tauri dev` | `npx @tauri-apps/cli@2.11.4 dev` | Fast iteration | App menu bar, bundle identity, sidecar resolution |
+| 2 — unsigned `.app`, real daemon | `npx @tauri-apps/cli@2.11.4 build --bundles app` | A real, launchable, unsigned `.app` with real daemon behavior end to end | A `.dmg`, and anything signed or update-capable |
+| 3 — unsigned `.dmg` too | `npx @tauri-apps/cli@2.11.4 build` | Everything Tier 2 gets you, plus a `.dmg` | Signing, notarization, updater artifacts — CI is the only path to those |
+
+**Pin the CLI version.** Every command above names an exact `@tauri-apps/cli` version rather than
+`@2`, which silently resolves to whatever 2.x is newest at build time. `release.yml` pins the same
+version deliberately — `CTX-402.6`'s Linux updater-artifact regression was caused by exactly that
+drift. Keep them equal; bump both together, verifying a real release run.
+
+**Tiers 2 and 3 are one command each, and both give you a real daemon.** `tauri build` runs
+`ensure_sidecar.py` for you (via Tauri's own
+`beforeBuildCommand`): if the frozen daemon is already present, real, current, and the right
+architecture it
+does nothing and the build proceeds; otherwise it freezes, names and verifies it first. The same
+script is what `release.yml` calls, so a local build and a release cannot drift apart.
+
+There is no longer a tier that bundles the placeholder on purpose. `SPEC-407` §2.3 made that
+impossible — `beforeBuildCommand` runs on **every** `tauri build`, `--bundles app` included, so a
+build either carries a real, current daemon or stops and says why. The trade this removes is real:
+a first build now needs a Python interpreter PyInstaller can freeze with, where it previously did
+not. That cost buys an app that cannot silently launch with a dead daemon.
+
+The first build on a new machine needs an interpreter PyInstaller can freeze with, and will stop
+with the exact command to install one if you do not have it. On macOS that is python.org's
+universal2 Python 3.11 — not Homebrew's, which is single-arch. Everything after that first freeze
+is a no-op costing about a second.
+
+If you want to freeze or check by hand:
+
+```bash
+cd services/python-daemon
+python3 scripts/ensure_sidecar.py               # freeze if needed, then verify
+python3 scripts/ensure_sidecar.py --check-only  # report only, never freeze
+```
+
+Do not rename the frozen binary yourself. Tauri looks for the base name plus the build target's
+triple, which is also what the committed placeholder is called — get it wrong and your build bundles
+the placeholder, which spawns fine, exits immediately, and leaves the app running with a dead daemon
+and no explanation.
+
+**An unsigned local build runs fine.** It never receives macOS's `com.apple.quarantine` attribute
+(that only gets attached to something downloaded from the internet), so there is no Gatekeeper
+warning and no right-click-Open dance — the friction described in `SPEC-402` applies to *released*
+`.dmg` downloads, not a build you just made yourself.
+
+**Signed, update-capable builds only ever come from CI.** `core/tauri-rust/tauri.conf.json` ships
+with `createUpdaterArtifacts: false` for exactly this reason — no local build ever demands
+`TAURI_SIGNING_PRIVATE_KEY`, a secret that only exists as a GitHub Actions secret and has no local
+substitute. The release pipeline re-enables it explicitly via a `--config
+tauri.release.conf.json` overlay on its own three build legs; there is no way to produce a real
+update-capable artifact locally, by design — a contributor's own generated updater keypair would
+produce artifacts the shipped app's pinned public key correctly rejects.
 
 ### Platform reports are a contribution
 

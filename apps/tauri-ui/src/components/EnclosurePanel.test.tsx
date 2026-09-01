@@ -63,6 +63,33 @@ vi.mock('./AgentChat', () => ({
   ),
 }))
 
+// CTX-319.4: ReviewPanel has its own dedicated test file
+// (ReviewPanel.test.tsx) -- stubbed here, matching AgentChat's own
+// precedent immediately above.
+vi.mock('./ReviewPanel', () => ({
+  ReviewPanel: ({
+    area,
+    scope,
+    scopeId,
+    title,
+    projectName,
+    menuCommand,
+  }: {
+    area: string
+    scope: string
+    scopeId: string
+    title: string
+    projectName?: string
+    menuCommand?: { area: string; command: string; nonce: number } | null
+  }) => (
+    <p>
+      ReviewPanel stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
+      {projectName && ` projectName=${projectName}`}
+      {menuCommand && ` menuCommand=${menuCommand.area}:${menuCommand.command}:${menuCommand.nonce}`}
+    </p>
+  ),
+}))
+
 const { EnclosurePanel } = await import('./EnclosurePanel')
 
 /** Real user feedback exercising the actual running app: the old
@@ -810,6 +837,19 @@ describe('EnclosurePanel: SPEC-316 menuCommand', () => {
     await waitFor(() => expect(listOpenBoardsMock).toHaveBeenCalled())
     expect(openKicadMock).not.toHaveBeenCalled()
   })
+
+  it('TEST-009d (CTX-319.6): a real menuCommand is forwarded through to ReviewPanel unchanged', async () => {
+    render(
+      <EnclosurePanel
+        projectName="test-project"
+        menuCommand={{ area: 'enclosure', command: 'run_review', nonce: 4 }}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('menuCommand=enclosure:run_review:4'),
+    )
+  })
 })
 
 describe('EnclosurePanel: CTX-318.4 AgentChat wiring', () => {
@@ -833,5 +873,28 @@ describe('EnclosurePanel: CTX-318.4 AgentChat wiring', () => {
     rerender(<EnclosurePanel projectName="project-b" />)
 
     await waitFor(() => expect(screen.getByText(/AgentChat stub/).textContent).toContain('scopeId=project-b:enclosure'))
+  })
+})
+
+describe('EnclosurePanel: CTX-319.4 ReviewPanel wiring', () => {
+  it('mounts ReviewPanel scoped to the project enclosure area', async () => {
+    render(<EnclosurePanel projectName="weather-pcb" />)
+
+    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+    const stub = screen.getByText(/ReviewPanel stub/)
+    expect(stub.textContent).toContain('area=enclosure')
+    expect(stub.textContent).toContain('scope=project')
+    expect(stub.textContent).toContain('scopeId=weather-pcb:enclosure')
+    expect(stub.textContent).toContain('title="Review the enclosure"')
+    expect(stub.textContent).toContain('projectName=weather-pcb')
+  })
+
+  it('re-scopes ReviewPanel when the project changes', async () => {
+    const { rerender } = render(<EnclosurePanel projectName="project-a" />)
+    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+
+    rerender(<EnclosurePanel projectName="project-b" />)
+
+    await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:enclosure'))
   })
 })

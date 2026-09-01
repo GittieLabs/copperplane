@@ -16,7 +16,13 @@ name: "Release"
 # adds real, UNSIGNED Windows and Linux builds -- explicitly pre-release
 # (see SPEC-402 §1 Non-Goals): windows-latest/ubuntu-latest are free-tier
 # GitHub-hosted runners (unlike macOS Intel), so no cross-compile trick is
-# needed there, just their own native build legs.
+# needed there, just their own native build legs. CTX-402.7: every `tauri
+# build` invocation below pins an exact @tauri-apps/cli version
+# (2.11.4, the one this pipeline last verified end to end) rather than
+# `npx @tauri-apps/cli@2`, which silently resolves to whatever 2.x is
+# newest at build time -- the real, root cause of CTX-402.6's Linux
+# updater-artifact regression. Bump this version deliberately, verifying
+# a real release run, not by letting it drift.
 
 on:
   push:
@@ -80,19 +86,17 @@ jobs:
           curl -fsSL -o "$RUNNER_TEMP/python311.pkg" https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg
           sudo installer -pkg "$RUNNER_TEMP/python311.pkg" -target /
 
-      - name: Install daemon runtime + build dependencies
+      # SPEC-407 §2.3: the venv/pip/pyinstaller/rename sequence lives in
+      # freeze_sidecar.py, which `beforeBuildCommand` also calls. One
+      # implementation, so a contributor's local build and this release leg
+      # cannot drift apart -- which is what SPEC-406 §1 was worried about
+      # when it rejected a wrapper, answered by making this the only copy
+      # rather than a second one. The arch prefix and the target-triple
+      # rename are inside the script (both keyed off --target-triple, never
+      # off `rustc -vV`'s host -- CTX-402.4).
+      - name: Freeze the Python daemon and name it for this target
         working-directory: services/python-daemon
-        env:
-          ARCH_PREFIX: ${{ matrix.target == 'x86_64-apple-darwin' && 'arch -x86_64' || 'arch -arm64' }}
-        run: |
-          $ARCH_PREFIX /Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 -m venv .build-venv
-          $ARCH_PREFIX .build-venv/bin/pip install -r requirements.txt -r requirements-build.txt
-
-      - name: Freeze the Python daemon (SPEC-401's committed daemon.spec)
-        working-directory: services/python-daemon
-        env:
-          ARCH_PREFIX: ${{ matrix.target == 'x86_64-apple-darwin' && 'arch -x86_64' || 'arch -arm64' }}
-        run: $ARCH_PREFIX .build-venv/bin/pyinstaller daemon.spec
+        run: python3 scripts/freeze_sidecar.py --target-triple ${{ matrix.target }}
 
       # Tauri's externalBin convention appends the real BUILD-TARGET's
       # triple to the sidecar's base name, not the build HOST's -- using
@@ -102,9 +106,9 @@ jobs:
       # triple never changes on this arm64 runner even when cross-
       # compiling. Keying off matrix.target directly is the real fix
       # (CTX-402.4 Plan Drift).
-      - name: Rename the frozen binary to Tauri's real target-triple sidecar convention
+      - name: Verify the frozen sidecar is real and the right architecture
         working-directory: services/python-daemon
-        run: mv dist/hardware-agent-studio-daemon "dist/hardware-agent-studio-daemon-${{ matrix.target }}"
+        run: python3 scripts/ensure_sidecar.py --check-only --target-triple ${{ matrix.target }}
 
       # The App Store Connect API key (CTX-402.3) is stored as a GitHub
       # secret holding the real .p8 file *content* -- notarytool (invoked
@@ -120,8 +124,12 @@ jobs:
       # tauri.macos.conf.json (CTX-401.2) merges automatically -- Tauri v2's
       # own platform-config-override convention picks it up because this
       # step runs on macOS, no explicit --config flag needed.
-      # createUpdaterArtifacts (tauri.conf.json, CTX-402.2) plus the two
-      # TAURI_SIGNING_* vars makes this step also produce a real
+      # createUpdaterArtifacts now defaults to false (SPEC-406) so a
+      # contributor's own local build never demands a signing key; this
+      # release leg explicitly re-enables it via --config
+      # tauri.release.conf.json (merged on top, per Tauri's own
+      # "configs merge in the order provided" contract), which combined
+      # with the two TAURI_SIGNING_* vars makes this step produce a real
       # <app>.app.tar.gz + matching .sig, signed with the real, maintainer-
       # generated Ed25519 keypair -- entirely unrelated to the
       # APPLE_*/Developer ID vars below (SPEC-402 §2: two separate trust
@@ -147,7 +155,7 @@ jobs:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: npx @tauri-apps/cli@2 build --target ${{ matrix.target }}
+        run: npx @tauri-apps/cli@2.11.4 build --target ${{ matrix.target }} --config tauri.release.conf.json
 
       - name: Upload this leg's real build artifacts for the publish job
         uses: actions/upload-artifact@v4
@@ -228,12 +236,15 @@ jobs:
       # runner. No APPLE_*-equivalent signing vars -- only the Tauri
       # updater keypair, shared across every platform (SPEC-402 §2: the
       # updater's own trust model was always platform-agnostic).
+      # --config tauri.release.conf.json (SPEC-406) re-enables
+      # createUpdaterArtifacts for this release leg -- see the macOS leg's
+      # comment above for the full reasoning.
       - name: Build the Tauri app bundle
         working-directory: core/tauri-rust
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx @tauri-apps/cli@2 build --target x86_64-pc-windows-msvc
+        run: npx @tauri-apps/cli@2.11.4 build --target x86_64-pc-windows-msvc --config tauri.release.conf.json
 
       - name: Upload this leg's real build artifacts for the publish job
         uses: actions/upload-artifact@v4
@@ -321,17 +332,25 @@ jobs:
         run: mv dist/hardware-agent-studio-daemon dist/hardware-agent-studio-daemon-x86_64-unknown-linux-gnu
 
       # tauri.linux.conf.json (CTX-402.5) merges automatically on this
-      # runner. createUpdaterArtifacts (tauri.conf.json) makes this also
-      # produce a real <app>_<version>_amd64.AppImage.tar.gz + matching
-      # .sig -- confirmed directly against tauri-plugin-updater's own real
-      # source (the exact version pinned in Cargo.lock) that AppImage is
-      # the real Linux updater artifact format, not .deb/.rpm.
+      # runner. --config tauri.release.conf.json (SPEC-406) re-enables
+      # createUpdaterArtifacts for this release leg (see the macOS leg's
+      # comment above). AppImage is the real Linux updater artifact
+      # format, not .deb/.rpm (CTX-402.5, still true). CTX-402.6: the real
+      # v0.2.0 release run showed the current @tauri-apps/cli (2.11.4,
+      # resolved fresh by npx, not pinned) signs the raw
+      # <app>_<version>_amd64.AppImage directly -- ".AppImage.sig", no
+      # ".tar.gz" wrapper -- unlike the ".app.tar.gz"/".sig" pair macOS
+      # still produces. CTX-402.5's own comment assumed the .tar.gz
+      # wrapper from whatever Tauri version was current in 2026-08-17;
+      # this is real, observed version drift, not a mistake in this leg's
+      # own build step -- only the two download-side glob patterns below
+      # (and the matching ones in the publish job) needed correcting.
       - name: Build the Tauri app bundle
         working-directory: core/tauri-rust
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npx @tauri-apps/cli@2 build --target x86_64-unknown-linux-gnu --bundles deb,appimage
+        run: npx @tauri-apps/cli@2.11.4 build --target x86_64-unknown-linux-gnu --bundles deb,appimage --config tauri.release.conf.json
 
       - name: Upload this leg's real build artifacts for the publish job
         uses: actions/upload-artifact@v4
@@ -340,8 +359,7 @@ jobs:
           path: |
             core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
             core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
-            core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.tar.gz
-            core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.tar.gz.sig
+            core/tauri-rust/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage.sig
           if-no-files-found: error
 
   # A separate job, not a third matrix leg: publishing must happen exactly
@@ -353,8 +371,17 @@ jobs:
     needs: [build-macos, build-windows, build-linux]
     runs-on: macos-latest
     steps:
+      # CTX-402.7: fetch-depth: 0 (full history, every tag) -- the default
+      # shallow checkout (depth 1) made generate_release_notes.py's own
+      # fallback (first_commit(), when no other tag is found) silently
+      # treat this single fetched commit as the repo's root, comparing
+      # v0.2.0 against itself and reporting a null diff. Needed regardless
+      # of latest_tag()'s own fix, since a real from_ref..to_ref diff
+      # needs real history to walk.
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download every real build leg's artifacts
         uses: actions/download-artifact@v4
@@ -368,6 +395,11 @@ jobs:
       # leg (two macOS architectures signed/notarized -- CTX-402.4 --
       # plus unsigned Windows/Linux pre-release builds -- CTX-402.5) --
       # generate_update_manifest.py folds them all into one latest.json.
+      # Each platform's find -name '*.sig' relies on exactly one .sig
+      # file existing in that leg's downloaded artifact directory -- true
+      # for Windows (only the .exe's .sig is ever uploaded, see that leg's
+      # own upload step) and, since CTX-402.6, true for Linux too (only
+      # the AppImage's .sig is uploaded, not the .deb's).
       - name: Generate the real Tauri updater manifest (latest.json)
         run: |
           PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -409,6 +441,5 @@ jobs:
             artifacts/windows-x86_64-pc-windows-msvc/**/*.sig
             artifacts/linux-x86_64-unknown-linux-gnu/**/*.deb
             artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage
-            artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage.tar.gz
-            artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage.tar.gz.sig
+            artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage.sig
             ${{ runner.temp }}/latest.json

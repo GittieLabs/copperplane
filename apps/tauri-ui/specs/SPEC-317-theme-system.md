@@ -1,10 +1,10 @@
 ---
 id: SPEC-317
 title: "Theme System: Light, Dark, and System Mode"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-20
-last_updated: 2026-08-20
+last_updated: 2026-08-24
 target_version: v0.3.0
 location: "apps/tauri-ui/specs/SPEC-317-theme-system.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
