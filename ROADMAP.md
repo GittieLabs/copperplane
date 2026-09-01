@@ -1038,6 +1038,74 @@ reasoning-effort control (provider records carry a model id per role and nothing
 capability, needs a `SPEC-208` schema change) and per-agent model binding (contradicts `SPEC-208`
 §2.3.1's "exactly two roles, deliberately", so that argument has to be reopened first).
 
+#### [SPEC-325](apps/tauri-ui/specs/SPEC-325-kicad-project-integration.md) — KiCad Project Integration & Schematic Component Table — Draft
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-312, SPEC-311
+
+The read half of the co-pilot, and the foundation the four specs below stand on. Verified
+2026-09-01 that `kicad-cli sch export bom`/`netlist` read a **closed** `.kicad_sch` with no GUI and
+no IPC — the capability was always there and the app never asked. A project links to a
+`.kicad_pro`; the Schematic tab becomes a component table.
+
+**The four below are staged deliberately, read-only first.** They came out of one long design
+conversation on 2026-09-01 about whether this is a reference tool for experts or a co-pilot for
+hobbyists. The diagnosis: the app can observe but not participate, so every insight ends in "now go
+do that in KiCad yourself" — and each handoff is a place a novice gives up. Stages 1-3 are entirely
+read-only and carry most of the value.
+
+#### SPEC-326 — Component Volume Placeholders — not yet written
+
+*Module:* `services/python-daemon` · *Depends on:* SPEC-325, SPEC-311, SPEC-202
+
+The enclosure needs a *volume*, not a model. Found while investigating a real report: KiCad's own
+`Battery` library ships **53 footprints and 29 STEP models — 25 dangling references, zero `.wrl`
+fallbacks**, and a real `Hello_World_Blinky` project's own CR2032 footprint points at a
+`.step` that does not exist. So "download the model" fails for half of a stock library.
+
+`component_extraction` already produces `package_dimensions` (length/width/height), and `SPEC-109`
+already generates parametric geometry in FreeCAD. A footprint with no resolvable model gets a
+**labelled bounding solid** — a clearance proxy, never presented as a real model. Open question
+this must settle: a coin-cell holder's *assembled* height (holder plus installed cell) is the
+number that matters for clearance, and is not either part's datasheet height.
+
+#### SPEC-327 — Design Advice: Layout & Clearance Warnings — not yet written
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-325, SPEC-326
+
+Pure analysis over what SPEC-325 reads. Mixed through-hole and SMD where it matters, components too
+close together, missing mounting holes, headers whose off-board connection is undeclared, trace
+width questions. Advises; never edits. The PCB tab becomes a table of components with resolved
+models or placeholder volumes, a board view, and warnings — the same shape as SPEC-325's schematic
+table.
+
+#### SPEC-328 — Project Intent & Suggested Parts — not yet written
+
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-325, SPEC-206
+
+The Overview tab's real purpose, which `SPEC-313` deliberately left undecided. A user may arrive
+before they have anything: they describe what they want to build, the app asks clarifying
+questions, and offers a **general** parts list — "10K resistor, 100µF capacitor, ESP32-S3 devkit" —
+not a vendor search. The user searches for real parts through the existing flow; what this adds is
+a stated goal, carried forward so the library, schematic, PCB and enclosure stages all know what
+the project is *for* (does it need a lid, will a connector exit the enclosure).
+
+#### SPEC-329 — Assisted Authoring: Adding a Part on Request — not yet written, deliberately last
+
+*Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-325, SPEC-308
+
+The only stage that writes, and it is last on purpose — the maintainer's own call: *"I think we
+need to add it but we can do this last to see if things shape in a way where it is not needed."*
+
+The distinction it must hold is **authoring versus assisting**. Wiring nets, placing parts and
+routing are KiCad's job. Adding a part the user explicitly asked for — unconnected, with the
+footprint they chose — is what an add-on does, and both KiCad and FreeCAD have add-on ecosystems
+that do exactly that.
+
+Two routes to evaluate before choosing: writing a custom library plus a schematic entry directly,
+or **a real KiCad add-on this app talks to**, which makes the permission boundary explicit and puts
+the write inside KiCad's own process rather than behind its back. Either way, per-action
+authorisation, never a setting. Read-only may prove sufficient; that is the point of doing it last.
+
 ### 3.4 `4xx` — Distribution & operations
 
 #### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — ✅ Completed ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md), [CTX-401.2](context/CTX-401.2-tauri-sidecar-wiring.md)) 2026-08-14

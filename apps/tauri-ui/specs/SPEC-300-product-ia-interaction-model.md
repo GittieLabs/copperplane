@@ -27,6 +27,7 @@ child_specs:
   - "SPEC-322-model-role-legibility.md"
   - "SPEC-323-advanced-agent-configuration.md"
   - "SPEC-324-model-identity-verification.md"
+  - "SPEC-325-kicad-project-integration.md"
 user_facing: true
 ---
 
