@@ -1,0 +1,68 @@
+# CTX-209.1 §4 Deviation 4: pinning the vendor SDKs closed a real hole --
+# v0.3.0's release CI resolved an `anthropic` whose API had changed, and
+# shipped a build where every Anthropic call failed. Pins stop that. What
+# pins do NOT do is move themselves, and nothing here prompted anyone to
+# look, so a stale pin would sit until it became its own problem.
+#
+# This is that prompt. Every update arrives as a PR the existing checks
+# run against, which is the point: a dependency bump becomes a reviewed,
+# tested event rather than whatever `pip` or `npm` resolved that morning.
+#
+# `github-actions` is included deliberately. The v0.3.0 and v0.3.1 release
+# runs both warned that actions/checkout@v4, actions/setup-node@v4,
+# actions/setup-python@v5 and actions/upload-artifact@v4 target Node.js 20,
+# which GitHub has deprecated and is force-running on Node 24. That will
+# eventually break the release pipeline, and release.yml is the one
+# workflow no CI can exercise -- it fires only on a pushed tag -- so a
+# surprise there is discovered during a release rather than before one.
+version: 2
+updates:
+  # The Python daemon: the vendor SDKs, AgentFlow itself, and the pinned
+  # transitive deps CTX-402.6 and CTX-209.1 both had to nail down by hand.
+  - package-ecosystem: "pip"
+    directory: "/services/python-daemon"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      # The spec/context gatekeeper blocks any code change without a
+      # CTX-*.md. A dependency bump has no design to record, and CTX-902.3
+      # added this label for exactly that case -- without it every
+      # Dependabot PR fails a gate it can never satisfy.
+      - "trivial-fix"
+
+  - package-ecosystem: "npm"
+    directory: "/apps/tauri-ui"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "trivial-fix"
+
+  - package-ecosystem: "cargo"
+    directory: "/core/tauri-rust"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "dependencies"
+      - "trivial-fix"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - "dependencies"
+      - "trivial-fix"
