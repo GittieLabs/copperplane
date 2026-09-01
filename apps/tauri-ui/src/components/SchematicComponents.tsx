@@ -1,0 +1,176 @@
+import { useCallback, useEffect, useState } from 'react'
+
+import {
+  listSchematicComponents,
+  pickKicadProject,
+  resolveKicadProject,
+  type KicadProjectFiles,
+  type SchematicComponent,
+  type SchematicRead,
+} from '../lib/kicadProject'
+import { loadProject, saveProject } from '../lib/projects'
+
+/** SPEC-325 §5: what is actually in the user's schematic, read from the
+ * file with KiCad closed.
+ *
+ * Deliberately a table, not a canvas. KiCad already draws the schematic,
+ * better, and is usually open next to this app -- the question this
+ * answers is "what is in my design and what is missing from it", which a
+ * drawing does not answer well. */
+export function SchematicComponents({ projectName }: { projectName: string }) {
+  const [proPath, setProPath] = useState<string | null>(null)
+  const [files, setFiles] = useState<KicadProjectFiles | null>(null)
+  const [read, setRead] = useState<SchematicRead | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const readSchematic = useCallback(async (resolved: KicadProjectFiles) => {
+    setFiles(resolved)
+    if (!resolved.schematic_path) {
+      setRead(null)
+      return
+    }
+    setRead(await listSchematicComponents(resolved.schematic_path))
+  }, [])
+
+  const load = useCallback(async (path: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await readSchematic(await resolveKicadProject(path))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setRead(null)
+    } finally {
+      setBusy(false)
+    }
+  }, [readSchematic])
+
+  // A previously linked project reloads on mount. Nothing is cached: the
+  // file is read fresh, because a stored copy of a schematic's contents
+  // goes stale the moment the user edits in KiCad (SPEC-325 §2.3).
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const project = await loadProject(projectName)
+        if (cancelled || !project.kicad_project_path) return
+        setProPath(project.kicad_project_path)
+        await load(project.kicad_project_path)
+      } catch {
+        // A project with no KiCad link yet is the ordinary first state.
+      }
+    })()
+    return () => { cancelled = true }
+  }, [projectName, load])
+
+  async function handlePick() {
+    setError(null)
+    try {
+      const picked = await pickKicadProject()
+      if (!picked) return
+      setProPath(picked)
+      const project = await loadProject(projectName)
+      await saveProject({ ...project, kicad_project_path: picked })
+      await load(picked)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  function statusOf(component: SchematicComponent): { label: string; tone: string } {
+    if (!component.footprint) return { label: 'no footprint', tone: 'text-warning' }
+    if (!component.footprint_found) return { label: 'footprint not installed', tone: 'text-warning' }
+    if (!component.has_model) return { label: 'no 3D model', tone: 'text-warning' }
+    return { label: 'ready', tone: 'text-success' }
+  }
+
+  const missingModels = (read?.components ?? []).filter((c) => c.footprint && !c.has_model).length
+
+  return (
+    <div className="flex flex-col gap-2 rounded border border-line p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium uppercase text-fg-muted">Schematic components</p>
+        <button
+          type="button"
+          className="rounded border border-line px-2 py-1 text-xs hover:bg-surface-alt disabled:opacity-50"
+          onClick={() => void handlePick()}
+          disabled={busy}
+        >
+          {proPath ? 'Change KiCad project…' : 'Link KiCad project…'}
+        </button>
+      </div>
+
+      {!proPath && (
+        <p className="text-xs text-fg-tertiary">
+          Pick your <code>.kicad_pro</code> to see every component in the schematic — its footprint,
+          and whether that footprint has a 3D model your enclosure can use. KiCad does not need to
+          be running.
+        </p>
+      )}
+
+      {proPath && <p className="break-all text-xs text-fg-muted">{proPath}</p>}
+      {busy && <p className="text-sm text-fg-tertiary">Reading the schematic…</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
+
+      {files && !files.schematic_path && !busy && (
+        <p className="text-xs text-warning">
+          This project has no <code>.kicad_sch</code> next to its project file yet.
+        </p>
+      )}
+
+      {/* SPEC-325 §3: whether `kicad-cli sch export bom` walks a hierarchy
+          from the root sheet is UNVERIFIED -- no multi-sheet project was
+          available to test against. Saying so is the honest option; showing
+          a possibly-partial list as complete is not. */}
+      {files?.sheet_count != null && files.sheet_count > 1 && (
+        <p className="text-xs text-warning">
+          This project has {files.sheet_count} sheets. This list is read from the root sheet and may
+          not include components on the others — that has not been verified.
+        </p>
+      )}
+
+      {read && (
+        <>
+          <p className="text-xs text-fg-muted">
+            {read.components.length} component{read.components.length === 1 ? '' : 's'}
+            {missingModels > 0 && `, ${missingModels} with no 3D model`} · read{' '}
+            {new Date(read.read_at).toLocaleTimeString()}
+          </p>
+          {/* The file is what was read, so this can lag an editor holding
+              unsaved changes. Never presented as live sync. */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="text-fg-muted">
+                <tr>
+                  <th className="py-1 pr-3 font-medium">Ref</th>
+                  <th className="py-1 pr-3 font-medium">Value</th>
+                  <th className="py-1 pr-3 font-medium">Footprint</th>
+                  <th className="py-1 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {read.components.map((component) => {
+                  const status = statusOf(component)
+                  return (
+                    <tr key={component.reference} className="border-t border-line-subtle">
+                      <td className="py-1 pr-3 text-fg-bright">{component.reference}</td>
+                      <td className="py-1 pr-3 text-fg-secondary">{component.value ?? '—'}</td>
+                      <td className="py-1 pr-3 break-all text-fg-tertiary">
+                        {component.footprint ?? '—'}
+                      </td>
+                      <td className={`py-1 ${status.tone}`}>
+                        {status.label}
+                        {component.dnp && <span className="text-fg-muted"> · DNP</span>}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}

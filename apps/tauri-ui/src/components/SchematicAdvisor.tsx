@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+
+import { SchematicComponents } from './SchematicComponents'
 import type { MenuCommand } from '../lib/areas'
 import {
   checkSchematic,
@@ -130,6 +132,11 @@ export function SchematicAdvisor({
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6">
+      {/* SPEC-325: what is actually in the schematic, read from the file.
+          Above ERC deliberately -- "what is in my design" is the question a
+          user arrives with; "does it pass ERC" is the one they ask second. */}
+      <SchematicComponents projectName={projectName} />
+
       <div className="flex flex-col gap-2 rounded border border-line p-3">
         <p className="text-xs font-medium uppercase text-fg-muted">Schematic (ERC)</p>
 

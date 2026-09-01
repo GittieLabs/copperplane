@@ -42,6 +42,12 @@ export interface Project {
   parts?: string[]
   footprint_overrides?: Record<string, string>
   intent?: string | null
+  /** SPEC-325 §2.1: the `.kicad_pro` this project is anchored to. The
+   *  schematic and PCB are resolved from it, replacing "whatever board
+   *  KiCad currently has open" -- which needed KiCad running, its API
+   *  enabled, and the right document focused, for a fact sitting in a
+   *  file. `directory` stays for projects with no KiCad files yet. */
+  kicad_project_path?: string | null
 }
 
 /** One real, permanent record of an actual `freecad.export_enclosure`
