@@ -58,4 +58,4 @@ kiutils==1.4.8
 # the resulting build-from-source .so as arm64-only when a x86_64 freeze
 # needed it, since Rust's build backend doesn't respect the parent
 # process's `arch -x86_64` the way a prebuilt wheel install does.
-cryptography==48.0.0
+cryptography==50.0.1
