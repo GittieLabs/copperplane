@@ -34,7 +34,7 @@
     "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^6.0.4",
     "autoprefixer": "^10.5.4",
-    "jsdom": "^27.0.1",
+    "jsdom": "^30.0.1",
     "oxlint": "^1.75.0",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.3",
