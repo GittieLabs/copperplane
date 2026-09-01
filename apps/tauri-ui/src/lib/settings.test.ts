@@ -220,18 +220,57 @@ describe('saveProviderConfig', () => {
     expect(dispatchMock).toHaveBeenCalledWith('daemon.configure', { providers: [record], provider_roles: roles })
   })
 
-  it('throws when the live daemon.configure push fails, even if the config.json write already succeeded', async () => {
+  /* CTX-209.2: the daemon reduces each record to what differs from its
+     shipped preset and returns that; THAT is what gets persisted. So
+     daemon.configure runs first and config.json is written from its
+     answer -- the delta rule has one implementation, in the daemon,
+     rather than a second copy here that could disagree with the merge it
+     is supposed to invert. */
+  it('persists the daemon\'s normalized records rather than what was sent', async () => {
     invokeMock.mockResolvedValueOnce(undefined)
     dispatchMock.mockResolvedValueOnce({
-      jsonrpc: '2.0',
-      id: 1,
-      error: { code: -32602, message: 'Invalid params' },
+      jsonrpc: '2.0', id: 1,
+      result: { configured: true, providers: [{ id: 'workshop', models: { reasoning: 'big-model' } }] },
+    })
+
+    await saveProviderConfig([record], roles, { llm_provider: null, llm_model: null })
+
+    expect(invokeMock).toHaveBeenCalledWith('save_config_cmd', {
+      config: {
+        llm_provider: null, llm_model: null,
+        providers: [{ id: 'workshop', models: { reasoning: 'big-model' } }],
+        provider_roles: roles,
+      },
+    })
+  })
+
+  it('falls back to what was sent when the daemon returns no normalized set', async () => {
+    // An older daemon mid-upgrade. Whole records still resolve correctly,
+    // because merge-on-read treats one as a delta covering every field.
+    invokeMock.mockResolvedValueOnce(undefined)
+    dispatchMock.mockResolvedValueOnce({ jsonrpc: '2.0', id: 1, result: { configured: true } })
+
+    await saveProviderConfig([record], roles, { llm_provider: null, llm_model: null })
+
+    expect(invokeMock).toHaveBeenCalledWith('save_config_cmd', {
+      config: { llm_provider: null, llm_model: null, providers: [record], provider_roles: roles },
+    })
+  })
+
+  it('writes nothing to config.json when the daemon rejects the push', async () => {
+    // Reversing the order removed a real failure mode: config.json used to
+    // be written before the daemon had accepted the change, so a rejected
+    // push left the file holding configuration the daemon had refused.
+    dispatchMock.mockResolvedValueOnce({
+      jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'Invalid params' },
     })
 
     await expect(
       saveProviderConfig([record], roles, { llm_provider: null, llm_model: null }),
     ).rejects.toThrow('Invalid params')
+    expect(invokeMock).not.toHaveBeenCalled()
   })
+
 })
 
 describe('getAppVersion', () => {

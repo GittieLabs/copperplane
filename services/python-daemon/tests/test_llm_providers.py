@@ -779,3 +779,92 @@ class TestManagedPresetConstruction(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestDeltaConfigAndMovingDefaults(unittest.TestCase):
+    """CTX-209.2. Before this, a config entry REPLACED its preset, so the
+    first Settings save froze every shipped default into an install
+    permanently and no release could move one. Verified against a real
+    install on 2026-08-31: all five presets written out verbatim.
+    """
+
+    def _preset(self, pid="google"):
+        return llm_providers._resolve_provider_records({})[pid]
+
+    def test_030_an_absent_field_resolves_to_the_shipped_value(self):
+        """The property the whole design rests on: absent means "use what
+        shipped", which is what makes a default movable at all."""
+        cfg = {"providers": [{"id": "google"}]}
+        got = llm_providers._resolve_provider_records(cfg)["google"]
+        self.assertEqual(self._preset()["models"], got["models"])
+        self.assertEqual(self._preset()["kind"], got["kind"])
+
+    def test_031_a_delta_overrides_only_the_field_it_names(self):
+        cfg = {"providers": [{"id": "google", "base_url": "https://proxy.internal/v1"}]}
+        got = llm_providers._resolve_provider_records(cfg)["google"]
+        self.assertEqual("https://proxy.internal/v1", got["base_url"])
+        self.assertEqual(self._preset()["models"], got["models"])
+
+    def test_032_nested_models_merge_per_key_not_wholesale(self):
+        """Replacing `models` outright would re-freeze the role the user
+        never touched -- the same defect one level down."""
+        cfg = {"providers": [{"id": "google", "models": {"reasoning": "gemini-3-pro"}}]}
+        got = llm_providers._resolve_provider_records(cfg)["google"]
+        self.assertEqual("gemini-3-pro", got["models"]["reasoning"])
+        self.assertEqual(self._preset()["models"]["fast"], got["models"]["fast"])
+
+    def test_033_a_user_added_record_with_no_preset_is_unchanged(self):
+        entry = {"id": "mine", "kind": "openai_compat", "base_url": "http://x/v1",
+                 "api_key_ref": None, "models": {"reasoning": "m"}, "capabilities": {}}
+        got = llm_providers._resolve_provider_records({"providers": [entry]})["mine"]
+        self.assertEqual(entry, got)
+
+    def test_034_a_record_identical_to_its_preset_reduces_to_just_its_id(self):
+        """So "identical to shipped" has exactly one representation."""
+        self.assertEqual({"id": "google"},
+                         llm_providers.provider_delta(dict(self._preset()), self._preset()))
+
+    def test_035_a_delta_keeps_only_what_differs(self):
+        entry = {**self._preset(), "models": {**self._preset()["models"], "reasoning": "gemini-3-pro"}}
+        self.assertEqual({"id": "google", "models": {"reasoning": "gemini-3-pro"}},
+                         llm_providers.provider_delta(entry, self._preset()))
+
+    def test_036_delta_then_merge_round_trips_to_the_original(self):
+        """The two halves are inverses. If they ever disagree, a save
+        silently changes configuration the user did not touch."""
+        entry = {**self._preset(), "base_url": "https://proxy/v1",
+                 "models": {**self._preset()["models"], "fast": "gemini-flash-8b"}}
+        delta = llm_providers.provider_delta(entry, self._preset())
+        merged = llm_providers._merge_over_preset(self._preset(), delta)
+        self.assertEqual(entry, merged)
+
+    def test_037_a_record_with_no_preset_deltas_to_itself_whole(self):
+        entry = {"id": "mine", "kind": "openai_compat", "models": {"reasoning": "m"}}
+        self.assertEqual(entry, llm_providers.provider_delta(entry, None))
+
+    def test_038_a_changed_preset_reaches_an_install_that_never_overrode_it(self):
+        """The point of the exercise, stated as a test: this is exactly
+        what could not happen before."""
+        cfg = {"providers": [{"id": "google"}]}
+        real = llm_providers._preset_records
+        try:
+            def shifted():
+                records = real()
+                records["google"] = {**records["google"],
+                                     "models": {"reasoning": "gemini-4", "fast": "gemini-4-flash"}}
+                return records
+            llm_providers._preset_records = shifted
+            got = llm_providers._resolve_provider_records(cfg)["google"]
+        finally:
+            llm_providers._preset_records = real
+        self.assertEqual("gemini-4", got["models"]["reasoning"])
+
+    def test_039_a_full_legacy_record_still_resolves_identically(self):
+        """Backwards compatibility: every config.json on disk today holds
+        whole records. Reading one must not change behaviour, or the fix
+        would break the installs it exists to unfreeze."""
+        whole = dict(self._preset())
+        self.assertEqual(
+            llm_providers._resolve_provider_records({"providers": [whole]})["google"],
+            llm_providers._resolve_provider_records({"providers": [{"id": "google"}]})["google"],
+        )

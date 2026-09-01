@@ -245,11 +245,30 @@ export async function saveProviderConfig(
   providerRoles: Record<ModelRole, string>,
   currentConfig: DaemonConfig,
 ): Promise<void> {
-  await saveConfig({ ...currentConfig, providers, provider_roles: providerRoles })
+  /* SPEC-209 §2.3: the daemon reduces each record to only what differs
+     from its shipped preset and returns that; what gets written to
+     config.json is the daemon's answer, not what was sent.
+     
+     The order matters and is the reverse of what it was. `daemon.configure`
+     runs FIRST so its normalized result is what `saveConfig` persists.
+     Computing the delta here instead would mean a second implementation of
+     a rule whose whole job is to be the exact inverse of the daemon's
+     merge -- two copies that can disagree about what "differs from the
+     preset" means, which is the class of drift this repo keeps paying for.
+     
+     A daemon that returns no `providers` (an older build, mid-upgrade)
+     falls back to persisting what was sent: the previous whole-record
+     behaviour, which merge-on-read still resolves correctly. */
   const response = await dispatch('daemon.configure', { providers, provider_roles: providerRoles })
   if (response.error) {
     throw new Error(response.error.message)
   }
+  const normalized = (response.result as { providers?: ProviderRecord[] } | undefined)?.providers
+  await saveConfig({
+    ...currentConfig,
+    providers: normalized ?? providers,
+    provider_roles: providerRoles,
+  })
 }
 
 /** SPEC-208 §3 / SPEC-321 §2.5: the exact exfiltration risk both specs

@@ -919,11 +919,27 @@ def configure_daemon(
         CONFIG["llm_provider"] = llm_provider
     if llm_model is not None:
         CONFIG["llm_model"] = llm_model
+    normalized = None
     if providers is not None:
-        CONFIG["providers"] = list(providers)
+        # SPEC-209 §2.3: reduce each record to only what differs from its
+        # shipped preset before it is stored or written to disk. Returned
+        # so the caller persists exactly this -- the delta computation has
+        # ONE implementation, here, rather than a second copy in the
+        # frontend that could disagree with the merge it is the inverse of.
+        presets = llm_providers._resolve_provider_records({}) if llm_providers else {}
+        normalized = [
+            llm_providers.provider_delta(entry, presets.get(entry.get("id")))
+            for entry in providers
+        ] if llm_providers else list(providers)
+        CONFIG["providers"] = normalized
     if provider_roles is not None:
         CONFIG["provider_roles"] = dict(provider_roles)
-    return {"configured": True}
+    # Only reported when providers were actually sent, so Rust's spawn-time
+    # call and every secrets-only update keep the exact response shape they
+    # have always had.
+    if normalized is None:
+        return {"configured": True}
+    return {"configured": True, "providers": normalized}
 
 
 def get_daemon_capabilities() -> dict:
