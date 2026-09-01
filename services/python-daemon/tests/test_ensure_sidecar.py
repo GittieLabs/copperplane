@@ -321,3 +321,38 @@ class TestStaleness(unittest.TestCase):
             ok, reason = es.inspect(binary, "aarch64-apple-darwin", daemon_dir=tmp)
             self.assertTrue(ok)
             self.assertIn("current", reason)
+
+
+class TestBundledAgentPrompts(unittest.TestCase):
+    """CTX-407.4. The agent prompt tree must be declared as PyInstaller
+    `datas`, or every AI feature fails in a frozen build while working
+    perfectly from source.
+
+    `datas` was empty from the day daemon.spec was written (CTX-401.1)
+    until 2026-09-01, so this shipped broken in every release to date.
+    chat_agents, component_pipeline and datasheet_guidance all resolve the
+    tree as `os.path.dirname(__file__)/agentflow`, which under PyInstaller
+    is sys._MEIPASS -- the path was always right, there was simply nothing
+    extracted there.
+    """
+
+    def _spec_text(self):
+        spec = os.path.join(os.path.dirname(DIST), "daemon.spec")
+        with open(spec, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_019_the_spec_declares_the_agentflow_tree_as_data(self):
+        text = self._spec_text()
+        self.assertIn('"agentflow"', text)
+        self.assertNotIn("datas=[],", text,
+                         "datas is empty again -- every AI feature would fail in a frozen build")
+
+    def test_020_the_agent_prompts_this_bundles_actually_exist(self):
+        """A spec entry naming a directory that is not there would bundle
+        nothing and fail exactly the same way, silently."""
+        tree = os.path.join(os.path.dirname(DIST), "agentflow")
+        self.assertTrue(os.path.isdir(tree), tree)
+        self.assertTrue(os.path.isfile(os.path.join(tree, "router.prompt.md")))
+        agents = os.path.join(tree, "agents")
+        prompts = [n for n in os.listdir(agents) if n.endswith(".prompt.md")]
+        self.assertGreater(len(prompts), 0, "no agent prompts to bundle")

@@ -53,7 +53,24 @@ a = Analysis(
     [os.path.join(_HERE, "daemon.py")],
     pathex=[],
     binaries=[],
-    datas=[],
+    # CTX-407.4: the agent prompt tree -- router.prompt.md plus every
+    # agents/*.prompt.md -- must be INSIDE the bundle.
+    #
+    # chat_agents, component_pipeline and datasheet_guidance all resolve it
+    # as `os.path.dirname(__file__)/agentflow`. Under PyInstaller that
+    # dirname is sys._MEIPASS, the runtime extraction directory, so the
+    # path is already correct for a frozen build -- there was simply
+    # nothing extracted there. `datas` had been empty since this spec was
+    # written (CTX-401.1), which meant EVERY AI feature failed in EVERY
+    # frozen build with "Context directory not found: .../_MEIxxxx/agentflow",
+    # while working perfectly from source. Reported from a real running
+    # app on 2026-09-01.
+    #
+    # Bundling as a data tree rather than adding a code path: the runtime
+    # resolution is already right, and a `sys._MEIPASS` branch in three
+    # modules would be three places to keep in sync with one that needs no
+    # branch at all.
+    datas=[(os.path.join(_HERE, "agentflow"), "agentflow")],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
