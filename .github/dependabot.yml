@@ -26,6 +26,23 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
+    ignore:
+      # cryptography dropped macOS x86_64 wheels entirely at 49.0.0 -- from
+      # there on only macosx_11_0_arm64 ships. 48.0.0 is the newest release
+      # carrying a real macosx_10_9_universal2 wheel, which is what the
+      # x86_64 macOS release leg needs; without it pip builds from source
+      # and PyInstaller's own arch check rejects the arm64-only .so.
+      # CTX-402.6 found that through a real failed CI run (v0.1.3), and
+      # release.yml fires only on a pushed tag -- so nothing catches a
+      # regression here until a release is already going out.
+      #
+      # This ignore exists because that is exactly what happened: #317
+      # bumped it to 50.0.1 and it merged, leaving CTX-402.6's own
+      # explanation sitting directly above a version contradicting it.
+      # Re-checked against PyPI on 2026-09-01: still arm64-only at 50.0.1.
+      # Revisit only when cryptography ships an x86_64 or universal2 macOS
+      # wheel again, or when SPEC-402 stops building an Intel macOS leg.
+      - dependency-name: "cryptography"
     labels:
       - "dependencies"
       # The spec/context gatekeeper blocks any code change without a
