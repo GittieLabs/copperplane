@@ -15,7 +15,7 @@ jobs:
           fetch-depth: 0 # Full depth required to calculate git diffs against target branch
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
