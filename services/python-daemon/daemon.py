@@ -1643,10 +1643,12 @@ def _detect_capabilities() -> dict:
     freecad_available = False
     freecad_path_checked = None
     freecad_error = None
+    freecad_version = None
     if freecad_bridge is not None:
         try:
             freecad_path_checked = freecad_bridge.find_freecadcmd()
             freecad_available = True
+            freecad_version = freecad_bridge.get_freecad_version()
         except Exception as e:
             freecad_available = False
             freecad_error = str(e)
@@ -1679,6 +1681,7 @@ def _detect_capabilities() -> dict:
         "freecad_available": freecad_available,
         "freecad_path_checked": freecad_path_checked,
         "freecad_error": freecad_error,
+        "freecad_version": freecad_version,
         "kicad_cli_available": kicad_cli_available,
         # SPEC-303: reflects which providers actually have a key configured
         # right now, fixed from a hardcoded [] that predated any real

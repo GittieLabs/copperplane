@@ -106,6 +106,22 @@ def find_freecadcmd() -> str:
         "or ensure it's on PATH."
     )
 
+def get_freecad_version() -> str:
+    """Runs `freecadcmd --version` once to report the real, installed
+    FreeCAD version for diagnostics (issue #249) -- mirrors
+    find_freecadcmd's own resolve-then-shell-out pattern, but for a
+    version string instead of a build. Raises FreeCADUnavailableError
+    if the binary itself can't be found (find_freecadcmd's own error),
+    or returns the raw stdout if `--version`'s output shape changes
+    across FreeCAD releases, rather than guessing at a parse."""
+    cli = find_freecadcmd()
+    result = subprocess.run(
+        [cli, "--version"],
+        capture_output=True, text=True, timeout=10,
+    )
+    return result.stdout.strip() or result.stderr.strip()
+
+
 
 _BUILD_SCRIPT_TEMPLATE = """\
 import FreeCAD
