@@ -934,6 +934,33 @@ def get_daemon_capabilities() -> dict:
     return _detect_capabilities()
 
 
+def freecad_get_version() -> dict:
+    """The freecad.get_version route (SPEC-107/CTX-107.2, closing issue #249).
+
+    Deliberately NOT part of `_detect_capabilities`. That probe feeds both
+    `daemon.ready` and `daemon.get_capabilities`, and SPEC-107 §3 requires
+    it to stay "cheap and non-blocking" -- it even names the hazard
+    directly: "a long `freecadcmd` call would starve [the heartbeat] and
+    produce a false 'crashed' signal". Shelling out for a version string on
+    every launch would delay each startup by that call, on every machine,
+    even when nothing ever touches FreeCAD.
+
+    ASYNC_ROUTES-registered because it spawns a subprocess. A sync route
+    runs inline in the daemon's stdin read loop, and CTX-314.2 records the
+    real bug from getting that wrong.
+
+    Never raises: a version that cannot be read is `{"version": None,
+    "reason": str}`, because not knowing the version is an ordinary state
+    and must never read as FreeCAD being unavailable.
+    """
+    if freecad_bridge is None:
+        return {"version": None, "reason": "the FreeCAD bridge module is not available"}
+    try:
+        return {"version": freecad_bridge.get_freecad_version(), "reason": None}
+    except Exception as exc:  # noqa: BLE001 -- every failure is a reportable state
+        return {"version": None, "reason": f"{type(exc).__name__}: {exc}"}
+
+
 def llm_chat(
     prompt: str, provider: str = None, model: str = None, system: str = "", history: list = None
 ) -> dict:
@@ -1510,6 +1537,7 @@ def _build_routes() -> dict:
         "job.cancel": cancel_job,
         "daemon.configure": configure_daemon,
         "daemon.get_capabilities": get_daemon_capabilities,
+        "freecad.get_version": freecad_get_version,
     }
     if get_kicad_version is not None:
         routes["kicad.get_version"] = get_kicad_version
@@ -1623,6 +1651,9 @@ ASYNC_ROUTES = {
     # other request while a slow or hanging provider is waited on -- the
     # exact bug CTX-314.2 found and fixed for the community-library routes.
     "llm.list_models", "llm.validate_model",
+    # CTX-107.2: spawns `freecadcmd --version`. Same reasoning -- a
+    # subprocess must not run inline in the request path.
+    "freecad.get_version",
     # CTX-321.3: same reasoning -- a real socket connect to a URL that may
     # simply have nothing listening, which must not block the request path.
     "llm.probe_endpoint",

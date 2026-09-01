@@ -106,6 +106,34 @@ def find_freecadcmd() -> str:
         "or ensure it's on PATH."
     )
 
+_VERSION_TIMEOUT_SECONDS = 5
+
+
+def get_freecad_version(cli: str | None = None) -> str:
+    """The real installed FreeCAD version, for diagnostics (issue #249).
+
+    Returns `--version`'s raw output rather than parsing it. FreeCAD's
+    version string has changed shape across releases, and a wrong parse
+    that silently reports the wrong version is worse than an unparsed
+    string a human can read.
+
+    `cli` accepts an already-resolved path so a caller that has just run
+    `find_freecadcmd()` does not pay for a second filesystem walk, and so
+    the two can never disagree about which binary was inspected.
+
+    Raises `FreeCADUnavailableError` when the binary cannot be found, and
+    whatever `subprocess` raises when it cannot be run. Callers must treat
+    both as "version unknown" -- never as FreeCAD being unavailable, which
+    is a separate and much more consequential claim.
+    """
+    cli = cli or find_freecadcmd()
+    result = subprocess.run(
+        [cli, "--version"],
+        capture_output=True, text=True, timeout=_VERSION_TIMEOUT_SECONDS,
+    )
+    return result.stdout.strip() or result.stderr.strip()
+
+
 
 _BUILD_SCRIPT_TEMPLATE = """\
 import FreeCAD
