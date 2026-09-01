@@ -1,7 +1,7 @@
 ---
 id: SPEC-325
 title: "KiCad Project Integration & Schematic Component Table"
-status: Draft
+status: In-Progress
 type: Feature
 created: 2026-09-01
 last_updated: 2026-09-01
