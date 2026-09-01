@@ -1,4 +1,4 @@
 # SPEC-401/CTX-401.1: build-time tooling for freezing daemon.py into a
 # Tauri sidecar (see daemon.spec) -- never imported by the daemon itself,
 # so kept separate from requirements.txt's real runtime dependency set.
-pyinstaller==6.22.0
+pyinstaller==6.22.2
