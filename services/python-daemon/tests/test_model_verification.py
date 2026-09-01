@@ -222,3 +222,46 @@ class TestNetworkRoutesAreAsync(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRecordParams(unittest.TestCase):
+    """CTX-209.1. A provider record's vendor params reach AgentFlow 0.11.1's
+    own verbatim passthrough. This repo adds no second mechanism for
+    something the framework already carries -- they ride on AgentConfig,
+    which is where AgentFlow expects per-agent params to live.
+    """
+
+    def test_019_a_record_without_params_yields_an_empty_dict(self):
+        """Absent and empty must be the same answer: AgentFlow treats a
+        falsy params as 'send nothing', so a record that never had params
+        and one whose params were cleared produce an identical request."""
+        self.assertEqual({}, lp.record_params({"providers": [
+            {"id": "p", "kind": "openai_compat", "models": {}, "capabilities": {}}
+        ]}, "p"))
+
+    def test_020_a_record_s_params_are_returned(self):
+        out = lp.record_params({"providers": [
+            {"id": "p", "kind": "openai_compat", "models": {}, "capabilities": {},
+             "params": {"reasoning_effort": "high"}}
+        ]}, "p")
+        self.assertEqual({"reasoning_effort": "high"}, out)
+
+    def test_021_an_unknown_provider_id_is_empty_not_an_error(self):
+        """Called on every dispatch. Raising here would turn a stale role
+        binding into a crash rather than the existing, clearer error."""
+        self.assertEqual({}, lp.record_params({}, "nope"))
+
+    def test_022_the_caller_cannot_mutate_the_stored_record(self):
+        config = {"providers": [
+            {"id": "p", "kind": "openai_compat", "models": {}, "capabilities": {},
+             "params": {"reasoning_effort": "high"}}
+        ]}
+        out = lp.record_params(config, "p")
+        out["reasoning_effort"] = "low"
+        self.assertEqual("high", config["providers"][0]["params"]["reasoning_effort"])
+
+    def test_023_a_preset_record_has_no_params_by_default(self):
+        """Shipping a default param would be a claim about what a model
+        supports -- exactly what SPEC-209 §1 declines to make."""
+        for pid in ("anthropic", "google", "openai", "perplexity", "ollama"):
+            self.assertEqual({}, lp.record_params({}, pid), pid)

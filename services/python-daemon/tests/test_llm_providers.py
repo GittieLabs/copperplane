@@ -175,7 +175,7 @@ class TestHistory(unittest.TestCase):
 
         captured = {}
 
-        async def fake_chat(messages, system=""):
+        async def fake_chat(messages, system="", params=None):
             captured["messages"] = messages
             response = MagicMock()
             response.text = "ok"

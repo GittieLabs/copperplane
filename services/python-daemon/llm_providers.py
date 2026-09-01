@@ -17,7 +17,7 @@ explicitly, the same pattern `kicad_bridge`/`freecad_bridge` already use.
 import asyncio
 import logging
 import os
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,13 @@ class ProviderRecord(TypedDict):
     api_key_ref: str | None  # a key name in the secrets dict, never a key
     models: dict[str, str]  # role -> model name
     capabilities: dict[str, bool]
+    # SPEC-209 §2.1: vendor arguments forwarded verbatim to the SDK call,
+    # for anything AgentFlow does not name itself -- reasoning effort,
+    # thinking budgets, whatever a vendor ships next. Optional; absent and
+    # empty behave identically. AgentFlow refuses any key it sets itself
+    # (model, messages, system, tools) with a ValueError naming it, so a
+    # passthrough can never silently redirect a call.
+    params: NotRequired[dict[str, Any]]
 
 
 # `managed` is reserved for SPEC-207's locked, code-constructed record --
@@ -467,6 +474,24 @@ def _check_capabilities(agent_name: str | None, requires: list[str] | None, reco
     _preflight_checked.add(cache_key)
 
 
+def record_params(config: dict | None, provider_id: str) -> dict:
+    """The vendor `params` a provider record carries (SPEC-209 §2.1).
+
+    A separate lookup rather than a fourth element on `resolve()`'s return
+    tuple: widening that arity would break every existing caller for a
+    value most of them do not want, and `resolve()`'s three-tuple is
+    SPEC-208 §2.6's own documented contract.
+
+    Always a dict. Absent and empty are the same answer, because
+    AgentFlow treats a falsy `params` as "send nothing" -- so a record
+    that has never been given params and one whose params were cleared
+    produce an identical request.
+    """
+    records = _resolve_provider_records(migrate_legacy_config(config or {}))
+    record = records.get(provider_id)
+    return dict(record.get("params") or {}) if record else {}
+
+
 def resolve(
     default_provider: str,
     default_model: str,
@@ -560,12 +585,17 @@ async def _close_provider_client(provider_client) -> None:
         await client.close()
 
 
-async def _chat_and_close(provider_client, messages, system: str):
+async def _chat_and_close(provider_client, messages, system: str, params: dict | None = None):
     """Runs the chat call and closes the client within the *same* event
     loop, so cleanup never has to happen after `asyncio.run()` has
-    already closed it."""
+    already closed it.
+
+    `params` (SPEC-209 §2.1) reaches AgentFlow 0.11.0's own verbatim
+    passthrough. `None` and `{}` are the same request -- AgentFlow treats
+    a falsy value as "send nothing" -- so a record with an empty params
+    dict is indistinguishable from one with none."""
     try:
-        return await provider_client.chat(messages, system=system)
+        return await provider_client.chat(messages, system=system, params=params or None)
     finally:
         await _close_provider_client(provider_client)
 
@@ -593,6 +623,7 @@ def chat(
     model: str | None = None,
     system: str = "",
     history: list[dict] | None = None,
+    params: dict[str, Any] | None = None,
 ) -> dict:
     """Sends one prompt to `provider` and returns `{"text": str, "usage":
     {"input_tokens": int, "output_tokens": int} | None, "model": str |
@@ -641,7 +672,7 @@ def chat(
     messages.append(Message(role=Role.USER, content=prompt))
 
     try:
-        response = asyncio.run(_chat_and_close(provider_client, messages, system))
+        response = asyncio.run(_chat_and_close(provider_client, messages, system, params))
     except Exception as e:
         raise LLMProviderError(f"'{provider}' chat call failed: {e}") from e
 
