@@ -2978,3 +2978,59 @@ class TestLibraryRenderFootprintPreviewRoute(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class TestFreeCADVersionDiagnostics(unittest.TestCase):
+    """CTX-107.2, closing issue #249. The version is reported on demand,
+    never from the startup capability probe.
+
+    The original contribution put the `freecadcmd --version` call inside
+    `_detect_capabilities`'s availability try-block, where a failed version
+    lookup set `freecad_available = False` -- turning a cosmetic diagnostic
+    into a switch that disables the whole enclosure feature area. SPEC-107
+    §3 forbids it independently: capability probes must be "cheap and
+    non-blocking", and it names this exact hazard, that "a long `freecadcmd`
+    call would starve [the heartbeat] and produce a false 'crashed' signal".
+    """
+
+    def test_020_the_startup_probe_never_shells_out_for_a_version(self):
+        """The regression guard SPEC-107 §3 never had. _detect_capabilities
+        feeds both daemon.ready and daemon.get_capabilities, so a subprocess
+        here is paid on every launch and every Settings refresh."""
+        with patch('daemon.freecad_bridge.get_freecad_version') as version_call:
+            daemon._detect_capabilities()
+        version_call.assert_not_called()
+
+    def test_021_a_failed_version_lookup_never_marks_freecad_unavailable(self):
+        """The actual defect. A version that cannot be read must not become
+        the much larger claim that FreeCAD is not installed."""
+        with patch('daemon.freecad_bridge.find_freecadcmd',
+                   return_value='/opt/freecad/bin/freecadcmd'), \
+             patch('daemon.freecad_bridge.get_freecad_version',
+                   side_effect=OSError("boom")):
+            caps = daemon._detect_capabilities()
+        self.assertTrue(caps["freecad_available"])
+        self.assertIsNone(caps["freecad_error"])
+
+    def test_022_the_route_reports_the_real_version(self):
+        with patch('daemon.freecad_bridge.get_freecad_version',
+                   return_value='FreeCAD 1.0.0, Libs: 1.0.0R'):
+            out = daemon.freecad_get_version()
+        self.assertEqual('FreeCAD 1.0.0, Libs: 1.0.0R', out["version"])
+        self.assertIsNone(out["reason"])
+
+    def test_023_the_route_reports_a_reason_rather_than_raising(self):
+        """Not knowing the version is an ordinary state, so it is reported
+        rather than raised -- the same rule SPEC-324 applies to a provider
+        that cannot list its models."""
+        with patch('daemon.freecad_bridge.get_freecad_version',
+                   side_effect=RuntimeError("freecadcmd exploded")):
+            out = daemon.freecad_get_version()
+        self.assertIsNone(out["version"])
+        self.assertIn("freecadcmd exploded", out["reason"])
+
+    def test_024_the_route_is_async_registered(self):
+        """It spawns a subprocess. A sync route runs inline in the daemon's
+        stdin read loop -- CTX-314.2 records the real bug from getting this
+        wrong for a network-calling route."""
+        self.assertIn("freecad.get_version", daemon.ASYNC_ROUTES)
+        self.assertIn("freecad.get_version", daemon.ROUTES)

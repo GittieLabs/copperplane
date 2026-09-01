@@ -346,12 +346,33 @@ export async function copyDiagnostics(): Promise<void> {
     }
   }
 
+  /* CTX-107.2 (issue #249): FreeCAD's real version, fetched the same way
+     and in the same place as KiCad's just above -- on demand, only when a
+     human asks for diagnostics. Deliberately not part of the capability
+     probe: SPEC-107 §3 requires that to stay cheap and non-blocking, and
+     names a long `freecadcmd` call as the thing that would starve the
+     heartbeat. `freecad.get_version` is async-registered, so it goes
+     through submitJob rather than dispatch -- the one shape difference
+     from the KiCad path above. */
+  let freecadVersion = 'not reachable'
+  if (capabilities.freecad_available) {
+    try {
+      const handle = await submitJob<{ version: string | null; reason: string | null }>(
+        'freecad.get_version',
+        {},
+      )
+      freecadVersion = (await handle.result).version ?? 'unknown'
+    } catch {
+      freecadVersion = 'unknown'
+    }
+  }
+
   const lines = [
     `Copperplane v${appVersion}`,
     `Python: ${capabilities.python_version}`,
     `Log file: ${capabilities.log_path ?? '(not available)'}`,
     `KiCad: ${kicadVersion}`,
-    `FreeCAD: ${capabilities.freecad_available ? 'reachable' : 'not reachable'}`,
+    `FreeCAD: ${freecadVersion}`,
     `LLM providers configured: ${capabilities.llm_providers.join(', ') || '(none)'}`,
   ]
 

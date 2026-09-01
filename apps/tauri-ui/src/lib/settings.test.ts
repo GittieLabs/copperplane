@@ -4,10 +4,11 @@ import type { DaemonCapabilities } from './settings'
 const invokeMock = vi.fn()
 const dispatchMock = vi.fn()
 const writeTextMock = vi.fn()
+const submitJobMock = vi.fn()
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({ writeText: writeTextMock }))
-vi.mock('./ipc', () => ({ dispatch: dispatchMock }))
+vi.mock('./ipc', () => ({ dispatch: dispatchMock, submitJob: submitJobMock }))
 
 const {
   saveSecret,
@@ -28,6 +29,7 @@ beforeEach(() => {
   invokeMock.mockReset()
   writeTextMock.mockReset()
   dispatchMock.mockReset()
+  submitJobMock.mockReset()
 })
 
 describe('isNonLoopbackBaseUrl', () => {
@@ -285,6 +287,41 @@ describe('copyDiagnostics', () => {
     expect(text).toContain('KiCad: not reachable')
     expect(text).toContain('FreeCAD: not reachable')
     expect(text).toContain('LLM providers configured: (none)')
+  })
+
+  /* CTX-107.2 (issue #249). The version is fetched here, on demand, the
+     same way and in the same place as KiCad's -- never from the capability
+     probe, which SPEC-107 §3 requires to stay cheap and non-blocking. */
+  it('looks up the real FreeCAD version only when freecad_available is true', async () => {
+    mockCapabilitiesAndVersion({ ...BASE_CAPABILITIES, freecad_available: true })
+    submitJobMock.mockResolvedValue({
+      result: Promise.resolve({ version: 'FreeCAD 1.0.0, Libs: 1.0.0R', reason: null }),
+    })
+
+    await copyDiagnostics()
+
+    expect(submitJobMock).toHaveBeenCalledWith('freecad.get_version', {})
+    expect(writeTextMock.mock.calls[0][0] as string).toContain('FreeCAD: FreeCAD 1.0.0, Libs: 1.0.0R')
+  })
+
+  it('never asks for a FreeCAD version when FreeCAD is not reachable', async () => {
+    mockCapabilitiesAndVersion(BASE_CAPABILITIES)
+
+    await copyDiagnostics()
+
+    expect(submitJobMock).not.toHaveBeenCalledWith('freecad.get_version', {})
+    expect(writeTextMock.mock.calls[0][0] as string).toContain('FreeCAD: not reachable')
+  })
+
+  it('reports an unknown FreeCAD version rather than failing the whole diagnostic', async () => {
+    // A version that cannot be read must never cost the user the rest of
+    // their diagnostics -- the same rule the daemon route follows.
+    mockCapabilitiesAndVersion({ ...BASE_CAPABILITIES, freecad_available: true })
+    submitJobMock.mockRejectedValue(new Error('job failed'))
+
+    await copyDiagnostics()
+
+    expect(writeTextMock.mock.calls[0][0] as string).toContain('FreeCAD: unknown')
   })
 
   it('reports "(not available)" when the daemon has no log file active', async () => {
