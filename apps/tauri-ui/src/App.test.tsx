@@ -34,7 +34,6 @@ vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
   dispatchTool: (...args: unknown[]) => dispatchToolMock(...args),
-  MENU_SAVE_PROJECT_EVENT: 'menu://save-project',
   MENU_OPEN_PROJECT_EVENT: 'menu://open-project',
   MENU_OPEN_SETTINGS_EVENT: 'menu://open-settings',
   MENU_OPEN_DEFAULT_LIBRARY_EVENT: 'menu://open-library-default',
@@ -549,19 +548,18 @@ describe('App: Enclosure tab persists across area switches', () => {
     render(<App />)
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Link to folder…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose project folder…' }))
 
     await waitFor(() =>
       expect(saveProjectMock).toHaveBeenCalledWith(
         expect.objectContaining({ directory: '/real/PCBs/test-project' }),
       ),
     )
-    // The header leads with the project NAME, labels each path, and links
-    // through a real button rather than a clickable path -- reported as "it
-    // was not clear to me that clicking the path would open a file dialog".
-    await waitFor(() => screen.getByRole('button', { name: 'Change folder…' }))
-    expect(screen.getByText('/real/PCBs/test-project')).toBeTruthy()
-    expect(screen.getByText('Project folder:')).toBeTruthy()
+    // Once a folder exists the header stops printing its path and offers to
+    // copy it instead -- the path is long and was only clutter.
+    await waitFor(() =>
+      within(screen.getByTestId('project-header')).getByRole('button', { name: 'Copy project path' }),
+    )
     // CTX-312.2: real user feedback -- a successful link/save previously
     // gave no visible confirmation at all, reading as "nothing happened."
     screen.getByText('Linked to /real/PCBs/test-project')
@@ -573,53 +571,13 @@ describe('App: Enclosure tab persists across area switches', () => {
     render(<App />)
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Link to folder…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose project folder…' }))
 
     await waitFor(() => expect(pickProjectDirectoryMock).toHaveBeenCalled())
     expect(saveProjectMock).not.toHaveBeenCalled()
   })
 
-  it('CTX-312.1: "Save Project" saves the current real project state on demand', async () => {
-    render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
-    await waitFor(() => {
-      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
-      expect(button.disabled).toBe(false)
-    })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save Project' }))
-
-    await waitFor(() =>
-      expect(saveProjectMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'test-project' })),
-    )
-    // CTX-312.2: real user feedback -- a successful save previously gave
-    // no visible confirmation at all, reading as "nothing happened."
-    await waitFor(() => screen.getByText('Project saved.'))
-  })
-
-  it('CTX-312.3: the real native menu\'s own Save Project event runs the same real handleSaveProject flow as the button', async () => {
-    render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
-    // The menu-event listener effect re-subscribes whenever `currentProject`
-    // changes (so `handleSaveProject`'s own closure is never stale) --
-    // waiting for the button to become enabled is the real signal that the
-    // *latest* subscription (the one with a real, loaded project) is in
-    // place, not an earlier one registered while it was still null.
-    await waitFor(() => {
-      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
-      expect(button.disabled).toBe(false)
-    })
-
-    const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://save-project')!
-    await act(async () => {
-      menuHandler()
-    })
-
-    await waitFor(() =>
-      expect(saveProjectMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'test-project' })),
-    )
-    await waitFor(() => screen.getByText('Project saved.'))
-  })
 
   it('CTX-312.3: the real native menu\'s own Open Project… event picks a real linked folder and selects it', async () => {
     pickProjectDirectoryMock.mockResolvedValueOnce('/real/PCBs/other-project')
@@ -629,10 +587,9 @@ describe('App: Enclosure tab persists across area switches', () => {
 
     render(<App />)
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
-    await waitFor(() => {
-      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
-      expect(button.disabled).toBe(false)
-    })
+    // Waiting on the project NAME in the header: the Save Project button used
+    // to serve as this signal, and no longer exists.
+    await waitFor(() => screen.getByText('test-project'))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://open-project')!
     await act(async () => {
@@ -893,12 +850,11 @@ describe('App: Schematic tab persists across area switches, resets on project sw
   })
 })
 
-describe('App: the project header says what each path is', () => {
-  /* Reported: "It was not clear to me that clicking the path would open a file
-     dialog to change the project", and the path itself was unlabelled -- so it
-     was not even clear WHICH path it was. Two different ones are in play: this
-     app's project folder, and the linked .kicad_pro, which usually lives
-     somewhere else entirely. */
+describe('App: the project header', () => {
+  /* "showing the complete paths to the linked project or project folder could
+     show a long string and only clutters the screen. Neither offers enough
+     value to be statically shown." So: the KiCad project by FILE NAME, its
+     full path on hover, and the project folder behind a copy button. */
   async function renderLinked() {
     loadProjectMock.mockResolvedValue({
       name: 'test-project',
@@ -907,45 +863,72 @@ describe('App: the project header says what each path is', () => {
     })
     render(<App />)
     await waitFor(() => screen.getByText('test-project'))
+    return within(screen.getByTestId('project-header'))
   }
 
-  it('labels the KiCad project path, rather than leaving a bare path', async () => {
-    await renderLinked()
+  it('shows the KiCad project by name, not by path', async () => {
+    const header = await renderLinked()
 
-    // Scoped to the header: every area stays mounted, and the Schematic tab
-    // shows the same path in its own panel.
-    const header = within(screen.getByTestId('project-header'))
-    expect(header.getByText('Linked KiCad project:')).toBeTruthy()
-    expect(header.getByText('/elsewhere/Blinky/Blinky.kicad_pro')).toBeTruthy()
+    expect(header.getByText('Blinky')).toBeTruthy()
+    expect(header.queryByText('/elsewhere/Blinky/Blinky.kicad_pro')).toBeNull()
   })
 
-  it('shows the project folder separately, since it is a different place', async () => {
-    await renderLinked()
+  it('keeps the full path available without spending a line on it', async () => {
+    const header = await renderLinked()
 
-    expect(screen.getByText('Project folder:')).toBeTruthy()
-    expect(screen.getByText('/real/PCBs/test-project')).toBeTruthy()
+    expect(
+      header.getByTitle('/elsewhere/Blinky/Blinky.kicad_pro'),
+    ).toBeTruthy()
   })
 
-  it('links through a real button, not a clickable path', async () => {
-    await renderLinked()
+  it('does not print the project folder path at all', async () => {
+    const header = await renderLinked()
 
-    expect(screen.getByRole('button', { name: 'Change folder…' })).toBeTruthy()
+    expect(header.queryByText('/real/PCBs/test-project')).toBeNull()
+    expect(header.getByRole('button', { name: 'Copy project path' })).toBeTruthy()
   })
 
   it('copies the project folder path', async () => {
     writeTextMock.mockResolvedValue(undefined)
-    await renderLinked()
+    const header = await renderLinked()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy project folder path' }))
+    fireEvent.click(header.getByRole('button', { name: 'Copy project path' }))
 
     await waitFor(() => expect(writeTextMock).toHaveBeenCalledWith('/real/PCBs/test-project'))
-    await waitFor(() => screen.getByText('Copied'))
+    await waitFor(() => header.getByText('Copied'))
   })
 
-  it('says a KiCad project is not linked yet, and where to link one', async () => {
+  it('names what the button changes, rather than saying "folder"', async () => {
+    const header = await renderLinked()
+
+    // "Change folder…" sat beside two different paths and could be read as
+    // either. This one sits on the KiCad project line and says Change.
+    expect(header.getByRole('button', { name: 'Change' })).toBeTruthy()
+  })
+
+  it('offers to link a KiCad project when none is linked', async () => {
     loadProjectMock.mockResolvedValue({ name: 'test-project', directory: '/real/PCBs/test-project' })
     render(<App />)
 
-    await waitFor(() => screen.getByText(/link one on the Schematic tab/))
+    await waitFor(() => screen.getByText('test-project'))
+    const header = within(screen.getByTestId('project-header'))
+    expect(header.getByText('none yet')).toBeTruthy()
+    expect(header.getByRole('button', { name: 'Link' })).toBeTruthy()
+  })
+
+  it('offers a folder only while the project has none', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'test-project' })
+    render(<App />)
+
+    await waitFor(() => screen.getByText('test-project'))
+    const header = within(screen.getByTestId('project-header'))
+    expect(header.getByRole('button', { name: 'Choose project folder…' })).toBeTruthy()
+    expect(header.queryByRole('button', { name: 'Copy project path' })).toBeNull()
+  })
+
+  it('has no Save Project button -- every field persists as it changes', async () => {
+    await renderLinked()
+
+    expect(screen.queryByRole('button', { name: 'Save Project' })).toBeNull()
   })
 })

@@ -753,10 +753,24 @@ def send(
 # format" section, matching the existing "Citation format" section's
 # own per-agent-appropriate-subset convention, not a second prompt file
 # per area.
+# The message the model actually receives. It used to defer entirely -- "in
+# the format described in your own instructions" -- to a system prompt that is
+# now well over a hundred lines, with the format two thirds of the way down.
+# Responses came back with no block at all. The requirement is stated here, in
+# the request itself, because that is the text nearest the model's answer.
 _REVIEW_PROMPT = (
     "Review this area for anything worth flagging -- a real risk, a gap, or a suggestion -- "
-    "using only what you're actually grounded in. Return your findings in the format described "
-    "in your own instructions. An empty list is a normal, honest result when nothing stands out."
+    "using only what you're actually grounded in.\n\n"
+    "Every finding in the check block you were given is worth flagging: explain each one in "
+    "plain language for a maker who does not know the abbreviations, and say where on the board "
+    "it is, using that finding's own `locations`.\n\n"
+    "Answer with ONLY this block and nothing else -- no preamble, no prose before or after:\n\n"
+    "<<<FINDINGS>>>\n"
+    '[{"severity": "info" | "suggestion" | "warning", "title": "...", "detail": "...", '
+    '"sources": [...], "general_practice": true|false}]\n'
+    "<<<END_FINDINGS>>>\n\n"
+    "An empty array is a normal, honest result when nothing stands out -- but it is wrong if the "
+    "check block listed anything. A reply without the block cannot be read at all."
 )
 _REVIEW_SEVERITIES = ("info", "suggestion", "warning")
 

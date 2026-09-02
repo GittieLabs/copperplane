@@ -15,7 +15,6 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: listenMock }))
 const {
   dispatch,
   submitJob,
-  MENU_SAVE_PROJECT_EVENT,
   MENU_OPEN_PROJECT_EVENT,
   MENU_OPEN_SETTINGS_EVENT,
   MENU_OPEN_DEFAULT_LIBRARY_EVENT,
@@ -193,7 +192,6 @@ describe('submitJob', () => {
 // only job is to catch a future accidental rename on one side only.
 describe('MENU_* event constants', () => {
   it('TEST-012: every real menu event constant has the expected string value', () => {
-    expect(MENU_SAVE_PROJECT_EVENT).toBe('menu://save-project')
     expect(MENU_OPEN_PROJECT_EVENT).toBe('menu://open-project')
     expect(MENU_OPEN_SETTINGS_EVENT).toBe('menu://open-settings')
     expect(MENU_OPEN_DEFAULT_LIBRARY_EVENT).toBe('menu://open-library-default')
