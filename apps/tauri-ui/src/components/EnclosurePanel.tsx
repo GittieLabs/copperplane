@@ -15,6 +15,7 @@ import {
   type ExportParts,
 } from '../lib/enclosure'
 import { listOpenBoards, openKicad, type BoardCandidate, type ListOpenBoardsResult } from '../lib/boardAdvisor'
+import { componentEnvelopes, type EnvelopeResult } from '../lib/kicadProject'
 import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { EnclosureViewer } from './EnclosureViewer'
@@ -104,6 +105,13 @@ export function EnclosurePanel({
   const [manualPcbPath, setManualPcbPath] = useState<string | null>(null)
 
   const [dims, setDims] = useState({ width: 50, depth: 30, height: 20 })
+  /* SPEC-326 §2.7: what the parts on the BOARD actually need. The 20mm
+     default above is arbitrary — it was chosen before anything could be
+     measured, and it looked derived while being pure coincidence. A default
+     replaced by a measurement is not the "recommendation as override" that
+     SPEC-326 §2 rules out: a value the user has typed is never overwritten. */
+  const [measured, setMeasured] = useState<EnvelopeResult | null>(null)
+  const [heightTouched, setHeightTouched] = useState(false)
   const [boardParams, setBoardParams] = useState(_DEFAULT_BOARD_PARAMS)
 
   // SPEC-311/CTX-311.2: lid is board-driven-mode-only on the daemon
@@ -166,6 +174,36 @@ export function EnclosurePanel({
   // A manually-picked file always wins once chosen -- it's the user's
   // explicit override of whatever the list auto-selected or offered.
   const pcbPath = manualPcbPath ?? selectedBoard?.path ?? null
+
+  // SPEC-326 §2.7: measure the board's own components and let the height
+  // field start from what they need, rather than from an arbitrary 20.
+  // Read-only and advisory -- a height the user has typed is never replaced.
+  useEffect(() => {
+    let cancelled = false
+    if (!pcbPath) {
+      setMeasured(null)
+      return
+    }
+    void (async () => {
+      try {
+        const result = await componentEnvelopes(null, pcbPath, {})
+        if (cancelled) return
+        setMeasured(result)
+        if (result.min_interior_height_mm != null) {
+          // Only while untouched: replacing a default is help, replacing a
+          // decision is an override.
+          setBoardParams((prev) =>
+            heightTouched ? prev : { ...prev, height: Math.ceil(result.min_interior_height_mm!) },
+          )
+        }
+      } catch {
+        // Measurement is advisory. Failing to measure must not block the
+        // generator, which worked without any of this before.
+        if (!cancelled) setMeasured(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [pcbPath, heightTouched])
 
   useEffect(() => {
     setSelectedBoard(null)
@@ -466,10 +504,30 @@ export function EnclosurePanel({
                   type="number"
                   className="w-full rounded border border-line bg-surface px-3 py-2 text-sm"
                   value={boardParams[field]}
-                  onChange={(e) => setBoardParams((prev) => ({ ...prev, [field]: Number(e.target.value) }))}
+                  onChange={(e) => {
+                    if (field === 'height') setHeightTouched(true)
+                    setBoardParams((prev) => ({ ...prev, [field]: Number(e.target.value) }))
+                  }}
                   disabled={running}
                 />
                 <span className="text-fg-muted">{hint}</span>
+                {field === 'height' && measured?.min_interior_height_mm != null && (
+                  <span
+                    className={
+                      boardParams.height < measured.min_interior_height_mm
+                        ? 'text-warning'
+                        : 'text-fg-tertiary'
+                    }
+                  >
+                    {boardParams.height < measured.min_interior_height_mm
+                      ? `Too short — the parts on your board need ${measured.min_interior_height_mm}mm`
+                      : `Your board's parts need ${measured.min_interior_height_mm}mm`}
+                    {measured.tallest ? `, set by ${measured.tallest.reference}` : ''}
+                    {measured.unknown > 0
+                      ? `. ${measured.unknown} component${measured.unknown === 1 ? '' : 's'} still have no known height, so the real minimum may be taller.`
+                      : '.'}
+                  </span>
+                )}
               </label>
             ))}
 

@@ -21,6 +21,14 @@ export interface CheckResult {
   summary: string
   truncated_count: number
   source_path: string
+  /** KiCad's own counts, per kind, independent of the LLM explanation
+   *  path. Reported so the UI can never say "no violations" about a board
+   *  KiCad found problems on: `violations` is empty on the maintainer's
+   *  own board while `unconnected_count` is 18, every one severity error.
+   *  Optional because a result cached before SPEC-326 §2.7 lacks them. */
+  violation_count?: number
+  unconnected_count?: number
+  parity_count?: number
 }
 
 export interface BoardCandidate {

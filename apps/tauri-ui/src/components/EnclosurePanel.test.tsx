@@ -10,6 +10,7 @@ const pickExportDestinationMock = vi.fn()
 const getProjectDirectoryMock = vi.fn()
 const exportBoardGlbMock = vi.fn()
 const getComponentHeightsMock = vi.fn()
+const componentEnvelopesMock = vi.fn()
 
 vi.mock('../lib/enclosure', () => ({
   generateEnclosure: (...args: unknown[]) => generateEnclosureMock(...args),
@@ -19,6 +20,10 @@ vi.mock('../lib/enclosure', () => ({
   getProjectDirectory: (...args: unknown[]) => getProjectDirectoryMock(...args),
   exportBoardGlb: (...args: unknown[]) => exportBoardGlbMock(...args),
   getComponentHeights: (...args: unknown[]) => getComponentHeightsMock(...args),
+}))
+
+vi.mock('../lib/kicadProject', () => ({
+  componentEnvelopes: (...args: unknown[]) => componentEnvelopesMock(...args),
 }))
 
 vi.mock('../lib/boardAdvisor', () => ({
@@ -139,6 +144,7 @@ const fakeResult = {
 
 beforeEach(() => {
   generateEnclosureMock.mockReset()
+  componentEnvelopesMock.mockReset().mockRejectedValue(new Error('not measured by default'))
   pickPcbFileMock.mockReset()
   listOpenBoardsMock.mockReset().mockResolvedValue({ status: 'no_board_open' })
   openKicadMock.mockReset().mockResolvedValue(undefined)
@@ -896,5 +902,73 @@ describe('EnclosurePanel: CTX-319.4 ReviewPanel wiring', () => {
     rerender(<EnclosurePanel projectName="project-b" />)
 
     await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:enclosure'))
+  })
+})
+
+describe('EnclosurePanel: interior height comes from the board, not a default', () => {
+  /* The maintainer reported this three times. The field showed 20 while the
+     component review said the parts needed a different number, and the two
+     surfaces were not connected at all -- 20 was a literal in
+     `_DEFAULT_BOARD_PARAMS`. That it once matched a height he had typed for
+     BT1 was coincidence, which made it look derived. */
+  const MEASURED = {
+    envelopes: [], components: [], measured: 9, stated: 0, unknown: 5,
+    source_path: '/p/board.kicad_pcb', read_at: '2026-09-01T00:00:00Z',
+    measured_from: 'board' as const,
+    min_interior_height_mm: 15.515,
+    tallest: { reference: 'R2', z_mm: 15.515, source: 'model' },
+  }
+
+  beforeEach(() => {
+    listOpenBoardsMock.mockResolvedValue({
+      status: 'boards_found',
+      candidates: [{ path: '/p/board.kicad_pcb', label: 'board.kicad_pcb' }],
+    })
+  })
+
+  it('starts the height at what the board needs, rounded up, not at 20', async () => {
+    componentEnvelopesMock.mockResolvedValue(MEASURED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() =>
+      expect((screen.getByLabelText(/Height \(mm\)/) as HTMLInputElement).value).toBe('16'),
+    )
+  })
+
+  it('says which component set the number, and that unknowns may push it higher', async () => {
+    componentEnvelopesMock.mockResolvedValue(MEASURED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    expect(await screen.findByText(/need 15\.515mm/)).toBeTruthy()
+    expect(screen.getByText(/set by R2/)).toBeTruthy()
+    expect(screen.getByText(/real minimum may be taller/)).toBeTruthy()
+  })
+
+  it('warns when a height the user typed is below what the parts need', async () => {
+    componentEnvelopesMock.mockResolvedValue(MEASURED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    const field = await screen.findByLabelText(/Height \(mm\)/)
+    fireEvent.change(field, { target: { value: '10' } })
+
+    expect(await screen.findByText(/Too short/)).toBeTruthy()
+  })
+
+  it('never overwrites a height the user has already typed', async () => {
+    componentEnvelopesMock.mockResolvedValue(MEASURED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    const field = await screen.findByLabelText(/Height \(mm\)/) as HTMLInputElement
+    fireEvent.change(field, { target: { value: '40' } })
+
+    await waitFor(() => expect(field.value).toBe('40'))
+  })
+
+  it('leaves the generator working when the board cannot be measured', async () => {
+    componentEnvelopesMock.mockRejectedValue(new Error('freecadcmd missing'))
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    expect(screen.getByRole('button', { name: 'Generate Enclosure' })).toBeTruthy()
   })
 })

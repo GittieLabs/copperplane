@@ -458,6 +458,16 @@ describe('App: Enclosure tab persists across area switches', () => {
     loadConversationMock.mockReset().mockResolvedValue([])
     listOpenBoardsMock.mockReset().mockResolvedValue(ONE_BOARD_OPEN)
     submitJobMock.mockReset()
+    // SPEC-326 §2.7: picking a board now also measures its components, so the
+    // enclosure height can start from what the parts need instead of an
+    // arbitrary 20. That call must not consume the mockResolvedValueOnce
+    // queue the generate/export assertions below depend on, so it is answered
+    // by route rather than by position.
+    submitJobMock.mockImplementation((method: string) =>
+      method === 'kicad.component_envelopes'
+        ? Promise.resolve(fakeJobHandle(Promise.reject(new Error('not measured in this test'))))
+        : Promise.resolve(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT))),
+    )
   })
 
   function enclosureArea() {
@@ -479,12 +489,26 @@ describe('App: Enclosure tab persists across area switches', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
 
     enclosureArea().getByRole('button', { name: 'Export…' })
-    expect(submitJobMock).toHaveBeenCalledTimes(1)
+    // Generated exactly once -- the measurement call is a separate route and
+    // is deliberately not counted here.
+    expect(
+      submitJobMock.mock.calls.filter(([m]) => m === 'freecad.generate_enclosure'),
+    ).toHaveLength(1)
   })
 
   it('CTX-312.1: a real successful Export immediately persists a real export_history entry, not deferred to a separate Save click', async () => {
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT)))
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({ dest_path: '/real/dest/combined.step' })))
+    // Answered by route, not by position: the board measurement added in
+    // SPEC-326 §2.7 fires before Generate and would otherwise consume the
+    // first queued response.
+    submitJobMock.mockImplementation((method: string) => {
+      if (method === 'kicad.component_envelopes') {
+        return Promise.resolve(fakeJobHandle(Promise.reject(new Error('not measured in this test'))))
+      }
+      if (method === 'freecad.export_enclosure') {
+        return Promise.resolve(fakeJobHandle(Promise.resolve({ dest_path: '/real/dest/combined.step' })))
+      }
+      return Promise.resolve(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT)))
+    })
     saveDialogMock.mockResolvedValueOnce('/real/dest/combined.step')
 
     render(<App />)

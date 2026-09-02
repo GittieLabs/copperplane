@@ -21,8 +21,34 @@ export function ViolationsList({
   return (
     <div className="flex flex-col gap-2">
       {!hideSourcePath && <p className="text-xs text-fg-muted">{result.source_path}</p>}
+      {/* KiCad reports three kinds of problem under three separate JSON
+          keys, and only `violations` was ever explained. On a real board
+          that key can be EMPTY while 18 unconnected-item errors sit in
+          another -- so "no violations found" was said about a board KiCad
+          had 19 complaints about. These counts come straight from KiCad and
+          do not depend on the explanation call succeeding. */}
+      {(result.unconnected_count || result.parity_count) ? (
+        <p className="text-sm text-warning">
+          KiCad reports {result.violation_count ?? 0} design-rule violation
+          {(result.violation_count ?? 0) === 1 ? '' : 's'}
+          {result.unconnected_count
+            ? `, ${result.unconnected_count} unconnected item${result.unconnected_count === 1 ? '' : 's'}`
+            : ''}
+          {result.parity_count
+            ? `, and ${result.parity_count} schematic mismatch${result.parity_count === 1 ? '' : 'es'}`
+            : ''}
+          .
+        </p>
+      ) : null}
+
       {result.violations.length === 0 ? (
-        <p className="text-sm text-success">No violations found.</p>
+        <p className={result.unconnected_count || result.parity_count
+          ? 'text-sm text-fg-tertiary'
+          : 'text-sm text-success'}>
+          {result.unconnected_count || result.parity_count
+            ? 'No explanations were produced for them.'
+            : 'No violations found.'}
+        </p>
       ) : (
         <>
           <p className="text-sm text-fg-secondary">{result.summary}</p>
