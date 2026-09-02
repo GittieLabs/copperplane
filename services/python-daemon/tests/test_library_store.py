@@ -1805,11 +1805,17 @@ if __name__ == '__main__':
 
 
 class TestProjectCheckResults(LibraryStoreTestCase):
-    """SPEC-319 §2.1's prerequisite. `chat_agents._check_status_note` reads
-    `Project.last_results[area]` to give the review and chat agents the
-    user's real ERC/DRC findings; only `enclosure` was ever written, so the
-    PCB review agent was told "No DRC check result is available this
-    session" on a board with real errors."""
+    """`Project.last_results[area]`, written per area.
+
+    Built for SPEC-319 §2.1, to feed the review agents stored ERC/DRC
+    findings. That is no longer what grounds them: `_check_status_note` now
+    RUNS the check on request, because `kicad-cli` reads a closed file and a
+    stored finding can go stale in ways this app cannot detect (the user can
+    fix everything in KiCad and never tell us).
+
+    This record is kept for a genuinely different job -- `OverviewDashboard`
+    reads `last_results` to show per-area status -- so it is still written,
+    just no longer load-bearing for an agent's grounding."""
 
     def _result(self, n=3):
         return {

@@ -18,7 +18,7 @@ import { listOpenBoards, openKicad, type BoardCandidate, type ListOpenBoardsResu
 import { componentEnvelopes, linkedProjectBoard, type EnvelopeResult } from '../lib/kicadProject'
 import { setProjectCheckResult } from '../lib/projects'
 import { AgentChat } from './AgentChat'
-import { ReviewPanel } from './ReviewPanel'
+import { NotBuiltPlaceholder } from './NotBuiltPlaceholder'
 import { EnclosureViewer } from './EnclosureViewer'
 
 /** Real, defensive path join -- avoids pulling in `@tauri-apps/api/path`
@@ -801,15 +801,24 @@ export function EnclosurePanel({
         </div>
       )}
     </div>
-    {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
-        is a flow step with a typed result, not a conversational turn. */}
-    <ReviewPanel
-      area="enclosure"
-      scope="project"
-      scopeId={`${projectName}:enclosure`}
+    {/* SPEC-319 §2.4 mounted a ReviewPanel here. Disabled deliberately,
+        not deleted, and not left running: it is a real feature (physical
+        fit -- do the parts fit the box) whose one real data tool,
+        `kicad.get_component_heights`, goes through `kipy` and needs KiCad
+        RUNNING. With KiCad closed it had nothing but the project intent,
+        so it produced confident-sounding advice from no data. SPEC-326
+        since built a strictly better source that reads closed files
+        (`kicad.component_envelopes` -- the same measurement driving the
+        interior-height recommendation above), so repointing it is real
+        work with a real payoff, not a patch. SPEC-331 owns that.
+
+        Shown rather than hidden, per SPEC-305 §2's "visible-but-empty
+        beats hidden" -- a review button that silently advises from no data
+        is worse than one that says it is not built. */}
+    <NotBuiltPlaceholder
+      specId="SPEC-331"
       title="Review the enclosure"
-      projectName={projectName}
-      menuCommand={menuCommand}
+      description="Checking that your parts actually fit the box you generated. Its data source needed KiCad running and gave advice from nothing when it was closed, so it is switched off until it reads the same board measurements the height recommendation above already uses."
     />
     {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area."
         A project-scoped chat has no single Part to offer as a promotion

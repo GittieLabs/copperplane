@@ -117,7 +117,14 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs text-fg-muted">
               {findings.length === 0
-                ? 'Nothing stood out.'
+                ? // "Nothing stood out" used to be said whether or not any check
+                  // had run -- and for the PCB and schematic areas, none ever
+                  // had, so it read as "your design is fine" when it meant
+                  // "the agent was shown nothing". The check now runs as part
+                  // of the review, so this only ever follows a real one; the
+                  // wording still says what was actually done rather than
+                  // pronouncing the design clean.
+                  'Reviewed — nothing worth flagging.'
                 : `${findings.length} finding${findings.length === 1 ? '' : 's'}`}
             </p>
             <button type="button" className="text-xs text-fg-muted underline" onClick={handleDismiss}>

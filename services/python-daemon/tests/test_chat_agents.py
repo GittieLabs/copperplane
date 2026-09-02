@@ -525,12 +525,17 @@ class TestAssembleContext(ChatAgentsTestCase):
         self.assertEqual(len(context["export_history"]), 1)
         self.assertEqual(context["parts"], [{"part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8"}])
 
-    def test_004_schematic_area_reports_not_checked_this_session_when_no_last_results_entry_exists(self):
+    def test_004_schematic_area_says_no_check_could_be_run_without_a_linked_project(self):
+        """Was "not checked this session", back when the check block was read
+        from stored results. The check now RUNS on request (`kicad-cli` reads
+        a closed file), so the only reason to have no result is that there is
+        no file to check -- and that must never read as a clean design."""
         store.save_project({"name": "weather-pcb", "parts": []})
 
         context = json.loads(chat_agents._assemble_context("schematic", "project", "weather-pcb:schematic", None))
 
-        self.assertIn("No ERC check result is available this session.", context["check_status"])
+        self.assertIn("no KiCad project linked", context["check_status"])
+        self.assertIn("NOT a clean result", context["check_status"])
 
     def test_005_pcb_area_includes_full_part_guidance_not_just_identity(self):
         self._save_part(connection_guidance={
@@ -953,3 +958,104 @@ class TestPromoteTurn(ChatAgentsTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestLiveCheckStatusNote(unittest.TestCase):
+    """The review agents' check block is computed NOW, not read from storage.
+
+    Persisting results and warning about their age was the obvious repair and
+    is the wrong one: the maintainer pointed out that a stored finding goes
+    stale in ways this app cannot detect -- he can run DRC in KiCad, fix
+    everything, and never tell us -- so re-running the review would "still
+    just show cached and potentially stale results". `kicad-cli` reads a
+    CLOSED file in about two seconds, so there is nothing worth caching."""
+
+    _FILES = {"schematic_path": "/p/s.kicad_sch", "pcb_path": "/p/b.kicad_pcb"}
+
+    def test_001_an_unlinked_project_is_not_reported_as_clean(self):
+        note = chat_agents._check_status_note({"name": "P"}, "pcb")
+
+        self.assertIn("no KiCad project linked", note)
+        self.assertIn("NOT a clean result", note)
+
+    def test_002_a_real_drc_run_reaches_the_agent(self):
+        report = {
+            "violations": [],
+            "unconnected_items": [{"description": "Missing connection",
+                                   "severity": "error", "type": "unconnected_items"}],
+            "schematic_parity": [],
+        }
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_drc", return_value=report):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertTrue(note["ran_now"])
+        self.assertEqual(note["unconnected_count"], 1)
+        self.assertEqual(note["findings"][0]["description"], "Missing connection")
+
+    def test_003_the_drc_run_asks_for_schematic_parity(self):
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_drc",
+                          return_value={"violations": []}) as run_drc:
+            chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+
+        run_drc.assert_called_once_with("/p/b.kicad_pcb", schematic_parity=True)
+
+    def test_004_erc_violations_are_flattened_across_sheets(self):
+        erc = {"sheets": [
+            {"path": "/", "violations": [{"description": "a", "severity": "error", "type": "x"}]},
+            {"path": "/sub", "violations": [{"description": "b", "severity": "warning", "type": "y"}]},
+        ]}
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_erc", return_value=erc):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "schematic")
+            )
+
+        self.assertEqual(note["violation_count"], 2)
+
+    def test_005_a_failed_check_is_never_mistaken_for_a_clean_one(self):
+        """'We could not check' and 'we checked and it is fine' must not look
+        the same to the agent -- the whole complaint about the old behaviour."""
+        with patch.object(chat_agents.kicad_project, "resolve_project",
+                          side_effect=OSError("kicad-cli not found")):
+            note = chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+
+        self.assertIn("could not be run", note)
+        self.assertIn("NOT a clean result", note)
+
+    def test_006_a_clean_board_says_a_check_actually_ran(self):
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_drc", return_value={"violations": []}):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertTrue(note["ran_now"])
+        self.assertEqual(note["findings"], [])
+        self.assertIn("checked_at", note)
+
+    def test_007_the_note_says_it_read_the_file_not_the_editor(self):
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_drc", return_value={"violations": []}):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertIn("unsaved changes", note["read_from"])
+
+    def test_008_a_huge_finding_list_is_capped_but_the_counts_are_not(self):
+        many = [{"description": f"v{i}", "severity": "error", "type": "unconnected_items"}
+                for i in range(200)]
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_drc",
+                          return_value={"violations": [], "unconnected_items": many}):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertEqual(len(note["findings"]), 25)
+        self.assertEqual(note["findings_omitted"], 175)
+        self.assertEqual(note["unconnected_count"], 200)

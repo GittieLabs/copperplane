@@ -34,6 +34,8 @@ from agentflow import AgentExecutor, ConfigLoader, RouterEngine
 from agentflow.types import Message, Role
 
 import agent_roles
+import kicad_cli
+import kicad_project
 import library_store
 import llm_providers
 import tool_registry
@@ -256,25 +258,100 @@ def _part_guidance_summary(part: dict) -> dict:
 
 
 _CHECK_AREA_LABELS = {"schematic": "ERC", "pcb": "DRC"}
+# This note is read straight into an LLM context window; a real board can
+# produce hundreds of findings. The COUNTS above stay exact either way.
+_MAX_LIVE_FINDINGS = 25
 
 
 def _check_status_note(project: dict, area: str) -> str:
-    """SPEC-318's `chat_schematic`/`chat_pcb` prompts both explicitly
-    anticipate this exact honesty requirement ("if another area shows
-    nothing, say plainly that it hasn't been checked this session,
-    never that it passed"). A real, named gap this context found but
-    does not fix: today `Project.last_results` is only ever populated
-    for `enclosure` (`EnclosurePanel.tsx`'s own real save call) --
-    SchematicAdvisor/BoardAdvisor hold their own check results in local
-    React state only, never persisted anywhere this route can read.
-    Real ERC/DRC persistence is a separate, later prerequisite (the same
-    category of gap `CTX-206.1` already fixed for connection guidance) --
-    until it exists, this always honestly reports "not checked this
-    session" rather than fabricating or guessing a result."""
-    result = (project.get("last_results") or {}).get(area)
-    if not result:
-        return f"No {_CHECK_AREA_LABELS[area]} check result is available this session."
-    return json.dumps(result, sort_keys=True)
+    """Runs the real ERC/DRC now, rather than reporting a stored one.
+
+    This used to read `Project.last_results[area]`, which nothing but the
+    enclosure ever wrote -- so the review agent was handed "No DRC check
+    result is available this session" on boards with real errors, and found
+    nothing because it was shown nothing.
+
+    Persisting the result and warning about its age was the obvious repair
+    and is the wrong one. `kicad-cli` reads a **closed** `.kicad_sch` /
+    `.kicad_pcb` (SPEC-325 §2.2) in about two seconds, so there is nothing
+    to cache: a stored finding can be stale in ways this app cannot detect
+    -- the user can run DRC in KiCad, fix everything, and never tell us --
+    while a finding computed now cannot. The maintainer put it plainly:
+    re-running the review would "still just show cached and potentially
+    stale results", and even "nothing stood out" is misleading when no
+    check was ever run.
+
+    The one honest caveat left is that this reads the FILE, so an editor
+    holding unsaved changes will differ. Said explicitly in the note rather
+    than implied.
+
+    Every failure is reported as itself, never as a clean board: no linked
+    project, no such file, no `kicad-cli` installed. "We could not check"
+    and "we checked and it is fine" must never look the same to the agent.
+    """
+    label = _CHECK_AREA_LABELS[area]
+    pro_path = project.get("kicad_project_path")
+    if not pro_path:
+        return (
+            f"No {label} check could be run: this project has no KiCad project linked, "
+            "so there is no file to check. This is NOT a clean result."
+        )
+
+    try:
+        files = kicad_project.resolve_project(pro_path)
+        path = files["schematic_path"] if area == "schematic" else files["pcb_path"]
+        if not path:
+            return (
+                f"No {label} check could be run: the linked KiCad project has no "
+                f"{'schematic' if area == 'schematic' else 'board'} file yet. "
+                "This is NOT a clean result."
+            )
+
+        if area == "schematic":
+            report = kicad_cli.run_erc(path)
+            findings = [v for sheet in report["sheets"] for v in sheet["violations"]]
+            counts = {"violation_count": len(findings)}
+        else:
+            report = kicad_cli.run_drc(path, schematic_parity=True)
+            findings = [
+                *report["violations"],
+                *report.get("unconnected_items", []),
+                *report.get("schematic_parity", []),
+            ]
+            counts = {
+                "violation_count": len(report["violations"]),
+                "unconnected_count": len(report.get("unconnected_items", [])),
+                "parity_count": len(report.get("schematic_parity", [])),
+            }
+    except Exception as exc:  # noqa: BLE001 -- reported, never mistaken for clean
+        logger.warning("live %s check failed for %s: %s", label, pro_path, exc)
+        return (
+            f"The {label} check could not be run ({exc}). This is NOT a clean result -- "
+            "say so rather than implying the design passed."
+        )
+
+    return json.dumps(
+        {
+            "check": label,
+            "ran_now": True,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "source_path": path,
+            "read_from": (
+                "the file on disk -- an editor holding unsaved changes will differ"
+            ),
+            **counts,
+            "findings": [
+                {
+                    "severity": f.get("severity"),
+                    "type": f.get("type"),
+                    "description": f.get("description"),
+                }
+                for f in findings[:_MAX_LIVE_FINDINGS]
+            ],
+            "findings_omitted": max(0, len(findings) - _MAX_LIVE_FINDINGS),
+        },
+        sort_keys=True,
+    )
 
 
 def _assemble_context(area: str, scope: str, scope_id: str, project_name: str | None) -> str:

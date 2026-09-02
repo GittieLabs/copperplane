@@ -1099,6 +1099,29 @@ not a vendor search. The user searches for real parts through the existing flow;
 a stated goal, carried forward so the library, schematic, PCB and enclosure stages all know what
 the project is *for* (does it need a lid, will a connector exit the enclosure).
 
+#### SPEC-331 — Enclosure Fit Review — not yet written, disabled in the app
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-326, SPEC-319
+
+`SPEC-319` mounted a Run Review panel on the Enclosure tab. It is switched off as of 2026-09-02,
+showing `NotBuiltPlaceholder` rather than a button, at the maintainer's call: *"I don't even know
+what the run review check is supposed to show for the enclosure."*
+
+It is a real feature, not a stub — `chat_enclosure.prompt.md` defines it as physical fit: the
+board's outline and mounting holes, per-component heights, and the generated enclosure parameters.
+The problem is its data. Its one real tool, `kicad.get_component_heights`, goes through `kicad_bridge`
+→ `kipy`, which needs **KiCad running**. With KiCad closed it had nothing but the project intent,
+and produced confident-sounding advice from no data at all — the exact failure mode `SPEC-326` §1
+exists to prevent, reached from a different direction.
+
+The fix is not a patch: `SPEC-326` built a strictly better source that reads **closed** files —
+`kicad.component_envelopes`, already driving the interior-height recommendation, with per-part
+envelopes and an honest measured/stated/unknown split. Repointing the enclosure agent at it makes
+the review work with KiCad closed *and* gives it better data than it ever had. That is this spec.
+
+Worth settling here too: what a fit review should actually say. "Your box is 16mm and BT1 needs 20mm"
+is useful; restating the parameters the user just typed is not.
+
 #### SPEC-330 — Standoffs the Board Actually Mounts To — not yet written, backlog
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-109, SPEC-311

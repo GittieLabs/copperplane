@@ -863,9 +863,12 @@ describe('EnclosurePanel: SPEC-316 menuCommand', () => {
       />,
     )
 
-    await waitFor(() =>
-      expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('menuCommand=enclosure:run_review:4'),
-    )
+    // The enclosure ReviewPanel is switched off (see the describe below), so
+    // a Design > Enclosure > Run Review menu click has nothing to forward to.
+    // Asserting the panel is absent is the honest replacement for asserting
+    // it received the command.
+    await waitFor(() => screen.getByText(/Review the enclosure — not built yet/))
+    expect(screen.queryByText(/ReviewPanel stub/)).toBeNull()
   })
 })
 
@@ -893,26 +896,35 @@ describe('EnclosurePanel: CTX-318.4 AgentChat wiring', () => {
   })
 })
 
-describe('EnclosurePanel: CTX-319.4 ReviewPanel wiring', () => {
-  it('mounts ReviewPanel scoped to the project enclosure area', async () => {
+describe('EnclosurePanel: the enclosure review is off until it has real data', () => {
+  /* CTX-319.4 mounted a live ReviewPanel here. Switched off deliberately:
+     its one real data tool, `kicad.get_component_heights`, goes through
+     `kipy` and needs KiCad RUNNING, so with KiCad closed the agent had
+     nothing but the project intent and produced confident advice from no
+     data. Reported as "I don't even know what the run review check is
+     supposed to show for the enclosure."
+
+     Shown rather than hidden (SPEC-305 §2, "visible-but-empty beats
+     hidden") -- a review button that silently advises from nothing is worse
+     than one that says it is not built. */
+  it('does not run an enclosure review', async () => {
     render(<EnclosurePanel projectName="weather-pcb" />)
 
-    await waitFor(() => screen.getByText(/ReviewPanel stub/))
-    const stub = screen.getByText(/ReviewPanel stub/)
-    expect(stub.textContent).toContain('area=enclosure')
-    expect(stub.textContent).toContain('scope=project')
-    expect(stub.textContent).toContain('scopeId=weather-pcb:enclosure')
-    expect(stub.textContent).toContain('title="Review the enclosure"')
-    expect(stub.textContent).toContain('projectName=weather-pcb')
+    await waitFor(() => screen.getByText(/Review the enclosure/))
+    expect(screen.queryByText(/ReviewPanel stub/)).toBeNull()
   })
 
-  it('re-scopes ReviewPanel when the project changes', async () => {
-    const { rerender } = render(<EnclosurePanel projectName="project-a" />)
-    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+  it('names the feature and the spec that will restore it', async () => {
+    render(<EnclosurePanel projectName="weather-pcb" />)
 
-    rerender(<EnclosurePanel projectName="project-b" />)
+    expect(await screen.findByText(/Review the enclosure — not built yet/)).toBeTruthy()
+    expect(screen.getByText(/SPEC-331/)).toBeTruthy()
+  })
 
-    await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:enclosure'))
+  it('says why, in terms of the data it lacked', async () => {
+    render(<EnclosurePanel projectName="weather-pcb" />)
+
+    expect(await screen.findByText(/needed KiCad running/)).toBeTruthy()
   })
 })
 

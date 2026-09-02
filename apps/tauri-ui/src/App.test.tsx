@@ -287,7 +287,13 @@ describe('App: Overview plain chat', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Components' }))
 
     await waitFor(() => screen.getByPlaceholderText(/search for a part/))
-    expect(screen.queryByText(/not built yet/)).toBeNull()
+    // Scoped to this area on purpose. Every area stays mounted (hidden), so a
+    // global search for "not built yet" also matches the Enclosure tab's own
+    // deliberately-disabled review panel -- which says nothing about whether
+    // Components rendered.
+    expect(
+      within(screen.getByTestId('components-area')).queryByText(/not built yet/),
+    ).toBeNull()
   })
 
   it('TEST-008: loads an existing project\'s persisted conversation into view on first render', async () => {
@@ -845,7 +851,10 @@ describe('App: Schematic tab persists across area switches, resets on project sw
   it('the Schematic tab renders the real SchematicAdvisor, not a not-built placeholder', async () => {
     await renderAppOnSchematic()
 
-    expect(screen.queryByText(/not built yet/)).toBeNull()
+    // Scoped for the same reason as TEST-008b above.
+    expect(
+      within(screen.getByTestId('schematic-area')).queryByText(/not built yet/),
+    ).toBeNull()
   })
 
   it('a finished check is still shown after switching to another area and back to Schematic', async () => {
