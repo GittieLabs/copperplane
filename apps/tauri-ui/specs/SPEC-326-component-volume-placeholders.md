@@ -53,22 +53,31 @@ user_facing: true
 **Decided: the envelope's footprint extents are read from the `F.CrtYd` layer of the real
 `.kicad_mod`.** No inference, no LLM, no datasheet — the geometry is in a file the user already has.
 
-Calibrated against a footprint that *does* have a model, `BatteryHolder_Keystone_1060_1x2032`:
+**Coverage measured before committing to it:** 902 of 903 footprints across five real KiCad
+libraries (`Battery`, `LED_THT`, `Capacitor_THT`, `Package_DIP`, `Resistor_THT`) have a readable
+courtyard — 99%.
 
-| | X (mm) | Y (mm) | Z (mm) |
-| :--- | :--- | :--- | :--- |
-| Courtyard | 32.90 | 17.00 | — |
-| Real STEP bounding box | 31.86 | 17.96 | 5.08 |
+**Accuracy calibrated against ten footprints that do have real STEP models**, comparing the
+courtyard to the model's true bounding box:
 
-Close, and **not conservative in both axes**: the courtyard is 1mm wider in X and **1mm narrower in
-Y** than the real body, because a courtyard is a PCB keep-out, not a 3D envelope — a part can
-overhang it. Any placeholder built from it must apply a stated margin rather than be presented as a
-bound.
+| footprint | courtyard X × Y | real STEP X × Y × Z |
+| :--- | :--- | :--- |
+| `BatteryHolder_Keystone_1060_1x2032` | 32.90 × 21.40 | 31.86 × 17.96 × 5.08 |
+| `BatteryHolder_Keystone_103_1x20mm` | 29.40 × 23.23 | 29.30 × **24.64** × 13.25 |
+| `BatteryHolder_Keystone_105_1x2430` | 31.75 × 28.28 | **32.12** × **30.05** × 13.25 |
+| `BatteryClip_Keystone_54_D16-19mm` | 14.10 × 20.00 | 13.97 × 16.51 × 19.86 |
+
+**The courtyard is smaller than the real body in 4 of those 10 parts** — in X, in Y, or both. A
+courtyard is a PCB keep-out, not a 3D envelope, and a part can overhang it. So it is a good
+approximation and **not a bound**: any placeholder built from it must apply a stated margin, and
+must never be presented as a guaranteed enclosure.
 
 ### 2.2 Z has no honest source in the footprint, and that is the whole problem
 
-The same calibration shows Z absent entirely: 5.08mm of real height that nothing in the
-`.kicad_mod` records. A placeholder therefore cannot be derived from the footprint alone, and the
+The same calibration shows Z absent entirely — 5.08mm of real height for the Keystone 1060, 19.86mm
+for the `BatteryClip_Keystone_54`, and nothing in either `.kicad_mod` records it. Note also that the
+tallest part in that sample is a battery clip at 19.86mm: on a simple board, the component with no
+model is quite often the one that decides the enclosure height. A placeholder therefore cannot be derived from the footprint alone, and the
 spec must say where Z comes from rather than quietly inventing it.
 
 **And orientation is not recoverable.** `Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles` has
