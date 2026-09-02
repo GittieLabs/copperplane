@@ -80,3 +80,44 @@ export async function listSchematicComponents(schPath: string): Promise<Schemati
   })
   return handle.result
 }
+
+/** SPEC-326: a clearance envelope per component, plus the minimum interior
+ *  height they imply.
+ *
+ *  A recommendation, never an override -- SPEC-311's enclosure height stays
+ *  user-entered. Silently resizing a box from a partly-stated set of volumes
+ *  would be the confident-wrong-answer this spec exists to avoid. */
+export interface ComponentEnvelope {
+  reference: string
+  footprint: string | null
+  x_mm: number | null
+  y_mm: number | null
+  z_mm: number | null
+  /** Which of SPEC-326 §2.3's ordered sources supplied the height. */
+  source: 'model' | 'package_dimensions' | 'user' | 'unknown'
+  /** X/Y came from the footprint's courtyard, which approximates the body
+   *  and can be smaller than it -- never a guaranteed enclosure. */
+  x_within_courtyard: boolean
+}
+
+export interface EnvelopeResult {
+  envelopes: ComponentEnvelope[]
+  measured: number
+  stated: number
+  unknown: number
+  source_path: string
+  read_at: string
+  min_interior_height_mm: number | null
+  tallest: { reference: string; z_mm: number; source: string } | null
+}
+
+export async function componentEnvelopes(
+  schPath: string,
+  heightOverrides: Record<string, number> = {},
+): Promise<EnvelopeResult> {
+  const handle = await submitJob<EnvelopeResult>('kicad.component_envelopes', {
+    sch_path: schPath,
+    height_overrides: heightOverrides,
+  })
+  return handle.result
+}

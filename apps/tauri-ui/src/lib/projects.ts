@@ -48,6 +48,11 @@ export interface Project {
    *  enabled, and the right document focused, for a fact sitting in a
    *  file. `directory` stays for projects with no KiCad files yet. */
   kicad_project_path?: string | null
+  /** SPEC-326 §2.5: heights the user supplied for footprints with no 3D
+   *  model, keyed by FOOTPRINT rather than reference designator -- ten
+   *  identical resistors are one decision, and it survives a schematic edit
+   *  that renumbers references. */
+  component_heights?: Record<string, number>
 }
 
 /** One real, permanent record of an actual `freecad.export_enclosure`

@@ -597,8 +597,9 @@ export function EnclosurePanel({
             {boardVisible && unknownComponentRefs.length > 0 && (
               <p className="text-xs text-warning">
                 {unknownComponentRefs.join(', ')} {unknownComponentRefs.length === 1 ? 'has' : 'have'} no
-                3D model in KiCad and won't appear above -- fix their footprint's 3D model assignment
-                and regenerate to see them.
+                3D model in KiCad and won't appear above. Often there is nothing to fix -- KiCad's own
+                Battery library, for instance, ships 53 footprints against 29 models. Set a height for
+                them in the Schematic tab and this enclosure can still be sized to clear them.
               </p>
             )}
             {!exportOpen && (

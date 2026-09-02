@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import {
+  componentEnvelopes,
   listSchematicComponents,
   pickKicadProject,
   resolveKicadProject,
+  type EnvelopeResult,
   type KicadProjectFiles,
   type SchematicComponent,
   type SchematicRead,
@@ -23,21 +25,39 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
   const [read, setRead] = useState<SchematicRead | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /* SPEC-326 §2.5: heights the user supplied, keyed by FOOTPRINT -- ten
+     identical resistors are one decision, and it survives a schematic edit
+     that renumbers references. */
+  const [heights, setHeights] = useState<Record<string, number>>({})
+  const [envelopes, setEnvelopes] = useState<EnvelopeResult | null>(null)
+  const [draftHeight, setDraftHeight] = useState<Record<string, string>>({})
 
-  const readSchematic = useCallback(async (resolved: KicadProjectFiles) => {
-    setFiles(resolved)
-    if (!resolved.schematic_path) {
-      setRead(null)
-      return
-    }
-    setRead(await listSchematicComponents(resolved.schematic_path))
-  }, [])
+  const readSchematic = useCallback(
+    async (resolved: KicadProjectFiles, supplied: Record<string, number>) => {
+      setFiles(resolved)
+      if (!resolved.schematic_path) {
+        setRead(null)
+        setEnvelopes(null)
+        return
+      }
+      setRead(await listSchematicComponents(resolved.schematic_path))
+      // SPEC-326: a recommendation, never an override -- the enclosure's own
+      // height stays user-entered. This says what the parts need, and where
+      // each number came from.
+      try {
+        setEnvelopes(await componentEnvelopes(resolved.schematic_path, supplied))
+      } catch {
+        setEnvelopes(null)
+      }
+    },
+    [],
+  )
 
-  const load = useCallback(async (path: string) => {
+  const load = useCallback(async (path: string, supplied: Record<string, number> = {}) => {
     setBusy(true)
     setError(null)
     try {
-      await readSchematic(await resolveKicadProject(path))
+      await readSchematic(await resolveKicadProject(path), supplied)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setRead(null)
@@ -56,7 +76,9 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
         const project = await loadProject(projectName)
         if (cancelled || !project.kicad_project_path) return
         setProPath(project.kicad_project_path)
-        await load(project.kicad_project_path)
+        const supplied = project.component_heights ?? {}
+        setHeights(supplied)
+        await load(project.kicad_project_path, supplied)
       } catch {
         // A project with no KiCad link yet is the ordinary first state.
       }
@@ -72,7 +94,25 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
       setProPath(picked)
       const project = await loadProject(projectName)
       await saveProject({ ...project, kicad_project_path: picked })
-      await load(picked)
+      await load(picked, heights)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /** SPEC-326: a height for a footprint KiCad ships no model for. Keyed by
+   *  footprint and remembered on the project, so it is entered once. */
+  async function handleSetHeight(footprint: string) {
+    const raw = draftHeight[footprint]
+    const value = Number(raw)
+    if (!raw || !Number.isFinite(value) || value <= 0) return
+    const next = { ...heights, [footprint]: value }
+    setHeights(next)
+    setDraftHeight((prev) => ({ ...prev, [footprint]: '' }))
+    try {
+      const project = await loadProject(projectName)
+      await saveProject({ ...project, component_heights: next })
+      if (proPath) await load(proPath, next)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     }
@@ -137,6 +177,26 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
             {missingModels > 0 && `, ${missingModels} with no 3D model`} · read{' '}
             {new Date(read.read_at).toLocaleTimeString()}
           </p>
+
+          {/* SPEC-326: a recommendation, never an override. The enclosure's
+              own height stays user-entered; this says what the parts need and
+              names where the number came from, so a partly-stated result is
+              never mistaken for a measured one. */}
+          {envelopes?.min_interior_height_mm != null && envelopes.tallest && (
+            <p className="text-xs text-fg-secondary">
+              Enclosure needs at least{' '}
+              <strong className="text-fg-bright">{envelopes.min_interior_height_mm}mm</strong> of
+              interior height — set by {envelopes.tallest.reference} (
+              {envelopes.tallest.source === 'model' ? 'measured from its 3D model' : 'height you supplied'}).{' '}
+              {envelopes.measured} measured, {envelopes.stated} stated
+              {envelopes.unknown > 0 && `, ${envelopes.unknown} still unknown`}.
+            </p>
+          )}
+          {envelopes && envelopes.unknown > 0 && (
+            <p className="text-xs text-warning">
+              A component with no height is not counted above, so the real minimum may be taller.
+            </p>
+          )}
           {/* The file is what was read, so this can lag an editor holding
               unsaved changes. Never presented as live sync. */}
           <div className="overflow-x-auto">
@@ -162,6 +222,39 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
                       <td className={`py-1 ${status.tone}`}>
                         {status.label}
                         {component.dnp && <span className="text-fg-muted"> · DNP</span>}
+                        {/* SPEC-326 §2.3: a height is SOURCED, never guessed.
+                            For a footprint KiCad ships no model for, the user
+                            is the only remaining source -- so ask, once, and
+                            remember it against the footprint. */}
+                        {component.footprint && !component.has_model && (
+                          heights[component.footprint] != null ? (
+                            <span className="text-fg-muted">
+                              {' '}· {heights[component.footprint]}mm (you)
+                            </span>
+                          ) : (
+                            <span className="ml-2 inline-flex items-center gap-1">
+                              <input
+                                aria-label={`Height for ${component.footprint}`}
+                                className="w-16 rounded border border-line bg-surface px-1 py-0.5 text-xs text-fg"
+                                placeholder="mm"
+                                value={draftHeight[component.footprint] ?? ''}
+                                onChange={(e) =>
+                                  setDraftHeight((prev) => ({
+                                    ...prev,
+                                    [component.footprint as string]: e.target.value,
+                                  }))
+                                }
+                              />
+                              <button
+                                type="button"
+                                className="rounded border border-line px-1 py-0.5 text-xs"
+                                onClick={() => void handleSetHeight(component.footprint as string)}
+                              >
+                                set
+                              </button>
+                            </span>
+                          )
+                        )}
                       </td>
                     </tr>
                   )
