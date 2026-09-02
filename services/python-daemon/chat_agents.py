@@ -169,6 +169,30 @@ def _resolve_deferred(ref: dict) -> bool:
     return False
 
 
+def _resolve_check_finding(ref: dict) -> bool:
+    """A citation of an ERC/DRC finding this request itself produced.
+
+    Stubbed to `_resolve_deferred` (always False) since SPEC-206, for a good
+    reason at the time: the check block was read from stored results that
+    nothing ever wrote, so there was never a real finding to cite. Every
+    `check_finding` ref was therefore dropped, `sources` came back empty, and
+    the UI fell through to "General engineering practice -- not from this
+    area's own data" beneath a finding that opened "DRC detected 2 missing
+    connections". Reported directly.
+
+    Now that `_check_status_note` runs the check, a citation resolves when the
+    file it names is still on disk. That is a deliberately modest claim: it
+    says the check had a real subject, not that the finding is still present
+    -- the board may have been fixed since, which is exactly why nothing here
+    is cached. `source_path` is written by us, never by the model, so a
+    citation cannot point at a file the check never read.
+    """
+    if not isinstance(ref, dict):
+        return False
+    path = ref.get("source_path")
+    return isinstance(path, str) and bool(path) and os.path.exists(path)
+
+
 _RESOLVERS = {
     "datasheet_page": _resolve_datasheet_page,
     "guidance_item": _resolve_guidance_item,
@@ -176,7 +200,7 @@ _RESOLVERS = {
     "part_field": _resolve_part_field,
     "chat_turn": _resolve_chat_turn,
     "project_intent": _resolve_project_intent,
-    "check_finding": _resolve_deferred,
+    "check_finding": _resolve_check_finding,
     "note": _resolve_note,
 }
 

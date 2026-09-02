@@ -134,7 +134,7 @@ describe('AgentChat', () => {
     )
     fireEvent.click(screen.getByText('Ask about this part'))
 
-    await waitFor(() => screen.getByText(/General engineering practice/))
+    await waitFor(() => screen.getByText(/Includes general engineering practice/))
   })
 
   it('TEST-006: a guidance_item source chip resolves its real page from the part\'s own design_guidance before opening', async () => {

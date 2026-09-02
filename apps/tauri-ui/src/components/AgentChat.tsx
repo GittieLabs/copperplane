@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Area } from '../lib/areas'
 import { loadChatThread, promoteChatTurn, sendChatMessage, type ChatScope, type ChatTurn, type SourceRef } from '../lib/chat'
 import { isOpenableSource, openSource, sourceChipLabel } from '../lib/sourceRefs'
+import { Markdown } from './Markdown'
 
 /** SPEC-318 §2.2/§2.7: the one shared chat panel every area mounts --
  * Overview, Components, Schematic, PCB, Enclosure each supply their
@@ -170,15 +171,21 @@ export function AgentChat({ area, scope, scopeId, title, projectName, promotionT
 
         {turns.map((turn) => (
           <div key={turn.turn_id} className="flex flex-col gap-1">
-            <p className={turn.role === 'user' ? 'text-sm text-fg' : 'text-sm text-fg-secondary'}>
+            <div className={turn.role === 'user' ? 'text-sm text-fg' : 'text-sm text-fg-secondary'}>
               <span className="mr-1 text-xs font-medium uppercase text-fg-muted">
                 {turn.role === 'user' ? 'You' : 'Assistant'}
               </span>
-              {turn.content}
-            </p>
+              {/* The agents answer in Markdown because the prompts ask them
+                  to. Rendering it into one <p> showed literal ### and **
+                  runs with every newline collapsed -- reported from the PCB
+                  chat. A user's own text is shown verbatim: they did not
+                  write Markdown, and reformatting what someone typed is a
+                  different and unwelcome thing to do. */}
+              {turn.role === 'user' ? turn.content : <Markdown text={turn.content} />}
+            </div>
             {turn.role === 'assistant' && turn.general_practice && (
               <p className="text-xs font-medium text-warning">
-                General engineering practice -- not from this part's own data.
+                Includes general engineering practice, not only this project's own data.
               </p>
             )}
             {turn.role === 'assistant' && turn.sources.length > 0 && (

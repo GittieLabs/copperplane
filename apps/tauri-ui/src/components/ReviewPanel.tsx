@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Markdown } from './Markdown'
 import type { Area, MenuCommand } from '../lib/areas'
 import { runReview, type ChatScope, type ReviewFinding, type SourceRef } from '../lib/chat'
 import { isOpenableSource, openSource, sourceChipLabel } from '../lib/sourceRefs'
@@ -138,10 +139,16 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
                 {SEVERITY_LABEL[finding.severity]}
               </p>
               <p className="text-sm font-medium text-fg">{finding.title}</p>
-              <p className="text-sm text-fg-secondary">{finding.detail}</p>
+              <Markdown text={finding.detail} className="text-sm text-fg-secondary" />
+              {/* `general_practice` means "SOME of this relies on general
+                  engineering knowledge", not "none of this is grounded". The
+                  old wording claimed the latter, and appeared under a finding
+                  that opened "DRC detected 2 missing connections" -- measured
+                  from the user's own board seconds earlier. Telling someone to
+                  discount a real measurement is worse than saying nothing. */}
               {finding.general_practice && (
                 <p className="text-xs font-medium text-warning">
-                  General engineering practice -- not from this area's own data.
+                  Includes general engineering practice, not only this area's own data.
                 </p>
               )}
               {finding.sources.length > 0 && (

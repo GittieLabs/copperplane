@@ -1059,3 +1059,47 @@ class TestLiveCheckStatusNote(unittest.TestCase):
         self.assertEqual(len(note["findings"]), 25)
         self.assertEqual(note["findings_omitted"], 175)
         self.assertEqual(note["unconnected_count"], 200)
+
+
+class TestCheckFindingSourceRef(unittest.TestCase):
+    """A citation of a finding the check itself just produced.
+
+    `check_finding` resolved to `_resolve_deferred` (always False) from
+    SPEC-206 until now -- correct while the check block was read from stored
+    results nothing ever wrote, wrong the moment it started carrying a real
+    DRC run. Every such citation was dropped, so `sources` came back empty
+    and the UI fell through to a general-practice note beneath a finding
+    that opened "DRC detected 2 missing connections"."""
+
+    def test_001_a_citation_of_a_real_checked_file_resolves(self):
+        with tempfile.NamedTemporaryFile(suffix=".kicad_pcb") as f:
+            self.assertTrue(
+                chat_agents.resolve_source_ref(
+                    {"kind": "check_finding", "source_path": f.name}
+                )
+            )
+
+    def test_002_a_citation_of_a_file_that_is_not_there_is_dropped(self):
+        self.assertFalse(
+            chat_agents.resolve_source_ref(
+                {"kind": "check_finding", "source_path": "/nope/never.kicad_pcb"}
+            )
+        )
+
+    def test_003_a_citation_with_no_path_is_dropped(self):
+        self.assertFalse(chat_agents.resolve_source_ref({"kind": "check_finding"}))
+        self.assertFalse(
+            chat_agents.resolve_source_ref({"kind": "check_finding", "source_path": ""})
+        )
+
+    def test_004_it_travels_through_validate_source_refs(self):
+        """The path a real response takes -- resolve_source_ref is only
+        reached through here."""
+        with tempfile.NamedTemporaryFile(suffix=".kicad_pcb") as f:
+            resolved, dropped = chat_agents.validate_source_refs([
+                {"kind": "check_finding", "source_path": f.name},
+                {"kind": "check_finding", "source_path": "/nope/x.kicad_pcb"},
+            ])
+
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(dropped, 1)

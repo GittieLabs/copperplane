@@ -26,7 +26,10 @@ export function sourceChipLabel(ref: SourceRef): string {
     case 'note':
       return 'Saved note'
     case 'check_finding':
-      return 'Check finding'
+      // Naming the check is the point: "DRC finding" tells a user this came
+      // from KiCad's own run on their board, which is exactly what the
+      // general-practice note used to deny.
+      return ref.source_path?.endsWith('.kicad_sch') ? 'ERC finding' : 'DRC finding'
     default:
       return 'Source'
   }

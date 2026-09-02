@@ -57,7 +57,7 @@ describe('ReviewPanel', () => {
     await waitFor(() => screen.getByText('No project intent set'))
     screen.getByText('Agents will answer generically until one is added.')
     screen.getByText('Warning')
-    screen.getByText(/General engineering practice/)
+    screen.getByText(/Includes general engineering practice/)
     screen.getByText('1 finding')
   })
 

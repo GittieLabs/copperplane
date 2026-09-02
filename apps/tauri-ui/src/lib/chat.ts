@@ -14,6 +14,8 @@ export interface SourceRef {
   part_id?: string
   page?: number
   content_hash?: string
+  /** `check_finding`: the .kicad_sch/.kicad_pcb the ERC/DRC run read. */
+  source_path?: string
   category?: string
   quote?: string
   pin_number?: string
