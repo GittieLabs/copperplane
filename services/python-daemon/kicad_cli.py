@@ -203,6 +203,29 @@ def run_drc(pcb_path: str) -> dict:
     return _run_report(["pcb", "drc"], pcb_path)
 
 
+def check_schematic_parity(pcb_path: str) -> list:
+    """Every place the board and its schematic disagree -- SPEC-326 2.7.
+
+    KiCad performs this comparison itself, via `pcb drc
+    --schematic-parity`, on a CLOSED board: it reads the `.kicad_sch`
+    sitting beside the `.kicad_pcb` and reports each symbol/footprint
+    disagreement under a `schematic_parity` key. We deliberately do not
+    hand-roll the comparison. A hand-rolled diff of `sch export bom`
+    footprints against `pcb export pos` packages was written first and
+    produced FIVE findings on the maintainer's own board, of which one
+    was real: the other four were the mounting holes H1-H4, which are
+    board-only by design and carry no schematic symbol at all. KiCad's
+    own check reports exactly the one real issue and correctly stays
+    silent about the mounting holes, because it knows which absences are
+    legitimate and a footprint-name diff does not.
+
+    Returns the raw parity entries -- each {description, severity, type,
+    items} -- and an empty list when the board and schematic agree.
+    """
+    report = _run_report(["pcb", "drc", "--schematic-parity"], pcb_path)
+    return report.get("schematic_parity", [])
+
+
 def export_board_glb(pcb_path: str, origin_x_mm: float = None, origin_y_mm: float = None) -> str:
     """Real `kicad-cli pcb export glb` wrapper (SPEC-311): exports the
     *entire assembled board* -- substrate plus every real component's

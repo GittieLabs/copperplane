@@ -155,6 +155,15 @@ except Exception:
     kicad_cli = None
 
 try:
+    import kicad_board
+except Exception:
+    logger.exception(
+        "kicad_board failed to import -- board-sourced component envelopes will be unavailable"
+    )
+    _note_degraded("kicad_board", "kicad.list_board_components")
+    kicad_board = None
+
+try:
     import kicad_project
 except Exception:
     logger.exception(
@@ -1000,9 +1009,23 @@ def kicad_list_schematic_components(sch_path: str) -> dict:
         raise RuntimeError("Reading a schematic requires kicad_cli, which failed to import.")
 
     components = kicad_cli.export_schematic_bom(sch_path)
+    _resolve_footprints(components)
 
-    # Footprint/model resolution is best-effort per component: one
-    # unresolvable footprint must not cost the user the whole table.
+    return {
+        "source_path": sch_path,
+        "read_at": datetime.now(timezone.utc).isoformat(),
+        "components": components,
+    }
+
+
+def _resolve_footprints(components: list) -> None:
+    """Fill in footprint/model/courtyard facts, in place.
+
+    Shared by the schematic and board readers so the two produce
+    identically-shaped components and stay comparable (SPEC-326 §2.7).
+
+    Footprint/model resolution is best-effort per component: one
+    unresolvable footprint must not cost the user the whole table."""
     for component in components:
         resolved = {"footprint_found": False, "model_ref": None, "model_path": None}
         if kicad_bridge is not None and component.get("footprint"):
@@ -1020,8 +1043,39 @@ def kicad_list_schematic_components(sch_path: str) -> dict:
         # courtyard. None means no X/Y source, not zero.
         component["courtyard"] = resolved.get("courtyard")
 
+
+def kicad_list_board_components(pcb_path: str) -> dict:
+    """The kicad.list_board_components route (SPEC-326 §2.7).
+
+    Every footprint physically on the board, resolved the same way the
+    schematic reader resolves its own. **This, not the schematic, is what
+    the enclosure is measured from** -- the board is the thing being put
+    in a box, and the two files disagree whenever a schematic edit has not
+    been pushed across with "Update PCB from Schematic".
+
+    Async: `kicad_board` only reads a file, but `_resolve_footprints`
+    reaches the footprint libraries per component."""
+    if kicad_board is None:
+        raise RuntimeError("Reading a board requires kicad_board, which failed to import.")
+
+    components = [
+        {
+            "reference": fp["reference"],
+            "value": fp["value"],
+            "footprint": fp["footprint"],
+            # A board footprint carries no DNP flag of its own in the shape
+            # the schematic BOM reports it, so this is stated as False
+            # rather than guessed. SPEC-326 counts a DNP part's volume
+            # anyway: an unpopulated pad still has no part above it, but a
+            # box sized without it is wrong the moment it is populated.
+            "dnp": False,
+        }
+        for fp in kicad_board.read_board_footprints(pcb_path)
+    ]
+    _resolve_footprints(components)
+
     return {
-        "source_path": sch_path,
+        "source_path": pcb_path,
         "read_at": datetime.now(timezone.utc).isoformat(),
         "components": components,
     }
@@ -1092,7 +1146,53 @@ def component_envelopes(components: list, height_overrides: dict = None) -> dict
     }
 
 
-def kicad_component_envelopes(sch_path: str, height_overrides: dict = None) -> dict:
+def kicad_check_schematic_parity(pcb_path: str) -> dict:
+    """The kicad.check_schematic_parity route (SPEC-326 2.7).
+
+    KiCad does not push a schematic edit to the board. A user runs
+    "Update PCB from Schematic" by hand, and until they do, the two files
+    disagree silently -- each opens and renders perfectly on its own, so
+    neither view shows a problem.
+
+    That matters here specifically, and not only as general hygiene:
+    every number this daemon reports about component volume is read from
+    the SCHEMATIC's footprints, while the enclosure is built around the
+    BOARD. When they disagree, the interior height is computed from a
+    part that is not on the board being built. On the maintainer's own
+    project this is live -- the schematic carries a horizontal CR2032
+    holder and the board a vertical one, which are different heights --
+    so the recommendation describes a board that does not exist.
+
+    Read-only. Reporting the disagreement is the whole feature; resolving
+    it stays a human action inside KiCad, because choosing which of the
+    two files is right is a design decision, not a mechanical one.
+
+    Async: runs `kicad-cli pcb drc`, a real subprocess (~1.7s on a small
+    real board).
+    """
+    if kicad_cli is None:
+        raise RuntimeError("The parity check requires kicad_cli, which failed to import.")
+
+    issues = kicad_cli.check_schematic_parity(pcb_path)
+    return {
+        "pcb_path": pcb_path,
+        "in_sync": not issues,
+        "issue_count": len(issues),
+        "issues": [
+            {
+                "type": i.get("type"),
+                "severity": i.get("severity"),
+                "description": i.get("description"),
+            }
+            for i in issues
+        ],
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def kicad_component_envelopes(
+    sch_path: str = None, pcb_path: str = None, height_overrides: dict = None
+) -> dict:
     """The kicad.component_envelopes route (SPEC-326).
 
     Reads a schematic and returns a clearance envelope per component, plus
@@ -1110,7 +1210,32 @@ def kicad_component_envelopes(sch_path: str, height_overrides: dict = None) -> d
     Async: composes `kicad-cli` with a `freecadcmd` bounding-box read per
     modelled component.
     """
-    read = kicad_list_schematic_components(sch_path)
+    # SPEC-326 §2.7: **the board is the source of truth.** The enclosure is
+    # built around the board, not around the schematic, and the two disagree
+    # whenever a schematic edit has not been pushed across with KiCad's
+    # "Update PCB from Schematic". Measuring the schematic answers a question
+    # nobody asked -- how tall a box the design *would* need, if the board
+    # matched it.
+    #
+    # The schematic remains the fallback for a real and ordinary state: a
+    # project whose schematic is drawn but whose board is not laid out yet
+    # has NO footprints on the board at all (one of the maintainer's own four
+    # projects is in exactly that state). Falling back beats reporting an
+    # empty design, but the caller is told which file the numbers came from
+    # rather than left to assume.
+    read, measured_from = None, None
+    if pcb_path:
+        try:
+            candidate = kicad_list_board_components(pcb_path)
+            if candidate["components"]:
+                read, measured_from = candidate, "board"
+        except Exception as exc:  # noqa: BLE001 -- fall back, never fail the panel
+            logger.warning("board read failed for %s, falling back: %s", pcb_path, exc)
+    if read is None and sch_path:
+        read, measured_from = kicad_list_schematic_components(sch_path), "schematic"
+    if read is None:
+        raise RuntimeError("Component envelopes need a board or a schematic to read.")
+
     envelopes = component_envelopes(read["components"], height_overrides)
 
     known = [e for e in envelopes["envelopes"] if e["z_mm"] is not None]
@@ -1119,6 +1244,10 @@ def kicad_component_envelopes(sch_path: str, height_overrides: dict = None) -> d
     return {
         **envelopes,
         "source_path": read["source_path"],
+        # Which file these numbers describe. Never inferred by the caller:
+        # "board" and "schematic" are different answers, and a fallback to
+        # the schematic must be visible as one.
+        "measured_from": measured_from,
         "read_at": read["read_at"],
         "min_interior_height_mm": round(tallest["z_mm"], 3) if tallest else None,
         "tallest": {
@@ -1736,6 +1865,8 @@ def _build_routes() -> dict:
         "kicad.resolve_project": kicad_resolve_project,
         "kicad.list_schematic_components": kicad_list_schematic_components,
         "kicad.component_envelopes": kicad_component_envelopes,
+        "kicad.check_schematic_parity": kicad_check_schematic_parity,
+        "kicad.list_board_components": kicad_list_board_components,
     }
     if get_kicad_version is not None:
         routes["kicad.get_version"] = get_kicad_version
@@ -1856,6 +1987,11 @@ ASYNC_ROUTES = {
     "kicad.list_schematic_components",
     # SPEC-326: kicad-cli plus a freecadcmd read per modelled component.
     "kicad.component_envelopes",
+    # SPEC-326 2.7: runs `kicad-cli pcb drc --schematic-parity`, a subprocess.
+    "kicad.check_schematic_parity",
+    # SPEC-326 2.7: reads the board file, then the footprint libraries per
+    # component -- the same per-component library work the schematic reader does.
+    "kicad.list_board_components",
     # CTX-321.3: same reasoning -- a real socket connect to a URL that may
     # simply have nothing listening, which must not block the request path.
     "llm.probe_endpoint",

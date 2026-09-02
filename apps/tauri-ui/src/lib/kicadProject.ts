@@ -106,18 +106,59 @@ export interface EnvelopeResult {
   stated: number
   unknown: number
   source_path: string
+  /** SPEC-326 §2.7: which file these numbers describe. The BOARD is the
+   *  source of truth — it is the thing going in the box. `'schematic'` means
+   *  the board had no footprints on it at all (a project drawn but not laid
+   *  out yet), and the caller must say so rather than let it pass as a board
+   *  measurement. */
+  measured_from: 'board' | 'schematic'
   read_at: string
   min_interior_height_mm: number | null
   tallest: { reference: string; z_mm: number; source: string } | null
 }
 
 export async function componentEnvelopes(
-  schPath: string,
+  schPath: string | null,
+  pcbPath: string | null,
   heightOverrides: Record<string, number> = {},
 ): Promise<EnvelopeResult> {
   const handle = await submitJob<EnvelopeResult>('kicad.component_envelopes', {
     sch_path: schPath,
+    pcb_path: pcbPath,
     height_overrides: heightOverrides,
+  })
+  return handle.result
+}
+
+/** SPEC-326 §2.7: where the board and its schematic disagree.
+ *
+ *  KiCad does not push a schematic edit to the board -- a user runs
+ *  "Update PCB from Schematic" by hand, and until they do the two files
+ *  disagree silently. Each opens and renders correctly on its own, so
+ *  neither KiCad view shows a problem.
+ *
+ *  This matters to SPEC-326 specifically and not just as hygiene: every
+ *  volume number above is read from the SCHEMATIC's footprints, while the
+ *  enclosure is built around the BOARD. When they disagree, the interior
+ *  height describes a part that is not on the board being built. */
+export interface ParityIssue {
+  type: string
+  severity: string
+  description: string
+}
+
+export interface ParityResult {
+  pcb_path: string
+  in_sync: boolean
+  issue_count: number
+  issues: ParityIssue[]
+  checked_at: string
+}
+
+/** Async route: runs `kicad-cli pcb drc`, a real subprocess. */
+export async function checkSchematicParity(pcbPath: string): Promise<ParityResult> {
+  const handle = await submitJob<ParityResult>('kicad.check_schematic_parity', {
+    pcb_path: pcbPath,
   })
   return handle.result
 }

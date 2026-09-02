@@ -3124,3 +3124,104 @@ class TestSchematicComponentRoutes(unittest.TestCase):
             out = daemon.kicad_list_schematic_components("/tmp/board.kicad_sch")
         self.assertEqual("/tmp/board.kicad_sch", out["source_path"])
         self.assertIn("T", out["read_at"])
+
+
+class TestSchematicParityRoute(unittest.TestCase):
+    """SPEC-326 §2.7: kicad.check_schematic_parity."""
+
+    def test_001_the_route_is_registered(self):
+        self.assertIn("kicad.check_schematic_parity", daemon.ROUTES)
+
+    def test_002_the_route_is_async_because_it_spawns_kicad_cli(self):
+        """CTX-314.2's bug shape: a route that runs a real subprocess but is
+        absent from ASYNC_ROUTES blocks main()'s whole stdin read loop for
+        its duration, freezing every other IPC command. This one takes
+        ~1.7s on a real board."""
+        self.assertIn("kicad.check_schematic_parity", daemon.ASYNC_ROUTES)
+
+    def test_003_an_agreeing_board_reports_in_sync_with_no_issues(self):
+        with patch.object(daemon.kicad_cli, "check_schematic_parity", return_value=[]):
+            out = daemon.kicad_check_schematic_parity("/p/board.kicad_pcb")
+
+        self.assertTrue(out["in_sync"])
+        self.assertEqual(out["issue_count"], 0)
+        self.assertEqual(out["issues"], [])
+
+    def test_004_a_disagreeing_board_reports_each_real_difference(self):
+        issue = {
+            "type": "footprint_symbol_mismatch",
+            "severity": "warning",
+            "description": "A doesn't match footprint given by symbol (B)",
+            "items": [{"uuid": "x"}],
+        }
+        with patch.object(daemon.kicad_cli, "check_schematic_parity", return_value=[issue]):
+            out = daemon.kicad_check_schematic_parity("/p/board.kicad_pcb")
+
+        self.assertFalse(out["in_sync"])
+        self.assertEqual(out["issue_count"], 1)
+        self.assertEqual(out["issues"][0]["type"], "footprint_symbol_mismatch")
+        # `items` carries KiCad's internal uuids, which mean nothing to a
+        # user and nothing to this app -- dropped rather than passed through.
+        self.assertNotIn("items", out["issues"][0])
+
+
+class TestEnvelopeSourceIsTheBoard(unittest.TestCase):
+    """SPEC-326 §2.7: the enclosure is built around the board, so the board
+    is what gets measured -- with the schematic as a stated fallback, never
+    a silent one."""
+
+    _BOARD = {"source_path": "/p/b.kicad_pcb", "read_at": "t",
+              "components": [{"reference": "R1", "footprint": "L:F", "value": "1k",
+                              "dnp": False, "footprint_found": True, "model_ref": None,
+                              "model_path": None, "has_model": False, "courtyard": None}]}
+    _SCH = {"source_path": "/p/s.kicad_sch", "read_at": "t",
+            "components": [{"reference": "R9", "footprint": "L:G", "value": "2k",
+                            "dnp": False, "footprint_found": True, "model_ref": None,
+                            "model_path": None, "has_model": False, "courtyard": None}]}
+
+    def test_001_the_board_is_preferred_when_it_has_footprints(self):
+        with patch.object(daemon, "kicad_list_board_components", return_value=self._BOARD), \
+             patch.object(daemon, "kicad_list_schematic_components", return_value=self._SCH):
+            out = daemon.kicad_component_envelopes(
+                sch_path="/p/s.kicad_sch", pcb_path="/p/b.kicad_pcb")
+
+        self.assertEqual(out["measured_from"], "board")
+        self.assertEqual(out["source_path"], "/p/b.kicad_pcb")
+        self.assertEqual([e["reference"] for e in out["envelopes"]], ["R1"])
+
+    def test_002_an_empty_board_falls_back_to_the_schematic_and_says_so(self):
+        """A project drawn but not laid out yet has NO footprints on the
+        board. One of the maintainer's own four projects is in that state.
+        Reporting an empty design would be the worse answer, but the caller
+        must be able to see that this is not a board measurement."""
+        empty = {**self._BOARD, "components": []}
+        with patch.object(daemon, "kicad_list_board_components", return_value=empty), \
+             patch.object(daemon, "kicad_list_schematic_components", return_value=self._SCH):
+            out = daemon.kicad_component_envelopes(
+                sch_path="/p/s.kicad_sch", pcb_path="/p/b.kicad_pcb")
+
+        self.assertEqual(out["measured_from"], "schematic")
+        self.assertEqual([e["reference"] for e in out["envelopes"]], ["R9"])
+
+    def test_003_an_unreadable_board_falls_back_rather_than_failing_the_panel(self):
+        with patch.object(daemon, "kicad_list_board_components",
+                          side_effect=RuntimeError("bad board")), \
+             patch.object(daemon, "kicad_list_schematic_components", return_value=self._SCH):
+            out = daemon.kicad_component_envelopes(
+                sch_path="/p/s.kicad_sch", pcb_path="/p/b.kicad_pcb")
+
+        self.assertEqual(out["measured_from"], "schematic")
+
+    def test_004_a_schematic_only_project_still_works(self):
+        with patch.object(daemon, "kicad_list_schematic_components", return_value=self._SCH):
+            out = daemon.kicad_component_envelopes(sch_path="/p/s.kicad_sch")
+
+        self.assertEqual(out["measured_from"], "schematic")
+
+    def test_005_neither_path_is_a_loud_error_not_an_empty_answer(self):
+        with self.assertRaises(RuntimeError):
+            daemon.kicad_component_envelopes()
+
+    def test_006_the_board_route_is_registered_and_async(self):
+        self.assertIn("kicad.list_board_components", daemon.ROUTES)
+        self.assertIn("kicad.list_board_components", daemon.ASYNC_ROUTES)

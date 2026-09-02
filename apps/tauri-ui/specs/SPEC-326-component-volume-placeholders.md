@@ -129,6 +129,80 @@ references.
 *   `SPEC-202` — `package_dimensions` becomes load-bearing for something physical, having been
     informational until now.
 
+### 2.7 The schematic and the board can disagree, and every number here comes from the schematic
+
+Everything above reads the **schematic**'s footprints. The enclosure is built around the **board**.
+KiCad does not keep those in step: a schematic edit does not reach the `.kicad_pcb` until the user
+runs *Tools → Update PCB from Schematic* by hand. Until they do, the two files describe different
+designs — and each one opens and renders perfectly on its own, so neither KiCad view shows a
+problem.
+
+This is not hypothetical and not hygiene. It is live on the maintainer's own project, the same
+board §1 is written about:
+
+| | footprint for `BT1` | courtyard |
+|---|---|---|
+| schematic | `Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles` | 22.59 × 20.50 mm |
+| board | `Battery_Panasonic_CR2032-VS1N_Vertical_CircularHoles` | 20.61 × 6.23 mm |
+
+A horizontal and a vertical CR2032 holder are different heights. So the interior height this spec
+recommends is derived from a part that **is not on the board being built** — a confident wrong
+answer of exactly the shape §1 exists to avoid, arrived at by a different route.
+
+**Decided: the board is the source of truth. Detect the disagreement, report it, and never
+resolve it.**
+
+The board is the thing going in the box, so the board is what gets measured. Measuring the
+schematic answers a question nobody asked — how tall a box the design *would* need, if the board
+matched it. The user is told which file the numbers came from and how to sync if the schematic is
+the version they want.
+
+Getting a *complete* list of what is on the board is harder than it looks, and both obvious routes
+are wrong:
+
+*   **`kicad-cli pcb export pos` silently omits footprints.** Position files honour KiCad's
+    `exclude_from_pos_files` attribute — confirmed by setting it on a fixture and watching the
+    component vanish from the CSV while the board was otherwise unchanged. That attribute is
+    routinely set on mounting holes, fiducials, logos and test points: precisely the board-only
+    mechanical parts that decide whether a board fits in a box.
+*   **`kiutils` cannot read a full board at all** — `IndexError` on real boards, already recorded
+    in `CTX-314.1` and re-confirmed here.
+
+So `kicad_board.py` reads the file. Nothing can be excluded from it by an export setting, because
+there is no export. Two format traps it handles, both found against real boards on this machine:
+quoted values containing parentheses (`Battery_Cell (CR2032)`) which defeat a paren count, and the
+pre-KiCad-7 `(fp_text reference "SW1" ...)` spelling, under which all 31 footprints of a real 2021
+board read as reference `None` — a silent wrong answer, not a crash.
+
+**The schematic remains a stated fallback.** A project whose schematic is drawn but whose board is
+not laid out yet has *no* footprints on the board — one of the maintainer's own four projects is in
+exactly that state. Falling back beats reporting an empty design, but `measured_from` says which
+file was read, and the UI says so too. A fallback must never pass as a board measurement.
+
+**What switching to board truth costs, on the maintainer's own board:** the 20.0mm height they
+supplied is keyed to the *schematic's* horizontal holder, which is not on the board, so it no
+longer applies. The recommendation drops to 15.515mm and `unknown` rises from 0 to 5. That is the
+honest answer — the board's actual holder has no model and no stated height — and it is the
+correct one: the previous 20.0mm described a part that is not there. Because §2.5 keys heights by
+footprint, those 5 unknowns are only **2** entries to make, not 5.
+
+*   **Detection uses KiCad's own check, not our own comparison.** `kicad-cli pcb drc
+    --schematic-parity` reads the `.kicad_sch` beside a **closed** board and reports each
+    disagreement under its own `schematic_parity` key, separate from `violations`. A hand-rolled
+    diff of `sch export bom` footprints against `pcb export pos` packages was written first and
+    produced **five** findings on this board, of which **one** was real: the other four were the
+    mounting holes `H1`–`H4`, which are board-only by design and carry no schematic symbol.
+    KiCad's own check reports the one real issue and stays silent about the mounting holes.
+    Running it on three further boards of the maintainer's found real desyncs in all three.
+*   **Reporting is the whole feature.** Resolving it means writing to the board, and choosing
+    which of the two files is right is a design decision. The only mechanism available is
+    `kipy`'s `run_action("pcbnew.EditorControl.importNetlist")` — the action behind the menu item,
+    whose own docstring says it is unstable, not for use outside API development, and may have
+    unintended side effects. It also needs KiCad running with the board focused, and opens a
+    modal dialog. That is `SPEC-329` territory, deliberately deferred.
+*   **The warning is placed above the height recommendation**, not below it: the caveat has to
+    arrive before the claim it qualifies.
+
 ## 3. Known Constraints & Risks
 
 *   **A courtyard can be absent or wrong.** Not every footprint has an `F.CrtYd` layer, and a

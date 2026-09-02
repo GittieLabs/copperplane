@@ -1068,6 +1068,16 @@ already generates parametric geometry in FreeCAD. A footprint with no resolvable
 this must settle: a coin-cell holder's *assembled* height (holder plus installed cell) is the
 number that matters for clearance, and is not either part's datasheet height.
 
+Extended mid-flight by §2.7 (`CTX-326.3`): every volume number here is read from the **schematic**,
+while the enclosure is built around the **board**, and KiCad keeps those in step only when a user
+runs *Update PCB from Schematic* by hand. The maintainer's own board is currently out of sync on
+exactly the CR2032 above — schematic says horizontal, board says vertical — so the recommendation
+describes a part that is not on the board. `kicad-cli pcb drc --schematic-parity` detects this on
+closed files; all three of the maintainer's other boards were also out of sync. Detection ships;
+*triggering* the sync needs `kipy`'s explicitly-unstable `run_action`, so it stays in SPEC-329.
+Remaining: placeholder geometry in the 3D view (`CTX-326.4`), and the open source-of-truth question
+of whether envelopes should be read from the board instead.
+
 #### SPEC-327 — Design Advice: Layout & Clearance Warnings — not yet written
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-325, SPEC-326
