@@ -1016,11 +1016,79 @@ def kicad_list_schematic_components(sch_path: str) -> dict:
         component["model_ref"] = resolved["model_ref"]
         component["model_path"] = resolved["model_path"]
         component["has_model"] = bool(resolved["model_path"])
+        # SPEC-326 §2.1: real X/Y extents from the footprint, when it has a
+        # courtyard. None means no X/Y source, not zero.
+        component["courtyard"] = resolved.get("courtyard")
 
     return {
         "source_path": sch_path,
         "read_at": datetime.now(timezone.utc).isoformat(),
         "components": components,
+    }
+
+
+# SPEC-326 §2.3: where a component's Z came from, in priority order. There is
+# deliberately no "default" member -- a guessed height fails as a physical
+# object that does not fit, which is worse than an honest unknown.
+ENVELOPE_SOURCES = ("model", "package_dimensions", "user", "unknown")
+
+
+def component_envelopes(components: list, height_overrides: dict = None) -> dict:
+    """Per-component clearance envelopes for the enclosure (SPEC-326).
+
+    Each entry reports `x_mm`/`y_mm`/`z_mm` and, crucially, **`source`** --
+    which of SPEC-326 §2.3's ordered sources supplied the height. A caller
+    must be able to tell a measured volume from a stated one; §2.4 requires
+    that distinction to survive all the way into the 3D view.
+
+    X/Y come from the footprint's own courtyard, measured from the real
+    `.kicad_mod`. That covers 902 of 903 footprints across five real KiCad
+    libraries, but it is **not a bound** -- in 4 of 10 sampled parts with
+    real models the courtyard was SMALLER than the true body, so
+    `x_within_courtyard` records that this is an approximation rather than a
+    guarantee.
+
+    Z is sourced, never guessed. A component with no height from any source
+    is reported `source: "unknown"` with `z_mm: None`, exactly as
+    SPEC-311 reports an unknown height today -- not silently defaulted.
+    """
+    overrides = height_overrides or {}
+    envelopes = []
+    for component in components:
+        footprint = component.get("footprint")
+        courtyard = component.get("courtyard")
+        z_mm, source = None, "unknown"
+
+        # SPEC-326 §2.3, in order. A model that resolves is READ, not merely
+        # noted: reporting a component as "measured" while carrying no height
+        # would be a claim with nothing behind it.
+        model_path = component.get("model_path")
+        if model_path and freecad_bridge is not None and model_path.lower().endswith((".step", ".stp")):
+            try:
+                z_mm = round(freecad_bridge.get_step_bounding_box_mm(model_path)["z_mm"], 3)
+                source = "model"
+            except Exception as exc:  # noqa: BLE001 -- an unreadable model is unknown, not fatal
+                logger.warning("could not read %s: %s", model_path, exc)
+        if z_mm is None and footprint and footprint in overrides:
+            z_mm, source = overrides[footprint], "user"
+
+        envelopes.append({
+            "reference": component.get("reference"),
+            "footprint": footprint,
+            "x_mm": courtyard["x_mm"] if courtyard else None,
+            "y_mm": courtyard["y_mm"] if courtyard else None,
+            "z_mm": z_mm,
+            "source": source,
+            # SPEC-326 §2.1: the courtyard approximates the body and can be
+            # smaller than it. Never presented as a guaranteed enclosure.
+            "x_within_courtyard": bool(courtyard),
+        })
+
+    return {
+        "envelopes": envelopes,
+        "measured": sum(1 for e in envelopes if e["source"] == "model"),
+        "stated": sum(1 for e in envelopes if e["source"] in ("package_dimensions", "user")),
+        "unknown": sum(1 for e in envelopes if e["source"] == "unknown"),
     }
 
 

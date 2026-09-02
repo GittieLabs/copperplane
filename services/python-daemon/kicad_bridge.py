@@ -119,6 +119,10 @@ def resolve_footprint_model(footprint_id: str) -> dict:
     result = {
         "footprint_id": footprint_id,
         "footprint_found": False,
+        "footprint_path": None,
+        # SPEC-326 §2.1: X/Y extents from the real footprint, when it has a
+        # courtyard. None means no X/Y source, not zero.
+        "courtyard": None,
         "model_ref": None,
         "model_path": None,
     }
@@ -139,6 +143,8 @@ def resolve_footprint_model(footprint_id: str) -> dict:
         if not os.path.isfile(mod_path):
             continue
         result["footprint_found"] = True
+        result["footprint_path"] = mod_path
+        result["courtyard"] = read_footprint_courtyard(mod_path)
         try:
             with open(mod_path, encoding="utf-8", errors="replace") as handle:
                 text = handle.read()
@@ -151,6 +157,72 @@ def resolve_footprint_model(footprint_id: str) -> dict:
         return result
 
     return result
+
+
+_COURTYARD_LAYERS = ("F.CrtYd", "B.CrtYd")
+
+
+def read_footprint_courtyard(mod_path: str) -> dict | None:
+    """The X/Y extents of a footprint's courtyard, in mm, or `None`.
+
+    SPEC-326 §2.1: the placeholder envelope's footprint extents come from
+    the real `.kicad_mod` on disk -- no inference, no LLM, no datasheet.
+    Measured across five real KiCad libraries: **902 of 903 footprints
+    (99%) have a readable courtyard**, so this is a source that actually
+    covers the case.
+
+    **Not a conservative bound**, and callers must not treat it as one.
+    Calibrated against `BatteryHolder_Keystone_1060_1x2032`, which has a
+    real STEP model to check against: courtyard 32.90 x 17.00 against a
+    true bounding box of 31.86 x 17.96 -- 1mm wider in X and **1mm
+    narrower in Y** than the actual body. A courtyard is a PCB keep-out;
+    a part can overhang it.
+
+    Returns `None` rather than raising for a footprint with no courtyard
+    layer -- that is the 1-in-903 case, and it means "no X/Y source",
+    which is the same honest unknown a missing height produces.
+    """
+    try:
+        import kiutils.footprint as kf
+        footprint = kf.Footprint.from_file(mod_path)
+    except Exception:  # noqa: BLE001 -- an unreadable footprint is "unknown", not fatal
+        return None
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for item in getattr(footprint, "graphicItems", []) or []:
+        if getattr(item, "layer", None) not in _COURTYARD_LAYERS:
+            continue
+
+        # A circle's extent is centre +/- radius, NOT the two points that
+        # define it. Taking only those gave a real radial capacitor
+        # (CP_Radial_D5.0mm_P2.50mm, whose courtyard is a single circle) an
+        # extent of 2.75 x 0.00 mm instead of 5.50 x 5.50 -- a zero-height
+        # envelope for a part that is 5.5mm across.
+        if type(item).__name__ == "FpCircle":
+            centre = getattr(item, "center", None)
+            edge = getattr(item, "end", None)
+            if centre is not None and edge is not None:
+                radius = ((edge.X - centre.X) ** 2 + (edge.Y - centre.Y) ** 2) ** 0.5
+                xs.extend((centre.X - radius, centre.X + radius))
+                ys.extend((centre.Y - radius, centre.Y + radius))
+                continue
+
+        # An arc bulges past its endpoints, so `mid` is load-bearing: without
+        # it BatteryHolder_Keystone_1060 measured 32.90 x 17.00 instead of
+        # 32.90 x 21.40, understating the keep-out by 4mm.
+        for attr in ("start", "end", "center", "mid"):
+            point = getattr(item, attr, None)
+            if point is not None:
+                xs.append(point.X)
+                ys.append(point.Y)
+        for point in (getattr(item, "coordinates", None) or []):
+            xs.append(point.X)
+            ys.append(point.Y)
+
+    if not xs or not ys:
+        return None
+    return {"x_mm": round(max(xs) - min(xs), 3), "y_mm": round(max(ys) - min(ys), 3)}
 
 
 class KiCadUnavailableError(Exception):
