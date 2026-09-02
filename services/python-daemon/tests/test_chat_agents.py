@@ -1292,3 +1292,40 @@ class TestFindingsFromCheckAlone(unittest.TestCase):
         self.assertIsNone(
             chat_agents._findings_from_check_alone("enclosure", "P:enclosure", "P")
         )
+
+
+class TestAgentToolsWorkWithKicadClosed(unittest.TestCase):
+    """`kicad.get_component_heights` goes through `kipy` and needs KiCad
+    RUNNING. Once the PCB and Enclosure tabs stopped requiring that, the tool
+    failed on every call -- and agentflow returns ACCUMULATED TOOL RESULTS as
+    its text when an agent exhausts `max_tool_rounds`, so a permanently
+    failing tool turned into "the review came back without its findings
+    block". Reported as "Why is the plain-language text not generated?"."""
+
+    def _tools_of(self, agent):
+        import re
+        path = os.path.join(os.path.dirname(__file__), "..", "agentflow", "agents",
+                            f"{agent}.prompt.md")
+        with open(path, encoding="utf-8") as f:
+            head = f.read().split("---")[1]
+        block = re.search(r"tools:\n((?:\s+- .*\n)+)", head)
+        return [l.strip("- ").strip() for l in block.group(1).splitlines()] if block else []
+
+    def test_001_the_pcb_agent_declares_no_kicad_ipc_tool(self):
+        self.assertNotIn("kicad.get_component_heights", self._tools_of("chat_pcb"))
+
+    def test_002_the_enclosure_agent_declares_no_kicad_ipc_tool(self):
+        """Its review panel is switched off, but its chat panel is still live."""
+        self.assertNotIn("kicad.get_component_heights", self._tools_of("chat_enclosure"))
+
+    def test_003_the_pcb_agent_keeps_the_tools_that_work_from_files(self):
+        tools = self._tools_of("chat_pcb")
+        self.assertIn("context.search", tools)
+        self.assertIn("datasheet.read_pages", tools)
+
+    def test_004_no_prompt_still_promises_the_removed_tool(self):
+        for agent in ("chat_pcb", "chat_enclosure"):
+            path = os.path.join(os.path.dirname(__file__), "..", "agentflow", "agents",
+                                f"{agent}.prompt.md")
+            with open(path, encoding="utf-8") as f:
+                self.assertNotIn("kicad.get_component_heights", f.read(), agent)

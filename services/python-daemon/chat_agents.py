@@ -864,6 +864,20 @@ def review(
     # there is no check to fall back on -- an unlinked project, an area with no
     # check at all -- is this a real error.
     if _FINDINGS_PATTERN.search(result["text"]) is None:
+        # Why, when we can tell. agentflow returns ACCUMULATED TOOL RESULTS as
+        # its text when an agent exhausts `max_tool_rounds` without answering,
+        # so a tool that always fails silently turns into "no findings block".
+        # That is exactly what happened here: `kicad.get_component_heights`
+        # needs KiCad RUNNING, the PCB and Enclosure tabs stopped requiring it,
+        # and the tool then failed on every call until the rounds ran out.
+        # Logged rather than swallowed, so the next instance of this shape is
+        # one grep away instead of another round of guessing.
+        logger.warning(
+            "review(%s) produced no findings block after %s tool call(s): %s",
+            area,
+            len(result.get("tool_calls_raw") or []),
+            [tc.get("name") for tc in (result.get("tool_calls_raw") or [])],
+        )
         fallback = _findings_from_check_alone(area, scope_id, project_name)
         if fallback is not None:
             return fallback

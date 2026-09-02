@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { listen } from '@tauri-apps/api/event'
 import {
   MENU_SAVE_PROJECT_EVENT,
@@ -196,6 +197,22 @@ function App() {
     }
   }
 
+  // A project's folder is a real path a user needs outside this app -- to open
+  // it in Finder, or to hand to a tool. Copying beats a clickable path that
+  // silently opens a dialog, which is what this used to be.
+  const [copiedPath, setCopiedPath] = useState(false)
+
+  async function handleCopyProjectPath() {
+    if (!currentProject?.directory) return
+    try {
+      await writeText(currentProject.directory)
+      setCopiedPath(true)
+      window.setTimeout(() => setCopiedPath(false), 1500)
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function handleSaveProject() {
     if (!currentProject) return
     setSavingProject(true)
@@ -373,34 +390,50 @@ function App() {
              * these real, already-scoped actions don't get entangled
              * with a surface whose future shape isn't settled yet. */}
             <div className="flex w-full max-w-4xl items-center justify-between gap-2 text-xs">
-              {/* The project's NAME is what identifies it to its owner; the
-                  folder is where it happens to live. This used to show only
-                  the full path, at the top of every screen -- "I don't see the
-                  value of prominently display the linked project and path."
-                  The path stays, one step quieter, because linking is still a
-                  real action taken from here and a user with two similarly
-                  named projects needs to be able to tell them apart. */}
+              {/* Three separate facts, previously collapsed into one line of
+                  grey path text that was also, invisibly, a button:
+                    - the project's NAME, which is what identifies it;
+                    - its FOLDER, where this app keeps its artifacts;
+                    - the LINKED KICAD PROJECT, which lives wherever the user
+                      keeps their PCB work and is usually somewhere else.
+                  Reported: clicking the path opened a file dialog with nothing
+                  to suggest it would, and the path itself was unlabelled, so
+                  it was not clear which of the two it even was. */}
+              <div data-testid="project-header" className="flex min-w-0 flex-col gap-0.5">
+                <p className="truncate text-base font-semibold text-fg-bright">
+                  {currentProject?.name ?? 'Untitled project'}
+                </p>
+                <p className="flex items-center gap-1 text-xs text-fg-muted">
+                  <span className="shrink-0">Linked KiCad project:</span>
+                  <span className="truncate" title={currentProject?.kicad_project_path ?? undefined}>
+                    {currentProject?.kicad_project_path ?? 'none yet — link one on the Schematic tab'}
+                  </span>
+                </p>
+                <p className="flex items-center gap-1 text-xs text-fg-muted">
+                  <span className="shrink-0">Project folder:</span>
+                  <span className="truncate" title={currentProject?.directory ?? undefined}>
+                    {currentProject?.directory ?? 'not linked'}
+                  </span>
+                  {currentProject?.directory && (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded border border-line px-1 text-fg-tertiary hover:bg-surface-alt hover:text-fg-bright"
+                      onClick={() => void handleCopyProjectPath()}
+                      aria-label="Copy project folder path"
+                      title="Copy project folder path"
+                    >
+                      {copiedPath ? 'Copied' : 'Copy'}
+                    </button>
+                  )}
+                </p>
+              </div>
               <button
                 type="button"
-                className="min-w-0 text-left"
+                className="shrink-0 rounded border border-line px-2 py-1 font-medium text-fg-bright hover:bg-surface-alt disabled:opacity-50"
                 onClick={() => void handleLinkDirectory()}
                 disabled={!currentProject}
-                title={currentProject?.directory ?? undefined}
-                // Named for the ACTION rather than derived from the two lines
-                // of text inside it, which would otherwise read out as the
-                // project name run together with its path.
-                aria-label={
-                  currentProject?.directory
-                    ? `Change project folder (currently ${currentProject.directory})`
-                    : 'Link to folder…'
-                }
               >
-                <span className="block truncate text-sm font-medium text-fg-bright">
-                  {currentProject?.name ?? 'Untitled project'}
-                </span>
-                <span className="block truncate text-xs text-fg-muted hover:text-fg-tertiary">
-                  {currentProject?.directory ?? 'Link to folder…'}
-                </span>
+                {currentProject?.directory ? 'Change folder…' : 'Link to folder…'}
               </button>
               <button
                 type="button"

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const submitJobMock = vi.fn()
+const writeTextMock = vi.fn()
 const dispatchToolMock = vi.fn()
 const listProjectsMock = vi.fn()
 const listLibraryPartsMock = vi.fn()
@@ -25,6 +26,10 @@ const listLibrariesMock = vi.fn()
 const syncLibraryMenuMock = vi.fn()
 const setDesignMenuEnabledMock = vi.fn()
 const loadPartMock = vi.fn()
+
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
+  writeText: (...args: unknown[]) => writeTextMock(...args),
+}))
 
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
@@ -551,13 +556,12 @@ describe('App: Enclosure tab persists across area switches', () => {
         expect.objectContaining({ directory: '/real/PCBs/test-project' }),
       ),
     )
-    // The header now leads with the project NAME and carries the folder as a
-    // quieter second line; the button is labelled for its action rather than
-    // by its visible text.
-    await waitFor(() =>
-      screen.getByRole('button', { name: 'Change project folder (currently /real/PCBs/test-project)' }),
-    )
+    // The header leads with the project NAME, labels each path, and links
+    // through a real button rather than a clickable path -- reported as "it
+    // was not clear to me that clicking the path would open a file dialog".
+    await waitFor(() => screen.getByRole('button', { name: 'Change folder…' }))
     expect(screen.getByText('/real/PCBs/test-project')).toBeTruthy()
+    expect(screen.getByText('Project folder:')).toBeTruthy()
     // CTX-312.2: real user feedback -- a successful link/save previously
     // gave no visible confirmation at all, reading as "nothing happened."
     screen.getByText('Linked to /real/PCBs/test-project')
@@ -886,5 +890,62 @@ describe('App: Schematic tab persists across area switches, resets on project sw
     fireEvent.click(screen.getByRole('button', { name: 'Schematic' }))
 
     expect(screen.queryByText('No violations found.')).toBeNull()
+  })
+})
+
+describe('App: the project header says what each path is', () => {
+  /* Reported: "It was not clear to me that clicking the path would open a file
+     dialog to change the project", and the path itself was unlabelled -- so it
+     was not even clear WHICH path it was. Two different ones are in play: this
+     app's project folder, and the linked .kicad_pro, which usually lives
+     somewhere else entirely. */
+  async function renderLinked() {
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      directory: '/real/PCBs/test-project',
+      kicad_project_path: '/elsewhere/Blinky/Blinky.kicad_pro',
+    })
+    render(<App />)
+    await waitFor(() => screen.getByText('test-project'))
+  }
+
+  it('labels the KiCad project path, rather than leaving a bare path', async () => {
+    await renderLinked()
+
+    // Scoped to the header: every area stays mounted, and the Schematic tab
+    // shows the same path in its own panel.
+    const header = within(screen.getByTestId('project-header'))
+    expect(header.getByText('Linked KiCad project:')).toBeTruthy()
+    expect(header.getByText('/elsewhere/Blinky/Blinky.kicad_pro')).toBeTruthy()
+  })
+
+  it('shows the project folder separately, since it is a different place', async () => {
+    await renderLinked()
+
+    expect(screen.getByText('Project folder:')).toBeTruthy()
+    expect(screen.getByText('/real/PCBs/test-project')).toBeTruthy()
+  })
+
+  it('links through a real button, not a clickable path', async () => {
+    await renderLinked()
+
+    expect(screen.getByRole('button', { name: 'Change folder…' })).toBeTruthy()
+  })
+
+  it('copies the project folder path', async () => {
+    writeTextMock.mockResolvedValue(undefined)
+    await renderLinked()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy project folder path' }))
+
+    await waitFor(() => expect(writeTextMock).toHaveBeenCalledWith('/real/PCBs/test-project'))
+    await waitFor(() => screen.getByText('Copied'))
+  })
+
+  it('says a KiCad project is not linked yet, and where to link one', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'test-project', directory: '/real/PCBs/test-project' })
+    render(<App />)
+
+    await waitFor(() => screen.getByText(/link one on the Schematic tab/))
   })
 })
