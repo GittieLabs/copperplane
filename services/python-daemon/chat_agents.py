@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import uuid
 from datetime import datetime, timezone
 
@@ -501,6 +502,43 @@ def _extract_self_reported(text: str) -> tuple:
     return visible, sources, bool(payload.get("general_practice", True))
 
 
+def _findings_json_without_delimiters(text: str):
+    """The findings JSON when the model omitted the `<<<FINDINGS>>>` markers.
+
+    Captured from a real run rather than guessed at: the model returned
+
+        {"severity": "warning", "title": "...", "detail": "...", ...}
+
+    -- the right content, correctly shaped, with no wrapper. Discarding that
+    threw away a real answer over its packaging, and the user saw the raw
+    check output instead of the explanation the model had actually written.
+
+    Custom sentinels are a lot to ask of a model that is already producing
+    JSON. Being tolerant here does not weaken the honesty rule that matters:
+    text that yields no findings JSON at all is still not a clean board, and
+    still falls back to the check's own findings.
+
+    Returns the JSON substring, or `None` when there is none to read.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    # Whole response is the JSON, which is the common case.
+    if stripped[0] in "[{" and stripped[-1] in "]}":
+        return stripped
+
+    # Otherwise take the outermost array, then the outermost object, that the
+    # response contains -- a model that adds a sentence either side of its
+    # JSON has still answered.
+    for opener, closer in (("[", "]"), ("{", "}")):
+        start = stripped.find(opener)
+        end = stripped.rfind(closer)
+        if start != -1 and end > start:
+            return stripped[start:end + 1]
+    return None
+
+
 def _extract_findings(text: str) -> list:
     """CTX-319.1, SPEC-319 §2.1/§2.3: parses a review response's own
     trailing `<<<FINDINGS>>>[...]<<<END_FINDINGS>>>` block -- a JSON
@@ -516,12 +554,17 @@ def _extract_findings(text: str) -> list:
     `review()` does that per-entry validation, this function only
     guarantees every returned item is at least a dict."""
     match = _FINDINGS_PATTERN.search(text)
-    if not match:
+    raw = match.group(1).strip() if match else _findings_json_without_delimiters(text)
+    if raw is None:
         return []
     try:
-        payload = json.loads(match.group(1).strip())
+        payload = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return []
+    # A single finding object, unwrapped, is what a model actually returned
+    # when asked for an array -- read as a one-item list rather than dropped.
+    if isinstance(payload, dict):
+        payload = [payload]
     if not isinstance(payload, list):
         return []
     return [f for f in payload if isinstance(f, dict)]
@@ -877,7 +920,8 @@ def review(
     # is a fact about the user's board, the explanation of it is not. Only when
     # there is no check to fall back on -- an unlinked project, an area with no
     # check at all -- is this a real error.
-    if _FINDINGS_PATTERN.search(result["text"]) is None:
+    if _FINDINGS_PATTERN.search(result["text"]) is None \
+            and _findings_json_without_delimiters(result["text"]) is None:
         # Why, when we can tell. agentflow returns ACCUMULATED TOOL RESULTS as
         # its text when an agent exhausts `max_tool_rounds` without answering,
         # so a tool that always fails silently turns into "no findings block".
@@ -892,6 +936,22 @@ def review(
             len(result.get("tool_calls_raw") or []),
             [tc.get("name") for tc in (result.get("tool_calls_raw") or [])],
         )
+        # The model's ACTUAL words, written where they can be read. Three
+        # rounds of fixing this have been guesses at what the model returned,
+        # because the daemon's stderr goes to a parent process that has no
+        # console when the app is launched from Finder. A log line nobody can
+        # read is not a diagnostic.
+        try:
+            debug_path = os.path.join(tempfile.gettempdir(), "copperplane-review-debug.txt")
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write(f"area={area} scope_id={scope_id}\n")
+                f.write(f"tool_calls={[tc.get('name') for tc in (result.get('tool_calls_raw') or [])]}\n")
+                f.write(f"text_length={len(result.get('text') or '')}\n")
+                f.write("--- raw model text ---\n")
+                f.write(result.get("text") or "<empty>")
+            logger.warning("review(%s): raw model text written to %s", area, debug_path)
+        except OSError:
+            pass
         fallback = _findings_from_check_alone(area, scope_id, project_name)
         if fallback is not None:
             return fallback

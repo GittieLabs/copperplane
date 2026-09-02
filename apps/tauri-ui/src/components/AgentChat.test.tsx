@@ -235,3 +235,60 @@ describe('AgentChat', () => {
     expect(screen.queryByText('Save as note')).toBeNull()
   })
 })
+
+describe('AgentChat: saving a note says what it does', () => {
+  /* "Our only option is to save to this project, so asking as a confirmation
+     after the save as note seems redundant" -- and the old second state also
+     offered Cancel beside "Saved to this project", which reads as undo and was
+     not: it only closed the row. There is no remove-note route at all. */
+  function renderSingleTarget() {
+    loadChatThreadMock.mockResolvedValueOnce([ASSISTANT_TURN])
+    render(
+      <AgentChat
+        area="pcb"
+        scope="project"
+        scopeId="weather-pcb:pcb"
+        title="Ask about the board"
+        promotionTargets={[{ label: 'This project', scope: 'project', id: 'weather-pcb' }]}
+      />,
+    )
+    fireEvent.click(screen.getByText('Ask about the board'))
+  }
+
+  it('saves on the first click when there is only one target', async () => {
+    promoteChatTurnMock.mockResolvedValueOnce({ note_id: 'n1', text: 'x', sources: [] })
+    renderSingleTarget()
+    await waitFor(() => screen.getByText('Save as note'))
+
+    fireEvent.click(screen.getByText('Save as note'))
+
+    await waitFor(() =>
+      expect(promoteChatTurnMock).toHaveBeenCalledWith(
+        'project', 'weather-pcb:pcb', 't2', 'project', 'weather-pcb',
+      ),
+    )
+    await waitFor(() => screen.getByText('Saved as note'))
+  })
+
+  it('offers no Cancel that looks like an undo it cannot perform', async () => {
+    promoteChatTurnMock.mockResolvedValueOnce({ note_id: 'n1', text: 'x', sources: [] })
+    renderSingleTarget()
+    await waitFor(() => screen.getByText('Save as note'))
+
+    fireEvent.click(screen.getByText('Save as note'))
+
+    await waitFor(() => screen.getByText('Saved as note'))
+    expect(screen.queryByText('Cancel')).toBeNull()
+  })
+
+  it('explains on hover why a note differs from the chat already being saved', async () => {
+    renderSingleTarget()
+    await waitFor(() => screen.getByText('Save as note'))
+
+    const info = screen.getByLabelText('What saving a note does')
+    expect(info.getAttribute('title')).toMatch(/searchable notes/)
+    expect(info.getAttribute('title')).toMatch(/scroll back/)
+    // Honest about the gap the maintainer asked about.
+    expect(info.getAttribute('title')).toMatch(/cannot be removed yet/)
+  })
+})

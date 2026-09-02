@@ -217,7 +217,36 @@ export function AgentChat({ area, scope, scopeId, title, projectName, promotionT
             )}
             {turn.role === 'assistant' && promotionTargets.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
-                {promptingTurnId === turn.turn_id ? (
+                {/* One target means the confirmation step asked a question with
+                    a single answer -- "Our only option is to save to this
+                    project, so asking as a confirmation after the save as note
+                    seems redundant." So a single target saves on the first
+                    click; the picker only appears when there is a real choice.
+
+                    The old second state also offered "Cancel" beside "Saved to
+                    this project", which read as undo and was not: it only
+                    closed the row. There is no remove-note route at all, so
+                    nothing here pretends otherwise. */}
+                {promotionTargets.length === 1 ? (
+                  // One target: no question to ask, so no confirmation step.
+                  // Several targets is a real choice and keeps its picker --
+                  // saving to one must never imply the others.
+                  <span className="flex items-center gap-1">
+                    {(promotedByTurn[turn.turn_id] ?? []).length > 0 ? (
+                      <span className="text-xs text-fg-muted">Saved as note</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-xs text-fg-muted underline disabled:opacity-50"
+                        onClick={() => void handlePromote(turn, promotionTargets[0])}
+                        disabled={promoting}
+                      >
+                        Save as note
+                      </button>
+                    )}
+                    <NoteInfo />
+                  </span>
+                ) : promptingTurnId === turn.turn_id ? (
                   <>
                     {promotionTargets.map((target) => {
                       const alreadyPromoted = (promotedByTurn[turn.turn_id] ?? []).includes(
@@ -240,17 +269,20 @@ export function AgentChat({ area, scope, scopeId, title, projectName, promotionT
                       className="text-xs text-fg-muted"
                       onClick={() => setPromptingTurnId(null)}
                     >
-                      Cancel
+                      Close
                     </button>
                   </>
                 ) : (
-                  <button
-                    type="button"
-                    className="text-xs text-fg-muted underline"
-                    onClick={() => setPromptingTurnId(turn.turn_id)}
-                  >
-                    Save as note
-                  </button>
+                  <span className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="text-xs text-fg-muted underline"
+                      onClick={() => setPromptingTurnId(turn.turn_id)}
+                    >
+                      Save as note
+                    </button>
+                    <NoteInfo />
+                  </span>
                 )}
               </div>
             )}
@@ -291,5 +323,31 @@ export function AgentChat({ area, scope, scopeId, title, projectName, promotionT
         </div>
       </div>
     </details>
+  )
+}
+
+/** What saving a note actually does, on hover.
+ *
+ *  Asked directly: "If we are saving the chat history, why would we need a
+ *  separate note to explicitly say this chat round is referenceable?" Because
+ *  they are not the same thing -- chat turns are persisted but NOT indexed
+ *  (`context_index.py` yields chunks for a project's `notes`, and nothing for
+ *  its conversation). A saved note is the only way an answer becomes findable
+ *  by an agent later, from another area. Without saying so, the button reads
+ *  as a save that has already happened. */
+function NoteInfo() {
+  return (
+    <span
+      className="cursor-help text-xs text-fg-faint"
+      title={
+        'Chat is already saved and you can scroll back to it. Saving as a note additionally ' +
+        'adds this answer to the project\u2019s searchable notes, so the assistant can find and ' +
+        'cite it later from any area \u2014 not just in this conversation. Notes cannot be ' +
+        'removed yet.'
+      }
+      aria-label="What saving a note does"
+    >
+      &#9432;
+    </span>
   )
 }

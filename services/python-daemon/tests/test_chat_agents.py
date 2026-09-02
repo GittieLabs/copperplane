@@ -1329,3 +1329,60 @@ class TestAgentToolsWorkWithKicadClosed(unittest.TestCase):
                                 f"{agent}.prompt.md")
             with open(path, encoding="utf-8") as f:
                 self.assertNotIn("kicad.get_component_heights", f.read(), agent)
+
+
+class TestFindingsWithoutDelimiters(unittest.TestCase):
+    """Captured from a real run, not guessed: the model returned the finding
+    correctly shaped and simply omitted the `<<<FINDINGS>>>` markers, and the
+    app threw a real answer away over its packaging.
+
+        {"severity": "warning", "title": "Empty array", "detail": "...",
+         "sources": ["check block"], "general_practice": true}
+    """
+
+    _REAL_CAPTURE = (
+        '{"severity": "warning", "title": "Empty array", "detail": '
+        '"The check block lists an empty array as a valid result.", '
+        '"sources": [], "general_practice": true}'
+    )
+
+    def test_001_the_exact_captured_response_is_read(self):
+        out = chat_agents._extract_findings(self._REAL_CAPTURE)
+
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["title"], "Empty array")
+
+    def test_002_a_bare_array_is_read(self):
+        out = chat_agents._extract_findings(
+            '[{"severity": "info", "title": "t", "detail": "d"}]'
+        )
+
+        self.assertEqual(len(out), 1)
+
+    def test_003_json_wrapped_in_a_sentence_is_still_read(self):
+        out = chat_agents._extract_findings(
+            'Here are my findings:\n[{"severity": "info", "title": "t", "detail": "d"}]\nHope that helps.'
+        )
+
+        self.assertEqual(len(out), 1)
+
+    def test_004_the_delimited_form_still_works(self):
+        out = chat_agents._extract_findings(
+            '<<<FINDINGS>>>\n[{"severity": "info", "title": "t", "detail": "d"}]\n<<<END_FINDINGS>>>'
+        )
+
+        self.assertEqual(len(out), 1)
+
+    def test_005_prose_with_no_json_is_still_not_a_review(self):
+        """The honesty rule this must not weaken: nothing readable is still
+        not a clean board."""
+        self.assertEqual(
+            chat_agents._extract_findings("I looked at your board and it seems fine."), []
+        )
+
+    def test_006_an_empty_response_is_not_a_review(self):
+        self.assertEqual(chat_agents._extract_findings(""), [])
+        self.assertIsNone(chat_agents._findings_json_without_delimiters("   "))
+
+    def test_007_malformed_json_is_not_invented_into_a_finding(self):
+        self.assertEqual(chat_agents._extract_findings("[{severity: nope}]"), [])
