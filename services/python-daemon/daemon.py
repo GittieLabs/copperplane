@@ -1146,6 +1146,36 @@ def component_envelopes(components: list, height_overrides: dict = None) -> dict
     }
 
 
+def _explain_or_report_plainly(findings: list, check_type: str, **kwargs) -> dict:
+    """`explain_violations`, but never at the cost of the findings themselves.
+
+    KiCad's own output is a deterministic fact about the user's board. The
+    plain-language explanation of it is an LLM call, which can fail for
+    reasons that have nothing to do with the design -- no API key, a rate
+    limit, a model that returned malformed JSON. Letting that failure take
+    down the whole route means a board with real errors reports as an error
+    *of the app*, and the user learns nothing about their board.
+
+    So a failed explanation degrades to the raw findings plus a note. The
+    numbers are still right; only the prose is missing.
+    """
+    try:
+        return component_pipeline.explain_violations(findings, check_type, **kwargs)
+    except Exception as exc:  # noqa: BLE001 -- the findings matter more than the prose
+        logger.warning("explanation failed for %s, reporting findings plainly: %s", check_type, exc)
+        return {
+            "violations": [
+                {**f, "explanation": "", "suggested_fix": ""} for f in findings
+            ],
+            "summary": (
+                f"KiCad reported {len(findings)} issue(s). Plain-language explanations "
+                f"could not be generated: {exc}"
+            ),
+            "truncated_count": 0,
+            "explanations_failed": True,
+        }
+
+
 def kicad_check_schematic_parity(pcb_path: str) -> dict:
     """The kicad.check_schematic_parity route (SPEC-326 2.7).
 
@@ -1682,7 +1712,7 @@ def kicad_check_board(pcb_path: str) -> dict:
         *report.get("unconnected_items", []),
         *report.get("schematic_parity", []),
     ]
-    result = component_pipeline.explain_violations(
+    result = _explain_or_report_plainly(
         findings, "drc",
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
@@ -1747,7 +1777,7 @@ def kicad_check_schematic(sch_path: str) -> dict:
         for sheet in report["sheets"]
         for violation in sheet["violations"]
     ]
-    result = component_pipeline.explain_violations(
+    result = _explain_or_report_plainly(
         flattened, "erc",
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
@@ -1755,6 +1785,7 @@ def kicad_check_schematic(sch_path: str) -> dict:
         app_config=CONFIG,
     )
     result["source_path"] = sch_path
+    result["violation_count"] = len(flattened)
     return result
 
 

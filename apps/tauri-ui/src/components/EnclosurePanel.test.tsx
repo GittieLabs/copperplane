@@ -939,8 +939,7 @@ describe('EnclosurePanel: interior height comes from the board, not a default', 
     componentEnvelopesMock.mockResolvedValue(MEASURED)
     render(<EnclosurePanel projectName="test-project" />)
 
-    expect(await screen.findByText(/need 15\.515mm/)).toBeTruthy()
-    expect(screen.getByText(/set by R2/)).toBeTruthy()
+    expect(await screen.findByText(/15\.515mm needed, set by R2/)).toBeTruthy()
     expect(screen.getByText(/real minimum may be taller/)).toBeTruthy()
   })
 

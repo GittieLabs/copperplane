@@ -3295,3 +3295,62 @@ class TestBoardCheckReportsEveryKindOfFinding(unittest.TestCase):
 
         self.assertEqual(result["unconnected_count"], 0)
         self.assertEqual(result["parity_count"], 0)
+
+
+class TestFindingsSurviveAFailedExplanation(unittest.TestCase):
+    """KiCad's output is a deterministic fact about the user's board; the
+    plain-language explanation of it is an LLM call. Letting that call's
+    failure take down the route means a board with real errors reports as an
+    error *of the app*, and the user learns nothing about their board."""
+
+    _REPORT = {
+        "violations": [],
+        "unconnected_items": [
+            {"description": "Missing connection between items",
+             "severity": "error", "type": "unconnected_items"},
+            {"description": "Missing connection between items",
+             "severity": "error", "type": "unconnected_items"},
+        ],
+    }
+
+    def test_001_the_findings_are_still_reported_when_the_llm_call_fails(self):
+        with patch("daemon.kicad_cli.run_drc", return_value=self._REPORT), \
+             patch("daemon.component_pipeline.explain_violations",
+                   side_effect=RuntimeError("no api key")):
+            out = daemon.kicad_check_board("/p/b.kicad_pcb")
+
+        self.assertEqual(len(out["violations"]), 2)
+        self.assertEqual(out["unconnected_count"], 2)
+        self.assertTrue(out["explanations_failed"])
+
+    def test_002_the_summary_says_why_the_prose_is_missing(self):
+        with patch("daemon.kicad_cli.run_drc", return_value=self._REPORT), \
+             patch("daemon.component_pipeline.explain_violations",
+                   side_effect=RuntimeError("no api key")):
+            out = daemon.kicad_check_board("/p/b.kicad_pcb")
+
+        self.assertIn("no api key", out["summary"])
+        self.assertIn("2", out["summary"])
+
+    def test_003_a_successful_explanation_is_unchanged(self):
+        explained = {"violations": [{"description": "x", "explanation": "e",
+                                     "suggested_fix": "f"}],
+                     "summary": "s", "truncated_count": 0}
+        with patch("daemon.kicad_cli.run_drc", return_value=self._REPORT), \
+             patch("daemon.component_pipeline.explain_violations", return_value=explained):
+            out = daemon.kicad_check_board("/p/b.kicad_pcb")
+
+        self.assertNotIn("explanations_failed", out)
+        self.assertEqual(out["summary"], "s")
+
+    def test_004_the_schematic_route_degrades_the_same_way(self):
+        erc = {"sheets": [{"path": "/", "violations": [
+            {"description": "v", "severity": "error", "type": "x"}]}]}
+        with patch("daemon.kicad_cli.run_erc", return_value=erc), \
+             patch("daemon.component_pipeline.explain_violations",
+                   side_effect=RuntimeError("rate limited")):
+            out = daemon.kicad_check_schematic("/p/s.kicad_sch")
+
+        self.assertEqual(len(out["violations"]), 1)
+        self.assertEqual(out["violation_count"], 1)
+        self.assertTrue(out["explanations_failed"])

@@ -511,22 +511,49 @@ export function EnclosurePanel({
                   disabled={running}
                 />
                 <span className="text-fg-muted">{hint}</span>
+                {/* Deliberately NOT styled like the grey hint above it. This
+                    is the only number on the panel derived from the user's own
+                    board, and as a third muted line it read as boilerplate --
+                    reported directly: "it blends into what labels look like". */}
                 {field === 'height' && measured?.min_interior_height_mm != null && (
-                  <span
-                    className={
+                  <div
+                    className={`mt-1 flex items-start gap-2 rounded border px-2 py-1.5 ${
                       boardParams.height < measured.min_interior_height_mm
-                        ? 'text-warning'
-                        : 'text-fg-tertiary'
-                    }
+                        ? 'border-warning/50 bg-warning/10'
+                        : 'border-accent/40 bg-accent/5'
+                    }`}
                   >
-                    {boardParams.height < measured.min_interior_height_mm
-                      ? `Too short — the parts on your board need ${measured.min_interior_height_mm}mm`
-                      : `Your board's parts need ${measured.min_interior_height_mm}mm`}
-                    {measured.tallest ? `, set by ${measured.tallest.reference}` : ''}
-                    {measured.unknown > 0
-                      ? `. ${measured.unknown} component${measured.unknown === 1 ? '' : 's'} still have no known height, so the real minimum may be taller.`
-                      : '.'}
-                  </span>
+                    <span
+                      aria-hidden
+                      className={
+                        boardParams.height < measured.min_interior_height_mm
+                          ? 'text-warning'
+                          : 'text-accent'
+                      }
+                    >
+                      {boardParams.height < measured.min_interior_height_mm ? '⚠' : '↳'}
+                    </span>
+                    <span className="flex flex-col gap-0.5">
+                      <span
+                        className={`font-medium ${
+                          boardParams.height < measured.min_interior_height_mm
+                            ? 'text-warning'
+                            : 'text-fg-bright'
+                        }`}
+                      >
+                        {boardParams.height < measured.min_interior_height_mm
+                          ? `Too short — your board needs ${measured.min_interior_height_mm}mm`
+                          : `Measured from your board: ${measured.min_interior_height_mm}mm needed`}
+                        {measured.tallest ? `, set by ${measured.tallest.reference}` : ''}
+                      </span>
+                      {measured.unknown > 0 && (
+                        <span className="text-fg-tertiary">
+                          {measured.unknown} component{measured.unknown === 1 ? '' : 's'} still have
+                          no known height, so the real minimum may be taller.
+                        </span>
+                      )}
+                    </span>
+                  </div>
                 )}
               </label>
             ))}

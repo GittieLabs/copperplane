@@ -141,12 +141,23 @@ class TestRealBoards(unittest.TestCase):
         self.assertTrue({"H1", "H2", "H3", "H4"} <= refs)
         self.assertIn("BT1", refs)
 
-    def test_002_the_board_disagrees_with_the_schematic_about_bt1(self):
-        """The live defect SPEC-326 §2.7 was written about."""
+    def test_002_a_real_battery_footprint_is_read_whole(self):
+        """This test originally asserted that `BT1` was the VS1N vertical
+        holder -- the live schematic/board mismatch SPEC-326 §2.7 was written
+        about. That was a bad test: it asserted a DEFECT in the maintainer's
+        own working file, and broke the moment he fixed it by running "Update
+        PCB from Schematic" (2026-09-02), which is exactly the outcome the
+        feature exists to produce.
+
+        The mismatch case is covered deterministically by the
+        `parity_mismatch` fixture instead, which cannot be fixed out from
+        under it. What belongs here is only what a real board can prove: that
+        a real, full library id is read intact."""
         found = read_board_footprints(self._REAL)
         bt1 = next(f for f in found if f["reference"] == "BT1")
 
-        self.assertIn("VS1N_Vertical", bt1["footprint"])
+        self.assertTrue(bt1["footprint"].startswith("Battery:"))
+        self.assertIn("CR2032", bt1["footprint"])
 
 
 if __name__ == "__main__":
