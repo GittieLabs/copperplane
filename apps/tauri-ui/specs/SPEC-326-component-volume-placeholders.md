@@ -1,7 +1,7 @@
 ---
 id: SPEC-326
 title: "Component Volume Placeholders"
-status: Draft
+status: In-Progress
 type: Feature
 created: 2026-09-01
 last_updated: 2026-09-01
