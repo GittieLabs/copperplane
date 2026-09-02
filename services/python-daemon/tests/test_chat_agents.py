@@ -1178,17 +1178,30 @@ class TestAnUnreadableReviewIsNotACleanBoard(unittest.TestCase):
              patch.object(chat_agents.tool_registry, "build_tool_registry", return_value={}):
             return chat_agents.review("project", "P:pcb", "pcb", project_name="P")
 
-    def test_001_a_response_with_no_findings_block_raises(self):
-        with self.assertRaises(chat_agents.ReviewFormatError):
-            self._review_returning("Here is some prose about your board, with no block at all.")
+    def test_001_the_checks_own_findings_survive_the_prose_failing(self):
+        """"Try again" was the first answer here and it was wrong: the check
+        is on demand and deterministic, it has already run, and only the
+        model's formatting failed. Re-running would recompute findings this
+        process is already holding."""
+        with patch.object(chat_agents, "_findings_from_check_alone", return_value=[
+            {"severity": "warning", "title": "Missing connection between items",
+             "detail": "raw", "sources": [], "general_practice": False, "area": "pcb"},
+        ]):
+            findings = self._review_returning("prose, and no block at all")
 
-    def test_002_the_error_says_it_is_not_a_clean_result(self):
-        """The wording is the point -- a user reading it must not conclude
-        their board passed."""
-        with self.assertRaises(chat_agents.ReviewFormatError) as ctx:
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["title"], "Missing connection between items")
+
+    def test_002_it_raises_only_when_there_is_no_check_to_fall_back_on(self):
+        """An unlinked project, or an area with no check: the one case where
+        the area really has not been assessed."""
+        with patch.object(chat_agents, "_findings_from_check_alone", return_value=None), \
+             self.assertRaises(chat_agents.ReviewFormatError) as ctx:
             self._review_returning("prose only")
 
         self.assertIn("NOT a clean result", str(ctx.exception))
+        # No longer tells the user to re-run: re-running would not help.
+        self.assertNotIn("Try again", str(ctx.exception))
 
     def test_003_an_explicitly_empty_block_is_still_an_honest_clean_review(self):
         """The other half: a model that DID answer in the format and found
@@ -1216,3 +1229,66 @@ class TestAnUnreadableReviewIsNotACleanBoard(unittest.TestCase):
 
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0]["title"], "Unconnected items")
+
+
+class TestFindingsFromCheckAlone(unittest.TestCase):
+    """The check's own findings, rendered as review findings with no model
+    prose at all."""
+
+    _NOTE = {
+        "check": "DRC", "ran_now": True, "source_path": "/p/b.kicad_pcb",
+        "findings": [{
+            "description": "Missing connection between items",
+            "severity": "error", "type": "unconnected_items",
+            "locations": [
+                {"description": "PTH pad 2 [Net-(U2-THRES)] of U2", "pos_mm": {"x": 1, "y": 2}},
+            ],
+        }],
+    }
+
+    def _run(self, note, project=None):
+        with patch.object(chat_agents.library_store, "load_project",
+                          return_value=project if project is not None else {"name": "P"}), \
+             patch.object(chat_agents, "_check_status_note", return_value=json.dumps(note)):
+            return chat_agents._findings_from_check_alone("pcb", "P:pcb", "P")
+
+    def test_001_a_finding_carries_where_it_is(self):
+        out = self._run(self._NOTE)
+
+        self.assertIn("PTH pad 2 [Net-(U2-THRES)] of U2", out[0]["detail"])
+
+    def test_002_it_says_the_explanation_is_missing_rather_than_pretending(self):
+        out = self._run(self._NOTE)
+
+        self.assertIn("explanation could not be generated", out[0]["detail"])
+
+    def test_003_it_is_not_marked_general_practice(self):
+        """It came straight from KiCad's check, which is the opposite of
+        general engineering knowledge."""
+        out = self._run(self._NOTE)
+
+        self.assertFalse(out[0]["general_practice"])
+
+    def test_004_it_cites_the_file_the_check_read(self):
+        with patch("os.path.exists", return_value=True):
+            out = self._run(self._NOTE)
+
+        self.assertEqual(out[0]["sources"][0]["kind"], "check_finding")
+
+    def test_005_a_clean_check_falls_back_to_an_honestly_empty_review(self):
+        out = self._run({**self._NOTE, "findings": []})
+
+        self.assertEqual(out, [])
+
+    def test_006_a_check_that_could_not_run_is_not_a_fallback(self):
+        """`_check_status_note` returns prose, not JSON, when it could not run
+        -- that is the case where the board really has not been assessed."""
+        with patch.object(chat_agents.library_store, "load_project", return_value={"name": "P"}), \
+             patch.object(chat_agents, "_check_status_note",
+                          return_value="No DRC check could be run: ..."):
+            self.assertIsNone(chat_agents._findings_from_check_alone("pcb", "P:pcb", "P"))
+
+    def test_007_an_area_with_no_check_has_nothing_to_fall_back_on(self):
+        self.assertIsNone(
+            chat_agents._findings_from_check_alone("enclosure", "P:enclosure", "P")
+        )

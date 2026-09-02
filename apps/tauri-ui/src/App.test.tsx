@@ -551,7 +551,13 @@ describe('App: Enclosure tab persists across area switches', () => {
         expect.objectContaining({ directory: '/real/PCBs/test-project' }),
       ),
     )
-    await waitFor(() => screen.getByRole('button', { name: 'Linked: /real/PCBs/test-project' }))
+    // The header now leads with the project NAME and carries the folder as a
+    // quieter second line; the button is labelled for its action rather than
+    // by its visible text.
+    await waitFor(() =>
+      screen.getByRole('button', { name: 'Change project folder (currently /real/PCBs/test-project)' }),
+    )
+    expect(screen.getByText('/real/PCBs/test-project')).toBeTruthy()
     // CTX-312.2: real user feedback -- a successful link/save previously
     // gave no visible confirmation at all, reading as "nothing happened."
     screen.getByText('Linked to /real/PCBs/test-project')

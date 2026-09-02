@@ -373,14 +373,34 @@ function App() {
              * these real, already-scoped actions don't get entangled
              * with a surface whose future shape isn't settled yet. */}
             <div className="flex w-full max-w-4xl items-center justify-between gap-2 text-xs">
+              {/* The project's NAME is what identifies it to its owner; the
+                  folder is where it happens to live. This used to show only
+                  the full path, at the top of every screen -- "I don't see the
+                  value of prominently display the linked project and path."
+                  The path stays, one step quieter, because linking is still a
+                  real action taken from here and a user with two similarly
+                  named projects needs to be able to tell them apart. */}
               <button
                 type="button"
-                className="truncate text-left text-fg-tertiary hover:text-fg-bright"
+                className="min-w-0 text-left"
                 onClick={() => void handleLinkDirectory()}
                 disabled={!currentProject}
                 title={currentProject?.directory ?? undefined}
+                // Named for the ACTION rather than derived from the two lines
+                // of text inside it, which would otherwise read out as the
+                // project name run together with its path.
+                aria-label={
+                  currentProject?.directory
+                    ? `Change project folder (currently ${currentProject.directory})`
+                    : 'Link to folder…'
+                }
               >
-                {currentProject?.directory ? `Linked: ${currentProject.directory}` : 'Link to folder…'}
+                <span className="block truncate text-sm font-medium text-fg-bright">
+                  {currentProject?.name ?? 'Untitled project'}
+                </span>
+                <span className="block truncate text-xs text-fg-muted hover:text-fg-tertiary">
+                  {currentProject?.directory ?? 'Link to folder…'}
+                </span>
               </button>
               <button
                 type="button"

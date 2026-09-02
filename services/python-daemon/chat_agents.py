@@ -761,6 +761,69 @@ _REVIEW_PROMPT = (
 _REVIEW_SEVERITIES = ("info", "suggestion", "warning")
 
 
+_UNEXPLAINED_PREFIX = (
+    "Reported by KiCad's own check. The plain-language explanation could not be "
+    "generated this time, so this is the raw finding: "
+)
+
+
+def _findings_from_check_alone(area: str, scope_id: str, project_name: str | None) -> list | None:
+    """The check's own findings, as review findings, with no model prose.
+
+    Used when the model answers without its findings block. The check is
+    deterministic and has already run; discarding it because the wording
+    failed would make a user re-run everything to recover data this process is
+    already holding.
+
+    Returns `None` -- meaning "there is genuinely nothing to fall back on" --
+    for an area with no check, or a project whose check could not run at all.
+    That case is a real error and is raised by the caller, because it is the
+    one where the board really has not been assessed.
+    """
+    if area not in _CHECK_AREA_LABELS:
+        return None
+
+    real_project_name, _, _ = scope_id.partition(":")
+    try:
+        project = library_store.load_project(project_name or real_project_name)
+    except Exception:  # noqa: BLE001 -- no project is a real "nothing to fall back on"
+        return None
+
+    note = _check_status_note(project, area)
+    try:
+        parsed = json.loads(note)
+    except json.JSONDecodeError:
+        # The note is prose, which is what `_check_status_note` returns when
+        # the check could NOT be run. Not a clean result, and not a fallback.
+        return None
+
+    label = parsed.get("check", _CHECK_AREA_LABELS[area])
+    findings = []
+    for raw in parsed.get("findings", []):
+        where = ", ".join(
+            loc["description"] for loc in (raw.get("locations") or []) if loc.get("description")
+        )
+        findings.append({
+            # KiCad's own severity vocabulary is not this app's: it says
+            # "error"/"warning", the review surface says info/suggestion/
+            # warning. Everything real maps to `warning` rather than being
+            # invented into a finer grade we did not measure.
+            "severity": "warning",
+            "title": raw.get("description") or f"{label} finding",
+            "detail": _UNEXPLAINED_PREFIX + (
+                f"{raw.get('description')}. Where: {where}." if where
+                else f"{raw.get('description')}."
+            ),
+            "sources": validate_source_refs(
+                [{"kind": "check_finding", "source_path": parsed.get("source_path")}]
+            )[0],
+            # Straight from the check, so not general practice at all.
+            "general_practice": False,
+            "area": area,
+        })
+    return findings
+
+
 def review(
     scope: str, scope_id: str, area: str, project_name: str | None = None,
     secrets: dict | None = None, provider: str | None = None, model: str | None = None,
@@ -788,16 +851,25 @@ def review(
         tools=read_only_tools, config=config,
     ))
 
-    # An absent FINDINGS block is NOT a clean review. Both used to collapse to
-    # an empty list, so the UI said "Reviewed -- nothing worth flagging" about
-    # a board with two unconnected errors, because the model had written prose
-    # and no block at all. "We could not read the review" and "your board is
-    # fine" must never look the same -- the same distinction the check block
-    # itself already makes for "could not run" versus "ran and passed".
+    # An absent FINDINGS block is NOT a clean review -- but it is also not a
+    # reason to throw away the check. "Try again" was the first answer here and
+    # it was the wrong one: the ERC/DRC is on demand and deterministic, it has
+    # already run, and only the model's FORMATTING failed. Asking the user to
+    # re-run costs another check plus another LLM call to recompute findings
+    # that are sitting right here.
+    #
+    # So the findings survive the prose failing, exactly as they do in
+    # `daemon.kicad_check_board`'s `_explain_or_report_plainly`: KiCad's output
+    # is a fact about the user's board, the explanation of it is not. Only when
+    # there is no check to fall back on -- an unlinked project, an area with no
+    # check at all -- is this a real error.
     if _FINDINGS_PATTERN.search(result["text"]) is None:
+        fallback = _findings_from_check_alone(area, scope_id, project_name)
+        if fallback is not None:
+            return fallback
         raise ReviewFormatError(
             "The review came back without its findings block, so it could not be read. "
-            "This is NOT a clean result -- the board has not been assessed. Try again."
+            "This is NOT a clean result -- the area has not been assessed."
         )
 
     findings = []
