@@ -48,10 +48,13 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
   /* SPEC-326 §2.7: whether the board still agrees with the schematic every
      number above was read from. */
   const [parity, setParity] = useState<ParityResult | null>(null)
+  /* Why the numbers are missing, when they are. Never swallowed. */
+  const [measureError, setMeasureError] = useState<string | null>(null)
 
   const readSchematic = useCallback(
     async (resolved: KicadProjectFiles, supplied: Record<string, number>) => {
       setFiles(resolved)
+      setMeasureError(null)
       if (!resolved.schematic_path) {
         setRead(null)
         setEnvelopes(null)
@@ -76,11 +79,18 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
           read_at: measured.read_at,
           components: measured.components,
         })
-      } catch {
+      } catch (err) {
         // Falling back to the schematic list keeps the table alive when
-        // envelope measurement fails (no FreeCAD, say). The summary is
-        // absent in that case, so there is nothing for the rows to contradict.
+        // envelope measurement fails (no FreeCAD, say).
+        //
+        // The fallback used to be SILENT, and that cost three rounds of
+        // debugging a live defect: the panel showed the schematic's
+        // components under a "Board components" heading with no indication
+        // that measurement had failed at all, which is indistinguishable
+        // from the measurement simply being wrong. A fallback the user
+        // cannot see is a fallback nobody can diagnose.
         setEnvelopes(null)
+        setMeasureError(err instanceof Error ? err.message : String(err))
         setRead(
           resolved.schematic_path
             ? await listSchematicComponents(resolved.schematic_path)
@@ -183,7 +193,7 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
     <div className="flex flex-col gap-2 rounded border border-line p-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium uppercase text-fg-muted">
-          {envelopes?.measured_from === 'schematic' ? 'Schematic components' : 'Board components'}
+          {envelopes?.measured_from === 'board' ? 'Board components' : 'Schematic components'}
         </p>
         <button
           type="button"
@@ -232,6 +242,16 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
             {new Date(read.read_at).toLocaleTimeString()}
           </p>
 
+          {measureError && (
+            <div className="flex flex-col gap-1 rounded border border-danger/40 bg-danger/5 p-2">
+              <p className="text-xs font-medium text-danger">
+                Could not measure this project&rsquo;s components, so the list below is read from the
+                schematic and no height is recommended.
+              </p>
+              <p className="break-all text-xs text-fg-tertiary">{measureError}</p>
+            </div>
+          )}
+
           {/* SPEC-326 §2.7. Placed ABOVE the height recommendation on
               purpose: when the board and schematic disagree, the number
               below was read from footprints that are not on the board, so
@@ -256,11 +276,20 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
                 </p>
               )}
               <p className="text-xs text-fg-tertiary">
-                Heights and clearances below are measured from the <strong>board</strong>, since the
-                board is what goes in the enclosure. If the schematic is the version you want, open
-                the PCB in KiCad and run <strong>Tools → Update PCB from Schematic</strong> to bring
-                the board up to date, then re-read the project here. This app does not change your
-                files.
+                {envelopes?.measured_from === 'board' ? (
+                  <>
+                    Heights and clearances below are measured from the <strong>board</strong>, since
+                    the board is what goes in the enclosure.{' '}
+                  </>
+                ) : (
+                  <>
+                    The list below is read from the <strong>schematic</strong>, not the board — so it
+                    describes a different design from the one above.{' '}
+                  </>
+                )}
+                If the schematic is the version you want, open the PCB in KiCad and run{' '}
+                <strong>Tools → Update PCB from Schematic</strong> to bring the board up to date,
+                then re-read the project here. This app does not change your files.
               </p>
             </div>
           )}

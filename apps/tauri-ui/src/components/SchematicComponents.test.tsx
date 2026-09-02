@@ -262,6 +262,29 @@ describe('SchematicComponents', () => {
     expect(await screen.findByText('Board components')).toBeTruthy()
   })
 
+  /* The silent fallback cost three rounds of debugging a live defect: the
+     panel showed the schematic's components under a "Board components"
+     heading with nothing to say measurement had failed, which looks exactly
+     like the measurement being wrong. */
+  it('says why, and names the real error, when measurement fails', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    componentEnvelopesMock.mockRejectedValue(new Error('freecadcmd not found on this machine'))
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText(/Could not measure/)).toBeTruthy()
+    expect(screen.getByText(/freecadcmd not found on this machine/)).toBeTruthy()
+  })
+
+  it('does not call itself Board components when nothing was measured', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    componentEnvelopesMock.mockRejectedValue(new Error('boom'))
+    render(<SchematicComponents projectName="p" />)
+
+    await screen.findByText('D1')
+    expect(screen.getByText('Schematic components')).toBeTruthy()
+    expect(screen.queryByText('Board components')).toBeNull()
+  })
+
   it('falls back to the schematic list so a failed measurement still shows a table', async () => {
     loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
     componentEnvelopesMock.mockRejectedValue(new Error('no freecad'))
