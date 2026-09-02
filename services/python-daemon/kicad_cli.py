@@ -195,12 +195,17 @@ def run_erc(sch_path: str) -> dict:
     return _run_report(["sch", "erc"], sch_path)
 
 
-def run_drc(pcb_path: str) -> dict:
+def run_drc(pcb_path: str, schematic_parity: bool = False) -> dict:
     """Real Design Rules Check on a .kicad_pcb file -- SPEC-309. Real
     JSON shape (confirmed the same way): {..., unconnected_items,
     violations: [{description, items, severity, type}]} -- flat, since a
     board is one PCB, not several sheets."""
-    return _run_report(["pcb", "drc"], pcb_path)
+    subcommand = ["pcb", "drc"]
+    if schematic_parity:
+        # Off by default: parity needs the `.kicad_sch` sibling, and a board
+        # checked on its own is a legitimate call. Callers that want it ask.
+        subcommand.append("--schematic-parity")
+    return _run_report(subcommand, pcb_path)
 
 
 def check_schematic_parity(pcb_path: str) -> list:

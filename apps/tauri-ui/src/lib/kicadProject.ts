@@ -102,6 +102,10 @@ export interface ComponentEnvelope {
 
 export interface EnvelopeResult {
   envelopes: ComponentEnvelope[]
+  /** The components these envelopes were computed from. Rendered as the
+   *  table, so the rows and the summary above them are the same set by
+   *  construction rather than by two calls staying in step. */
+  components: SchematicComponent[]
   measured: number
   stated: number
   unknown: number

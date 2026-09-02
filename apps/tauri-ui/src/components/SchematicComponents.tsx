@@ -58,16 +58,34 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
         setParity(null)
         return
       }
-      setRead(await listSchematicComponents(resolved.schematic_path))
-      // SPEC-326: a recommendation, never an override -- the enclosure's own
-      // height stays user-entered. This says what the parts need, and where
-      // each number came from.
+      // SPEC-326 §2.7: ONE read decides both the table and the summary above
+      // it. Listing the schematic's components under a summary counting the
+      // board's is what CTX-326.3 first shipped, and it is not a discipline
+      // problem -- two reads of two files will drift.
+      //
+      // A recommendation, never an override: the enclosure's own height stays
+      // user-entered. This says what the parts need and where each number
+      // came from.
       try {
-        setEnvelopes(
-          await componentEnvelopes(resolved.schematic_path, resolved.pcb_path, supplied),
+        const measured = await componentEnvelopes(
+          resolved.schematic_path, resolved.pcb_path, supplied,
         )
+        setEnvelopes(measured)
+        setRead({
+          source_path: measured.source_path,
+          read_at: measured.read_at,
+          components: measured.components,
+        })
       } catch {
+        // Falling back to the schematic list keeps the table alive when
+        // envelope measurement fails (no FreeCAD, say). The summary is
+        // absent in that case, so there is nothing for the rows to contradict.
         setEnvelopes(null)
+        setRead(
+          resolved.schematic_path
+            ? await listSchematicComponents(resolved.schematic_path)
+            : null,
+        )
       }
       // SPEC-326 §2.7: everything above was read from the SCHEMATIC, but the
       // enclosure is built around the BOARD. If the user has edited the
@@ -164,7 +182,9 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
   return (
     <div className="flex flex-col gap-2 rounded border border-line p-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium uppercase text-fg-muted">Schematic components</p>
+        <p className="text-xs font-medium uppercase text-fg-muted">
+          {envelopes?.measured_from === 'schematic' ? 'Schematic components' : 'Board components'}
+        </p>
         <button
           type="button"
           className="rounded border border-line px-2 py-1 text-xs hover:bg-surface-alt disabled:opacity-50"

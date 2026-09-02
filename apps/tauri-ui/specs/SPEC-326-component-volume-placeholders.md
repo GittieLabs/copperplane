@@ -200,6 +200,14 @@ footprint, those 5 unknowns are only **2** entries to make, not 5.
     whose own docstring says it is unstable, not for use outside API development, and may have
     unintended side effects. It also needs KiCad running with the board focused, and opens a
     modal dialog. That is `SPEC-329` territory, deliberately deferred.
+*   **One read feeds both the table and the summary.** The route returns the components it
+    measured, and the UI renders those. The first version left the table on a separate schematic
+    read, and shipped a panel listing 10 schematic components under a summary counting the board's
+    14 — caught by the maintainer in the running app, with every test passing. Two reads of two
+    files cannot be kept in step by discipline.
+*   **The board check reports every kind of finding KiCad has, not just `violations`.** On the
+    maintainer's board that key is empty while `unconnected_items` holds 18 entries, all severity
+    `error`. `SPEC-309`'s route explained `violations` alone and so called the board clean.
 *   **The warning is placed above the height recommendation**, not below it: the caveat has to
     arrive before the claim it qualifies.
 

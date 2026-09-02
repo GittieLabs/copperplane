@@ -1629,7 +1629,10 @@ class TestKicadCheckBoardRoute(unittest.TestCase):
              patch('daemon.component_pipeline.explain_violations', return_value={"violations": [], "summary": "clean", "truncated_count": 0}):
             result = daemon.kicad_check_board('/explicit/path.kicad_pcb')
 
-        mock_run_drc.assert_called_once_with('/explicit/path.kicad_pcb')
+        # schematic_parity is requested: a board's parity with its schematic is
+        # a real DRC finding to a user, and KiCad only reports it when asked.
+        mock_run_drc.assert_called_once_with(
+            '/explicit/path.kicad_pcb', schematic_parity=True)
         self.assertEqual(result["source_path"], '/explicit/path.kicad_pcb')
         self.assertEqual(result["status"], "ok")
 
@@ -3225,3 +3228,70 @@ class TestEnvelopeSourceIsTheBoard(unittest.TestCase):
     def test_006_the_board_route_is_registered_and_async(self):
         self.assertIn("kicad.list_board_components", daemon.ROUTES)
         self.assertIn("kicad.list_board_components", daemon.ASYNC_ROUTES)
+
+
+class TestBoardCheckReportsEveryKindOfFinding(unittest.TestCase):
+    """SPEC-309 + SPEC-326 §2.7. `kicad_check_board` explained
+    `report["violations"]` alone, silently discarding two other things KiCad
+    reports about the same board.
+
+    Caught on the maintainer's own project, in the running app: 0 violations
+    but 18 `unconnected_items`, every one severity ERROR, plus a schematic
+    parity failure. The tab called the board clean while KiCad's own DRC
+    dialog would show 19 problems. A user does not care which JSON key KiCad
+    filed a problem under."""
+
+    _REPORT = {
+        "violations": [{"description": "v", "severity": "warning", "type": "clearance"}],
+        "unconnected_items": [
+            {"description": "u1", "severity": "error", "type": "unconnected_items"},
+            {"description": "u2", "severity": "error", "type": "unconnected_items"},
+        ],
+        "schematic_parity": [
+            {"description": "p", "severity": "warning", "type": "footprint_symbol_mismatch"},
+        ],
+    }
+
+    def _check(self):
+        seen = {}
+
+        def explain(findings, kind, **kwargs):
+            seen["findings"] = findings
+            return {"violations": [], "summary": "s", "truncated_count": 0}
+
+        with patch("daemon.kicad_cli.run_drc", return_value=self._REPORT), \
+             patch("daemon.component_pipeline.explain_violations", side_effect=explain):
+            return daemon.kicad_check_board("/p/b.kicad_pcb"), seen["findings"]
+
+    def test_001_unconnected_items_reach_the_explainer(self):
+        _, findings = self._check()
+        self.assertIn("u1", [f["description"] for f in findings])
+        self.assertIn("u2", [f["description"] for f in findings])
+
+    def test_002_parity_findings_reach_the_explainer(self):
+        _, findings = self._check()
+        self.assertIn("p", [f["description"] for f in findings])
+
+    def test_003_ordinary_violations_are_still_included(self):
+        _, findings = self._check()
+        self.assertIn("v", [f["description"] for f in findings])
+        self.assertEqual(len(findings), 4)
+
+    def test_004_each_kind_is_counted_separately(self):
+        """A user reads "18 unconnected" and "1 mismatch" very differently
+        from one undifferentiated number."""
+        result, _ = self._check()
+        self.assertEqual(result["violation_count"], 1)
+        self.assertEqual(result["unconnected_count"], 2)
+        self.assertEqual(result["parity_count"], 1)
+
+    def test_005_a_report_lacking_the_newer_keys_does_not_crash(self):
+        """`unconnected_items` and `schematic_parity` are absent from a report
+        produced without --schematic-parity, and from older KiCad output."""
+        with patch("daemon.kicad_cli.run_drc", return_value={"violations": []}), \
+             patch("daemon.component_pipeline.explain_violations",
+                   return_value={"violations": [], "summary": "s", "truncated_count": 0}):
+            result = daemon.kicad_check_board("/p/b.kicad_pcb")
+
+        self.assertEqual(result["unconnected_count"], 0)
+        self.assertEqual(result["parity_count"], 0)

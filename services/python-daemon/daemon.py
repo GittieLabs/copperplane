@@ -1243,6 +1243,13 @@ def kicad_component_envelopes(
 
     return {
         **envelopes,
+        # The components these envelopes were computed from, returned so a
+        # caller renders the SAME set it is quoting numbers about. CTX-326.3
+        # shipped a UI that listed the schematic's components under a summary
+        # counting the board's -- 10 rows beneath "9 measured, 5 unknown", with
+        # a `BT1` whose footprint was not the one measured. Two reads of two
+        # files cannot be kept in step by discipline; one read cannot drift.
+        "components": read["components"],
         "source_path": read["source_path"],
         # Which file these numbers describe. Never inferred by the caller:
         # "board" and "schematic" are different answers, and a fallback to
@@ -1658,9 +1665,25 @@ def kicad_check_board(pcb_path: str) -> dict:
     before this route ever runs, the same explicit-path contract
     `kicad_check_schematic` already used. `pcb_path` is required now, not
     optional."""
-    report = kicad_cli.run_drc(pcb_path)
+    # SPEC-309 originally explained `violations` alone. That silently
+    # discarded two other things KiCad reports about the same board, and
+    # the maintainer caught it on his own project: 0 violations, but 18
+    # `unconnected_items` -- every one of them severity ERROR -- plus a
+    # schematic parity failure. The tab said the board was clean while
+    # KiCad's own DRC dialog would show 19 problems.
+    #
+    # `unconnected_items` is a separate top-level key, not a violation
+    # subtype, and parity only runs when asked for, so neither appears by
+    # accident. Both are real DRC findings to a user, who does not care
+    # which JSON key KiCad filed them under.
+    report = kicad_cli.run_drc(pcb_path, schematic_parity=True)
+    findings = [
+        *report["violations"],
+        *report.get("unconnected_items", []),
+        *report.get("schematic_parity", []),
+    ]
     result = component_pipeline.explain_violations(
-        report["violations"], "drc",
+        findings, "drc",
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
@@ -1668,6 +1691,12 @@ def kicad_check_board(pcb_path: str) -> dict:
     )
     result["source_path"] = pcb_path
     result["status"] = "ok"
+    # Counted separately so a caller can say WHICH kind of problem a board
+    # has. A user reads "18 unconnected" and "1 mismatch" very differently
+    # from one number.
+    result["violation_count"] = len(report["violations"])
+    result["unconnected_count"] = len(report.get("unconnected_items", []))
+    result["parity_count"] = len(report.get("schematic_parity", []))
     return result
 
 

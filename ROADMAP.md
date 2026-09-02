@@ -1099,6 +1099,28 @@ not a vendor search. The user searches for real parts through the existing flow;
 a stated goal, carried forward so the library, schematic, PCB and enclosure stages all know what
 the project is *for* (does it need a lid, will a connector exit the enclosure).
 
+#### SPEC-330 — Standoffs the Board Actually Mounts To — not yet written, backlog
+
+*Module:* `services/python-daemon` · *Depends on:* SPEC-109, SPEC-311
+
+Reported by the maintainer from the running app, 2026-09-01: in the enclosure preview you can see
+the board's mounting holes, but **nothing comes through them** — the holes read as empty.
+
+Confirmed in the geometry, not guessed. `freecad_bridge.py`'s `_STANDOFF_CYLINDER_TEMPLATE` unions
+a **solid** cylinder of `height_mm` at each recognised hole position, and the preview lifts the
+board by `wall_thickness_mm + standoff_height_mm` (`EnclosureViewer.computeBoardOffset`). So the
+post stops flush at the board's underside by construction: it supports the board and nothing
+passes through the hole. The render is faithful — the geometry really is like that.
+
+What a real enclosure has instead: a standoff bored for a screw, with the screw passing through the
+board's hole into it, or a moulded boss that enters the hole to locate the board. Either makes the
+holes read as mounted rather than empty. Neither exists yet, and `SPEC-109` §1's non-goals
+explicitly ruled out fastener hardware — so this is a deliberate scope re-opening, not an oversight
+to be quietly patched.
+
+Also worth settling here: the standoff diameter currently comes from the hole's own
+`diameter_mm`, which makes the post exactly as wide as the hole it is meant to sit under.
+
 #### SPEC-329 — Assisted Authoring: Adding a Part on Request — not yet written, deliberately last
 
 *Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-325, SPEC-308

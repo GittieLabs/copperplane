@@ -58,7 +58,8 @@ beforeEach(() => {
   listSchematicComponentsMock.mockReset().mockResolvedValue(READ)
   componentEnvelopesMock.mockReset().mockResolvedValue({
     envelopes: [], measured: 1, stated: 1, unknown: 0,
-    source_path: FILES.schematic_path, read_at: READ.read_at,
+    components: READ.components,
+    source_path: FILES.pcb_path, read_at: READ.read_at,
     min_interior_height_mm: 20, tallest: { reference: 'BT1', z_mm: 20, source: 'user' },
     measured_from: 'board',
   })
@@ -77,13 +78,17 @@ describe('SchematicComponents', () => {
     expect(screen.getByText(/does not need to be running/)).toBeTruthy()
   })
 
-  it('reads the schematic after a project is picked, and remembers it', async () => {
+  it('reads the project after one is picked, and remembers it', async () => {
     pickKicadProjectMock.mockResolvedValue(FILES.pro_path)
     render(<SchematicComponents projectName="p" />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Link KiCad project…' }))
 
-    await waitFor(() => expect(listSchematicComponentsMock).toHaveBeenCalledWith(FILES.schematic_path))
+    await waitFor(() =>
+      expect(componentEnvelopesMock).toHaveBeenCalledWith(
+        FILES.schematic_path, FILES.pcb_path, {},
+      ),
+    )
     await waitFor(() =>
       expect(saveProjectMock).toHaveBeenCalledWith(
         expect.objectContaining({ kicad_project_path: FILES.pro_path }),
@@ -136,7 +141,9 @@ describe('SchematicComponents', () => {
 
   it('reports a read failure instead of rendering a stale or empty table', async () => {
     loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
-    listSchematicComponentsMock.mockRejectedValue(new Error("kicad-cli's BOM is missing expected column(s)"))
+    const boom = new Error("kicad-cli's BOM is missing expected column(s)")
+    componentEnvelopesMock.mockRejectedValue(boom)
+    listSchematicComponentsMock.mockRejectedValue(boom)
     render(<SchematicComponents projectName="p" />)
 
     expect(await screen.findByText(/missing expected column/)).toBeTruthy()
@@ -160,8 +167,10 @@ describe('SchematicComponents', () => {
     loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
     componentEnvelopesMock.mockResolvedValue({
       envelopes: [], measured: 1, stated: 0, unknown: 1,
-      source_path: FILES.schematic_path, read_at: READ.read_at,
+      components: READ.components,
+      source_path: FILES.pcb_path, read_at: READ.read_at,
       min_interior_height_mm: 15.5, tallest: { reference: 'R1', z_mm: 15.5, source: 'model' },
+      measured_from: 'board',
     })
     render(<SchematicComponents projectName="p" />)
 
@@ -221,6 +230,47 @@ describe('SchematicComponents', () => {
     expect(screen.getByText(/Update PCB from Schematic/)).toBeTruthy()
   })
 
+  /* The bug the maintainer caught in the running app: the table listed the
+     SCHEMATIC's 10 components under a summary counting the BOARD's 14, with a
+     BT1 whose footprint was not the one measured. Table and summary now come
+     from one read, so they cannot disagree. */
+  it('lists the components it actually measured, not a separate read', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    componentEnvelopesMock.mockResolvedValue({
+      envelopes: [], measured: 9, stated: 0, unknown: 5,
+      components: [{
+        reference: 'BT1', value: 'Battery_Cell',
+        footprint: 'Battery:Battery_Panasonic_CR2032-VS1N_Vertical_CircularHoles',
+        dnp: false, footprint_found: true, model_ref: null, model_path: null, has_model: false,
+      }],
+      source_path: FILES.pcb_path, read_at: READ.read_at,
+      min_interior_height_mm: 15.515, tallest: { reference: 'R2', z_mm: 15.515, source: 'model' },
+      measured_from: 'board',
+    })
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText(/VS1N_Vertical_CircularHoles/)).toBeTruthy()
+    // The schematic's footprint must NOT appear: it is not what was measured.
+    expect(screen.queryByText(/HFN_Horizontal_CircularHoles/)).toBeNull()
+    expect(listSchematicComponentsMock).not.toHaveBeenCalled()
+  })
+
+  it('calls the panel Board components when it measured the board', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText('Board components')).toBeTruthy()
+  })
+
+  it('falls back to the schematic list so a failed measurement still shows a table', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    componentEnvelopesMock.mockRejectedValue(new Error('no freecad'))
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText('D1')).toBeTruthy()
+    expect(listSchematicComponentsMock).toHaveBeenCalled()
+  })
+
   /* SPEC-326 §2.7: the board is the source of truth, because the board is
      what goes in the enclosure. */
   it('measures from the board, passing both paths so the schematic can be a fallback', async () => {
@@ -237,6 +287,7 @@ describe('SchematicComponents', () => {
     loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
     componentEnvelopesMock.mockResolvedValue({
       envelopes: [], measured: 1, stated: 0, unknown: 0,
+      components: READ.components,
       source_path: FILES.schematic_path, read_at: READ.read_at,
       min_interior_height_mm: 15, tallest: { reference: 'R1', z_mm: 15, source: 'model' },
       measured_from: 'schematic',
