@@ -12,6 +12,7 @@ const exportBoardGlbMock = vi.fn()
 const getComponentHeightsMock = vi.fn()
 const componentEnvelopesMock = vi.fn()
 const linkedProjectBoardMock = vi.fn()
+const setProjectCheckResultMock = vi.fn()
 
 vi.mock('../lib/enclosure', () => ({
   generateEnclosure: (...args: unknown[]) => generateEnclosureMock(...args),
@@ -26,6 +27,10 @@ vi.mock('../lib/enclosure', () => ({
 vi.mock('../lib/kicadProject', () => ({
   componentEnvelopes: (...args: unknown[]) => componentEnvelopesMock(...args),
   linkedProjectBoard: (...args: unknown[]) => linkedProjectBoardMock(...args),
+}))
+
+vi.mock('../lib/projects', () => ({
+  setProjectCheckResult: (...args: unknown[]) => setProjectCheckResultMock(...args),
 }))
 
 vi.mock('../lib/boardAdvisor', () => ({
@@ -150,6 +155,7 @@ beforeEach(() => {
   // No linked KiCad project by default, so these tests keep exercising the
   // open-in-KiCad discovery path they were written for.
   linkedProjectBoardMock.mockReset().mockResolvedValue(null)
+  setProjectCheckResultMock.mockReset().mockResolvedValue({ name: 'test-project' })
   pickPcbFileMock.mockReset()
   listOpenBoardsMock.mockReset().mockResolvedValue({ status: 'no_board_open' })
   openKicadMock.mockReset().mockResolvedValue(undefined)
@@ -1021,5 +1027,58 @@ describe('EnclosurePanel: KiCad does not need to be open', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Switch to KiCad' }))
 
     await waitFor(() => expect(openKicadMock).toHaveBeenCalledWith('/p/Blinky.kicad_pcb'))
+  })
+})
+
+describe('EnclosurePanel: the enclosure review has something to review', () => {
+  /* Reported: "i don't think the enclosure view is actually connected to do
+     anything." Accurate. `chat_agents._assemble_context` gives the enclosure
+     agent `last_results.enclosure` as `enclosure_parameters`, and that was
+     written ONLY on export -- so a generated-but-not-exported enclosure left
+     the agent with nothing but the project intent. */
+  it('records the generated enclosure, not only an exported one', async () => {
+    listOpenBoardsMock.mockResolvedValue({
+      status: 'boards_found',
+      candidates: [{ path: '/p/b.kicad_pcb', label: 'b.kicad_pcb' }],
+    })
+    generateEnclosureMock.mockResolvedValue(fakeJobHandle(Promise.resolve(fakeResult)))
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('b.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(setProjectCheckResultMock).toHaveBeenCalled())
+    const [name, area, record] = setProjectCheckResultMock.mock.calls[0]
+    expect(name).toBe('test-project')
+    expect(area).toBe('enclosure')
+    expect(record.pcb_path).toBe('/p/b.kicad_pcb')
+    expect(record.height_mm).toBeDefined()
+  })
+
+  it('carries what the parts need, so the agent can reason about fit', async () => {
+    listOpenBoardsMock.mockResolvedValue({
+      status: 'boards_found',
+      candidates: [{ path: '/p/b.kicad_pcb', label: 'b.kicad_pcb' }],
+    })
+    componentEnvelopesMock.mockResolvedValue({
+      envelopes: [], components: [], measured: 9, stated: 0, unknown: 5,
+      source_path: '/p/b.kicad_pcb', read_at: 'now', measured_from: 'board' as const,
+      min_interior_height_mm: 15.515,
+      tallest: { reference: 'R2', z_mm: 15.515, source: 'model' },
+    })
+    generateEnclosureMock.mockResolvedValue(fakeJobHandle(Promise.resolve(fakeResult)))
+    render(<EnclosurePanel projectName="test-project" />)
+
+    // Wait for the MEASUREMENT to land, not just the board list. Clicking
+    // Generate on the board alone races the envelope fetch, and this test
+    // failed roughly one run in two before this line.
+    await screen.findByText(/15\.515mm needed/)
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(setProjectCheckResultMock).toHaveBeenCalled())
+    const record = setProjectCheckResultMock.mock.calls[0][2]
+    expect(record.min_interior_height_mm).toBe(15.515)
+    expect(record.tallest_component).toBe('R2')
+    expect(record.components_without_known_height).toBe(5)
   })
 })

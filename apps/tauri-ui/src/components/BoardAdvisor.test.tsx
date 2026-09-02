@@ -5,11 +5,19 @@ const checkBoardMock = vi.fn()
 const listOpenBoardsMock = vi.fn()
 const openKicadMock = vi.fn()
 const linkedProjectBoardMock = vi.fn()
+const setProjectCheckResultMock = vi.fn()
 
-vi.mock('../lib/boardAdvisor', () => ({
+vi.mock('../lib/boardAdvisor', async (importOriginal) => ({
+  // checkResultForProject is a pure shaping function with no IPC of its own,
+  // so the real one is kept -- mocking it would test nothing.
+  ...(await importOriginal<typeof import('../lib/boardAdvisor')>()),
   checkBoard: (...args: unknown[]) => checkBoardMock(...args),
   listOpenBoards: (...args: unknown[]) => listOpenBoardsMock(...args),
   openKicad: (...args: unknown[]) => openKicadMock(...args),
+}))
+
+vi.mock('../lib/projects', () => ({
+  setProjectCheckResult: (...args: unknown[]) => setProjectCheckResultMock(...args),
 }))
 
 // CTX-318.3: AgentChat has its own dedicated test file (AgentChat.test.tsx)
@@ -104,6 +112,7 @@ beforeEach(() => {
   // No linked project by default, so the existing tests keep exercising the
   // open-in-KiCad discovery path they were written for.
   linkedProjectBoardMock.mockReset().mockResolvedValue(null)
+  setProjectCheckResultMock.mockReset().mockResolvedValue({ name: 'test-project' })
 })
 
 describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
@@ -446,5 +455,66 @@ describe('BoardAdvisor: KiCad does not need to be open', () => {
       fireEvent.click(button)
       await waitFor(() => expect(openKicadMock).toHaveBeenCalledWith('/p/Blinky.kicad_pcb'))
     }
+  })
+})
+
+describe('BoardAdvisor: a check result the review agent can actually read', () => {
+  /* Reported: "the pcb review should work but isn't."
+
+     It could not. `chat_agents._check_status_note` feeds the review and chat
+     agents `Project.last_results[area]`, and only `enclosure` was ever
+     written -- this component held its result in React state and dropped it.
+     So the PCB review agent was handed "No DRC check result is available
+     this session" on a board with 18 unconnected errors, and it has no tool
+     to run DRC itself. It honestly found nothing, because it was shown
+     nothing. `chat_agents.py` named this gap in a docstring and left it. */
+
+  it('persists the check so the review agent has something to review', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /board\.kicad_pcb/ }))
+
+    await waitFor(() => expect(setProjectCheckResultMock).toHaveBeenCalled())
+    const [projectName, area, record] = setProjectCheckResultMock.mock.calls[0]
+    expect(projectName).toBe('test-project')
+    expect(area).toBe('pcb')
+    expect(record.findings).toHaveLength(1)
+    expect(record.findings[0].description).toMatch(/malformed outline/)
+    expect(record.source_path).toBe('/real/board.kicad_pcb')
+  })
+
+  it('carries the counts KiCad reported, not just the explained list', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue({
+      ...VIOLATION_RESULT,
+      violations: [],
+      violation_count: 0,
+      unconnected_count: 18,
+      parity_count: 1,
+    })
+    render(<BoardAdvisor projectName="test-project" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /board\.kicad_pcb/ }))
+
+    await waitFor(() => expect(setProjectCheckResultMock).toHaveBeenCalled())
+    const record = setProjectCheckResultMock.mock.calls[0][2]
+    expect(record.unconnected_count).toBe(18)
+    expect(record.parity_count).toBe(1)
+  })
+
+  it('says so when the result could not be saved, rather than failing quietly', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockRejectedValue(new Error('disk full'))
+    render(<BoardAdvisor projectName="test-project" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /board\.kicad_pcb/ }))
+
+    // A review that then finds nothing would look like a clean board rather
+    // than a missing record, so this must not be swallowed.
+    expect(await screen.findByText(/could not save the result for review/)).toBeTruthy()
+    expect(screen.getByText(/disk full/)).toBeTruthy()
   })
 })

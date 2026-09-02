@@ -188,3 +188,30 @@ export async function setProjectFootprintOverride(
     }),
   )
 }
+
+/** SPEC-319 §2.1's named prerequisite.
+ *
+ *  `chat_agents._check_status_note` feeds the chat and review agents a
+ *  project's real ERC/DRC findings from `Project.last_results[area]`. Only
+ *  `enclosure` was ever written to it: the schematic and PCB checks kept
+ *  their results in local React state and dropped them, so the PCB review
+ *  agent was told "No DRC check result is available this session" every
+ *  time — on a board with real errors. It had no tool to run DRC itself, so
+ *  it had nothing to review and honestly found nothing.
+ *
+ *  A dedicated route rather than a full `saveProject`, matching
+ *  `setProjectIntent`: saving a whole in-memory project to record one field
+ *  races a stale copy of every other field into the manifest. */
+export async function setProjectCheckResult(
+  projectName: string,
+  area: 'schematic' | 'pcb' | 'enclosure',
+  result: Record<string, unknown>,
+): Promise<Project> {
+  return unwrap(
+    await dispatch('project.set_check_result', {
+      project_name: projectName,
+      area,
+      result,
+    }),
+  )
+}

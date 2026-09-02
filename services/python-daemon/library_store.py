@@ -1082,6 +1082,49 @@ def set_project_intent(name: str, intent: str) -> dict:
     return save_project(project)
 
 
+_CHECK_RESULT_AREAS = ("schematic", "pcb", "enclosure")
+_MAX_PERSISTED_FINDINGS = 25
+
+
+def set_project_check_result(name: str, area: str, result: dict) -> dict:
+    """SPEC-319 §2.1's named prerequisite, finally built.
+
+    `chat_agents._check_status_note` reads `Project.last_results[area]` to
+    give the review and chat agents the user's real ERC/DRC findings. Until
+    now only `enclosure` was ever written -- the schematic and PCB checks
+    held their results in local React state and threw them away, so the PCB
+    review agent was told "No DRC check result is available this session"
+    every single time, on a board with real errors. `chat_agents.py`'s own
+    docstring named this gap and left it: "Real ERC/DRC persistence is a
+    separate, later prerequisite."
+
+    Bounded on purpose: a real board can produce hundreds of findings, and
+    this record is read straight into an LLM context window. The counts are
+    always exact; the per-finding detail is capped, and says so when it has
+    been.
+
+    Round-trips through load_project/save_project for the same reason
+    `set_project_intent` does -- CTX-312.1's pointer/manifest routing comes
+    free rather than being re-derived.
+    """
+    if area not in _CHECK_RESULT_AREAS:
+        raise SchemaValidationError(
+            f"'{area}' is not a real check area. Expected one of {', '.join(_CHECK_RESULT_AREAS)}."
+        )
+
+    findings = result.get("findings") or []
+    stored = {
+        **{k: v for k, v in result.items() if k != "findings"},
+        "findings": findings[:_MAX_PERSISTED_FINDINGS],
+    }
+    if len(findings) > _MAX_PERSISTED_FINDINGS:
+        stored["findings_omitted"] = len(findings) - _MAX_PERSISTED_FINDINGS
+
+    project = load_project(name)
+    project["last_results"] = {**(project.get("last_results") or {}), area: stored}
+    return save_project(project)
+
+
 def add_project_part_reference(project_name: str, part_id: str) -> dict:
     """CTX-304.3 (SPEC-304 §2): a Project holds real *references* to
     Library Parts, not copies -- `SPEC-304`'s own directory diagram

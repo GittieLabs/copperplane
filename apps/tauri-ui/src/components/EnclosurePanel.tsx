@@ -16,6 +16,7 @@ import {
 } from '../lib/enclosure'
 import { listOpenBoards, openKicad, type BoardCandidate, type ListOpenBoardsResult } from '../lib/boardAdvisor'
 import { componentEnvelopes, linkedProjectBoard, type EnvelopeResult } from '../lib/kicadProject'
+import { setProjectCheckResult } from '../lib/projects'
 import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { EnclosureViewer } from './EnclosureViewer'
@@ -309,7 +310,35 @@ export function EnclosurePanel({
       handle.onUpdate((update) => setStatus(update.status))
 
       setLidVisible(true)
-      setResult(await handle.result)
+      const generated = await handle.result
+      setResult(generated)
+      // SPEC-319 §2.1: `last_results.enclosure` is what the enclosure review
+      // and chat agents are given as `enclosure_parameters` -- and it was
+      // written ONLY on export, so an enclosure that had been generated but
+      // not exported left the agent with nothing but the project intent.
+      // Reported as "the enclosure view isn't connected to do anything",
+      // which was accurate.
+      try {
+        await setProjectCheckResult(projectName, 'enclosure', {
+          generated_at: new Date().toISOString(),
+          mode,
+          pcb_path: mode === 'board' ? pcbPath : null,
+          height_mm: mode === 'board' ? boardParams.height : dims.height,
+          wall_thickness_mm: boardParams.wall_thickness_mm,
+          clearance_mm: boardParams.clearance_mm,
+          standoff_height_mm: boardParams.standoff_height_mm,
+          lid: mode === 'board' ? lid : false,
+          // What the parts actually need, so the agent can reason about fit
+          // rather than only repeating the numbers back.
+          min_interior_height_mm: measured?.min_interior_height_mm ?? null,
+          tallest_component: measured?.tallest?.reference ?? null,
+          components_without_known_height: measured?.unknown ?? null,
+          findings: [],
+        })
+      } catch {
+        // Advisory only: a generated enclosure that could not be recorded is
+        // still generated and on screen.
+      }
       if (mode === 'board' && pcbPath) {
         setResultBoardParams({
           pcbPath,

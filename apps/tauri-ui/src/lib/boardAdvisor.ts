@@ -133,3 +133,27 @@ export async function checkSchematic(schPath: string): Promise<CheckResult> {
   const handle = await submitJob<CheckResult>('kicad.check_schematic', { sch_path: schPath })
   return handle.result
 }
+
+/** The bounded record of a check, for `Project.last_results` — what the
+ *  review and chat agents actually read. Counts are exact; the per-finding
+ *  detail is what an LLM context can carry, and `library_store` caps it
+ *  again on the way in. */
+export function checkResultForProject(result: CheckResult, area: 'schematic' | 'pcb') {
+  return {
+    checked_at: new Date().toISOString(),
+    source_path: result.source_path,
+    summary: result.summary,
+    violation_count: result.violation_count ?? result.violations.length,
+    ...(area === 'pcb'
+      ? {
+          unconnected_count: result.unconnected_count ?? 0,
+          parity_count: result.parity_count ?? 0,
+        }
+      : {}),
+    findings: result.violations.map((v) => ({
+      severity: v.severity,
+      type: v.type,
+      description: v.description,
+    })),
+  }
+}

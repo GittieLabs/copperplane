@@ -1802,3 +1802,67 @@ class TestConnectionGuidanceStorage(LibraryStoreTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestProjectCheckResults(LibraryStoreTestCase):
+    """SPEC-319 §2.1's prerequisite. `chat_agents._check_status_note` reads
+    `Project.last_results[area]` to give the review and chat agents the
+    user's real ERC/DRC findings; only `enclosure` was ever written, so the
+    PCB review agent was told "No DRC check result is available this
+    session" on a board with real errors."""
+
+    def _result(self, n=3):
+        return {
+            "checked_at": "2026-09-02T00:00:00Z",
+            "source_path": "/p/b.kicad_pcb",
+            "violation_count": 0,
+            "unconnected_count": n,
+            "findings": [
+                {"severity": "error", "type": "unconnected_items",
+                 "description": f"Missing connection {i}"} for i in range(n)
+            ],
+        }
+
+    def test_001_a_check_result_is_readable_after_a_restart(self):
+        store.save_project({"name": "P"})
+        store.set_project_check_result("P", "pcb", self._result())
+
+        stored = store.load_project("P")["last_results"]["pcb"]
+        self.assertEqual(stored["unconnected_count"], 3)
+        self.assertEqual(len(stored["findings"]), 3)
+
+    def test_002_areas_do_not_overwrite_each_other(self):
+        store.save_project({"name": "P"})
+        store.set_project_check_result("P", "pcb", self._result())
+        store.set_project_check_result("P", "schematic", {"violation_count": 0, "findings": []})
+
+        last = store.load_project("P")["last_results"]
+        self.assertIn("pcb", last)
+        self.assertIn("schematic", last)
+        self.assertEqual(last["pcb"]["unconnected_count"], 3)
+
+    def test_003_an_existing_enclosure_result_survives(self):
+        """The one area that already wrote here must not be clobbered."""
+        store.save_project({"name": "P", "last_results": {"enclosure": {"glb_path": "/x.glb"}}})
+        store.set_project_check_result("P", "pcb", self._result())
+
+        last = store.load_project("P")["last_results"]
+        self.assertEqual(last["enclosure"]["glb_path"], "/x.glb")
+
+    def test_004_a_huge_finding_list_is_capped_and_says_so(self):
+        """This record is read straight into an LLM context window. A real
+        board can produce hundreds of findings."""
+        store.save_project({"name": "P"})
+        store.set_project_check_result("P", "pcb", self._result(n=200))
+
+        stored = store.load_project("P")["last_results"]["pcb"]
+        self.assertEqual(len(stored["findings"]), 25)
+        self.assertEqual(stored["findings_omitted"], 175)
+        # The COUNT stays exact even though the detail is capped -- an agent
+        # told "3 of 200" must not conclude the board has 25 problems.
+        self.assertEqual(stored["unconnected_count"], 200)
+
+    def test_005_an_unknown_area_is_refused(self):
+        store.save_project({"name": "P"})
+        with self.assertRaises(store.SchemaValidationError):
+            store.set_project_check_result("P", "firmware", self._result())

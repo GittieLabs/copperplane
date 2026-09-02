@@ -742,6 +742,19 @@ def project_load(name: str) -> dict:
     return library_store.load_project(name)
 
 
+def project_set_check_result(project_name: str, area: str, result: dict) -> dict:
+    """The project.set_check_result route (SPEC-319 §2.1's prerequisite).
+
+    A dedicated route rather than a full `project.save` round trip, for the
+    same reason `project.set_intent` is one: saving a whole in-memory project
+    to record one field races a stale copy of every other field into the
+    manifest.
+
+    Cheap local file I/O, so synchronous -- matching `project.set_intent`.
+    """
+    return library_store.set_project_check_result(project_name, area, result)
+
+
 def project_list() -> list:
     return library_store.list_projects()
 
@@ -1977,6 +1990,7 @@ def _build_routes() -> dict:
         routes["project.get_directory"] = project_get_directory
         routes["project.open_from_directory"] = project_open_from_directory
         routes["project.set_intent"] = project_set_intent
+        routes["project.set_check_result"] = project_set_check_result
         routes["project.add_part_reference"] = project_add_part_reference
         routes["project.set_footprint_override"] = project_set_footprint_override
         routes["chat.load_thread"] = chat_load_thread

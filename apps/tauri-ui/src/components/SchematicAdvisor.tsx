@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { SchematicComponents } from './SchematicComponents'
 import type { MenuCommand } from '../lib/areas'
 import {
+  checkResultForProject,
   checkSchematic,
   listProjectSchematics,
   openKicad,
@@ -14,6 +15,7 @@ import {
 import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { ViolationsList } from './ViolationsList'
+import { setProjectCheckResult } from '../lib/projects'
 
 /** SPEC-309: real ERC via kicad-cli (CTX-309.1), explained in plain
  * language. Lives in the Schematic area -- moved here from the PCB
@@ -99,7 +101,21 @@ export function SchematicAdvisor({
     setError(null)
     setResult(null)
     try {
-      setResult(await checkSchematic(candidate.path))
+      const checked = await checkSchematic(candidate.path)
+      setResult(checked)
+      // SPEC-319 §2.1's prerequisite -- see BoardAdvisor for why. An ERC
+      // result kept only in React state is invisible to the review agent.
+      try {
+        await setProjectCheckResult(
+          projectName, 'schematic', checkResultForProject(checked, 'schematic'),
+        )
+      } catch (persistErr) {
+        setError(
+          `Checked, but could not save the result for review: ${
+            persistErr instanceof Error ? persistErr.message : String(persistErr)
+          }`,
+        )
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
