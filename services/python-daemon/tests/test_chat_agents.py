@@ -1162,3 +1162,57 @@ class TestFindingLocations(unittest.TestCase):
             )
 
         self.assertEqual(note["ignored_checks"][0]["key"], "missing_courtyard")
+
+
+class TestAnUnreadableReviewIsNotACleanBoard(unittest.TestCase):
+    """Reported: "Reviewed -- nothing worth flagging" on a board with two
+    unconnected errors, right after a build where the same review had found
+    them. The model had written prose and no FINDINGS block, `_extract_findings`
+    returned [] for that exactly as it does for a genuinely clean board, and
+    the UI could not tell the two apart."""
+
+    def _review_returning(self, text):
+        async def fake_dispatch(*a, **kw):
+            return {"text": text, "tool_calls_raw": [], "model": "m", "provider": "p"}
+        with patch.object(chat_agents, "_dispatch", side_effect=fake_dispatch), \
+             patch.object(chat_agents.tool_registry, "build_tool_registry", return_value={}):
+            return chat_agents.review("project", "P:pcb", "pcb", project_name="P")
+
+    def test_001_a_response_with_no_findings_block_raises(self):
+        with self.assertRaises(chat_agents.ReviewFormatError):
+            self._review_returning("Here is some prose about your board, with no block at all.")
+
+    def test_002_the_error_says_it_is_not_a_clean_result(self):
+        """The wording is the point -- a user reading it must not conclude
+        their board passed."""
+        with self.assertRaises(chat_agents.ReviewFormatError) as ctx:
+            self._review_returning("prose only")
+
+        self.assertIn("NOT a clean result", str(ctx.exception))
+
+    def test_003_an_explicitly_empty_block_is_still_an_honest_clean_review(self):
+        """The other half: a model that DID answer in the format and found
+        nothing must not be turned into an error."""
+        findings = self._review_returning("<<<FINDINGS>>>\n[]\n<<<END_FINDINGS>>>")
+
+        self.assertEqual(findings, [])
+
+    def test_004_a_malformed_block_is_still_read_as_present(self):
+        """Present-but-unparseable drops to no findings rather than raising:
+        the model did answer in the format, and the per-entry validation above
+        already governs what survives."""
+        findings = self._review_returning("<<<FINDINGS>>>\nnot json\n<<<END_FINDINGS>>>")
+
+        self.assertEqual(findings, [])
+
+    def test_005_real_findings_still_come_through(self):
+        block = (
+            '<<<FINDINGS>>>\n'
+            '[{"severity": "warning", "title": "Unconnected items", '
+            '"detail": "Two pads are not joined.", "sources": [], "general_practice": false}]\n'
+            '<<<END_FINDINGS>>>'
+        )
+        findings = self._review_returning(block)
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["title"], "Unconnected items")

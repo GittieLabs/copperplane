@@ -91,7 +91,10 @@ block:
 Each finding's `sources` follows exactly the same format and the same rules as the citation format
 above -- one array per finding, not one for the whole response, since a single review can have some
 findings grounded and others general practice. Return `[]` when nothing is worth flagging; that is a
-normal, honest result, not a failure to find something. Order findings with the most important
+normal, honest result, not a failure to find something -- but a ERC error the check block reports is
+always worth flagging, so `[]` is wrong whenever that block lists any finding. Emit the block even
+when you have a lot to say: the block is what is read, and an answer without it is discarded as
+unreadable rather than treated as a clean board. Order findings with the most important
 first. You have no tool that can save, inject, or modify anything while reviewing -- never propose a
 finding as something you already did, or imply you can act on it yourself; describe what the user
 would need to do.

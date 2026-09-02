@@ -15,6 +15,7 @@ import {
 import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { ViolationsList } from './ViolationsList'
+import { linkedProjectSchematic } from '../lib/kicadProject'
 import { setProjectCheckResult } from '../lib/projects'
 
 /** SPEC-309: real ERC via kicad-cli (CTX-309.1), explained in plain
@@ -71,13 +72,22 @@ export function SchematicAdvisor({
     setLoadingList(true)
     setListError(null)
     try {
-      setListResult(await listProjectSchematics())
+      // The linked project first: it names the schematic outright. Asking
+      // KiCad meant opening the PCB Editor to find a *schematic*, because
+      // KiCad's IPC cannot list schematics at all -- a real limitation this
+      // tab no longer has to inherit now that SPEC-325 reads the .kicad_pro.
+      const linked = await linkedProjectSchematic(projectName)
+      setListResult(
+        linked
+          ? { status: 'schematics_found', candidates: [linked] }
+          : await listProjectSchematics(),
+      )
     } catch (err) {
       setListError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoadingList(false)
     }
-  }, [])
+  }, [projectName])
 
   useEffect(() => {
     void refreshList()
@@ -162,22 +172,25 @@ export function SchematicAdvisor({
 
         {showGuidance && (
           <div className="flex flex-col gap-2 rounded border border-line-subtle bg-surface p-3 text-sm">
-            <p className="text-fg-bright">
-              {listError
-                ? "KiCad doesn't appear to be running yet."
-                : 'No schematic could be found automatically.'}
-            </p>
+            {/* This used to tell the user to launch KiCad and open the PCB
+                Editor -- to find a SCHEMATIC -- because discovery went through
+                KiCad's IPC, which cannot list schematics at all. A linked
+                .kicad_pro names the schematic outright and needs nothing
+                running, so the instructions are now about linking a project,
+                and KiCad is the fallback rather than the first step. */}
+            <p className="text-fg-bright">No schematic is linked yet.</p>
             <ol className="list-decimal space-y-1 pl-4 text-xs text-fg-tertiary">
-              <li>Click <strong className="text-fg-secondary">Open KiCad</strong> below (or open it yourself).</li>
               <li>
-                Open your project, then open its <strong className="text-fg-secondary">PCB Editor</strong> window --
-                the schematic itself can't be listed directly (a real KiCad limitation, not this app's), so it's
-                found via whichever board you have open.
+                Link your KiCad project on the <strong className="text-fg-secondary">Schematic
+                components</strong> panel above — its <code>.kicad_pro</code> names the schematic,
+                and KiCad does not need to be running.
               </li>
-              <li>Click <strong className="text-fg-secondary">Refresh</strong> below.</li>
+              <li>Or pick the <code>.kicad_sch</code> file directly with the button below.</li>
             </ol>
             <p className="text-xs text-fg-muted">
-              Or, if the schematic you want isn't tied to any board currently open in KiCad, pick it directly.
+              {listError
+                ? 'Asking KiCad directly also failed, which only matters if you have no project linked.'
+                : 'Opening KiCad is still an option if you would rather work there first.'}
             </p>
             {openKicadError && <p className="text-xs text-danger">{openKicadError}</p>}
             <div className="flex gap-2">

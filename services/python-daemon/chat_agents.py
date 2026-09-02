@@ -165,6 +165,15 @@ def _resolve_note(ref: dict) -> bool:
     return any(n.get("note_id") == note_id for n in (record.get("notes") or []))
 
 
+class ReviewFormatError(Exception):
+    """A review response with no findings block at all.
+
+    Deliberately an error rather than an empty result: an empty list is a
+    real, honest answer ("nothing worth flagging"), and a missing block is
+    the model failing to answer in the required format. Collapsing the two
+    told a user their board was fine when it had not been assessed."""
+
+
 def _resolve_deferred(ref: dict) -> bool:
     return False
 
@@ -778,6 +787,18 @@ def review(
         area, scope, scope_id, project_name, _REVIEW_PROMPT, [], secrets, provider, model,
         tools=read_only_tools, config=config,
     ))
+
+    # An absent FINDINGS block is NOT a clean review. Both used to collapse to
+    # an empty list, so the UI said "Reviewed -- nothing worth flagging" about
+    # a board with two unconnected errors, because the model had written prose
+    # and no block at all. "We could not read the review" and "your board is
+    # fine" must never look the same -- the same distinction the check block
+    # itself already makes for "could not run" versus "ran and passed".
+    if _FINDINGS_PATTERN.search(result["text"]) is None:
+        raise ReviewFormatError(
+            "The review came back without its findings block, so it could not be read. "
+            "This is NOT a clean result -- the board has not been assessed. Try again."
+        )
 
     findings = []
     for raw in _extract_findings(result["text"]):

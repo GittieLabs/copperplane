@@ -197,3 +197,26 @@ export async function linkedProjectBoard(projectName: string): Promise<BoardCand
     return null
   }
 }
+
+/** SPEC-325 §2.1 for the Schematic tab, the last one still asking for KiCad.
+ *
+ *  `kicad.list_project_schematics` derives a schematic from whichever board
+ *  KiCad currently has open, because KiCad's IPC has never implemented
+ *  schematic listing at all -- which is why the guidance told users to open
+ *  the PCB Editor to find their *schematic*. A linked `.kicad_pro` names it
+ *  outright. */
+export async function linkedProjectSchematic(
+  projectName: string,
+): Promise<{ path: string; label: string } | null> {
+  const { loadProject } = await import('./projects')
+  try {
+    const project = await loadProject(projectName)
+    if (!project.kicad_project_path) return null
+    const files = await resolveKicadProject(project.kicad_project_path)
+    if (!files.schematic_path) return null
+    const path = files.schematic_path
+    return { path, label: path.split('/').pop() ?? path }
+  } catch {
+    return null
+  }
+}
