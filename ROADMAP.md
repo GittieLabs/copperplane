@@ -1099,6 +1099,23 @@ not a vendor search. The user searches for real parts through the existing flow;
 a stated goal, carried forward so the library, schematic, PCB and enclosure stages all know what
 the project is *for* (does it need a lid, will a connector exit the enclosure).
 
+#### [SPEC-333](apps/tauri-ui/specs/SPEC-333-project-save-semantics-and-rename.md) — Project Save Semantics & Rename — Draft
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-312
+
+Two reproduced defects in the persistence model, one of which `CTX-326.3` made much easier to hit.
+
+**Save Project discards newer data.** It writes the whole in-memory project snapshot, replacing the
+stored record — so anything a dedicated route wrote since that snapshot was loaded is erased. A DRC
+result recorded at 10:00 is gone after a Save Project click at 10:05 using a copy loaded at 09:55.
+`SPEC-312` already avoided this for intent and footprint overrides by adding dedicated routes; the
+Save button itself was never brought along, and now that check results and enclosure parameters are
+written on every run, the window routinely contains real work.
+
+**Rename forks the project.** There is no rename route. Saving under a new name writes a second
+pointer and leaves the first, so one folder becomes two entries in the project list, and the old one
+still loads with a name its own folder's manifest contradicts.
+
 #### SPEC-332 — DRC as a Teaching Surface — not yet written, partly delivered
 
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-309, SPEC-319

@@ -8,7 +8,8 @@ last_updated: 2026-08-19
 target_version: v0.2.0
 location: "apps/tauri-ui/specs/SPEC-312-application-shell-project-portability-persistence.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
-child_specs: []
+child_specs:
+  - "SPEC-333-project-save-semantics-and-rename.md"
 user_facing: true
 ---
 
