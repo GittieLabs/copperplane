@@ -1099,6 +1099,33 @@ not a vendor search. The user searches for real parts through the existing flow;
 a stated goal, carried forward so the library, schematic, PCB and enclosure stages all know what
 the project is *for* (does it need a lid, will a connector exit the enclosure).
 
+#### SPEC-332 — DRC as a Teaching Surface — not yet written, partly delivered
+
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-309, SPEC-319
+
+The maintainer, reading a real finding: *"I don't know what [Net-(U2-THRES)] of U2 means or actually
+any of the abbreviations in order to find them. We have an opportunity to help the user learn what
+these are and know to locate the problem on the board."* And on the target reader: *"a hobbyist/maker
+that enjoys getting to the end product but is not a professional in schematics, pcbs, or cad and we
+are their co-pilot assisting them with the areas they are weak in."*
+
+Delivered on 2026-09-02: findings now carry KiCad's own `items` (the pad/net/component text and the
+millimetre position, previously discarded as "internal uuids" — only `uuid` is), a static glossary
+expands the abbreviations without an LLM call, and `ignored_checks` is surfaced with a note per
+check saying what it would have caught and whether a maker should care.
+
+Still open, and what this spec is for:
+
+*   **Mirroring KiCad's own tab structure** — Violations / Unconnected / Schematic Parity / Ignored.
+    The maintainer suggested it and was unsure; the current build uses one findings list plus a
+    collapsible for ignored tests. Worth deciding once there is more than one kind of finding on a
+    real board to look at.
+*   **Jumping to a finding.** The mm position is shown; nothing uses it. KiCad's own dialog
+    centres the view on a double-click, and `kipy` could plausibly do the same when KiCad is open.
+*   **A glossary that is not a hard-coded list.** Fine for the dozen terms KiCad's DRC actually
+    emits; wrong if it grows into a general PCB dictionary.
+*   **The same treatment for ERC**, which has its own vocabulary and its own ignored-test set.
+
 #### SPEC-331 — Enclosure Fit Review — not yet written, disabled in the app
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-326, SPEC-319

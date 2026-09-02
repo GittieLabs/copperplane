@@ -1103,3 +1103,62 @@ class TestCheckFindingSourceRef(unittest.TestCase):
 
         self.assertEqual(len(resolved), 1)
         self.assertEqual(dropped, 1)
+
+
+class TestFindingLocations(unittest.TestCase):
+    """`items` used to be dropped from every finding as "KiCad's internal
+    uuids, which mean nothing to a user". Only `uuid` is: the rest names the
+    pad, the net, the component and the millimetre position -- the answer to
+    "where is it". Reported as "we didn't even tell the user where to find the
+    problems on the board."."""
+
+    _REAL = {
+        "description": "Missing connection between items",
+        "severity": "error",
+        "type": "unconnected_items",
+        "items": [
+            {"description": "PTH pad 2 [Net-(U2-THRES)] of U2",
+             "pos": {"x": 99.695, "y": 68.23}, "uuid": "316be86b"},
+            {"description": "Track [Net-(U2-THRES)] on F.Cu, length 1.5556 mm",
+             "pos": {"x": 107.315, "y": 70.77}, "uuid": "8568ccf9"},
+        ],
+    }
+
+    def test_001_locations_reach_the_agent_with_their_positions(self):
+        out = chat_agents._finding_for_agent(self._REAL)
+
+        self.assertEqual(len(out["locations"]), 2)
+        self.assertEqual(out["locations"][0]["description"], "PTH pad 2 [Net-(U2-THRES)] of U2")
+        self.assertEqual(out["locations"][0]["pos_mm"], {"x": 99.695, "y": 68.23})
+
+    def test_002_the_uuid_is_not_carried(self):
+        """The one part of an item that really is meaningless to a reader."""
+        out = chat_agents._finding_for_agent(self._REAL)
+
+        self.assertNotIn("uuid", out["locations"][0])
+
+    def test_003_a_finding_with_no_items_still_works(self):
+        out = chat_agents._finding_for_agent({"description": "x", "severity": "warning"})
+
+        self.assertEqual(out["locations"], [])
+
+    def test_004_an_item_with_no_description_is_skipped(self):
+        out = chat_agents._finding_for_agent(
+            {"description": "x", "items": [{"uuid": "only-a-uuid"}]}
+        )
+
+        self.assertEqual(out["locations"], [])
+
+    def test_005_ignored_checks_reach_the_agent(self):
+        """A board can look clean because a check is switched off."""
+        report = {"violations": [], "ignored_checks": [
+            {"key": "missing_courtyard", "description": "Footprint has no courtyard defined"},
+        ]}
+        with patch.object(chat_agents.kicad_project, "resolve_project",
+                          return_value={"pcb_path": "/p/b.kicad_pcb", "schematic_path": None}), \
+             patch.object(chat_agents.kicad_cli, "run_drc", return_value=report):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertEqual(note["ignored_checks"][0]["key"], "missing_courtyard")

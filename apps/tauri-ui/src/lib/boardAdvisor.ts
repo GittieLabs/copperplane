@@ -6,11 +6,21 @@ import { dispatch, submitJob } from './ipc'
  * (CTX-309.1) -- each real KiCad violation enriched with a real
  * explanation/suggested_fix, plus items/sheet_path passed straight
  * through from kicad-cli's own real JSON. */
+/** One item KiCad flagged, with the text KiCad's own dialog shows and its
+ *  millimetre position. This is the answer to "where is it" -- the whole
+ *  `items` array used to be discarded as internal uuids, which only the
+ *  `uuid` field actually is. */
+export interface ViolationItem {
+  description?: string
+  pos?: { x: number; y: number }
+  uuid?: string
+}
+
 export interface Violation {
   description: string
   severity: string
   type: string
-  items: unknown[]
+  items: ViolationItem[]
   sheet_path?: string
   explanation: string
   suggested_fix: string
@@ -29,6 +39,9 @@ export interface CheckResult {
   violation_count?: number
   unconnected_count?: number
   parity_count?: number
+  /** Checks KiCad did NOT run. A board can look clean because a test is
+   *  switched off, and that setting is usually inherited rather than chosen. */
+  ignored_checks?: { key: string; description: string }[]
 }
 
 export interface BoardCandidate {

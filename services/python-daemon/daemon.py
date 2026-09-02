@@ -1740,6 +1740,13 @@ def kicad_check_board(pcb_path: str) -> dict:
     result["violation_count"] = len(report["violations"])
     result["unconnected_count"] = len(report.get("unconnected_items", []))
     result["parity_count"] = len(report.get("schematic_parity", []))
+    # Which checks KiCad did NOT run. Carried because a disabled check is
+    # invisible in every other view: the board looks clean, and the reason it
+    # looks clean is a setting -- often inherited from whatever project the
+    # user copied their template from, years ago and for a reason that no
+    # longer applies. `missing_courtyard` in particular is load-bearing for
+    # SPEC-326's own enclosure envelopes.
+    result["ignored_checks"] = report.get("ignored_checks", [])
     return result
 
 

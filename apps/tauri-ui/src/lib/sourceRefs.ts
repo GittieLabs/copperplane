@@ -9,16 +9,39 @@ import { loadPart } from './partDetail'
  * answer and a review finding carry the same `SourceRef[]` union
  * (SPEC-206 §2.3) and need to resolve/open one the same way. */
 
+/** A field name from a Part record, in a reader's words. `pins` is the one
+ *  that prompted this -- "Part: pins" gave no hint that it meant the chip's
+ *  own pin list from its datasheet. Unmapped fields fall through to the raw
+ *  name rather than being hidden. */
+const _PART_FIELD_LABEL: Record<string, string> = {
+  pins: 'pin list',
+  package: 'package type',
+  manufacturer: 'manufacturer',
+  description: 'description',
+  datasheet_url: 'datasheet link',
+  part_number: 'part number',
+}
+
 export function sourceChipLabel(ref: SourceRef): string {
   switch (ref.kind) {
     case 'datasheet_page':
       return `Datasheet page ${ref.page}`
     case 'guidance_item':
-      return `Design guidance: ${ref.category}`
+      // Naming the part when we know it; the original wording when we do not,
+      // since "Part — power guidance" is worse than "Design guidance: power".
+      return ref.part_id
+        ? `${ref.part_id} — ${ref.category} guidance`
+        : `Design guidance: ${ref.category}`
     case 'connection_guidance':
-      return `Pin ${ref.pin_number} guidance`
+      return ref.part_id
+        ? `${ref.part_id} — pin ${ref.pin_number} wiring`
+        : `Pin ${ref.pin_number} guidance`
     case 'part_field':
-      return `Part: ${ref.field}`
+      // "Part: pins" said almost nothing -- reported directly. Name the part
+      // and say what was read from it, in the words a reader would use.
+      return ref.part_id
+        ? `${ref.part_id} — ${_PART_FIELD_LABEL[ref.field ?? ''] ?? ref.field}`
+        : `Part: ${_PART_FIELD_LABEL[ref.field ?? ''] ?? ref.field}`
     case 'project_intent':
       return 'Project intent'
     case 'chat_turn':

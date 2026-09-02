@@ -287,6 +287,34 @@ _CHECK_AREA_LABELS = {"schematic": "ERC", "pcb": "DRC"}
 _MAX_LIVE_FINDINGS = 25
 
 
+def _finding_for_agent(finding: dict) -> dict:
+    """One check finding, keeping WHERE it is.
+
+    `items` used to be dropped here on the grounds that it carried "KiCad's
+    internal uuids, which mean nothing to a user". The uuids do not; the rest
+    of each item very much does. A real one reads:
+
+        {"description": "PTH pad 2 [Net-(U2-THRES)] of U2",
+         "pos": {"x": 99.695, "y": 68.23}}
+
+    -- which is the pad, the net, the component, and the millimetre position
+    on the board. Dropping it left the agent able to say only that two
+    connections were missing, never which two or where, and the maintainer
+    reported exactly that: "we didn't even tell the user where to find the
+    problems on the board."
+    """
+    return {
+        "severity": finding.get("severity"),
+        "type": finding.get("type"),
+        "description": finding.get("description"),
+        "locations": [
+            {"description": i.get("description"), "pos_mm": i.get("pos")}
+            for i in (finding.get("items") or [])
+            if isinstance(i, dict) and i.get("description")
+        ],
+    }
+
+
 def _check_status_note(project: dict, area: str) -> str:
     """Runs the real ERC/DRC now, rather than reporting a stored one.
 
@@ -364,15 +392,13 @@ def _check_status_note(project: dict, area: str) -> str:
                 "the file on disk -- an editor holding unsaved changes will differ"
             ),
             **counts,
-            "findings": [
-                {
-                    "severity": f.get("severity"),
-                    "type": f.get("type"),
-                    "description": f.get("description"),
-                }
-                for f in findings[:_MAX_LIVE_FINDINGS]
-            ],
+            "findings": [_finding_for_agent(f) for f in findings[:_MAX_LIVE_FINDINGS]],
             "findings_omitted": max(0, len(findings) - _MAX_LIVE_FINDINGS),
+            # Which checks KiCad did not run at all. A disabled check makes a
+            # board look clean for a reason that is invisible everywhere else,
+            # and these settings are routinely inherited from whatever project
+            # a user copied their template from.
+            "ignored_checks": report.get("ignored_checks", []),
         },
         sort_keys=True,
     )

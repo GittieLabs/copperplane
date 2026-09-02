@@ -154,7 +154,7 @@ describe('AgentChat', () => {
     await waitFor(() => screen.getByText('1 source'))
     fireEvent.click(screen.getByText('1 source'))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Design guidance: power' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ATtiny85 — power guidance' }))
 
     await waitFor(() => expect(openMock).toHaveBeenCalledWith('/real/library/datasheets/ATtiny85.pdf#page=4'))
     expect(loadPartMock).toHaveBeenCalledWith('ATtiny85')
