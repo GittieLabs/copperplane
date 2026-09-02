@@ -11,6 +11,7 @@ const getProjectDirectoryMock = vi.fn()
 const exportBoardGlbMock = vi.fn()
 const getComponentHeightsMock = vi.fn()
 const componentEnvelopesMock = vi.fn()
+const linkedProjectBoardMock = vi.fn()
 
 vi.mock('../lib/enclosure', () => ({
   generateEnclosure: (...args: unknown[]) => generateEnclosureMock(...args),
@@ -24,6 +25,7 @@ vi.mock('../lib/enclosure', () => ({
 
 vi.mock('../lib/kicadProject', () => ({
   componentEnvelopes: (...args: unknown[]) => componentEnvelopesMock(...args),
+  linkedProjectBoard: (...args: unknown[]) => linkedProjectBoardMock(...args),
 }))
 
 vi.mock('../lib/boardAdvisor', () => ({
@@ -145,6 +147,9 @@ const fakeResult = {
 beforeEach(() => {
   generateEnclosureMock.mockReset()
   componentEnvelopesMock.mockReset().mockRejectedValue(new Error('not measured by default'))
+  // No linked KiCad project by default, so these tests keep exercising the
+  // open-in-KiCad discovery path they were written for.
+  linkedProjectBoardMock.mockReset().mockResolvedValue(null)
   pickPcbFileMock.mockReset()
   listOpenBoardsMock.mockReset().mockResolvedValue({ status: 'no_board_open' })
   openKicadMock.mockReset().mockResolvedValue(undefined)
@@ -969,5 +974,52 @@ describe('EnclosurePanel: interior height comes from the board, not a default', 
 
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     expect(screen.getByRole('button', { name: 'Generate Enclosure' })).toBeTruthy()
+  })
+})
+
+describe('EnclosurePanel: KiCad does not need to be open', () => {
+  /* Reported directly: "i have kicad closed and the schematic for the project
+     seems to still work but the pcb and enclosure view are not and are asking
+     for kicad to be opened."
+
+     The Schematic tab stopped needing KiCad open at SPEC-325. This tab kept
+     demanding it even though every route it calls -- generate_enclosure, the
+     envelope measurement -- takes an explicit path and reads the file. Only
+     the DISCOVERY step ever needed the IPC. */
+  const LINKED = { path: '/p/Blinky.kicad_pcb', label: 'Blinky.kicad_pcb' }
+
+  it('uses the linked project board when KiCad is closed', async () => {
+    listOpenBoardsMock.mockResolvedValue({ status: 'no_board_open' })
+    linkedProjectBoardMock.mockResolvedValue(LINKED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('Blinky.kicad_pcb'))
+    expect(screen.queryByText('No board is currently open in KiCad.')).toBeNull()
+  })
+
+  it('does not ask KiCad at all when the project is linked', async () => {
+    linkedProjectBoardMock.mockResolvedValue(LINKED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('Blinky.kicad_pcb'))
+    expect(listOpenBoardsMock).not.toHaveBeenCalled()
+  })
+
+  it('still guides the user to KiCad when nothing is linked and nothing is open', async () => {
+    listOpenBoardsMock.mockResolvedValue({ status: 'no_board_open' })
+    linkedProjectBoardMock.mockResolvedValue(null)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('No board is currently open in KiCad.'))
+  })
+
+  it('Open KiCad opens the board itself, not a bare KiCad window', async () => {
+    linkedProjectBoardMock.mockResolvedValue(LINKED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('Blinky.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to KiCad' }))
+
+    await waitFor(() => expect(openKicadMock).toHaveBeenCalledWith('/p/Blinky.kicad_pcb'))
   })
 })

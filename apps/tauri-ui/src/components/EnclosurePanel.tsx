@@ -15,7 +15,7 @@ import {
   type ExportParts,
 } from '../lib/enclosure'
 import { listOpenBoards, openKicad, type BoardCandidate, type ListOpenBoardsResult } from '../lib/boardAdvisor'
-import { componentEnvelopes, type EnvelopeResult } from '../lib/kicadProject'
+import { componentEnvelopes, linkedProjectBoard, type EnvelopeResult } from '../lib/kicadProject'
 import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { EnclosureViewer } from './EnclosureViewer'
@@ -216,7 +216,14 @@ export function EnclosurePanel({
     setLoadingList(true)
     setListError(null)
     try {
-      const listed = await listOpenBoards()
+      // The linked project first -- its board is a fact in a file, readable
+      // with KiCad closed. Everything this panel does with a board
+      // (`freecad.generate_enclosure`, the envelope measurement) takes an
+      // explicit path; only the discovery step ever needed KiCad running.
+      const linked = await linkedProjectBoard(projectName)
+      const listed: ListOpenBoardsResult = linked
+        ? { status: 'boards_found', candidates: [linked] }
+        : await listOpenBoards()
       setListResult(listed)
       // Real user feedback: "if we know that a pcb file has been
       // loaded, we should have that as selected." Only when exactly
@@ -229,7 +236,7 @@ export function EnclosurePanel({
     } finally {
       setLoadingList(false)
     }
-  }, [])
+  }, [projectName])
 
   useEffect(() => {
     void refreshList()
@@ -239,7 +246,8 @@ export function EnclosurePanel({
     setOpeningKicad(true)
     setOpenKicadError(null)
     try {
-      await openKicad()
+      // This panel already knows the board it is building an enclosure for.
+      await openKicad(pcbPath)
     } catch (err) {
       setOpenKicadError(err instanceof Error ? err.message : String(err))
     } finally {

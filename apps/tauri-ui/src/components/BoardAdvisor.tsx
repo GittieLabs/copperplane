@@ -11,6 +11,15 @@ import {
 import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { ViolationsList } from './ViolationsList'
+import { linkedProjectBoard } from '../lib/kicadProject'
+
+/** The one board's path, when there is exactly one. More than one is never
+ *  guessed -- opening the wrong board is worse than opening none. */
+function soleCandidatePath(result: ListOpenBoardsResult | null): string | null {
+  return result?.status === 'boards_found' && result.candidates.length === 1
+    ? result.candidates[0].path
+    : null
+}
 
 /** SPEC-309: real DRC via kicad-cli (CTX-309.1), explained in plain
  * language. Lives in the PCB area (App.tsx) -- the Schematic (ERC)
@@ -78,13 +87,23 @@ export function BoardAdvisor({
     setLoadingBoardList(true)
     setBoardListError(null)
     try {
+      // The linked project first: its board is a fact in a file, knowable
+      // with KiCad closed. Asking KiCad's IPC needs KiCad running with the
+      // right document focused -- three preconditions the Schematic tab
+      // stopped requiring at SPEC-325, and that this tab kept demanding even
+      // though `kicad.check_board` only ever wanted a path.
+      const linked = await linkedProjectBoard(projectName)
+      if (linked) {
+        setBoardListResult({ status: 'boards_found', candidates: [linked] })
+        return
+      }
       setBoardListResult(await listOpenBoards())
     } catch (err) {
       setBoardListError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoadingBoardList(false)
     }
-  }, [])
+  }, [projectName])
 
   // Scan for open boards as soon as this screen is shown, instead of
   // waiting for a blind first click -- the user sees real state
@@ -97,7 +116,10 @@ export function BoardAdvisor({
     setOpeningKicad(true)
     setOpenKicadError(null)
     try {
-      await openKicad()
+      // Open the board itself when we know which one -- the selected board,
+      // or the project's single linked one. A bare KiCad window makes the
+      // user go find a file the app is already holding the path to.
+      await openKicad(selectedBoard?.path ?? soleCandidatePath(boardListResult))
     } catch (err) {
       // Deliberately its own state, not folded into boardListError: a
       // failed *launch* (e.g. KiCad isn't installed where expected) is a

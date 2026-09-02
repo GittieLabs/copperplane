@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const checkBoardMock = vi.fn()
 const listOpenBoardsMock = vi.fn()
 const openKicadMock = vi.fn()
+const linkedProjectBoardMock = vi.fn()
 
 vi.mock('../lib/boardAdvisor', () => ({
   checkBoard: (...args: unknown[]) => checkBoardMock(...args),
@@ -16,6 +17,10 @@ vi.mock('../lib/boardAdvisor', () => ({
 // so BoardAdvisor's tests stay focused on its own wiring (does it mount
 // AgentChat with the real scope/area/targets) and never need to mock
 // AgentChat's own internal chat.* IPC calls.
+vi.mock('../lib/kicadProject', () => ({
+  linkedProjectBoard: (...args: unknown[]) => linkedProjectBoardMock(...args),
+}))
+
 vi.mock('./AgentChat', () => ({
   AgentChat: ({
     area,
@@ -96,6 +101,9 @@ beforeEach(() => {
   checkBoardMock.mockReset()
   listOpenBoardsMock.mockReset().mockResolvedValue({ status: 'no_board_open' })
   openKicadMock.mockReset().mockResolvedValue(undefined)
+  // No linked project by default, so the existing tests keep exercising the
+  // open-in-KiCad discovery path they were written for.
+  linkedProjectBoardMock.mockReset().mockResolvedValue(null)
 })
 
 describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
@@ -402,5 +410,41 @@ describe('BoardAdvisor: CTX-319.3 ReviewPanel wiring', () => {
     rerender(<BoardAdvisor projectName="project-b" />)
 
     await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:pcb'))
+  })
+})
+
+describe('BoardAdvisor: KiCad does not need to be open', () => {
+  /* Reported directly, with KiCad closed: the Schematic tab worked and this
+     one asked for KiCad. `kicad.check_board` only ever wanted a path -- the
+     IPC was needed to DISCOVER the board, and a linked project already knows
+     it. */
+  const LINKED = { path: '/p/Blinky.kicad_pcb', label: 'Blinky.kicad_pcb' }
+
+  it('uses the linked project board rather than asking KiCad', async () => {
+    linkedProjectBoardMock.mockResolvedValue(LINKED)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('Blinky.kicad_pcb'))
+    expect(listOpenBoardsMock).not.toHaveBeenCalled()
+  })
+
+  it('falls back to KiCad guidance when nothing is linked and nothing is open', async () => {
+    linkedProjectBoardMock.mockResolvedValue(null)
+    listOpenBoardsMock.mockResolvedValue({ status: 'no_board_open' })
+    render(<BoardAdvisor projectName="test-project" />)
+
+    await waitFor(() => expect(listOpenBoardsMock).toHaveBeenCalled())
+  })
+
+  it('Open KiCad opens the board itself when exactly one is known', async () => {
+    linkedProjectBoardMock.mockResolvedValue(LINKED)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('Blinky.kicad_pcb'))
+    const button = screen.queryByRole('button', { name: /Open KiCad|Switch to KiCad/ })
+    if (button) {
+      fireEvent.click(button)
+      await waitFor(() => expect(openKicadMock).toHaveBeenCalledWith('/p/Blinky.kicad_pcb'))
+    }
   })
 })

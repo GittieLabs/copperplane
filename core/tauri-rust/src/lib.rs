@@ -25,13 +25,26 @@ fn get_app_version() -> String {
 /// `find_kicad_cli`'s own lookup already does elsewhere in this app --
 /// **not verified on those platforms**, named honestly here rather than
 /// silently assumed to work the same way.
+///
+/// An optional `path` opens that specific file rather than just launching
+/// the app: the PCB and Enclosure tabs know exactly which board the user
+/// means (from the linked KiCad project), so sending them to a bare KiCad
+/// window and expecting them to find it themselves is a worse answer.
+/// Passing `None` keeps the original launch-only behaviour, which is what
+/// the "no project linked yet" case still wants.
 #[tauri::command]
-fn open_kicad() -> Result<(), String> {
+fn open_kicad(path: Option<String>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").args(["-a", "KiCad"]).spawn();
+    let result = match path.as_deref() {
+        Some(file) => std::process::Command::new("open").args(["-a", "KiCad", file]).spawn(),
+        None => std::process::Command::new("open").args(["-a", "KiCad"]).spawn(),
+    };
 
     #[cfg(not(target_os = "macos"))]
-    let result = std::process::Command::new("kicad").spawn();
+    let result = match path.as_deref() {
+        Some(file) => std::process::Command::new("kicad").arg(file).spawn(),
+        None => std::process::Command::new("kicad").spawn(),
+    };
 
     result.map(|_| ()).map_err(|e| format!("Could not launch KiCad: {e}"))
 }

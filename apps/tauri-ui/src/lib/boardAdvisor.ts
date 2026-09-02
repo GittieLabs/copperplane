@@ -69,8 +69,11 @@ export async function listOpenBoards(): Promise<ListOpenBoardsResult> {
  * not verified on Windows/Linux (see the Rust command's own doc
  * comment) -- if it fails there, the caller's existing walkthrough text
  * is still the real fallback. */
-export async function openKicad(): Promise<void> {
-  await invoke('open_kicad')
+export async function openKicad(path?: string | null): Promise<void> {
+  // A path opens that board rather than just launching the app. The PCB and
+  // Enclosure tabs know exactly which board the user means, so dropping them
+  // into a bare KiCad window to find it themselves is a worse answer.
+  await invoke('open_kicad', path ? { path } : {})
 }
 
 /** kicad.check_board (SPEC-309/CTX-309.4) always takes an explicit,

@@ -12,6 +12,7 @@
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 
 import { dispatch, submitJob } from './ipc'
+import type { BoardCandidate } from './boardAdvisor'
 
 export interface KicadProjectFiles {
   project_name: string
@@ -165,4 +166,34 @@ export async function checkSchematicParity(pcbPath: string): Promise<ParityResul
     pcb_path: pcbPath,
   })
   return handle.result
+}
+
+
+/** SPEC-325 §2.1 applied to the PCB and Enclosure tabs.
+ *
+ *  Board discovery used to run only through `kicad.list_open_boards`, which
+ *  talks to KiCad's IPC and therefore needs KiCad running with a board
+ *  focused — three preconditions for a fact that is sitting in a file. The
+ *  Schematic tab stopped needing KiCad open at SPEC-325; the other two tabs
+ *  kept asking for it, for no reason that survives inspection: every route
+ *  they actually call (`kicad.check_board`, `freecad.generate_enclosure`)
+ *  takes an explicit path and reads the file.
+ *
+ *  So: if a project has a linked `.kicad_pro`, its board is knowable with
+ *  KiCad closed. Returns `null` when nothing is linked, which is the one
+ *  case that genuinely has nothing to fall back on. */
+export async function linkedProjectBoard(projectName: string): Promise<BoardCandidate | null> {
+  const { loadProject } = await import('./projects')
+  try {
+    const project = await loadProject(projectName)
+    if (!project.kicad_project_path) return null
+    const files = await resolveKicadProject(project.kicad_project_path)
+    if (!files.pcb_path) return null
+    return { path: files.pcb_path, label: files.pcb_path.split('/').pop() ?? files.pcb_path }
+  } catch {
+    // A project with no link, or a .kicad_pro that has moved. Neither is an
+    // error worth surfacing here -- the caller's existing "open KiCad"
+    // guidance is still the honest fallback.
+    return null
+  }
 }
