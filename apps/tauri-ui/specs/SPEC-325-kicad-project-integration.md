@@ -8,7 +8,8 @@ last_updated: 2026-09-01
 target_version: v0.4.0
 location: "apps/tauri-ui/specs/SPEC-325-kicad-project-integration.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
-child_specs: []
+child_specs:
+  - "SPEC-334-footprint-literacy-and-component-detail.md"
 user_facing: true
 ---
 

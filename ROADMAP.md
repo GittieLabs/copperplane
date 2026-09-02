@@ -1116,6 +1116,22 @@ written on every run, the window routinely contains real work.
 pointer and leaves the first, so one folder becomes two entries in the project list, and the old one
 still loads with a name its own folder's manifest contradicts.
 
+#### [SPEC-334](apps/tauri-ui/specs/SPEC-334-footprint-literacy-and-component-detail.md) — Footprint Literacy & Component Detail — Draft
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-325, SPEC-332
+
+`SPEC-332` made a DRC finding legible. This does the same one stage earlier, for the parts
+themselves. From the maintainer's own board: *"there are often many options to choose from that have
+very similar names and it's hard to know what `P2.54mm_Vertical` means when to use over
+`P2.00mm_Horizontal`."* And on a real `NE555P` search returning NE555P/NE555D/SA555P/NA555P/SE555P:
+*"each option in kicad for adding to a schematic has different pin layouts... Which NE555P am I
+getting."*
+
+Also names a namespace gap found the same way: searching a KiCad **footprint** name in **component**
+search returns vendor part numbers, because the two were never connected. Whether component search
+should recognise a footprint-shaped query and answer from KiCad's own libraries is a question this
+spec settles.
+
 #### SPEC-332 — DRC as a Teaching Surface — not yet written, partly delivered
 
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-309, SPEC-319

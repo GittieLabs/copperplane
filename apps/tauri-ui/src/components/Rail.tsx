@@ -8,6 +8,7 @@ export function Rail({
   selectedProject,
   onSelectProject,
   onCreateProject,
+  projectsLoading = false,
   libraryCount,
   librarySelected,
   onSelectLibrary,
@@ -22,6 +23,11 @@ export function Rail({
    * `saveProject({ name })`'s existing unchanged-behavior path for a
    * skipped intent stays exactly that: no second argument at all. */
   onCreateProject: (name: string, intent?: string) => void
+  /** Listing projects reads every record off disk. Creating one while that is
+   *  in flight raced the in-flight list, which came back holding the state
+   *  from before the new project existed and overwrote it. App.tsx now merges
+   *  rather than replaces; this also stops the user starting the race. */
+  projectsLoading?: boolean
   libraryCount: number
   librarySelected: boolean
   onSelectLibrary: () => void
@@ -50,6 +56,9 @@ export function Rail({
     <nav className="flex h-full w-48 flex-col gap-6 border-r border-line-subtle p-4 text-sm">
       <div className="flex flex-col gap-1">
         <h2 className="px-2 text-xs font-medium uppercase text-fg-muted">Projects</h2>
+        {projectsLoading && (
+          <p className="px-2 py-1 text-xs text-fg-muted" role="status">Loading…</p>
+        )}
         {projects.map((name) => (
           <button
             key={name}
@@ -103,8 +112,10 @@ export function Rail({
         ) : (
           <button
             type="button"
-            className="rounded px-2 py-1 text-left text-fg-muted hover:bg-surface"
+            className="rounded px-2 py-1 text-left text-fg-muted hover:bg-surface disabled:opacity-50"
             onClick={() => setCreating(true)}
+            disabled={projectsLoading}
+            title={projectsLoading ? 'Still loading your projects…' : undefined}
           >
             + New…
           </button>

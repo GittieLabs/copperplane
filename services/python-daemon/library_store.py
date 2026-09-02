@@ -1314,13 +1314,42 @@ def _datasheets_dir() -> str:
     return _ensure_dir("library", "datasheets")
 
 
+_UNSAFE_IN_FILENAME = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def datasheet_filename(part_number: str) -> str:
+    """`part_number` as a safe filename stem.
+
+    Real part numbers contain characters a filename cannot: Panasonic's
+    coin cells are `CR-2032/HFN`, and plenty of others carry `#`, spaces or
+    commas. This used to REJECT any such part -- "'CR-2032/HFN' is not a
+    safe part_number for a cache filename" -- so an entire class of real
+    parts could never have a cached datasheet. Rejecting a path-traversal
+    attempt and rejecting a slash in a manufacturer's own part number are
+    not the same requirement; only the first one was ever wanted.
+
+    A stem that is already safe is returned unchanged, so every datasheet
+    cached before this keeps its existing filename. Anything else is
+    transliterated and given a short hash of the ORIGINAL, so two different
+    part numbers that sanitise to the same text do not collide on disk.
+    """
+    if not part_number:
+        raise DatasheetFetchError("A part number is required to cache a datasheet.")
+
+    safe = _UNSAFE_IN_FILENAME.sub("_", part_number)
+    if safe == part_number and ".." not in part_number:
+        return part_number
+    digest = hashlib.sha256(part_number.encode("utf-8")).hexdigest()[:8]
+    return f"{safe.strip('._-') or 'part'}-{digest}"
+
+
 def datasheet_cache_path(part_number: str) -> str:
     """The real, deterministic local cache path for `part_number`'s
     datasheet PDF -- a pure path computation, no filesystem check, no
     network. `CTX-206.4` (SPEC-206 §2.3) needs this to resolve a
     `datasheet_page` `SourceRef` without re-fetching or re-parsing
     anything."""
-    return os.path.join(_datasheets_dir(), f"{part_number}.pdf")
+    return os.path.join(_datasheets_dir(), f"{datasheet_filename(part_number)}.pdf")
 
 
 def cache_datasheet(part_number: str, datasheet_url: str) -> str:
@@ -1332,8 +1361,10 @@ def cache_datasheet(part_number: str, datasheet_url: str) -> str:
     save_part/_validate_part_provenance: a cached datasheet is a new,
     additional fact about a part number, not a replacement for the
     datasheet_url provenance entry that check already enforces."""
-    if not part_number or "/" in part_number or "\\" in part_number or ".." in part_number:
-        raise DatasheetFetchError(f"'{part_number}' is not a safe part_number for a cache filename.")
+    # datasheet_filename does the sanitising; it raises only for an empty
+    # part number. A slash in a real manufacturer part number is not an
+    # attack, and is no longer treated as one.
+    datasheet_filename(part_number)
 
     request = urllib.request.Request(
         datasheet_url, headers={"User-Agent": "copperplane/0.1"}
@@ -1392,8 +1423,10 @@ def ensure_datasheet_cached(part_number: str, datasheet_url: str) -> str:
     `cache_datasheet` -- duplicated, not shared, since raising before
     ever touching the filesystem here (an existence check) is a
     genuinely different real code path from raising mid-fetch there."""
-    if not part_number or "/" in part_number or "\\" in part_number or ".." in part_number:
-        raise DatasheetFetchError(f"'{part_number}' is not a safe part_number for a cache filename.")
+    # datasheet_filename does the sanitising; it raises only for an empty
+    # part number. A slash in a real manufacturer part number is not an
+    # attack, and is no longer treated as one.
+    datasheet_filename(part_number)
     path = datasheet_cache_path(part_number)
     if os.path.exists(path):
         return path

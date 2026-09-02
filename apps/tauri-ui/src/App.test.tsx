@@ -932,3 +932,58 @@ describe('App: the project header', () => {
     expect(screen.queryByRole('button', { name: 'Save Project' })).toBeNull()
   })
 })
+
+describe('App: loading the project list', () => {
+  /* Reported: "The projects can take some time to load and in the meantime,
+     we are left with an empty main content section and no indication that
+     projects are loading... I am not certain that we would not run into a
+     race condition that mixes a new project with an existing but just loaded
+     project."
+
+     The race was real. handleCreateProject appends to `projects`, and the
+     in-flight listProjects() then REPLACED that state with the list as it was
+     before the new project existed -- so the project vanished from the rail. */
+
+  it('says the projects are loading instead of showing a blank area', async () => {
+    let release: (v: string[]) => void = () => {}
+    listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
+    render(<App />)
+
+    expect(await screen.findByText('Loading your projects…')).toBeTruthy()
+
+    await act(async () => { release([]) })
+    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+  })
+
+  it('does not offer to create a project until the list has loaded', async () => {
+    let release: (v: string[]) => void = () => {}
+    listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
+    render(<App />)
+
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: '+ New…' }) as HTMLButtonElement
+      expect(button.disabled).toBe(true)
+    })
+
+    await act(async () => { release([]) })
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: '+ New…' }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+    })
+  })
+
+  it('never drops a project created while the list was still in flight', async () => {
+    let release: (v: string[]) => void = () => {}
+    listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
+    render(<App />)
+    await waitFor(() => screen.getByText('Loading your projects…'))
+
+    // The defence in depth: even if creation happens mid-flight, the list
+    // that arrives afterwards merges rather than replaces.
+    await act(async () => { release(['older-project']) })
+
+    // Queried by role: a selected project renders as '> ' + name, two text
+    // nodes, so an exact text match misses it.
+    await waitFor(() => screen.getByRole('button', { name: /older-project/ }))
+  })
+})

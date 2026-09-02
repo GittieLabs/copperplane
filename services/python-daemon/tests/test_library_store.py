@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -1872,3 +1873,54 @@ class TestProjectCheckResults(LibraryStoreTestCase):
         store.save_project({"name": "P"})
         with self.assertRaises(store.SchemaValidationError):
             store.set_project_check_result("P", "firmware", self._result())
+
+
+class TestDatasheetFilename(LibraryStoreTestCase):
+    """Real part numbers contain characters a filename cannot. Panasonic's
+    coin cells are `CR-2032/HFN`, and the app used to REFUSE them outright --
+    "'CR-2032/HFN' is not a safe part_number for a cache filename" -- so a
+    whole class of real parts could never cache a datasheet. Reported from the
+    part lookup, which showed exactly that error after confirming the part."""
+
+    def test_001_a_slash_in_a_real_part_number_is_handled_not_refused(self):
+        name = store.datasheet_filename("CR-2032/HFN")
+
+        self.assertNotIn("/", name)
+        self.assertIn("CR-2032", name)
+
+    def test_002_an_already_safe_part_number_is_unchanged(self):
+        """Every datasheet cached before this keeps its filename."""
+        self.assertEqual(store.datasheet_filename("NE555P"), "NE555P")
+        self.assertEqual(store.datasheet_filename("ATtiny85"), "ATtiny85")
+
+    def test_003_path_traversal_is_still_neutralised(self):
+        """Refusing traversal and refusing a manufacturer's slash were never
+        the same requirement; only the first was ever wanted."""
+        name = store.datasheet_filename("../../etc/passwd")
+
+        self.assertNotIn("..", name)
+        self.assertNotIn("/", name)
+
+    def test_004_two_part_numbers_that_sanitise_alike_do_not_collide(self):
+        self.assertNotEqual(
+            store.datasheet_filename("CR-2032/HFN"),
+            store.datasheet_filename("CR-2032\\HFN"),
+        )
+
+    def test_005_an_empty_part_number_is_still_an_error(self):
+        with self.assertRaises(store.DatasheetFetchError):
+            store.datasheet_filename("")
+
+    def test_006_the_cache_path_uses_the_safe_name(self):
+        path = store.datasheet_cache_path("CR-2032/HFN")
+
+        self.assertTrue(path.endswith(".pdf"))
+        self.assertNotIn("/HFN", path)
+
+    def test_007_ensure_datasheet_cached_no_longer_refuses_such_a_part(self):
+        """It used to raise before touching the network at all."""
+        with patch.object(store, "cache_datasheet", return_value="/cached.pdf") as fetch:
+            out = store.ensure_datasheet_cached("CR-2032/HFN", "https://example.com/x.pdf")
+
+        self.assertEqual(out, "/cached.pdf")
+        fetch.assert_called_once()

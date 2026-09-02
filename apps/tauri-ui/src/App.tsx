@@ -74,6 +74,11 @@ function kicadProjectName(path?: string | null): string | null {
 
 function App() {
   const [projects, setProjects] = useState<string[]>([])
+  /* Listing projects reads every project record off disk and can take a
+     visible moment. Until it finishes the main area was simply blank, with
+     nothing to say why -- and a project created in that window was dropped
+     when the in-flight list came back and overwrote it. */
+  const [projectsLoading, setProjectsLoading] = useState(true)
   const [libraryCount, setLibraryCount] = useState(0)
   const [view, setView] = useState<View>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -126,7 +131,9 @@ function App() {
       try {
         const [names, parts] = await Promise.all([listProjects(), listLibraryParts()])
         if (cancelled) return
-        setProjects(names)
+        // Merged, not replaced: a project created while this was in flight is
+        // already in state, and this list was read before it existed.
+        setProjects((prev) => [...names, ...prev.filter((n) => !names.includes(n))])
         setLibraryCount(parts.length)
         setView((prev) => {
           if (prev !== null) return prev
@@ -134,6 +141,8 @@ function App() {
         })
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!cancelled) setProjectsLoading(false)
       }
     }
     load()
@@ -361,6 +370,7 @@ function App() {
         selectedProject={view?.kind === 'project' ? view.name : null}
         onSelectProject={handleSelectProject}
         onCreateProject={handleCreateProject}
+        projectsLoading={projectsLoading}
         libraryCount={libraryCount}
         librarySelected={view?.kind === 'library' || view?.kind === 'partDetail'}
         onSelectLibrary={() => setView({ kind: 'library' })}
@@ -370,7 +380,11 @@ function App() {
       <main className="flex flex-1 flex-col items-center gap-6 overflow-auto p-8">
         {loadError && <p className="w-full max-w-4xl text-sm text-danger">{loadError}</p>}
 
-        {view === null && (
+        {view === null && projectsLoading && (
+          <p className="text-sm text-fg-muted" role="status">Loading your projects…</p>
+        )}
+
+        {view === null && !projectsLoading && (
           <p className="text-sm text-fg-muted">Create a project on the left to get started.</p>
         )}
 
