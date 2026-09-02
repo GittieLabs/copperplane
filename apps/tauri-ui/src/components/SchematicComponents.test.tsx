@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const pickKicadProjectMock = vi.fn()
 const resolveKicadProjectMock = vi.fn()
 const listSchematicComponentsMock = vi.fn()
+const componentEnvelopesMock = vi.fn()
 const loadProjectMock = vi.fn()
 const saveProjectMock = vi.fn()
 
@@ -11,6 +12,7 @@ vi.mock('../lib/kicadProject', () => ({
   pickKicadProject: (...a: unknown[]) => pickKicadProjectMock(...a),
   resolveKicadProject: (...a: unknown[]) => resolveKicadProjectMock(...a),
   listSchematicComponents: (...a: unknown[]) => listSchematicComponentsMock(...a),
+  componentEnvelopes: (...a: unknown[]) => componentEnvelopesMock(...a),
 }))
 vi.mock('../lib/projects', () => ({
   loadProject: (...a: unknown[]) => loadProjectMock(...a),
@@ -52,6 +54,11 @@ beforeEach(() => {
   pickKicadProjectMock.mockReset()
   resolveKicadProjectMock.mockReset().mockResolvedValue(FILES)
   listSchematicComponentsMock.mockReset().mockResolvedValue(READ)
+  componentEnvelopesMock.mockReset().mockResolvedValue({
+    envelopes: [], measured: 1, stated: 1, unknown: 0,
+    source_path: FILES.schematic_path, read_at: READ.read_at,
+    min_interior_height_mm: 20, tallest: { reference: 'BT1', z_mm: 20, source: 'user' },
+  })
   loadProjectMock.mockReset().mockResolvedValue({ name: 'p' })
   saveProjectMock.mockReset().mockResolvedValue({ name: 'p' })
 })
@@ -127,5 +134,59 @@ describe('SchematicComponents', () => {
 
     expect(await screen.findByText(/missing expected column/)).toBeTruthy()
     expect(screen.queryByText('BT1')).toBeNull()
+  })
+
+  /* SPEC-326. On the maintainer's real board the minimum interior height is
+     set by BT1 at 20mm -- the one component with no model -- while the
+     tallest measured part is only 15.5mm. Sizing from measured parts alone
+     would produce a box the battery does not fit in. */
+  it('recommends a minimum interior height and names what set it', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText(/at least/)).toBeTruthy()
+    expect(screen.getByText('20mm')).toBeTruthy()
+    expect(screen.getByText(/height you supplied/)).toBeTruthy()
+  })
+
+  it('warns that an unknown height means the real minimum may be taller', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    componentEnvelopesMock.mockResolvedValue({
+      envelopes: [], measured: 1, stated: 0, unknown: 1,
+      source_path: FILES.schematic_path, read_at: READ.read_at,
+      min_interior_height_mm: 15.5, tallest: { reference: 'R1', z_mm: 15.5, source: 'model' },
+    })
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText(/real minimum may be taller/)).toBeTruthy()
+  })
+
+  it('offers a height for a footprint with no model, and remembers it by footprint', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    const input = await screen.findByLabelText(
+      'Height for Battery:Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles',
+    )
+    fireEvent.change(input, { target: { value: '20' } })
+    fireEvent.click(screen.getByRole('button', { name: 'set' }))
+
+    await waitFor(() =>
+      expect(saveProjectMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          component_heights: {
+            'Battery:Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles': 20,
+          },
+        }),
+      ),
+    )
+  })
+
+  it('never offers a height for a component that already has a real model', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    await screen.findByText('D1')
+    expect(screen.queryByLabelText('Height for LED_THT:LED_D1.8mm_W3.3mm_H2.4mm')).toBeNull()
   })
 })

@@ -1092,6 +1092,43 @@ def component_envelopes(components: list, height_overrides: dict = None) -> dict
     }
 
 
+def kicad_component_envelopes(sch_path: str, height_overrides: dict = None) -> dict:
+    """The kicad.component_envelopes route (SPEC-326).
+
+    Reads a schematic and returns a clearance envelope per component, plus
+    the minimum interior height those envelopes imply and which component
+    drives it.
+
+    **A recommendation, never an override.** SPEC-311's enclosure height
+    stays user-entered; this says what the parts need and where each number
+    came from. Silently resizing a box from a partly-stated set of volumes
+    would be the confident-wrong-answer shape this spec exists to avoid.
+
+    `tallest` names the component setting the minimum, so a user can see
+    that -- on a real board -- it is often the one part with no model.
+
+    Async: composes `kicad-cli` with a `freecadcmd` bounding-box read per
+    modelled component.
+    """
+    read = kicad_list_schematic_components(sch_path)
+    envelopes = component_envelopes(read["components"], height_overrides)
+
+    known = [e for e in envelopes["envelopes"] if e["z_mm"] is not None]
+    tallest = max(known, key=lambda e: e["z_mm"]) if known else None
+
+    return {
+        **envelopes,
+        "source_path": read["source_path"],
+        "read_at": read["read_at"],
+        "min_interior_height_mm": round(tallest["z_mm"], 3) if tallest else None,
+        "tallest": {
+            "reference": tallest["reference"],
+            "z_mm": round(tallest["z_mm"], 3),
+            "source": tallest["source"],
+        } if tallest else None,
+    }
+
+
 def freecad_get_version() -> dict:
     """The freecad.get_version route (SPEC-107/CTX-107.2, closing issue #249).
 
@@ -1698,6 +1735,7 @@ def _build_routes() -> dict:
         "freecad.get_version": freecad_get_version,
         "kicad.resolve_project": kicad_resolve_project,
         "kicad.list_schematic_components": kicad_list_schematic_components,
+        "kicad.component_envelopes": kicad_component_envelopes,
     }
     if get_kicad_version is not None:
         routes["kicad.get_version"] = get_kicad_version
@@ -1816,6 +1854,8 @@ ASYNC_ROUTES = {
     "freecad.get_version",
     # SPEC-325: runs `kicad-cli`, a real subprocess.
     "kicad.list_schematic_components",
+    # SPEC-326: kicad-cli plus a freecadcmd read per modelled component.
+    "kicad.component_envelopes",
     # CTX-321.3: same reasoning -- a real socket connect to a URL that may
     # simply have nothing listening, which must not block the request path.
     "llm.probe_endpoint",
