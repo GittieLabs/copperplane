@@ -28,10 +28,11 @@ user_facing: true
     step. As the maintainer put it: *"I think this would feel overwhelming for a user who is trying
     to initially use the app."*
 
-    **Nothing checks that the app can actually work.** KiCad and FreeCAD are hard requirements —
-    every check, every measurement and every enclosure runs through them — and a user can configure
-    a provider, open the app, and discover that only by watching features fail one at a time. There
-    is no gate.
+    **Nothing tells the user the app cannot actually work.** KiCad and FreeCAD are hard
+    requirements — every check, every measurement and every enclosure runs through them — and a user
+    can configure a provider, open the app, and discover their absence only by watching features
+    fail one at a time. The fix is *telling them*, clearly and persistently; it is not locking the
+    door (see the skip rule below).
 
     **Launch opens an arbitrary project.** `App.tsx` selects `names[0]` from `list_projects()`,
     which is `sorted(...)` — so it opens the **alphabetically first** project, not the most recently
@@ -52,9 +53,31 @@ user_facing: true
         with a link to the docs page for obtaining a key *for that provider*. Guided setup applies
         the recommended settings rather than exposing every control.
     5.  **Guided: check KiCad and FreeCAD.** If either is missing from its default location, offer a
-        path picker — they are frequently installed elsewhere. If genuinely absent, state that both
-        must be installed and **halt**: no progression to the main app, and no visible bypass.
+        path picker — they are frequently installed elsewhere. If genuinely absent, say so plainly
+        and **let the user continue anyway**.
     6.  **Then the main app.**
+
+*   **Every step is skippable, and the wizard never blocks entry.** This reverses the first draft of
+    this spec, which halted on missing tools with "no visible bypass". The maintainer reconsidered,
+    and the reasoning is decisive:
+
+    > *"Blocking the user may not be the answer. We could replace this with banner messages to let
+    > the user know about missing requirements and still let the user get to the main app and fix
+    > later. A user may also be unsure about providing an api key and really want to see more before
+    > deciding... Its really no different than the manual setup where a user still has to setup
+    > before using and they do it at their own pace."*
+
+    That last point settles it on consistency alone: **the manual path never gated anyone.** A user
+    who chooses "manual setup" lands in Settings with no key and no tools configured and the app
+    lets them proceed. Gating only the guided path would punish precisely the user who asked for
+    help, and would make "guided" the more restrictive choice — the opposite of what it is for.
+
+    Hesitancy about an API key is also a legitimate reason to look around first, not a state to be
+    trapped in.
+
+*   **Missing requirements are surfaced as persistent banners instead**, naming what is missing,
+    what it stops working, and how to fix it — with a way back into the guided setup at any time. A
+    banner that can be dismissed forever is the same failure as no banner; see §2.
 
 *   **Also in scope:**
     *   **A no-project landing view** — what the app is, links to the repo and docs, and actions to
@@ -78,8 +101,11 @@ user_facing: true
 *   **How onboarding completion is recorded**, and what re-opens it. A config flag, or inferred
     from state (a usable provider plus both tools found)? Inferred is self-healing but can re-trigger
     on a transient failure; a flag can say "done" about a broken setup.
-*   **What "no visible bypass" means in practice.** The Settings screen is reachable from the rail,
-    and the native menu has its own entries. Halting means those cannot become an escape hatch.
+*   **How a banner persists, and what dismissing one means.** Per-session, until fixed, or
+    collapsible-but-never-gone? The requirement is that a user can always find their way back to
+    the guided setup; the mechanism is open.
+*   **Where "finish setting up" lives** once the wizard has been skipped — the rail, a banner
+    action, the menu, or all three.
 *   **How a provider's docs link is chosen.** One page per provider, or one page with anchors.
 *   **Whether the no-project view replaces or precedes the rail.** It is the launch view, but the
     rail also lists projects.
@@ -92,9 +118,14 @@ user_facing: true
     `GITHUB_REPO_URL` (`core/tauri-rust/src/menu.rs:85`). Every link this spec describes needs a
     placeholder that is honest about not being written yet, and its own context to create the pages
     — a link that 404s on first run is worse than no link.
-*   **Halting on missing tools is a hard gate**, and hard gates strand people. A user whose KiCad
-    lives somewhere unusual must be able to reach the path picker without first getting past the
-    gate. Verify the picker itself cannot be blocked by the thing it exists to fix.
+*   **The risk moved when the gate was removed, it did not disappear.** A user can now reach the
+    main app with no provider and no tools, where most features fail. The banners are the only thing
+    standing between that and the "watching features fail one at a time" experience this spec exists
+    to end — so they carry real weight and must be specific ("KiCad not found, so board checks and
+    the enclosure cannot run"), not a generic "setup incomplete".
+*   **A dismissible banner is the trap in a different costume.** Dismiss-forever returns the user to
+    an unexplained broken app with no route back. Whatever dismissal exists must keep a way back to
+    the guided setup permanently visible.
 *   **A disabled "Managed" path invites clicking.** It must say *why* it is disabled and roughly
     when, or it reads as broken rather than forthcoming.
 *   `SPEC-305`'s "visible-but-empty beats hidden" applies to the managed option and argues for
@@ -123,6 +154,8 @@ user_facing: true
     actually do something, without needing to know what a provider kind or a model role is.
 *   **What the user sees and does:** On first run, a welcome screen with the app logo and two
     choices; then either a short guided sequence (pick a provider, paste a key, confirm KiCad and
-    FreeCAD are found) or the full Settings screen. On every later launch, a landing view describing
-    the app with links to the repo and docs, and buttons to create or open a project — never an
-    arbitrary project opened on their behalf.
+    FreeCAD are found) or the full Settings screen. **Any step can be skipped** — a user who wants
+    to look around before handing over an API key can, and lands in the app with a banner naming
+    what is missing and what it stops working, plus a way back into setup whenever they are ready.
+    On every later launch, a landing view describing the app with links to the repo and docs, and
+    buttons to create or open a project — never an arbitrary project opened on their behalf.

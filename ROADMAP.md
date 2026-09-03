@@ -1126,10 +1126,14 @@ Three problems at the front door.
 provider records, provider kinds, two model-role bindings, a GitHub token and a KiCad socket path:
 *"I think this would feel overwhelming for a user who is trying to initially use the app."*
 
-**Nothing checks the app can work.** KiCad and FreeCAD are hard requirements and are never verified;
-a user finds out by watching features fail one at a time. Onboarding must detect them, offer a path
-picker (they are often installed outside the default location), and otherwise **halt with no visible
-bypass**.
+**Nothing tells the user the app cannot work.** KiCad and FreeCAD are hard requirements and are
+never verified; a user finds out by watching features fail one at a time. Onboarding detects them
+and offers a path picker (they are often installed outside the default location) — but does **not**
+block. Every step is skippable and missing requirements become persistent, specific banners, on the
+maintainer's own reconsideration: *"Blocking the user may not be the answer... Its really no
+different than the manual setup where a user still has to setup before using and they do it at their
+own pace."* Consistency settles it — the manual path never gated anyone, so gating the guided path
+would punish the user who asked for help.
 
 **Launch opens an arbitrary project.** `App.tsx` takes `names[0]` from a `sorted()` listing — the
 *alphabetically first* project, not the most recent. Confirmed in `library_store.list_projects`.
