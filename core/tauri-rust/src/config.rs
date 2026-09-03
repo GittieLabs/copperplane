@@ -46,6 +46,13 @@ pub struct DaemonConfig {
     /// real `config.json` field rather than a Rust-computed one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kicad_cli_path_override: Option<String>,
+    /// CTX-336.1: whether first-run setup has been *offered* and dismissed.
+    /// Deliberately not "is the app configured" -- that question is answered
+    /// live by `daemon.get_capabilities`, and conflating the two would
+    /// re-open the wizard on an expired key or a temporarily unmounted
+    /// KiCad. The UI is the only reader; the daemon ignores it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub onboarding_completed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kicad_socket_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -240,6 +247,7 @@ mod tests {
         let config = DaemonConfig {
             freecadcmd_path_override: Some("/opt/freecad/bin/freecadcmd".to_string()),
             kicad_cli_path_override: Some("/opt/kicad/bin/kicad-cli".to_string()),
+            onboarding_completed: Some(true),
             kicad_socket_path: Some("/tmp/kicad/api.sock".to_string()),
             kicad_timeout_ms: Some(5000),
             llm_provider: Some("anthropic".to_string()),
@@ -340,6 +348,7 @@ mod tests {
         let config = DaemonConfig {
             freecadcmd_path_override: Some("/opt/freecad/bin/freecadcmd".to_string()),
             kicad_cli_path_override: None,
+            onboarding_completed: None,
             kicad_socket_path: None,
             kicad_timeout_ms: Some(5000),
             llm_provider: None,

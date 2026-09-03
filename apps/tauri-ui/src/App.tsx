@@ -40,6 +40,18 @@ import { Rail } from './components/Rail'
 import { NewProjectWizard } from './components/NewProjectWizard'
 import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
+import { Welcome } from './components/Welcome'
+import { GuidedSetup } from './components/GuidedSetup'
+import { NoProjectLanding } from './components/NoProjectLanding'
+import { RequirementsBanner } from './components/RequirementsBanner'
+import type { Requirement } from './lib/requirements'
+import {
+  getCapabilities,
+  getConfig,
+  saveConfig,
+  type DaemonCapabilities,
+  type DaemonConfig,
+} from './lib/settings'
 import { loadPart, type SavedPart } from './lib/partDetail'
 
 /** SPEC-305 §2: the five per-project area tabs, in the shell's own
@@ -58,6 +70,15 @@ const AREAS: { key: Area; label: string }[] = [
 
 type View =
   | { kind: 'settings' }
+  /* SPEC-336: the first-run surfaces. `welcome` is only ever reached when
+     onboarding has not been dismissed; `guidedSetup` is reachable at any time
+     from the requirements banner, which is the route back the spec insists
+     must stay permanently available. */
+  | { kind: 'welcome' }
+  | { kind: 'guidedSetup'; startAt: 'provider' | 'tools' }
+  /* SPEC-336: the launch view, and where closing a project returns to. Not
+     `null`: that meant "nothing decided yet" and rendered a bare sentence. */
+  | { kind: 'noProject' }
   /* SPEC-335: creating a project owns the whole main area, and the tabbed
      project view is not shown until it completes. */
   | { kind: 'newProject' }
@@ -129,6 +150,77 @@ function App() {
   // persists until the next real action, not on an auto-dismiss timer.
   const [projectActionMessage, setProjectActionMessage] = useState<string | null>(null)
 
+  /* SPEC-336: what is actually true about this install, re-read on demand.
+     The banner and the guided steps both read this rather than any record of
+     what onboarding did -- a user who finished the wizard and later
+     uninstalled KiCad is not configured. */
+  const [capabilities, setCapabilities] = useState<DaemonCapabilities | null>(null)
+  const [config, setConfig] = useState<DaemonConfig>({})
+
+  async function refreshCapabilities() {
+    try {
+      setCapabilities(await getCapabilities())
+    } catch {
+      // A capability probe that fails leaves `null`, which renders no banner
+      // at all -- better than a banner asserting things are missing because
+      // we could not ask.
+    }
+  }
+
+  /* Decides the very first view: welcome only when onboarding has never been
+     dismissed. Runs once, before the project list lands, so a first-time user
+     never sees the landing view flash past first. */
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      let onboarded = true
+      try {
+        const cfg = await getConfig()
+        if (cancelled) return
+        setConfig(cfg)
+        onboarded = cfg.onboarding_completed === true
+      } catch {
+        // Unreadable config is not a reason to trap someone in a wizard.
+        onboarded = true
+      }
+      if (cancelled) return
+      // Decided here and nowhere else, and before capabilities are probed --
+      // a slow probe must not delay the first screen. `prev ?? ...` still
+      // yields to a view the user has already navigated to.
+      setView((prev) => prev ?? (onboarded ? { kind: 'noProject' } : { kind: 'welcome' }))
+      await refreshCapabilities()
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  /* SPEC-336: records that setup was OFFERED, not that it succeeded. */
+  async function dismissOnboarding() {
+    try {
+      const next = { ...config, onboarding_completed: true }
+      setConfig(next)
+      await saveConfig(next)
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleFinishSetup() {
+    await dismissOnboarding()
+    await refreshCapabilities()
+    setView({ kind: 'noProject' })
+  }
+
+  function handleOpenSetup(requirement: Requirement['id']) {
+    setView({ kind: 'guidedSetup', startAt: requirement === 'provider' ? 'provider' : 'tools' })
+  }
+
+  /* SPEC-336: closing a project, which did not exist -- only switching to a
+     different one did. Nothing is persisted on the way out: every project
+     edit already writes through, as of SPEC-333's resolution. */
+  function handleCloseProject() {
+    setView({ kind: 'noProject' })
+  }
+
   useEffect(() => {
     let cancelled = false
     async function load() {
@@ -139,10 +231,15 @@ function App() {
         // already in state, and this list was read before it existed.
         setProjects((prev) => [...names, ...prev.filter((n) => !names.includes(n))])
         setLibraryCount(parts.length)
-        setView((prev) => {
-          if (prev !== null) return prev
-          return names.length > 0 ? { kind: 'project', name: names[0], area: 'overview' } : prev
-        })
+        // SPEC-336: emphatically NOT `names[0]`. `list_projects` is sorted,
+        // so that opened the alphabetically first project -- "stable, and
+        // meaningless", and possibly one that has since moved or broken.
+        //
+        // This effect no longer picks a view at all. Two effects both setting
+        // the initial view raced: whichever of `list_projects` and
+        // `get_config` resolved first won, so on a genuine first run the
+        // welcome screen appeared or did not depending on disk timing. The
+        // onboarding effect below is now the single decider.
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err))
       } finally {
@@ -396,15 +493,49 @@ function App() {
         settingsSelected={view?.kind === 'settings'}
         onSelectSettings={() => setView({ kind: 'settings' })}
       />
-      <main className="flex flex-1 flex-col items-center gap-6 overflow-auto p-8">
-        {loadError && <p className="w-full max-w-4xl text-sm text-danger">{loadError}</p>}
-
-        {view === null && projectsLoading && (
-          <p className="text-sm text-fg-muted" role="status">Loading your projects…</p>
+      <main className="flex flex-1 flex-col overflow-auto">
+        {/* SPEC-336: the only thing standing between an unconfigured app and
+            "watching features fail one at a time". Not shown on the onboarding
+            surfaces themselves, which are already about exactly this. */}
+        {view?.kind !== 'welcome' && view?.kind !== 'guidedSetup' && (
+          <RequirementsBanner
+            capabilities={capabilities}
+            onOpenSetup={handleOpenSetup}
+            onRecheck={() => void refreshCapabilities()}
+          />
         )}
 
-        {view === null && !projectsLoading && (
-          <p className="text-sm text-fg-muted">Create a project on the left to get started.</p>
+        <div className="flex flex-1 flex-col items-center gap-6 p-8">
+        {loadError && <p className="w-full max-w-4xl text-sm text-danger">{loadError}</p>}
+
+        {view?.kind === 'welcome' && (
+          <Welcome
+            onChooseGuided={() => setView({ kind: 'guidedSetup', startAt: 'provider' })}
+            onChooseManual={() => { void dismissOnboarding(); setView({ kind: 'settings' }) }}
+            onSkip={() => void handleFinishSetup()}
+          />
+        )}
+
+        {view?.kind === 'guidedSetup' && (
+          <GuidedSetup
+            config={config}
+            capabilities={capabilities}
+            startAt={view.startAt}
+            onCapabilitiesChanged={setCapabilities}
+            onFinish={() => void handleFinishSetup()}
+            onOpenManualSettings={() => { void dismissOnboarding(); setView({ kind: 'settings' }) }}
+          />
+        )}
+
+        {(view === null || view?.kind === 'noProject') && (
+          <NoProjectLanding
+            projectCount={projects.length}
+            loading={projectsLoading}
+            onCreateProject={() => setView({ kind: 'newProject' })}
+            /* The rail is the list. Pointing at it beats duplicating it here
+               and then having two lists to keep honest. */
+            onOpenProject={() => setProjectActionMessage('Pick a project from the list on the left.')}
+          />
         )}
 
         {view?.kind === 'newProject' && (
@@ -492,6 +623,15 @@ function App() {
                       -- so linking stays reachable, just only while it is
                       actually missing. Once linked, the path is a copy button
                       rather than a permanent line of text. */}
+                  {/* SPEC-336: closing a project, which had no equivalent --
+                      only switching to a different one did. */}
+                  <button
+                    type="button"
+                    className="shrink-0 rounded border border-line px-1 text-fg-tertiary hover:bg-surface-alt hover:text-fg-bright"
+                    onClick={handleCloseProject}
+                  >
+                    Close project
+                  </button>
                   {currentProject?.directory ? (
                     <button
                       type="button"
@@ -582,6 +722,7 @@ function App() {
             </div>
           </>
         )}
+        </div>
       </main>
     </div>
   )

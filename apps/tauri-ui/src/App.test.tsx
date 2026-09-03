@@ -12,6 +12,8 @@ const pickProjectDirectoryMock = vi.fn()
 const loadConversationMock = vi.fn()
 const appendConversationTurnMock = vi.fn()
 const getCapabilitiesMock = vi.fn()
+const getConfigMock = vi.fn()
+const saveConfigMock = vi.fn()
 const shellOpenMock = vi.fn()
 const listOpenBoardsMock = vi.fn()
 const checkBoardMock = vi.fn()
@@ -26,6 +28,26 @@ const listLibrariesMock = vi.fn()
 const syncLibraryMenuMock = vi.fn()
 const setDesignMenuEnabledMock = vi.fn()
 const loadPartMock = vi.fn()
+
+/** SPEC-336 removed the auto-open. `App` used to select `names[0]` from a
+ *  sorted project list on launch, so every test below simply rendered and
+ *  found itself inside a project. Launch now lands on `NoProjectLanding` and
+ *  decides nothing on the user's behalf, so a test that means to exercise a
+ *  project has to open one -- exactly as a person now does.
+ *
+ *  Renders and opens the first project in the rail. A no-op when there are
+ *  none, so the empty-state tests keep working unchanged. */
+async function renderAppOpen(projectName?: string) {
+  const utils = render(<App />)
+  const name = projectName ?? (await listProjectsMock.mock.results[0]?.value ?? [])[0]
+  if (name) {
+    const button = await screen
+      .findByRole('button', { name }, { timeout: 300 })
+      .catch(() => null)
+    if (button) fireEvent.click(button)
+  }
+  return utils
+}
 
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
   writeText: (...args: unknown[]) => writeTextMock(...args),
@@ -67,6 +89,8 @@ vi.mock('./lib/projects', () => ({
 
 vi.mock('./lib/settings', () => ({
   getCapabilities: (...args: unknown[]) => getCapabilitiesMock(...args),
+  getConfig: (...args: unknown[]) => getConfigMock(...args),
+  saveConfig: (...args: unknown[]) => saveConfigMock(...args),
 }))
 
 vi.mock('./lib/library', () => ({
@@ -188,6 +212,11 @@ beforeEach(() => {
   syncLibraryMenuMock.mockReset().mockResolvedValue(undefined)
   setDesignMenuEnabledMock.mockReset().mockResolvedValue(undefined)
   loadPartMock.mockReset()
+  // SPEC-336: onboarding is "already dismissed" by default, so the existing
+  // tests exercise the app rather than the welcome screen. The first-run
+  // tests below set this deliberately.
+  getConfigMock.mockReset().mockResolvedValue({ onboarding_completed: true })
+  saveConfigMock.mockReset().mockResolvedValue(undefined)
 })
 
 /** Builds a fake JobHandle whose `result` resolves/rejects on demand --
@@ -207,7 +236,7 @@ function fakeJobHandle<T>(result: Promise<T>) {
  * once `project.list` resolves, so waiting for the chat input is the
  * real signal that the shell finished loading, not an arbitrary delay. */
 async function renderAppOnOverview() {
-  render(<App />)
+  await renderAppOpen()
   await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 }
 
@@ -279,9 +308,9 @@ describe('App: Overview plain chat', () => {
   it('TEST-007: a fresh install with no projects shows the empty state, not a broken chat surface', async () => {
     listProjectsMock.mockResolvedValueOnce([])
 
-    render(<App />)
+    await renderAppOpen()
 
-    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+    await waitFor(() => screen.getByRole('button', { name: 'New project' }))
     expect(screen.queryByPlaceholderText(/ask a question/)).toBeNull()
   })
 
@@ -306,7 +335,7 @@ describe('App: Overview plain chat', () => {
       { role: 'assistant', content: 'hi again' },
     ])
 
-    render(<App />)
+    await renderAppOpen()
 
     await waitFor(() => screen.getByText('> hello from before'))
     screen.getByText('hi again')
@@ -401,7 +430,7 @@ describe('App: PCB tab persists across area switches, resets on project switch',
   }
 
   async function renderAppOnPcb() {
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     fireEvent.click(screen.getByRole('button', { name: 'PCB' }))
     await waitFor(() => pcbArea().getByText('board.kicad_pcb'))
@@ -490,7 +519,7 @@ describe('App: Enclosure tab persists across area switches', () => {
   it('a just-generated enclosure is still shown after switching to another area and back', async () => {
     submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT)))
 
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
     await waitFor(() => enclosureArea().getByText('board.kicad_pcb'))
@@ -524,7 +553,7 @@ describe('App: Enclosure tab persists across area switches', () => {
     })
     saveDialogMock.mockResolvedValueOnce('/real/dest/combined.step')
 
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
     await waitFor(() => enclosureArea().getByText('board.kicad_pcb'))
@@ -548,7 +577,7 @@ describe('App: Enclosure tab persists across area switches', () => {
   it('CTX-312.1: "Link to folder…" links the real picked directory and saves it', async () => {
     pickProjectDirectoryMock.mockResolvedValueOnce('/real/PCBs/test-project')
 
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     fireEvent.click(screen.getByRole('button', { name: 'Choose project folder…' }))
@@ -571,7 +600,7 @@ describe('App: Enclosure tab persists across area switches', () => {
   it('CTX-312.1: cancelling the folder picker never calls saveProject', async () => {
     pickProjectDirectoryMock.mockResolvedValueOnce(null)
 
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     fireEvent.click(screen.getByRole('button', { name: 'Choose project folder…' }))
@@ -588,7 +617,7 @@ describe('App: Enclosure tab persists across area switches', () => {
       name: 'other-project', directory: '/real/PCBs/other-project',
     })
 
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     // Waiting on the project NAME in the header: the Save Project button used
     // to serve as this signal, and no longer exists.
@@ -607,7 +636,7 @@ describe('App: Enclosure tab persists across area switches', () => {
   })
 
   it('CTX-316.1: the Settings… menu event shows the real Settings screen', async () => {
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://open-settings')!
@@ -617,7 +646,7 @@ describe('App: Enclosure tab persists across area switches', () => {
   })
 
   it('CTX-316.1: the Default Library menu event opens Library deep-linked to Default', async () => {
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(
@@ -632,7 +661,7 @@ describe('App: Enclosure tab persists across area switches', () => {
   })
 
   it('CTX-316.1: the Manage Libraries… menu event opens Library with no deep link', async () => {
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(
@@ -647,7 +676,7 @@ describe('App: Enclosure tab persists across area switches', () => {
   })
 
   it('CTX-316.1: a Design menu event switches to the matching area and runs the real handler', async () => {
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     // Starts on Overview -- confirms the PCB area really was hidden
     // before the menu event, not just already active.
@@ -663,7 +692,7 @@ describe('App: Enclosure tab persists across area switches', () => {
   })
 
   it('CTX-319.6: a Design > PCB > Run Review menu event switches to PCB and forwards the real menuCommand to ReviewPanel', async () => {
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     expect(screen.getByTestId('pcb-area').className).toContain('hidden')
 
@@ -688,7 +717,7 @@ describe('App: Enclosure tab persists across area switches', () => {
     // CTX-306.2's own always-mounted wrapper divs. `not.toContain('hidden')`
     // alone (as the test above checks) would not have caught this --
     // asserting the real class value does.
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     for (const [label, testId] of [
@@ -710,8 +739,8 @@ describe('App: Enclosure tab persists across area switches', () => {
     // in this same describe block may have already made.
     openKicadMock.mockClear()
 
-    render(<App />)
-    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+    await renderAppOpen()
+    await waitFor(() => screen.getByRole('button', { name: 'New project' }))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(
       ([event]) => event === 'menu://design/pcb/open-kicad',
@@ -719,20 +748,20 @@ describe('App: Enclosure tab persists across area switches', () => {
     act(() => menuHandler())
 
     expect(openKicadMock).not.toHaveBeenCalled()
-    screen.getByText('Create a project on the left to get started.')
+    screen.getByRole('button', { name: 'New project' })
   })
 
   it('TEST-008: calls syncLibraryMenu with the real fetched library list on mount', async () => {
     const libraries = [{ id: 'default', name: 'Default', part_count: 0, symbol_count: 0, footprint_count: 0 }]
     listLibrariesMock.mockReset().mockResolvedValueOnce(libraries)
 
-    render(<App />)
+    await renderAppOpen()
 
     await waitFor(() => expect(syncLibraryMenuMock).toHaveBeenCalledWith(libraries))
   })
 
   it('TEST-009: calls setDesignMenuEnabled(true) once a project is selected, and (false) when none is', async () => {
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     await waitFor(() => expect(setDesignMenuEnabledMock).toHaveBeenCalledWith(true))
@@ -743,7 +772,7 @@ describe('App: Enclosure tab persists across area switches', () => {
   })
 
   it('TEST-010: the Open Library menu event sets view to library with the real payload as initialLibraryId', async () => {
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://open-library')!
@@ -812,7 +841,7 @@ describe('App: Schematic tab persists across area switches, resets on project sw
   })
 
   async function renderAppOnSchematic() {
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
     fireEvent.click(screen.getByRole('button', { name: 'Schematic' }))
     await waitFor(() => screen.getByText('board.kicad_sch'))
@@ -864,7 +893,7 @@ describe('App: the project header', () => {
       directory: '/real/PCBs/test-project',
       kicad_project_path: '/elsewhere/Blinky/Blinky.kicad_pro',
     })
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByText('test-project'))
     return within(screen.getByTestId('project-header'))
   }
@@ -911,7 +940,7 @@ describe('App: the project header', () => {
 
   it('offers to link a KiCad project when none is linked', async () => {
     loadProjectMock.mockResolvedValue({ name: 'test-project', directory: '/real/PCBs/test-project' })
-    render(<App />)
+    await renderAppOpen()
 
     await waitFor(() => screen.getByText('test-project'))
     const header = within(screen.getByTestId('project-header'))
@@ -921,7 +950,7 @@ describe('App: the project header', () => {
 
   it('offers a folder only while the project has none', async () => {
     loadProjectMock.mockResolvedValue({ name: 'test-project' })
-    render(<App />)
+    await renderAppOpen()
 
     await waitFor(() => screen.getByText('test-project'))
     const header = within(screen.getByTestId('project-header'))
@@ -950,18 +979,18 @@ describe('App: loading the project list', () => {
   it('says the projects are loading instead of showing a blank area', async () => {
     let release: (v: string[]) => void = () => {}
     listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
-    render(<App />)
+    await renderAppOpen()
 
     expect(await screen.findByText('Loading your projects…')).toBeTruthy()
 
     await act(async () => { release([]) })
-    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+    await waitFor(() => screen.getByRole('button', { name: 'New project' }))
   })
 
   it('does not offer to create a project until the list has loaded', async () => {
     let release: (v: string[]) => void = () => {}
     listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
-    render(<App />)
+    await renderAppOpen()
 
     await waitFor(() => {
       const button = screen.getByRole('button', { name: '+ New…' }) as HTMLButtonElement
@@ -978,7 +1007,7 @@ describe('App: loading the project list', () => {
   it('never drops a project created while the list was still in flight', async () => {
     let release: (v: string[]) => void = () => {}
     listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByText('Loading your projects…'))
 
     // The defence in depth: even if creation happens mid-flight, the list
@@ -997,8 +1026,8 @@ describe('App: creating a project owns the main area', () => {
      submitted." */
   async function openWizard() {
     listProjectsMock.mockResolvedValue([])
-    render(<App />)
-    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+    await renderAppOpen()
+    await waitFor(() => screen.getByRole('button', { name: 'New project' }))
     fireEvent.click(screen.getByRole('button', { name: '+ New…' }))
     await waitFor(() => screen.getByText(/step 1 of 4/))
   }
@@ -1025,7 +1054,7 @@ describe('App: creating a project owns the main area', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+    await waitFor(() => screen.getByRole('button', { name: 'New project' }))
     expect(saveProjectMock).not.toHaveBeenCalled()
   })
 
@@ -1059,7 +1088,7 @@ describe('App: an unlinked project says what is unavailable', () => {
      leaving the user to discover it by watching features fail one at a time. */
   it('shows a banner naming what cannot run, with a way to fix it', async () => {
     loadProjectMock.mockResolvedValue({ name: 'test-project', directory: '/d' })
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     await waitFor(() => screen.getByText(/No KiCad project linked, so board and schematic checks/))
@@ -1070,7 +1099,7 @@ describe('App: an unlinked project says what is unavailable', () => {
     loadProjectMock.mockResolvedValue({
       name: 'test-project', directory: '/d', kicad_project_path: '/p/Blinky.kicad_pro',
     })
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     expect(screen.queryByText(/No KiCad project linked/)).toBeNull()
@@ -1080,10 +1109,135 @@ describe('App: an unlinked project says what is unavailable', () => {
     // A banner that can be dismissed forever returns the user to an
     // unexplained broken app with no route back.
     loadProjectMock.mockResolvedValue({ name: 'test-project', directory: '/d' })
-    render(<App />)
+    await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
     await waitFor(() => screen.getByText(/No KiCad project linked/))
     expect(screen.queryByRole('button', { name: /Dismiss|Ignore/ })).toBeNull()
+  })
+})
+
+/** CTX-336.1 Phase 3-4: the launch view, closing a project, and first run.
+ *
+ *  SPEC-336 §1 on the behaviour these replace: launch "opens the
+ *  alphabetically first project, not the most recently used one. Stable, and
+ *  meaningless", and the maintainer's concern that it "could have moved, is
+ *  corrupted, or isn't the project the user expected to open." */
+describe('App: launch, closing a project, and first run', () => {
+  beforeEach(() => {
+    listProjectsMock.mockReset().mockResolvedValue(['alpha-project', 'zeta-project'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    loadProjectMock.mockReset().mockResolvedValue({ name: 'alpha-project' })
+    loadConversationMock.mockReset().mockResolvedValue([])
+    getCapabilitiesMock.mockReset().mockResolvedValue({
+      kicad_available: true, kicad_socket_path_checked: '/tmp/kicad/api.sock',
+      freecad_available: true, freecad_path_checked: '/f/freecadcmd', freecad_error: null,
+      kicad_cli_available: true, kicad_cli_path_checked: '/k/kicad-cli',
+      kicad_cli_path_source: 'install', kicad_cli_error: null,
+      llm_providers: ['anthropic'], log_path: '/l', python_version: '3.11.9',
+      storage_root: '/s', github_token_configured: false,
+      configured_secret_refs: ['anthropic_api_key'],
+    })
+  })
+
+  it('TEST-006: lands on the launch view rather than opening a project', async () => {
+    render(<App />)
+
+    // The landing view, not `alpha-project` -- which is exactly what the old
+    // `names[0]` would have picked out of this sorted list.
+    expect(await screen.findByRole('button', { name: 'New project' })).toBeTruthy()
+    expect(screen.queryByPlaceholderText(/ask a question/)).toBeNull()
+    expect(loadProjectMock).not.toHaveBeenCalled()
+  })
+
+  it('still opens a project when the user picks one', async () => {
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'zeta-project' }))
+
+    expect(await screen.findByPlaceholderText(/ask a question/)).toBeTruthy()
+  })
+
+  it('TEST-007: closing a project returns to the launch view and writes nothing', async () => {
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'alpha-project' }))
+    await screen.findByPlaceholderText(/ask a question/)
+    saveProjectMock.mockClear()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close project' }))
+
+    expect(await screen.findByRole('button', { name: 'New project' })).toBeTruthy()
+    expect(screen.queryByPlaceholderText(/ask a question/)).toBeNull()
+    // Nothing to flush: every project edit already writes through.
+    expect(saveProjectMock).not.toHaveBeenCalled()
+  })
+
+  it('shows the welcome screen on a genuinely first run', async () => {
+    getConfigMock.mockResolvedValue({})
+
+    render(<App />)
+
+    expect(await screen.findByText('Welcome to Copperplane')).toBeTruthy()
+    // And not the landing view underneath it.
+    expect(screen.queryByRole('button', { name: 'New project' })).toBeNull()
+  })
+
+  it('does not show the welcome screen again once it has been dismissed', async () => {
+    render(<App />)
+
+    expect(await screen.findByRole('button', { name: 'New project' })).toBeTruthy()
+    expect(screen.queryByText('Welcome to Copperplane')).toBeNull()
+  })
+
+  it('records the dismissal when the user skips, so it does not reappear', async () => {
+    getConfigMock.mockResolvedValue({})
+    render(<App />)
+    await screen.findByText('Welcome to Copperplane')
+
+    fireEvent.click(screen.getByRole('button', { name: /Skip for now/ }))
+
+    await waitFor(() =>
+      expect(saveConfigMock).toHaveBeenCalledWith(
+        expect.objectContaining({ onboarding_completed: true }),
+      ),
+    )
+    expect(await screen.findByRole('button', { name: 'New project' })).toBeTruthy()
+  })
+
+  it('an unreadable config does not trap the user in the wizard', async () => {
+    /** Failing toward "already onboarded" is the safe direction: the banner
+     *  still tells them what is missing, and the wizard is still reachable. */
+    getConfigMock.mockRejectedValue(new Error('config.json is corrupt'))
+
+    render(<App />)
+
+    expect(await screen.findByRole('button', { name: 'New project' })).toBeTruthy()
+    expect(screen.queryByText('Welcome to Copperplane')).toBeNull()
+  })
+
+  it('shows a requirements banner for what is actually missing, and routes back to setup', async () => {
+    getCapabilitiesMock.mockResolvedValue({
+      kicad_available: false, kicad_socket_path_checked: '/tmp/kicad/api.sock',
+      freecad_available: true, freecad_path_checked: '/f/freecadcmd', freecad_error: null,
+      kicad_cli_available: false, kicad_cli_path_checked: null,
+      kicad_cli_path_source: 'none', kicad_cli_error: 'Could not find the kicad-cli executable.',
+      llm_providers: [], log_path: '/l', python_version: '3.11.9',
+      storage_root: '/s', github_token_configured: false, configured_secret_refs: [],
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText(/KiCad was not found/)).toBeTruthy()
+    expect(screen.getByText(/No AI provider is configured/)).toBeTruthy()
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Fix this' })[0])
+    expect(await screen.findByText(/Setting up Copperplane/)).toBeTruthy()
+  })
+
+  it('shows no banner when everything is present', async () => {
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'New project' })
+    expect(screen.queryByText(/was not found/)).toBeNull()
   })
 })
