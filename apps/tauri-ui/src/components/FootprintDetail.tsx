@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { describeFootprint, type FootprintDetail as Detail } from '../lib/kicadProject'
+import { explainFootprintTerms } from '../lib/packageGlossary'
+import { GlossaryList } from './GlossaryList'
 
 /** SPEC-334: the detail view behind a row in the board components table.
  *
@@ -22,6 +24,15 @@ export function FootprintDetailView({
 }) {
   const [detail, setDetail] = useState<Detail | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [browsing, setBrowsing] = useState(false)
+
+  /** SPEC-334: the abbreviations, read straight off the name. No call and no
+   *  wait -- these do not depend on the footprint file being found, so they
+   *  are useful even while it is still loading or could not be read at all. */
+  const terms = useMemo(
+    () => explainFootprintTerms(footprintId, detail?.library ?? null),
+    [footprintId, detail?.library],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -99,6 +110,28 @@ export function FootprintDetailView({
             )}
           </dl>
 
+          {terms.length > 0 && (
+            <div className="flex flex-col gap-1 rounded bg-surface-alt/60 p-2">
+              <p className="font-medium text-fg-secondary">What the abbreviations mean</p>
+              <dl className="flex flex-col gap-1">
+                {terms.map((t) => (
+                  <div key={t.term}>
+                    <dt className="inline font-medium text-fg-bright">{t.term} </dt>
+                    <dd className="inline text-fg-secondary">
+                      {t.plain}
+                      {/* Shown because the reading was assembled from parts
+                          rather than looked up, and a reader deserves to know
+                          which of the two they are getting. */}
+                      {t.builtFrom && (
+                        <span className="text-fg-muted"> (read as {t.builtFrom})</span>
+                      )}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+
           {detail.name_notes.length > 0 && (
             <div className="flex flex-col gap-1 rounded bg-surface-alt/60 p-2">
               <p className="font-medium text-fg-secondary">What the name is telling you</p>
@@ -131,6 +164,20 @@ export function FootprintDetailView({
           )}
         </>
       )}
+
+      {/* Available whether or not the footprint itself could be read -- the
+          vocabulary is fixed and does not depend on this part. */}
+      <div className="flex flex-col gap-2 border-t border-line-subtle pt-2">
+        <button
+          type="button"
+          className="self-start text-fg-muted underline decoration-dotted underline-offset-2 hover:text-fg-secondary"
+          aria-expanded={browsing}
+          onClick={() => setBrowsing((prev) => !prev)}
+        >
+          {browsing ? 'Hide all KiCad terms' : 'All KiCad terms'}
+        </button>
+        {browsing && <GlossaryList />}
+      </div>
     </div>
   )
 }

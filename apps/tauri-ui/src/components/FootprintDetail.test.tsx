@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const describeFootprintMock = vi.fn()
@@ -67,3 +67,60 @@ describe('FootprintDetailView', () => {
     expect(screen.queryByText('What the name is telling you')).toBeNull()
   })
 })
+
+/** SPEC-334, second pass: "THT, DIP and all of the other abbreviations are not
+ *  intuitive. Adding links or help info could save time for the user to look
+ *  up unfamiliar ones that Kicad uses in naming." */
+describe('FootprintDetailView abbreviations', () => {
+  it('expands the abbreviations in the name it was given', async () => {
+    render(<FootprintDetailView footprintId={HEADER.footprint_id} onClose={() => {}} />)
+
+    await screen.findByText(/2.54mm pitch/)
+    expect(screen.getByText('What the abbreviations mean')).toBeTruthy()
+  })
+
+  it('expands a package abbreviation the user cannot be expected to know', async () => {
+    describeFootprintMock.mockResolvedValue({
+      ...HEADER,
+      footprint_id: 'Package_DFN_QFN:VQFN-16-1EP_3x3mm_P0.5mm',
+      library: 'Package_DFN_QFN',
+      name: 'VQFN-16-1EP_3x3mm_P0.5mm',
+    })
+    render(
+      <FootprintDetailView
+        footprintId="Package_DFN_QFN:VQFN-16-1EP_3x3mm_P0.5mm"
+        onClose={() => {}}
+      />,
+    )
+
+    // VQFN from the name, and DFN and QFN from the library it lives in --
+    // all three are terms the reader is looking at.
+    expect((await screen.findAllByText(/no legs sticking out/)).length).toBeGreaterThan(1)
+    // Composed from a height letter and a family, and says so.
+    expect(screen.getByText(/read as V \+ QFN/)).toBeTruthy()
+    expect(screen.getByText(/Very thin QFN/)).toBeTruthy()
+  })
+
+  it('offers the whole vocabulary to browse, closed by default', async () => {
+    render(<FootprintDetailView footprintId={HEADER.footprint_id} onClose={() => {}} />)
+
+    const open = await screen.findByText('All KiCad terms')
+    expect(screen.queryByPlaceholderText('THT, QFN, 0805…')).toBeNull()
+
+    fireEvent.click(open)
+    expect(screen.getByPlaceholderText('THT, QFN, 0805…')).toBeTruthy()
+  })
+
+  it('still explains the abbreviations when the footprint file cannot be read', async () => {
+    /** The vocabulary is fixed, so it does not depend on the library being
+     *  installed -- which is exactly when a user is most stuck. */
+    describeFootprintMock.mockRejectedValue(new Error('no such library'))
+    render(
+      <FootprintDetailView footprintId="Package_DIP:DIP-8_W7.62mm" onClose={() => {}} />,
+    )
+
+    expect(await screen.findByText(/Could not read this footprint/)).toBeTruthy()
+    expect(screen.getByText('All KiCad terms')).toBeTruthy()
+  })
+})
+

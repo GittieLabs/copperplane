@@ -4,7 +4,7 @@ title: "Footprint Literacy & Component Detail"
 status: Draft
 type: Feature
 created: 2026-09-02
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 target_version: v0.4.0
 location: "apps/tauri-ui/specs/SPEC-334-footprint-literacy-and-component-detail.md"
 parent_spec: "SPEC-325-kicad-project-integration.md"
@@ -60,6 +60,16 @@ user_facing: true
     covers the naming conventions `descr` does not spell out (`SPEC-332`'s glossary is the
     precedent), and an LLM is reserved for the comparative question — *which of these should I
     use* — grounded in both.
+*   **Settled: the abbreviations are decoded, not enumerated.** Raised by the maintainer after
+    `CTX-334.1` shipped: *"THT, DIP and all of the other abbreviations are not intuitive."*
+    `ROADMAP.md` already warned what the wrong answer looks like — *"a glossary that is not a
+    hard-coded list ... wrong if it grows into a general PCB dictionary"*. So the families are
+    taken from KiCad's own `Package_*` libraries, and the dozens of variants are read as a height
+    letter plus a family rather than listed: 33 entries and 11 prefix letters explain **88.0% of
+    the 15,433 footprints KiCad ships**, including combinations the glossary has never seen. A
+    token belonging to a vendor's product line is named as one rather than expanded, because it has
+    no standard meaning to give. Delivered in `CTX-334.2`.
+
 *   **Whether KiCad's own libraries are searchable.** The maintainer searched a *footprint* name in
     *component* search and got vendor part numbers, because the two namespaces were never
     connected: *"I have a hunch that the component I searched for ... is a kicad only reference name
@@ -83,12 +93,19 @@ user_facing: true
     must degrade to the naming decoder rather than showing an empty panel.
 *   An LLM explanation of a footprint name is exactly the kind of confident-sounding output that is
     hard to check. It needs grounding in the footprint file, and must be marked when it is not.
+*   **A decoder is not exempt from that risk.** `CTX-334.2` found this without an LLM anywhere in
+    the path: `LFCSP` composes fluently to "Low profile, fine pitch CSP" and Analog Devices means
+    *Lead Frame*. Any reading assembled from parts must be marked as assembled, and a whole-token
+    meaning must always win over a composed one.
 
 ## 4. Module Map & Reference Links
 
 *   `apps/tauri-ui/src/components/SchematicComponents.tsx` — the board components table this hangs
     off.
-*   `apps/tauri-ui/src/lib/kicadGlossary.ts` — `SPEC-332`'s static-explanation precedent.
+*   `apps/tauri-ui/src/lib/kicadGlossary.ts` — `SPEC-332`'s static-explanation precedent, for the
+    vocabulary KiCad's DRC emits.
+*   `apps/tauri-ui/src/lib/packageGlossary.ts` — the package and naming vocabulary (`CTX-334.2`).
+*   `apps/tauri-ui/tests/glossaryCoverage.test.ts` — the corpus measurement that bounds it.
 *   `services/python-daemon/kicad_bridge.py` — reads `.kicad_mod` files today
     (`resolve_footprint_model`, `read_footprint_courtyard`).
 *   `services/python-daemon/kicad_cli.py` — `export_footprint_svg`, already able to render one.
