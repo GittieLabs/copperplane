@@ -326,6 +326,27 @@ export async function confirmRemoveRoleBoundProvider(
   )
 }
 
+/** CTX-336.1: read-modify-write against what is actually on disk.
+ *
+ *  Every other config writer takes a `currentConfig` snapshot and saves the
+ *  whole object over it. That is a last-write-wins clobber whenever two
+ *  surfaces hold snapshots taken at different moments, and it cost a real
+ *  defect: guided setup bound both model roles to the provider the user
+ *  chose, and then finishing the wizard wrote `App`'s launch-time snapshot
+ *  back with `onboarding_completed` added -- silently restoring the provider
+ *  that was bound before. The user picked Anthropic, entered an Anthropic
+ *  key, and ended with Google still answering. Nothing failed, and nothing
+ *  said so.
+ *
+ *  A patch applied to a freshly-read config cannot do that: it can only
+ *  overwrite the keys it actually names. */
+export async function updateConfig(patch: Partial<DaemonConfig>): Promise<DaemonConfig> {
+  const latest = await getConfig()
+  const next = { ...latest, ...patch }
+  await saveConfig(next)
+  return next
+}
+
 /** CTX-336.1: binds BOTH model roles to one provider, for guided setup.
  *
  *  `setLlmProviderAndModel` above writes the legacy `llm_provider`/`llm_model`
@@ -339,10 +360,7 @@ export async function confirmRemoveRoleBoundProvider(
  *  Binding both roles is also exactly what an unconfigured install already
  *  resolves to (`llm_providers.py:473`), so this makes the existing default
  *  explicit rather than inventing a policy. */
-export async function bindBothRolesTo(
-  providerId: string,
-  currentConfig: DaemonConfig,
-): Promise<void> {
+export async function bindBothRolesTo(providerId: string): Promise<void> {
   const provider_roles = { reasoning: providerId, fast: providerId } as Record<ModelRole, string>
   const response = await dispatch('daemon.configure', {
     provider_roles,
@@ -351,7 +369,7 @@ export async function bindBothRolesTo(
   if (response.error) {
     throw new Error(response.error.message)
   }
-  await saveConfig({ ...currentConfig, provider_roles, llm_provider: providerId })
+  await updateConfig({ provider_roles, llm_provider: providerId })
 }
 
 /** CTX-336.1: applies a tool path to the RUNNING daemon and persists it.
@@ -366,14 +384,13 @@ export async function bindBothRolesTo(
 export async function setToolPath(
   tool: 'kicad' | 'freecad',
   path: string | null,
-  currentConfig: DaemonConfig,
 ): Promise<void> {
   const field = tool === 'kicad' ? 'kicad_cli_path_override' : 'freecadcmd_path_override'
   const response = await dispatch('daemon.configure', { [field]: path ?? '' })
   if (response.error) {
     throw new Error(response.error.message)
   }
-  await saveConfig({ ...currentConfig, [field]: path })
+  await updateConfig({ [field]: path })
 }
 
 /** CTX-336.1: a native picker for an executable, not a folder. SPEC-336's

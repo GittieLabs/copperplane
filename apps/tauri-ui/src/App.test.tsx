@@ -13,7 +13,7 @@ const loadConversationMock = vi.fn()
 const appendConversationTurnMock = vi.fn()
 const getCapabilitiesMock = vi.fn()
 const getConfigMock = vi.fn()
-const saveConfigMock = vi.fn()
+const updateConfigMock = vi.fn()
 const shellOpenMock = vi.fn()
 const listOpenBoardsMock = vi.fn()
 const checkBoardMock = vi.fn()
@@ -90,7 +90,7 @@ vi.mock('./lib/projects', () => ({
 vi.mock('./lib/settings', () => ({
   getCapabilities: (...args: unknown[]) => getCapabilitiesMock(...args),
   getConfig: (...args: unknown[]) => getConfigMock(...args),
-  saveConfig: (...args: unknown[]) => saveConfigMock(...args),
+  updateConfig: (...args: unknown[]) => updateConfigMock(...args),
 }))
 
 vi.mock('./lib/library', () => ({
@@ -216,7 +216,7 @@ beforeEach(() => {
   // tests exercise the app rather than the welcome screen. The first-run
   // tests below set this deliberately.
   getConfigMock.mockReset().mockResolvedValue({ onboarding_completed: true })
-  saveConfigMock.mockReset().mockResolvedValue(undefined)
+  updateConfigMock.mockReset().mockImplementation(async (patch: object) => ({ ...patch }))
 })
 
 /** Builds a fake JobHandle whose `result` resolves/rejects on demand --
@@ -1197,9 +1197,7 @@ describe('App: launch, closing a project, and first run', () => {
     fireEvent.click(screen.getByRole('button', { name: /Skip for now/ }))
 
     await waitFor(() =>
-      expect(saveConfigMock).toHaveBeenCalledWith(
-        expect.objectContaining({ onboarding_completed: true }),
-      ),
+      expect(updateConfigMock).toHaveBeenCalledWith({ onboarding_completed: true }),
     )
     expect(await screen.findByRole('button', { name: 'New project' })).toBeTruthy()
   })
@@ -1239,5 +1237,60 @@ describe('App: launch, closing a project, and first run', () => {
 
     await screen.findByRole('button', { name: 'New project' })
     expect(screen.queryByText(/was not found/)).toBeNull()
+  })
+})
+
+/** CTX-336.1 Deviation 10, found by the maintainer clicking through the built
+ *  app: they chose Anthropic, entered an Anthropic key, finished setup, and
+ *  `config.json` still read `provider_roles: google`. */
+describe('App: finishing setup does not revert what setup just did', () => {
+  beforeEach(() => {
+    listProjectsMock.mockReset().mockResolvedValue([])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    getCapabilitiesMock.mockReset().mockResolvedValue({
+      kicad_available: true, kicad_socket_path_checked: '/tmp/kicad/api.sock',
+      freecad_available: true, freecad_path_checked: '/f', freecad_error: null,
+      kicad_cli_available: true, kicad_cli_path_checked: '/k',
+      kicad_cli_path_source: 'install', kicad_cli_error: null,
+      llm_providers: ['anthropic'], log_path: '/l', python_version: '3.11.9',
+      storage_root: '/s', github_token_configured: false, configured_secret_refs: [],
+    })
+  })
+
+  it('writes only its own field, never a snapshot of the whole config', async () => {
+    /** The bug was a whole-object save of a launch-time snapshot: guided
+     *  setup had written `provider_roles` to the same file in between, and
+     *  the snapshot did not have it. A patch cannot revert a key it does not
+     *  name -- so the assertion is about the SHAPE of the write, which is the
+     *  only thing that makes the class of bug impossible. */
+    getConfigMock.mockResolvedValue({
+      provider_roles: { reasoning: 'google', fast: 'google' },
+      llm_provider: 'google',
+    })
+
+    render(<App />)
+    await screen.findByText('Welcome to Copperplane')
+    fireEvent.click(screen.getByRole('button', { name: /Skip for now/ }))
+
+    await waitFor(() => expect(updateConfigMock).toHaveBeenCalled())
+    for (const [patch] of updateConfigMock.mock.calls) {
+      expect(Object.keys(patch as object)).toEqual(['onboarding_completed'])
+    }
+  })
+
+  it('does not carry a launch-time provider binding into its write', async () => {
+    getConfigMock.mockResolvedValue({
+      provider_roles: { reasoning: 'google', fast: 'google' },
+      llm_provider: 'google',
+    })
+
+    render(<App />)
+    await screen.findByText('Welcome to Copperplane')
+    fireEvent.click(screen.getByRole('button', { name: /Skip for now/ }))
+
+    await waitFor(() => expect(updateConfigMock).toHaveBeenCalled())
+    const [patch] = updateConfigMock.mock.calls[0]
+    expect(patch).not.toHaveProperty('provider_roles')
+    expect(patch).not.toHaveProperty('llm_provider')
   })
 })

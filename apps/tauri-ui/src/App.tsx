@@ -48,7 +48,7 @@ import type { Requirement } from './lib/requirements'
 import {
   getCapabilities,
   getConfig,
-  saveConfig,
+  updateConfig,
   type DaemonCapabilities,
   type DaemonConfig,
 } from './lib/settings'
@@ -155,7 +155,10 @@ function App() {
      what onboarding did -- a user who finished the wizard and later
      uninstalled KiCad is not configured. */
   const [capabilities, setCapabilities] = useState<DaemonCapabilities | null>(null)
-  const [config, setConfig] = useState<DaemonConfig>({})
+  /* Kept only so the initial read is observable to tests and future readers.
+     Deliberately not passed to any writer: a held snapshot is what caused the
+     clobber this context records as Deviation 10. */
+  const [, setConfig] = useState<DaemonConfig>({})
 
   async function refreshCapabilities() {
     try {
@@ -196,9 +199,10 @@ function App() {
   /* SPEC-336: records that setup was OFFERED, not that it succeeded. */
   async function dismissOnboarding() {
     try {
-      const next = { ...config, onboarding_completed: true }
-      setConfig(next)
-      await saveConfig(next)
+      // Read-modify-write, not a save of this component's snapshot: that
+      // snapshot is from launch, and guided setup has written to the same
+      // file since. Saving it back reverted the provider the user just chose.
+      setConfig(await updateConfig({ onboarding_completed: true }))
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err))
     }
@@ -518,7 +522,6 @@ function App() {
 
         {view?.kind === 'guidedSetup' && (
           <GuidedSetup
-            config={config}
             capabilities={capabilities}
             startAt={view.startAt}
             onCapabilitiesChanged={setCapabilities}

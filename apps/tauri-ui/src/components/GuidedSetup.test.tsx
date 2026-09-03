@@ -77,7 +77,6 @@ beforeEach(() => {
 function renderSetup(overrides: Partial<Parameters<typeof GuidedSetup>[0]> = {}) {
   return render(
     <GuidedSetup
-      config={{}}
       capabilities={EMPTY}
       onCapabilitiesChanged={() => {}}
       onFinish={() => {}}
@@ -106,7 +105,7 @@ describe('GuidedSetup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save key and continue' }))
 
     await waitFor(() => expect(saveSecretMock).toHaveBeenCalledWith('anthropic_api_key', 'sk-test-123'))
-    expect(bindBothRolesToMock).toHaveBeenCalledWith('anthropic', {})
+    expect(bindBothRolesToMock).toHaveBeenCalledWith('anthropic')
   })
 
   it('links to the chosen provider’s own docs, not to a Copperplane page', async () => {
@@ -171,7 +170,7 @@ describe('GuidedSetup', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /point to it/ })[0])
 
     await waitFor(() =>
-      expect(setToolPathMock).toHaveBeenCalledWith('kicad', '/opt/kicad/bin/kicad-cli', {}),
+      expect(setToolPathMock).toHaveBeenCalledWith('kicad', '/opt/kicad/bin/kicad-cli'),
     )
     expect(onCapabilitiesChanged).toHaveBeenCalledWith(READY)
   })

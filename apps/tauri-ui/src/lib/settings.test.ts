@@ -11,6 +11,9 @@ vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({ writeText: writeTextMoc
 vi.mock('./ipc', () => ({ dispatch: dispatchMock, submitJob: submitJobMock }))
 
 const {
+  updateConfig,
+  bindBothRolesTo,
+  setToolPath,
   saveSecret,
   clearSecret,
   getConfig,
@@ -428,5 +431,102 @@ describe('copyDiagnostics', () => {
 
     const text = writeTextMock.mock.calls[0][0] as string
     expect(text).toContain('LLM providers configured: anthropic, google')
+  })
+})
+
+/** CTX-336.1 Deviation 10. Found in the built app: the maintainer chose
+ *  Anthropic in guided setup, entered an Anthropic key, finished, and
+ *  `config.json` still read `provider_roles: google`. */
+describe('updateConfig', () => {
+  beforeEach(() => {
+    invokeMock.mockReset()
+    dispatchMock.mockReset().mockResolvedValue({ result: {} })
+  })
+
+  it('merges its patch over what is on disk NOW, not over a caller snapshot', async () => {
+    /** The clobber: `App` held a config read at launch and saved the whole
+     *  object back. Guided setup had written `provider_roles` to the same
+     *  file in between, so the save reverted it. */
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === 'get_config') {
+        return { provider_roles: { reasoning: 'anthropic', fast: 'anthropic' }, llm_provider: 'anthropic' }
+      }
+      return undefined
+    })
+
+    await updateConfig({ onboarding_completed: true })
+
+    const [, args] = invokeMock.mock.calls.find(([cmd]) => cmd === 'save_config_cmd')!
+    expect((args as { config: Record<string, unknown> }).config).toEqual({
+      provider_roles: { reasoning: 'anthropic', fast: 'anthropic' },
+      llm_provider: 'anthropic',
+      onboarding_completed: true,
+    })
+  })
+
+  it('returns the merged config, so a caller can refresh without re-reading', async () => {
+    invokeMock.mockImplementation(async (cmd: string) =>
+      cmd === 'get_config' ? { llm_provider: 'google' } : undefined,
+    )
+
+    const next = await updateConfig({ onboarding_completed: true })
+
+    expect(next).toEqual({ llm_provider: 'google', onboarding_completed: true })
+  })
+})
+
+describe('bindBothRolesTo', () => {
+  beforeEach(() => {
+    invokeMock.mockReset().mockImplementation(async (cmd: string) =>
+      cmd === 'get_config' ? { llm_provider: 'google', provider_roles: { reasoning: 'google', fast: 'google' } } : undefined,
+    )
+    dispatchMock.mockReset().mockResolvedValue({ result: {} })
+  })
+
+  it('binds both roles live and persists them over the current file', async () => {
+    /** `setLlmProviderAndModel` writes only the legacy `llm_provider`, which
+     *  `_migrate_provider_roles` ignores once a roles map exists. */
+    await bindBothRolesTo('anthropic')
+
+    expect(dispatchMock).toHaveBeenCalledWith('daemon.configure', {
+      provider_roles: { reasoning: 'anthropic', fast: 'anthropic' },
+      llm_provider: 'anthropic',
+    })
+    const [, args] = invokeMock.mock.calls.find(([cmd]) => cmd === 'save_config_cmd')!
+    expect((args as { config: Record<string, unknown> }).config.provider_roles).toEqual({
+      reasoning: 'anthropic', fast: 'anthropic',
+    })
+  })
+
+  it('does not persist anything if the daemon rejects the binding', async () => {
+    dispatchMock.mockResolvedValue({ error: { message: 'no such provider' } })
+
+    await expect(bindBothRolesTo('anthropic')).rejects.toThrow('no such provider')
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === 'save_config_cmd')).toBe(false)
+  })
+})
+
+describe('setToolPath', () => {
+  beforeEach(() => {
+    invokeMock.mockReset().mockImplementation(async (cmd: string) =>
+      cmd === 'get_config' ? { llm_provider: 'anthropic' } : undefined,
+    )
+    dispatchMock.mockReset().mockResolvedValue({ result: {} })
+  })
+
+  it('applies to the running daemon before persisting', async () => {
+    await setToolPath('kicad', '/opt/kicad/bin/kicad-cli')
+
+    expect(dispatchMock).toHaveBeenCalledWith('daemon.configure', {
+      kicad_cli_path_override: '/opt/kicad/bin/kicad-cli',
+    })
+  })
+
+  it('sends the empty string to clear, since null means leave unchanged', async () => {
+    await setToolPath('freecad', null)
+
+    expect(dispatchMock).toHaveBeenCalledWith('daemon.configure', { freecadcmd_path_override: '' })
+    const [, args] = invokeMock.mock.calls.find(([cmd]) => cmd === 'save_config_cmd')!
+    expect((args as { config: Record<string, unknown> }).config.freecadcmd_path_override).toBeNull()
   })
 })

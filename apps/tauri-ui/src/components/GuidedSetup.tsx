@@ -11,7 +11,6 @@ import {
   bindBothRolesTo,
   setToolPath,
   type DaemonCapabilities,
-  type DaemonConfig,
   type KeyBasedProvider,
 } from '../lib/settings'
 
@@ -40,14 +39,12 @@ const PROVIDER_LABELS: Record<KeyBasedProvider, string> = {
 }
 
 export function GuidedSetup({
-  config,
   capabilities,
   startAt = 'provider',
   onCapabilitiesChanged,
   onFinish,
   onOpenManualSettings,
 }: {
-  config: DaemonConfig
   capabilities: DaemonCapabilities | null
   /** Which step to open on. The banner routes a specific missing thing
    *  straight to the step that fixes it rather than restarting the wizard. */
@@ -80,7 +77,7 @@ export function GuidedSetup({
       // legacy `llm_provider`, which `_migrate_provider_roles` ignores once a
       // `provider_roles` map exists -- so after any Settings save, guided
       // setup would have reported success and changed nothing.
-      await bindBothRolesTo(provider, config)
+      await bindBothRolesTo(provider)
       setKey('')
       setSaved(true)
       await refreshCapabilities()
@@ -101,7 +98,7 @@ export function GuidedSetup({
       // Applied to the running daemon, not only written to config.json --
       // CTX-336.1 Phase 1's whole point. Without that, this button would
       // appear to do nothing until the next launch.
-      await setToolPath(tool, picked, config)
+      await setToolPath(tool, picked)
       await refreshCapabilities()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
