@@ -1078,6 +1078,46 @@ closed files; all three of the maintainer's other boards were also out of sync. 
 Remaining: placeholder geometry in the 3D view (`CTX-326.4`), and the open source-of-truth question
 of whether envelopes should be read from the board instead.
 
+#### SPEC-337 — Two Things Called "Linked" — not yet written, reported from the app
+
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-325, SPEC-312
+
+A project record carries two independent links, and the header presents them inches apart in
+language a reader cannot tell apart:
+
+*   `directory` (`SPEC-304` §2.1, built in `CTX-312.1`) — a folder on disk, for artifacts and the
+    portable manifest. Set by **Choose project folder…**, which reports `Linked to <path>` in
+    green.
+*   `kicad_project_path` (`SPEC-325` §2.1) — the `.kicad_pro` everything is actually read from.
+    Set by **Link**, and shown as `Linked KiCad project: none yet` until it is.
+
+Reported by the maintainer on 2026-09-03, from a real project, with a screenshot showing all three
+of these on screen at once:
+
+> a warning banner: *"No KiCad project linked, so board and schematic checks, the component list
+> and the enclosure cannot run."*
+> the header: *"Linked KiCad project: none yet"*
+> and directly beneath, in green: *"Linked to
+> /Users/keithelliott/repos/PCBs/Hello_World_Blinky/Hello_World_Blinky"*
+
+He linked the folder, was told it was linked, and reasonably concluded the project was linked. It
+was not: the record read `directory: /Users/.../Hello_World_Blinky`,
+`kicad_project_path: <none>`. The consequence is not cosmetic — with no `.kicad_pro` there is no
+board outline, so `generate_enclosure` runs in manual mode with `standoffs=[]` and produces an
+enclosure with no mounting posts at all. He went looking for a standoff defect and had actually hit
+this.
+
+Neither field is wrong and neither is redundant: a project can have a folder before it has KiCad
+files. The defect is that one word does both jobs, in the same place, with a green success message
+that is true about the less important one.
+
+*   **The word.** "Linked" cannot mean both. Decide what each is called — folder versus KiCad
+    project — everywhere they appear, including the success messages.
+*   **Whether picking a folder should offer to link the `.kicad_pro` it contains.** In this case
+    the chosen folder held exactly one, and the app said nothing about it.
+*   **Whether the banner should say which link is missing**, given it fires on
+    `kicad_project_path` alone while a folder may well be set.
+
 #### SPEC-327 — Design Advice: Layout & Clearance Warnings — not yet written
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-325, SPEC-326
