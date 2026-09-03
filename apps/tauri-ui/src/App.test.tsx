@@ -990,3 +990,53 @@ describe('App: loading the project list', () => {
     await waitFor(() => screen.getByRole('button', { name: /older-project/ }))
   })
 })
+
+describe('App: creating a project owns the main area', () => {
+  /* SPEC-335: "We should make creating a project do everything in the main
+     content area and not show our tabbed view until the project is
+     submitted." */
+  async function openWizard() {
+    listProjectsMock.mockResolvedValue([])
+    render(<App />)
+    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+    fireEvent.click(screen.getByRole('button', { name: '+ New…' }))
+    await waitFor(() => screen.getByText(/step 1 of 4/))
+  }
+
+  it('opens the wizard in the main area, not an inline sidebar form', async () => {
+    await openWizard()
+
+    // The title appears twice by design -- as the heading and as the current
+    // item in the step list -- so this asks for the heading specifically.
+    expect(screen.getByRole('heading', { name: 'Name your project' })).toBeTruthy()
+  })
+
+  it('does not show the tabbed project view while the wizard is open', async () => {
+    await openWizard()
+
+    // The tabs belong to a project that does not exist yet.
+    expect(screen.queryByRole('button', { name: 'Overview' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Schematic' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Enclosure' })).toBeNull()
+  })
+
+  it('creates no project when the wizard is cancelled', async () => {
+    await openWizard()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+    expect(saveProjectMock).not.toHaveBeenCalled()
+  })
+
+  it('shows the tabbed view only once the wizard completes', async () => {
+    await openWizard()
+    fireEvent.change(screen.getByPlaceholderText('project name'), { target: { value: 'blinky' } })
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create project' }))
+
+    await waitFor(() => expect(saveProjectMock).toHaveBeenCalledWith({ name: 'blinky' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Overview' }))
+  })
+})

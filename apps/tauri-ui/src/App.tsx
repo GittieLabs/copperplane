@@ -37,6 +37,7 @@ import { LibraryArea } from './components/LibraryArea'
 import { Overview } from './components/Overview'
 import { PartDetail } from './components/PartDetail'
 import { Rail } from './components/Rail'
+import { NewProjectWizard } from './components/NewProjectWizard'
 import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
 import { loadPart, type SavedPart } from './lib/partDetail'
@@ -57,6 +58,9 @@ const AREAS: { key: Area; label: string }[] = [
 
 type View =
   | { kind: 'settings' }
+  /* SPEC-335: creating a project owns the whole main area, and the tabbed
+     project view is not shown until it completes. */
+  | { kind: 'newProject' }
   | { kind: 'library'; initialLibraryId?: string }
   | { kind: 'project'; name: string; area: Area }
   // CTX-315.4: a Part is a global SPEC-304 object, not project-scoped, so
@@ -369,7 +373,7 @@ function App() {
         projects={projects}
         selectedProject={view?.kind === 'project' ? view.name : null}
         onSelectProject={handleSelectProject}
-        onCreateProject={handleCreateProject}
+        onStartNewProject={() => setView({ kind: 'newProject' })}
         projectsLoading={projectsLoading}
         libraryCount={libraryCount}
         librarySelected={view?.kind === 'library' || view?.kind === 'partDetail'}
@@ -386,6 +390,16 @@ function App() {
 
         {view === null && !projectsLoading && (
           <p className="text-sm text-fg-muted">Create a project on the left to get started.</p>
+        )}
+
+        {view?.kind === 'newProject' && (
+          <NewProjectWizard
+            existingProjects={projects}
+            onCreate={handleCreateProject}
+            /* Cancel returns to whatever "no project" looks like today. Nothing
+               was written, so there is nothing to undo. */
+            onCancel={() => setView(null)}
+          />
         )}
 
         {view?.kind === 'settings' && <Settings />}
