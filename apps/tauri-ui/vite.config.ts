@@ -15,5 +15,12 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test-setup.ts'],
+    /* Must stay comfortably above `asyncUtilTimeout` in `src/test-setup.ts`.
+       Setting them equal (both 5s) meant a slow-to-appear element killed the
+       whole test at its own deadline instead of letting `waitFor` fail first
+       with a message naming what it was looking for -- so CI reported "Test
+       timed out in 5000ms" where it used to say which element was missing.
+       The helper gives up first and explains; the test has headroom behind it. */
+    testTimeout: 20000,
   },
 })

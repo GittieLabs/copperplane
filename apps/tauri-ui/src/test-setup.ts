@@ -17,3 +17,8 @@ import { configure } from '@testing-library/dom'
  *  every one still has to become true, and a genuinely broken expectation
  *  fails at 5s exactly as it failed at 1s — it just takes longer to say so. */
 configure({ asyncUtilTimeout: 5000 })
+
+/* Kept deliberately below vite.config.ts's `testTimeout`. When the two were
+   equal, a missing element produced "Test timed out in 5000ms" rather than
+   testing-library's own message naming what it waited for -- a worse failure
+   than the flake this was meant to fix. */
