@@ -1,7 +1,7 @@
 ---
 id: SPEC-333
 title: "Project Lifecycle: Save Semantics, Rename & Removal"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-02
 last_updated: 2026-09-02
@@ -80,22 +80,26 @@ user_facing: true
 
 *Open questions removal must settle:*
 
-*   **Where "removed" is recorded.** A flag in the project's own `project.json` keeps one record in
-    one place and travels with the folder, which is consistent with `SPEC-312`'s portability. A
-    list in `config.json` keeps the user's own files untouched but makes the state machine-local,
-    so a project hidden on one machine reappears on another.
-*   **How it comes back.** `project.open_from_directory` already exists for restoring a project
-    from a folder (`CTX-312.3`), which is a natural undo if removal is a flag: pointing at the
-    folder again clears it. Settle whether that is the whole story or whether the list needs its
-    own "show removed" view.
-*   **What the confirmation says.** It must state plainly that nothing is deleted, because the word
-    a user brings to this is "delete" and being wrong about that in either direction is bad: a user
-    who thinks files are gone loses trust, and one who thinks they are safe when they are not loses
-    work.
+*   ~~**Where "removed" is recorded.**~~ **Settled in `CTX-333.1`, and the question had a third
+    answer.** Neither `project.json` in the user's folder nor `config.json`: the flag goes on the
+    storage-root **pointer** record in `<storage_root>/projects/<name>/`, which is the app's own
+    bookkeeping — so it travels with the storage root *and* never touches anything of the
+    user's.
+*   ~~**How it comes back.**~~ **Settled: it needed its own view.** `open_from_directory` could not
+    be the whole story, because an unlinked project has no folder to point at. The launch view
+    shows *"N removed from this list"* — only when there are any — expanding to a **Put back** for
+    each.
+*   ~~**What the confirmation says.**~~ **Settled and delivered:** *"Nothing is deleted. Its files,
+    its board and anything you exported stay exactly where they are, and you can put it back from
+    the projects screen."*
 
 *Open questions this spec must settle, before implementation:*
 
-*   **What "Save Project" should mean now.** Most of what it once saved is now written the moment
+*   ~~**What "Save Project" should mean now.**~~ **Settled 2026-09-02 by deleting the button.**
+    Every field persists at the moment it changes, so there is no stale snapshot left to write.
+    Original reasoning kept below.
+
+*   **(Original wording, for the record)** What "Save Project" should mean now. Most of what it once saved is now written the moment
     it changes (intent, check results, footprint overrides, export history). Options to weigh: make
     it a merge rather than a replace; narrow it to the fields it is genuinely the author of; or
     remove the button and let every edit persist on its own. Consider which of these leaves a user

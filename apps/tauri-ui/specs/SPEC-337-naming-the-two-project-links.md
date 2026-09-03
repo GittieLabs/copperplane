@@ -1,7 +1,7 @@
 ---
 id: SPEC-337
 title: "Naming the Two Project Links"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-03
 last_updated: 2026-09-03
@@ -77,15 +77,17 @@ user_facing: true
     offered, not assumed. **Still open:** what happens for zero and for several. Zero is a plain
     statement; several needs either a picker or silence, and a picker duplicates the existing
     **Link KiCad project…** file dialog.
-*   **Whether the banner should name which link is missing.** It fires on `kicad_project_path`
-    alone and says "No KiCad project linked" while a folder may well be set — accurate, and read as
-    contradictory when a green message two lines below says something is linked.
-*   **What the wizard says.** `SPEC-335`'s step 2 asks for the KiCad project and its skip copy
-    reads *"No KiCad project linked yet. You can link one later"*. Whatever the two names become,
-    that sentence is a user's first encounter with them.
-*   **Whether a success message should state the consequence.** *"Linked to <path>"* says what
-    happened. *"Project folder set. Checks still need a KiCad project."* would have prevented this
-    report outright. Decide whether that belongs in the message or only in the banner.
+*   ~~**Whether the banner should name which link is missing.**~~ **Settled and delivered:** it now
+    reads *"No KiCad project (`.kicad_pro`) is linked ... A project folder is a different setting
+    and does not replace this."*
+*   ~~**What the wizard says.**~~ **Settled and delivered:** its bare *"Linked: <path>"* became
+    *"KiCad project linked: <path>"*. The skip copy already named the KiCad project explicitly and
+    needed no change.
+*   ~~**Whether a success message should state the consequence.**~~ **Settled: the offer says it
+    better than a sentence could.** Setting a folder now reports *"Project folder set to <path>"*
+    and, when that folder holds a `.kicad_pro`, immediately offers to link it. A user who declines
+    still has the banner, which now names which link is missing. Stating the consequence in the
+    success message as well would be the third place saying it.
 
 ## 3. Known Constraints & Risks
 
