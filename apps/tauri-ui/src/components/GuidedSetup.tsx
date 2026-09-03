@@ -173,7 +173,7 @@ export function GuidedSetup({
           <div className="mt-1 flex flex-wrap items-center gap-3">
             <button
               type="button"
-              className="rounded bg-accent px-3 py-1.5 font-medium text-on-accent hover:opacity-90 disabled:opacity-50"
+              className="rounded bg-accent px-3 py-1.5 font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
               disabled={busy || !key.trim()}
               onClick={() => void handleSaveKey()}
             >
@@ -267,7 +267,7 @@ export function GuidedSetup({
           <div className="mt-1 flex flex-wrap items-center gap-3">
             <button
               type="button"
-              className="rounded bg-accent px-3 py-1.5 font-medium text-on-accent hover:opacity-90"
+              className="rounded bg-accent px-3 py-1.5 font-medium text-accent-fg hover:opacity-90"
               onClick={onFinish}
             >
               {missing.length === 0 ? 'Done' : 'Continue anyway'}

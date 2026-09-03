@@ -40,7 +40,7 @@ export function Welcome({
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              className="rounded bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:opacity-90"
+              className="rounded bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:opacity-90"
               onClick={onChooseGuided}
             >
               Guide me through it
