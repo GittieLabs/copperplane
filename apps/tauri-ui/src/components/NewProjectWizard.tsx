@@ -43,6 +43,19 @@ export function NewProjectWizard({
   const problem = nameProblem(name, existingProjects)
   const canLeaveName = name.trim().length > 0 && problem === null
 
+  /* The forward action is real on every step, and never labelled "skip" when
+     the user has actually done the step. Skipping is offered separately, and
+     only where there is genuinely something to skip. */
+  const forwardLabel = step.key === 'intent' ? 'Use this' : 'Next'
+  const canGoForward =
+    step.key === 'name' ? canLeaveName
+      : step.key === 'kicad' ? kicadPath !== null
+        : step.key === 'intent' ? (summary?.trim() || description.trim()).length > 0
+          : true
+  // Only offered where there is something to skip: once the step is done,
+  // the forward action is Next, not "skip".
+  const canSkip = (step.key === 'kicad' || step.key === 'intent') && !canGoForward
+
   async function handlePickKicad() {
     setError(null)
     try {
@@ -86,7 +99,7 @@ export function NewProjectWizard({
   function finish(openArea: Area) {
     onCreate({
       name: name.trim(),
-      intent: summary?.trim() || undefined,
+      intent: (summary?.trim() || description.trim()) || undefined,
       kicadProjectPath: kicadPath,
       openArea,
     })
@@ -253,32 +266,40 @@ export function NewProjectWizard({
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          className="rounded border border-line px-3 py-1 text-xs text-fg-secondary hover:bg-surface-alt disabled:opacity-50"
-          onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
-          disabled={stepIndex === 0}
-        >
-          Back
-        </button>
-        {step.key !== 'review' && (
+      {/* Back and the real forward action together on the left; skipping sits
+          apart on the right, styled as the quiet option it is. It used to be
+          the SAME accent colour as Next and sat between Back and Next, which
+          both encouraged it and made it look equivalent -- and on the intent
+          step it was the ONLY way forward, so a user who had just read a
+          summary had no way to accept it, only to "skip". */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className="rounded bg-accent px-3 py-1 text-xs font-medium text-accent-fg disabled:opacity-50"
-            onClick={goNext}
-            disabled={step.key === 'name' && !canLeaveName}
+            className="rounded border border-line px-3 py-1 text-xs text-fg-secondary hover:bg-surface-alt disabled:opacity-50"
+            onClick={() => setStepIndex((i) => Math.max(0, i - 1))}
+            disabled={stepIndex === 0}
           >
-            {step.key === 'name' ? 'Next' : 'Skip for now'}
+            Back
           </button>
-        )}
-        {step.key === 'kicad' && kicadPath && (
+          {step.key !== 'review' && (
+            <button
+              type="button"
+              className="rounded bg-accent px-3 py-1 text-xs font-medium text-accent-fg disabled:opacity-50"
+              onClick={goNext}
+              disabled={!canGoForward}
+            >
+              {forwardLabel}
+            </button>
+          )}
+        </div>
+        {canSkip && (
           <button
             type="button"
-            className="rounded bg-accent px-3 py-1 text-xs font-medium text-accent-fg"
+            className="rounded px-2 py-1 text-xs text-fg-muted underline hover:text-fg-secondary"
             onClick={goNext}
           >
-            Next
+            Skip for now
           </button>
         )}
       </div>

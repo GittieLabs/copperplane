@@ -254,7 +254,9 @@ describe('NewProjectWizard: the review', () => {
     fireEvent.change(screen.getByPlaceholderText(/blinking LED badge/), { target: { value: 'x' } })
     fireEvent.click(screen.getByRole('button', { name: 'Summarise' }))
     await waitFor(() => screen.getByDisplayValue('A coin-cell LED badge.'))
-    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    // Both steps are done, so the forward action is "Use this" -- there is no
+    // longer a "Skip for now", which is the point.
+    fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
     await waitFor(() => expect(runProjectReviewMock).toHaveBeenCalled())
 
     fireEvent.click(screen.getByRole('button', { name: 'overview' }))
@@ -291,5 +293,65 @@ describe('NewProjectWizard: the shell', () => {
     renderWizard()
 
     expect((screen.getByRole('button', { name: 'Back' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+})
+
+describe('NewProjectWizard: skipping is offered, never encouraged', () => {
+  /* Reported: "The skip for now and next buttons are the same color but should
+     not be... I don't want to encourage the skip step." And, on the intent
+     step, skip was the ONLY way forward -- so a user who had just read a
+     summary had no way to accept it. */
+  it('offers a real forward action once a step is done, not a skip', async () => {
+    pickKicadProjectMock.mockResolvedValue('/p/Blinky.kicad_pro')
+    renderWizard()
+    nameIt()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose .kicad_pro…' }))
+    await waitFor(() => screen.getByText('/p/Blinky.kicad_pro'))
+
+    expect(screen.getByRole('button', { name: 'Next' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Skip for now' })).toBeNull()
+  })
+
+  it('lets the user accept a summary rather than only skip past it', async () => {
+    summariseIntentMock.mockResolvedValue('A coin-cell LED badge.')
+    renderWizard()
+    nameIt()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    fireEvent.change(screen.getByPlaceholderText(/blinking LED badge/), { target: { value: 'x' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Summarise' }))
+    await waitFor(() => screen.getByDisplayValue('A coin-cell LED badge.'))
+
+    // This is what was missing entirely: an acknowledge action.
+    expect(screen.getByRole('button', { name: 'Use this' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Skip for now' })).toBeNull()
+  })
+
+  it('keeps what the user typed even if they never pressed Summarise', async () => {
+    const props = renderWizard()
+    nameIt()
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    fireEvent.change(screen.getByPlaceholderText(/blinking LED badge/), {
+      target: { value: 'two alternating blinking leds' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use this' }))
+    await waitFor(() => expect(runProjectReviewMock).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole('button', { name: 'overview' }))
+
+    expect(props.onCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ intent: 'two alternating blinking leds' }),
+    )
+  })
+
+  it('does not style skip like the primary action', async () => {
+    renderWizard()
+    nameIt()
+
+    const skip = screen.getByRole('button', { name: 'Skip for now' })
+    const next = screen.getByRole('button', { name: 'Choose .kicad_pro…' })
+    expect(skip.className).not.toContain('bg-accent')
+    expect(skip.className).toContain('underline')
+    expect(next.className).not.toBe(skip.className)
   })
 })
