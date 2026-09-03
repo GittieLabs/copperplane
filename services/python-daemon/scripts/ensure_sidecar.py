@@ -241,7 +241,7 @@ def resolve_triple(explicit=None) -> str:
     raise RuntimeError("could not determine a target triple")
 
 
-def probe_routes(path: str, timeout_s: float = 60.0):
+def probe_routes(path: str, timeout_s: float = 60.0, command: list = None):
     """(ok, reason). Ask the frozen artifact what it can actually do.
 
     SPEC-407 §1's costly failure was "a mis-frozen sidecar that starts, reports
@@ -269,8 +269,12 @@ def probe_routes(path: str, timeout_s: float = 60.0):
     expected = set(source_daemon.ROUTES)
     request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "daemon.list_routes",
                           "params": {}}) + "\n"
+    # `command` exists so a test can stand a script in for the binary. A real
+    # caller never passes it -- and the alternative, a POSIX shell script as the
+    # fake sidecar, made these tests fail on Windows, which is precisely the
+    # platform SPEC-903's CI exists to speak for.
     try:
-        proc = subprocess.run([path], input=request, capture_output=True,
+        proc = subprocess.run(command or [path], input=request, capture_output=True,
                               text=True, timeout=timeout_s)
     except Exception as exc:
         return True, f"skipped -- could not run the sidecar to ask it ({exc})"

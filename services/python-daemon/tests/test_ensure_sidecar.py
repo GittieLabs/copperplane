@@ -445,19 +445,25 @@ class TestProbeRoutes(unittest.TestCase):
         self.real_routes = sorted(daemon.ROUTES)
 
     def _fake_sidecar(self, payload):
-        """A stand-in that answers daemon.list_routes however we like."""
-        path = os.path.join(self.tmp.name, "fake-sidecar")
+        """A stand-in that answers daemon.list_routes however we like.
+
+        A Python script run through `sys.executable`, not a shell script: the
+        first version used `#!/bin/sh` and failed on windows-latest, which is
+        exactly what SPEC-903's cross-platform CI is for.
+        """
+        path = os.path.join(self.tmp.name, "fake_sidecar.py")
         with open(path, "w") as handle:
-            handle.write("#!/bin/sh\ncat >/dev/null\ncat <<'JSON'\n")
-            handle.write(json.dumps({"jsonrpc": "2.0", "id": 1, "result": payload}))
-            handle.write("\nJSON\n")
-        os.chmod(path, 0o755)
-        return path
+            handle.write(
+                "import sys, json\n"
+                "sys.stdin.read()\n"
+                f"print(json.dumps({{'jsonrpc': '2.0', 'id': 1, 'result': {payload!r}}}))\n"
+            )
+        return [sys.executable, path]
 
     def test_001_a_sidecar_answering_every_route_passes(self):
-        path = self._fake_sidecar({"routes": self.real_routes, "degraded_modules": []})
+        command = self._fake_sidecar({"routes": self.real_routes, "degraded_modules": []})
 
-        ok, reason = es.probe_routes(path)
+        ok, reason = es.probe_routes(command[-1], command=command)
 
         self.assertTrue(ok, reason)
         self.assertIn("no degraded modules", reason)
@@ -466,11 +472,11 @@ class TestProbeRoutes(unittest.TestCase):
         """The whole point. A file that passes every static check and cannot
         do its job must stop the build."""
         missing = self.real_routes[:3]
-        path = self._fake_sidecar(
+        command = self._fake_sidecar(
             {"routes": [r for r in self.real_routes if r not in missing], "degraded_modules": []}
         )
 
-        ok, reason = es.probe_routes(path)
+        ok, reason = es.probe_routes(command[-1], command=command)
 
         self.assertFalse(ok)
         self.assertIn("missing 3 route(s)", reason)
@@ -480,9 +486,9 @@ class TestProbeRoutes(unittest.TestCase):
     def test_003_a_sidecar_reporting_degraded_modules_fails(self):
         """SPEC-407 §1's exact failure: it starts, reports ready, and runs with
         the AI surface disabled."""
-        path = self._fake_sidecar({"routes": self.real_routes, "degraded_modules": ["chat_agents"]})
+        command = self._fake_sidecar({"routes": self.real_routes, "degraded_modules": ["chat_agents"]})
 
-        ok, reason = es.probe_routes(path)
+        ok, reason = es.probe_routes(command[-1], command=command)
 
         self.assertFalse(ok)
         self.assertIn("chat_agents", reason)
@@ -490,21 +496,20 @@ class TestProbeRoutes(unittest.TestCase):
     def test_004_missing_routes_blame_a_bundled_file_when_nothing_is_degraded(self):
         """CTX-407.4: daemon.spec's datas=[] meant every AI feature failed in
         every packaged build, with no module reporting itself degraded."""
-        path = self._fake_sidecar({"routes": self.real_routes[:-1], "degraded_modules": []})
+        command = self._fake_sidecar({"routes": self.real_routes[:-1], "degraded_modules": []})
 
-        _, reason = es.probe_routes(path)
+        _, reason = es.probe_routes(command[-1], command=command)
 
         self.assertIn("bundled data file or a hidden import", reason)
 
     def test_005_an_older_sidecar_that_cannot_answer_is_skipped_not_failed(self):
         """A probe that cannot run must not block a build, or the first flaky
         launch becomes a reason to delete the check."""
-        path = os.path.join(self.tmp.name, "silent")
+        path = os.path.join(self.tmp.name, "silent.py")
         with open(path, "w") as handle:
-            handle.write("#!/bin/sh\ncat >/dev/null\n")
-        os.chmod(path, 0o755)
+            handle.write("import sys\nsys.stdin.read()\n")
 
-        ok, reason = es.probe_routes(path)
+        ok, reason = es.probe_routes(path, command=[sys.executable, path])
 
         self.assertTrue(ok)
         self.assertIn("does not answer", reason)
