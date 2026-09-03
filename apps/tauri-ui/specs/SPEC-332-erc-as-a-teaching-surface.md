@@ -117,12 +117,21 @@ user_facing: true
 
 *Open questions this spec must settle:*
 
-*   **Which ERC classes get a plain-language entry**, and where it lives. `SPEC-334`'s
+*   ~~**Which ERC classes get a plain-language entry**~~ — delivered in `CTX-332.1`: the four
+    ignored-check keys and five terms, in `kicadGlossary`'s existing flat list. **Still open:**
+    whether that list and `SPEC-334`'s compositional `packageGlossary` should share a module.
+
+*   **(Original wording, for the record)** Which ERC classes get a plain-language entry, and where
+    it lives. `SPEC-334`'s
     `packageGlossary` decodes compositionally and `kicadGlossary` is a flat list for a dozen fixed
     DRC strings; ERC's vocabulary is a closed set of KiCad `type` keys (`pin_not_connected`,
     `power_pin_not_driven`, `lib_symbol_mismatch`, …), which argues for the flat list. Settle
     whether they share a module.
-*   **What `power_pin_not_driven` should say.** It is the highest-value entry and the least
+*   ~~**What `power_pin_not_driven` should say.**~~ Answered in `CTX-332.1`: *"Nothing on this net
+    looks like a source to KiCad. Usually the wiring is right and a PWR_FLAG is missing, rather
+    than the circuit being wrong."* Original reasoning kept below.
+
+*   **(Original wording, for the record)** What `power_pin_not_driven` should say. It is the highest-value entry and the least
     obvious: the schematic is usually correct and missing only a `PWR_FLAG`, which is a KiCad
     convention rather than an electrical fact. A maker reads "not driven" and looks for a wiring
     fault that is not there.
