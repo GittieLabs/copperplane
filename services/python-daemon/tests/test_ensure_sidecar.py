@@ -9,6 +9,7 @@ be tested on any platform including CI's Linux runner.
 """
 import os
 import struct
+import json
 import sys
 import tempfile
 import unittest
@@ -424,3 +425,92 @@ class TestBundledPromptsCountAsSource(unittest.TestCase):
 
         self.assertIsNotNone(newest)
         self.assertEqual(which, "daemon.py")
+
+
+class TestProbeRoutes(unittest.TestCase):
+    """SPEC-407: ask the artifact what it can do, not just what it looks like.
+
+    `inspect()` checks four properties of the FILE -- exists, not the
+    placeholder, right architecture, newer than source. A binary can satisfy
+    every one and still be missing half its routes because a module failed to
+    import inside the freeze, which is how CTX-407.3 and CTX-407.4 both
+    shipped.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+        import daemon
+        self.real_routes = sorted(daemon.ROUTES)
+
+    def _fake_sidecar(self, payload):
+        """A stand-in that answers daemon.list_routes however we like."""
+        path = os.path.join(self.tmp.name, "fake-sidecar")
+        with open(path, "w") as handle:
+            handle.write("#!/bin/sh\ncat >/dev/null\ncat <<'JSON'\n")
+            handle.write(json.dumps({"jsonrpc": "2.0", "id": 1, "result": payload}))
+            handle.write("\nJSON\n")
+        os.chmod(path, 0o755)
+        return path
+
+    def test_001_a_sidecar_answering_every_route_passes(self):
+        path = self._fake_sidecar({"routes": self.real_routes, "degraded_modules": []})
+
+        ok, reason = es.probe_routes(path)
+
+        self.assertTrue(ok, reason)
+        self.assertIn("no degraded modules", reason)
+
+    def test_002_a_sidecar_missing_routes_FAILS_and_names_them(self):
+        """The whole point. A file that passes every static check and cannot
+        do its job must stop the build."""
+        missing = self.real_routes[:3]
+        path = self._fake_sidecar(
+            {"routes": [r for r in self.real_routes if r not in missing], "degraded_modules": []}
+        )
+
+        ok, reason = es.probe_routes(path)
+
+        self.assertFalse(ok)
+        self.assertIn("missing 3 route(s)", reason)
+        for route in missing:
+            self.assertIn(route, reason)
+
+    def test_003_a_sidecar_reporting_degraded_modules_fails(self):
+        """SPEC-407 §1's exact failure: it starts, reports ready, and runs with
+        the AI surface disabled."""
+        path = self._fake_sidecar({"routes": self.real_routes, "degraded_modules": ["chat_agents"]})
+
+        ok, reason = es.probe_routes(path)
+
+        self.assertFalse(ok)
+        self.assertIn("chat_agents", reason)
+
+    def test_004_missing_routes_blame_a_bundled_file_when_nothing_is_degraded(self):
+        """CTX-407.4: daemon.spec's datas=[] meant every AI feature failed in
+        every packaged build, with no module reporting itself degraded."""
+        path = self._fake_sidecar({"routes": self.real_routes[:-1], "degraded_modules": []})
+
+        _, reason = es.probe_routes(path)
+
+        self.assertIn("bundled data file or a hidden import", reason)
+
+    def test_005_an_older_sidecar_that_cannot_answer_is_skipped_not_failed(self):
+        """A probe that cannot run must not block a build, or the first flaky
+        launch becomes a reason to delete the check."""
+        path = os.path.join(self.tmp.name, "silent")
+        with open(path, "w") as handle:
+            handle.write("#!/bin/sh\ncat >/dev/null\n")
+        os.chmod(path, 0o755)
+
+        ok, reason = es.probe_routes(path)
+
+        self.assertTrue(ok)
+        self.assertIn("does not answer", reason)
+
+    def test_006_a_binary_that_will_not_run_is_skipped_not_failed(self):
+        ok, reason = es.probe_routes(os.path.join(self.tmp.name, "does-not-exist"))
+
+        self.assertTrue(ok)
+        self.assertIn("could not run", reason)
