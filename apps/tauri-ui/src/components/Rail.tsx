@@ -1,4 +1,3 @@
-import { useState } from 'react'
 
 /** SPEC-305 §2: the left rail SPEC-300 §2 designed -- Projects, then
  * Library, then Settings anchored at the bottom. Real projects and a
@@ -7,7 +6,7 @@ export function Rail({
   projects,
   selectedProject,
   onSelectProject,
-  onCreateProject,
+  onStartNewProject,
   projectsLoading = false,
   libraryCount,
   librarySelected,
@@ -22,7 +21,9 @@ export function Rail({
    * something -- omitted entirely (not an empty string) when skipped, so
    * `saveProject({ name })`'s existing unchanged-behavior path for a
    * skipped intent stays exactly that: no second argument at all. */
-  onCreateProject: (name: string, intent?: string) => void
+  /** SPEC-335: opens the wizard in the main area. The inline form this
+   *  replaces had no cancel, and asked for intent in a 192px column. */
+  onStartNewProject: () => void
   /** Listing projects reads every record off disk. Creating one while that is
    *  in flight raced the in-flight list, which came back holding the state
    *  from before the new project existed and overwrote it. App.tsx now merges
@@ -34,23 +35,7 @@ export function Rail({
   settingsSelected: boolean
   onSelectSettings: () => void
 }) {
-  const [newProjectName, setNewProjectName] = useState('')
-  const [newProjectIntent, setNewProjectIntent] = useState('')
-  const [creating, setCreating] = useState(false)
 
-  function handleCreate() {
-    const name = newProjectName.trim()
-    if (!name) return
-    const intent = newProjectIntent.trim()
-    if (intent) {
-      onCreateProject(name, intent)
-    } else {
-      onCreateProject(name)
-    }
-    setNewProjectName('')
-    setNewProjectIntent('')
-    setCreating(false)
-  }
 
   return (
     <nav className="flex h-full w-48 flex-col gap-6 border-r border-line-subtle p-4 text-sm">
@@ -74,52 +59,15 @@ export function Rail({
             {name}
           </button>
         ))}
-        {creating ? (
-          <div className="flex flex-col gap-1 px-2 py-1">
-            <input
-              autoFocus
-              className="w-full rounded border border-line bg-surface px-1 py-0.5 text-xs"
-              placeholder="project name"
-              value={newProjectName}
-              onChange={(e) => setNewProjectName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCreate()
-                if (e.key === 'Escape') setCreating(false)
-              }}
-            />
-            {/* SPEC-318 §2.4: optional, skip-first-class -- the textarea's
-             * own placeholder is the only prompt; leaving it blank is a
-             * normal outcome, not a validation error. */}
-            <textarea
-              className="w-full rounded border border-line bg-surface px-1 py-0.5 text-xs"
-              rows={2}
-              placeholder="what are you building? (optional)"
-              value={newProjectIntent}
-              onChange={(e) => setNewProjectIntent(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') setCreating(false)
-              }}
-            />
-            <button
-              type="button"
-              className="self-start rounded bg-accent px-2 py-0.5 text-xs font-medium text-accent-fg disabled:opacity-50"
-              onClick={handleCreate}
-              disabled={!newProjectName.trim()}
-            >
-              Add
-            </button>
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="rounded px-2 py-1 text-left text-fg-muted hover:bg-surface disabled:opacity-50"
-            onClick={() => setCreating(true)}
-            disabled={projectsLoading}
-            title={projectsLoading ? 'Still loading your projects…' : undefined}
-          >
-            + New…
-          </button>
-        )}
+        <button
+          type="button"
+          className="rounded px-2 py-1 text-left text-fg-muted hover:bg-surface disabled:opacity-50"
+          onClick={onStartNewProject}
+          disabled={projectsLoading}
+          title={projectsLoading ? 'Still loading your projects…' : undefined}
+        >
+          + New…
+        </button>
       </div>
 
       <div className="flex flex-col gap-1">

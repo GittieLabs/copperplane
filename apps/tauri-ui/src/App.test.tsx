@@ -990,3 +990,100 @@ describe('App: loading the project list', () => {
     await waitFor(() => screen.getByRole('button', { name: /older-project/ }))
   })
 })
+
+describe('App: creating a project owns the main area', () => {
+  /* SPEC-335: "We should make creating a project do everything in the main
+     content area and not show our tabbed view until the project is
+     submitted." */
+  async function openWizard() {
+    listProjectsMock.mockResolvedValue([])
+    render(<App />)
+    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+    fireEvent.click(screen.getByRole('button', { name: '+ New…' }))
+    await waitFor(() => screen.getByText(/step 1 of 4/))
+  }
+
+  it('opens the wizard in the main area, not an inline sidebar form', async () => {
+    await openWizard()
+
+    // The title appears twice by design -- as the heading and as the current
+    // item in the step list -- so this asks for the heading specifically.
+    expect(screen.getByRole('heading', { name: 'Name your project' })).toBeTruthy()
+  })
+
+  it('does not show the tabbed project view while the wizard is open', async () => {
+    await openWizard()
+
+    // The tabs belong to a project that does not exist yet.
+    expect(screen.queryByRole('button', { name: 'Overview' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Schematic' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Enclosure' })).toBeNull()
+  })
+
+  it('creates no project when the wizard is cancelled', async () => {
+    await openWizard()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+    expect(saveProjectMock).not.toHaveBeenCalled()
+  })
+
+  it('shows the tabbed view only once the wizard completes', async () => {
+    await openWizard()
+    fireEvent.change(screen.getByPlaceholderText('project name'), { target: { value: 'blinky' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    // Both remaining steps are skippable -- SPEC-336's no-trapping rule.
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }))
+
+    // The last step creates the project on whichever tab is chosen.
+    await waitFor(() => screen.getByRole('button', { name: 'overview' }))
+    fireEvent.click(screen.getByRole('button', { name: 'overview' }))
+
+    await waitFor(() => expect(saveProjectMock).toHaveBeenCalledWith({ name: 'blinky' }))
+    await waitFor(() => screen.getByRole('button', { name: 'Overview' }))
+  })
+})
+
+describe('App: an unlinked project says what is unavailable', () => {
+  beforeEach(() => {
+    // The banner lives on a loaded project, so the list has to resolve first.
+    listProjectsMock.mockReset().mockResolvedValue(['test-project'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    saveProjectMock.mockReset().mockImplementation(async (p: unknown) => p)
+  })
+
+  /* SPEC-335 Phase 5, following SPEC-336's no-trapping rule: skipping the
+     KiCad link is allowed, so the app has to say what that costs rather than
+     leaving the user to discover it by watching features fail one at a time. */
+  it('shows a banner naming what cannot run, with a way to fix it', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'test-project', directory: '/d' })
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
+
+    await waitFor(() => screen.getByText(/No KiCad project linked, so board and schematic checks/))
+    expect(screen.getByRole('button', { name: 'Link one' })).toBeTruthy()
+  })
+
+  it('says nothing once a project is linked', async () => {
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project', directory: '/d', kicad_project_path: '/p/Blinky.kicad_pro',
+    })
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
+
+    expect(screen.queryByText(/No KiCad project linked/)).toBeNull()
+  })
+
+  it('cannot be dismissed into silence', async () => {
+    // A banner that can be dismissed forever returns the user to an
+    // unexplained broken app with no route back.
+    loadProjectMock.mockResolvedValue({ name: 'test-project', directory: '/d' })
+    render(<App />)
+    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
+
+    await waitFor(() => screen.getByText(/No KiCad project linked/))
+    expect(screen.queryByRole('button', { name: /Dismiss|Ignore/ })).toBeNull()
+  })
+})

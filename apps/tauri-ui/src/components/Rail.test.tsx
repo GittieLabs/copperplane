@@ -7,7 +7,7 @@ function renderRail(overrides: Partial<Parameters<typeof Rail>[0]> = {}) {
     projects: ['weather-pcb', 'doorbell'],
     selectedProject: 'weather-pcb' as string | null,
     onSelectProject: vi.fn(),
-    onCreateProject: vi.fn(),
+    onStartNewProject: vi.fn(),
     libraryCount: 3,
     librarySelected: false,
     onSelectLibrary: vi.fn(),
@@ -40,41 +40,18 @@ describe('Rail', () => {
     screen.getByText('0 parts')
   })
 
-  it('creating a project: typing a name and pressing Add calls onCreateProject with no intent when the textarea is left blank', () => {
+  /* SPEC-335 moved creating a project out of this 192px column and into a
+     wizard in the main content area, with a cancel it never had. The Rail's
+     job is now only to open it -- the name field, the intent box and the Add
+     button live in NewProjectWizard and are tested there. */
+  it('+ New… opens the wizard rather than an inline form', () => {
     const props = renderRail()
 
     fireEvent.click(screen.getByText('+ New…'))
-    fireEvent.change(screen.getByPlaceholderText('project name'), { target: { value: 'new-proj' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
 
-    // SPEC-318 §2.4: skip is a first-class outcome -- called with exactly
-    // one argument, not `(name, undefined)`, so App.tsx's own unchanged
-    // `saveProject({ name })` path for a skipped intent stays untouched.
-    expect(props.onCreateProject).toHaveBeenCalledWith('new-proj')
-  })
-
-  it('creating a project: typing an optional intent passes it through as the second argument', () => {
-    const props = renderRail()
-
-    fireEvent.click(screen.getByText('+ New…'))
-    fireEvent.change(screen.getByPlaceholderText('project name'), { target: { value: 'new-proj' } })
-    fireEvent.change(screen.getByPlaceholderText(/what are you building/), {
-      target: { value: 'A macropad from scratch' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-
-    expect(props.onCreateProject).toHaveBeenCalledWith('new-proj', 'A macropad from scratch')
-  })
-
-  it('Add is disabled for an empty/whitespace-only project name', () => {
-    renderRail()
-    fireEvent.click(screen.getByText('+ New…'))
-
-    const addButton = screen.getByRole('button', { name: 'Add' }) as HTMLButtonElement
-    expect(addButton.disabled).toBe(true)
-
-    fireEvent.change(screen.getByPlaceholderText('project name'), { target: { value: '   ' } })
-    expect(addButton.disabled).toBe(true)
+    expect(props.onStartNewProject).toHaveBeenCalled()
+    expect(screen.queryByPlaceholderText('project name')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add' })).toBeNull()
   })
 
   it('clicking the library count calls onSelectLibrary', () => {

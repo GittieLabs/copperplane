@@ -37,6 +37,7 @@ import { LibraryArea } from './components/LibraryArea'
 import { Overview } from './components/Overview'
 import { PartDetail } from './components/PartDetail'
 import { Rail } from './components/Rail'
+import { NewProjectWizard } from './components/NewProjectWizard'
 import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
 import { loadPart, type SavedPart } from './lib/partDetail'
@@ -57,6 +58,9 @@ const AREAS: { key: Area; label: string }[] = [
 
 type View =
   | { kind: 'settings' }
+  /* SPEC-335: creating a project owns the whole main area, and the tabbed
+     project view is not shown until it completes. */
+  | { kind: 'newProject' }
   | { kind: 'library'; initialLibraryId?: string }
   | { kind: 'project'; name: string; area: Area }
   // CTX-315.4: a Part is a global SPEC-304 object, not project-scoped, so
@@ -179,11 +183,26 @@ function App() {
   // SPEC-318 §2.4: `intent` is only passed by Rail when the user actually
   // typed one -- `saveProject({ name })`'s existing behavior for a
   // skipped intent stays exactly as it was before this spec.
-  async function handleCreateProject(name: string, intent?: string) {
+  /** SPEC-335: the wizard's single write, at the end of the flow. Everything
+   *  it gathered arrives together, and the user chooses which tab to land on
+   *  rather than always being dropped on Overview. */
+  async function handleCreateProject(draft: {
+    name: string
+    intent?: string
+    kicadProjectPath?: string | null
+    openArea: Area
+  }) {
+    const { name, intent, kicadProjectPath, openArea } = draft
     try {
-      await saveProject(intent ? { name, intent } : { name })
+      // `intent` is omitted entirely rather than passed as undefined, keeping
+      // saveProject({ name })'s existing skipped-intent path untouched.
+      await saveProject({
+        name,
+        ...(intent ? { intent } : {}),
+        ...(kicadProjectPath ? { kicad_project_path: kicadProjectPath } : {}),
+      })
       setProjects((prev) => (prev.includes(name) ? prev : [...prev, name]))
-      setView({ kind: 'project', name, area: 'overview' })
+      setView({ kind: 'project', name, area: openArea })
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : String(err))
     }
@@ -369,7 +388,7 @@ function App() {
         projects={projects}
         selectedProject={view?.kind === 'project' ? view.name : null}
         onSelectProject={handleSelectProject}
-        onCreateProject={handleCreateProject}
+        onStartNewProject={() => setView({ kind: 'newProject' })}
         projectsLoading={projectsLoading}
         libraryCount={libraryCount}
         librarySelected={view?.kind === 'library' || view?.kind === 'partDetail'}
@@ -386,6 +405,16 @@ function App() {
 
         {view === null && !projectsLoading && (
           <p className="text-sm text-fg-muted">Create a project on the left to get started.</p>
+        )}
+
+        {view?.kind === 'newProject' && (
+          <NewProjectWizard
+            existingProjects={projects}
+            onCreate={handleCreateProject}
+            /* Cancel returns to whatever "no project" looks like today. Nothing
+               was written, so there is nothing to undo. */
+            onCancel={() => setView(null)}
+          />
         )}
 
         {view?.kind === 'settings' && <Settings />}
@@ -409,6 +438,27 @@ function App() {
              * (dashboard vs. cross-project landing page) undecided, so
              * these real, already-scoped actions don't get entangled
              * with a surface whose future shape isn't settled yet. */}
+            {/* SPEC-335 Phase 5 / SPEC-336: skipping the KiCad link is allowed,
+                so the app has to say what that costs rather than leaving the
+                user to find out by watching features fail one at a time. Not
+                dismissible: a banner that can be dismissed forever returns the
+                user to an unexplained broken app with no route back. */}
+            {currentProject && !currentProject.kicad_project_path && (
+              <div className="flex w-full max-w-4xl items-center justify-between gap-3 rounded border border-warning/40 bg-warning/5 px-3 py-2 text-xs">
+                <span className="text-warning">
+                  No KiCad project linked, so board and schematic checks, the component list and the
+                  enclosure cannot run.
+                </span>
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-warning/50 px-2 py-1 font-medium text-warning hover:bg-warning/10"
+                  onClick={() => void handleChangeKicadProject()}
+                >
+                  Link one
+                </button>
+              </div>
+            )}
+
             <div className="flex w-full max-w-4xl items-center justify-between gap-2 text-xs">
               {/* Paths are long, and neither one earns permanent screen space:
                   "showing the complete paths ... only clutters the screen.

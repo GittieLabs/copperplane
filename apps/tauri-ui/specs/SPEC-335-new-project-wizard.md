@@ -57,13 +57,17 @@ user_facing: true
 
 *Open questions this spec must settle:*
 
-*   **Whether every step is mandatory.** The maintainer wants intent required. A user who has no
-    KiCad project yet cannot complete step 2 — decide whether that blocks creation, or creates a
-    project parked at that step.
+*   **Settled: step 2 does not block.** A user with no `.kicad_pro` is told KiCad is needed, offered
+    a way to open KiCad, and allowed to finish with nothing linked. Every tab then carries a banner
+    naming what is missing and what it stops working, with a way to link one. This follows
+    `SPEC-336`'s rule directly — the manual paths have never gated anyone, and gating the guided
+    path would punish the user who asked for help. Intent stays required, because it costs the user
+    a sentence and every agent answers generically without it.
 *   **Whether the wizard is resumable.** A project created without a link would need to re-enter it.
-*   **What step 4 actually runs.** Every input already exists: `kicad.check_schematic_parity`,
-    `kicad.component_envelopes`, `kicad.check_board`, `kicad.check_schematic`. Together they are
-    several seconds and several LLM calls — decide what is run eagerly versus on first visit.
+*   **Settled: step 4 streams.** Parity, then components, then ERC and DRC, each appearing as it
+    lands, with the plain-language summary last. Several seconds of silence is the wrong shape for
+    a first run, and one check failing must not cost the user the others — the same reasoning that
+    made `_explain_or_report_plainly` degrade rather than fail.
 *   **Whether step 3's confirmation writes `intent` verbatim or the summary.** The summary is the
     agent's words; the intent is the user's. `project.set_intent` takes one string.
 *   **How cancel behaves at each step.** Nothing is created until submit, per the maintainer, so
