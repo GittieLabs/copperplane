@@ -13,6 +13,7 @@ const loadConversationMock = vi.fn()
 const appendConversationTurnMock = vi.fn()
 const getCapabilitiesMock = vi.fn()
 const getConfigMock = vi.fn()
+const findProjectsInDirectoryMock = vi.fn()
 const updateConfigMock = vi.fn()
 const shellOpenMock = vi.fn()
 const listOpenBoardsMock = vi.fn()
@@ -51,6 +52,13 @@ async function renderAppOpen(projectName?: string) {
 
 vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
   writeText: (...args: unknown[]) => writeTextMock(...args),
+}))
+
+vi.mock('./lib/kicadProject', async () => ({
+  // Only this one is stubbed: the module's other exports are used by real
+  // panels these tests render, and replacing the whole module removed them.
+  ...(await vi.importActual<typeof import('./lib/kicadProject')>('./lib/kicadProject')),
+  findProjectsInDirectory: (...args: unknown[]) => findProjectsInDirectoryMock(...args),
 }))
 
 vi.mock('./lib/ipc', () => ({
@@ -216,6 +224,7 @@ beforeEach(() => {
   // tests exercise the app rather than the welcome screen. The first-run
   // tests below set this deliberately.
   getConfigMock.mockReset().mockResolvedValue({ onboarding_completed: true })
+  findProjectsInDirectoryMock.mockReset().mockResolvedValue({ directory: '', projects: [], count: 0 })
   updateConfigMock.mockReset().mockImplementation(async (patch: object) => ({ ...patch }))
 })
 
@@ -574,13 +583,13 @@ describe('App: Enclosure tab persists across area switches', () => {
     )
   })
 
-  it('CTX-312.1: "Link to folder…" links the real picked directory and saves it', async () => {
+  it('CTX-312.1: "Set folder…" saves the real picked directory and names it a folder', async () => {
     pickProjectDirectoryMock.mockResolvedValueOnce('/real/PCBs/test-project')
 
     await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Choose project folder…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Set folder…' }))
 
     await waitFor(() =>
       expect(saveProjectMock).toHaveBeenCalledWith(
@@ -590,11 +599,11 @@ describe('App: Enclosure tab persists across area switches', () => {
     // Once a folder exists the header stops printing its path and offers to
     // copy it instead -- the path is long and was only clutter.
     await waitFor(() =>
-      within(screen.getByTestId('project-header')).getByRole('button', { name: 'Copy project path' }),
+      within(screen.getByTestId('project-header')).getByRole('button', { name: 'Copy folder path' }),
     )
     // CTX-312.2: real user feedback -- a successful link/save previously
     // gave no visible confirmation at all, reading as "nothing happened."
-    screen.getByText('Linked to /real/PCBs/test-project')
+    screen.getByText('Project folder set to /real/PCBs/test-project')
   })
 
   it('CTX-312.1: cancelling the folder picker never calls saveProject', async () => {
@@ -603,7 +612,7 @@ describe('App: Enclosure tab persists across area switches', () => {
     await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Choose project folder…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Set folder…' }))
 
     await waitFor(() => expect(pickProjectDirectoryMock).toHaveBeenCalled())
     expect(saveProjectMock).not.toHaveBeenCalled()
@@ -894,7 +903,7 @@ describe('App: the project header', () => {
       kicad_project_path: '/elsewhere/Blinky/Blinky.kicad_pro',
     })
     await renderAppOpen()
-    await waitFor(() => screen.getByText('test-project'))
+    await waitFor(() => screen.getByTestId('project-header'))
     return within(screen.getByTestId('project-header'))
   }
 
@@ -914,17 +923,24 @@ describe('App: the project header', () => {
   })
 
   it('does not print the project folder path at all', async () => {
+    /** "we should change this to not show the path of the project and use a
+     *  copy project path button" -- still the rule. SPEC-337 adds a Project
+     *  folder line, and it names the folder rather than printing its path. */
     const header = await renderLinked()
 
     expect(header.queryByText('/real/PCBs/test-project')).toBeNull()
-    expect(header.getByRole('button', { name: 'Copy project path' })).toBeTruthy()
+    // The folder line names the folder; the full path is only its tooltip.
+    const folderLine = header.getByTestId('project-folder')
+    expect(folderLine.textContent).toContain('test-project')
+    expect(folderLine.textContent).not.toContain('/real/PCBs')
+    expect(header.getByRole('button', { name: 'Copy folder path' })).toBeTruthy()
   })
 
   it('copies the project folder path', async () => {
     writeTextMock.mockResolvedValue(undefined)
     const header = await renderLinked()
 
-    fireEvent.click(header.getByRole('button', { name: 'Copy project path' }))
+    fireEvent.click(header.getByRole('button', { name: 'Copy folder path' }))
 
     await waitFor(() => expect(writeTextMock).toHaveBeenCalledWith('/real/PCBs/test-project'))
     await waitFor(() => header.getByText('Copied'))
@@ -942,7 +958,7 @@ describe('App: the project header', () => {
     loadProjectMock.mockResolvedValue({ name: 'test-project', directory: '/real/PCBs/test-project' })
     await renderAppOpen()
 
-    await waitFor(() => screen.getByText('test-project'))
+    await waitFor(() => screen.getByTestId('project-header'))
     const header = within(screen.getByTestId('project-header'))
     expect(header.getByText('none yet')).toBeTruthy()
     expect(header.getByRole('button', { name: 'Link' })).toBeTruthy()
@@ -954,8 +970,8 @@ describe('App: the project header', () => {
 
     await waitFor(() => screen.getByText('test-project'))
     const header = within(screen.getByTestId('project-header'))
-    expect(header.getByRole('button', { name: 'Choose project folder…' })).toBeTruthy()
-    expect(header.queryByRole('button', { name: 'Copy project path' })).toBeNull()
+    expect(header.getByRole('button', { name: 'Set folder…' })).toBeTruthy()
+    expect(header.queryByRole('button', { name: 'Copy folder path' })).toBeNull()
   })
 
   it('has no Save Project button -- every field persists as it changes', async () => {
@@ -1091,7 +1107,7 @@ describe('App: an unlinked project says what is unavailable', () => {
     await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
-    await waitFor(() => screen.getByText(/No KiCad project linked, so board and schematic checks/))
+    await waitFor(() => screen.getByText(/No KiCad project .* is linked, so board and schematic checks/))
     expect(screen.getByRole('button', { name: 'Link one' })).toBeTruthy()
   })
 
@@ -1102,7 +1118,7 @@ describe('App: an unlinked project says what is unavailable', () => {
     await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
-    expect(screen.queryByText(/No KiCad project linked/)).toBeNull()
+    expect(screen.queryByText(/No KiCad project .* is linked/)).toBeNull()
   })
 
   it('cannot be dismissed into silence', async () => {
@@ -1112,7 +1128,7 @@ describe('App: an unlinked project says what is unavailable', () => {
     await renderAppOpen()
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
-    await waitFor(() => screen.getByText(/No KiCad project linked/))
+    await waitFor(() => screen.getByText(/No KiCad project .* is linked/))
     expect(screen.queryByRole('button', { name: /Dismiss|Ignore/ })).toBeNull()
   })
 })
@@ -1306,5 +1322,162 @@ describe('App: finishing setup does not revert what setup just did', () => {
     const [patch] = updateConfigMock.mock.calls[0]
     expect(patch).not.toHaveProperty('provider_roles')
     expect(patch).not.toHaveProperty('llm_provider')
+  })
+})
+
+/** CTX-337.1: two links, two names.
+ *
+ *  Reported from the built app: the maintainer set a project folder, was told
+ *  "Linked to /Users/.../Hello_World_Blinky" in green, and reasonably read
+ *  that as the KiCad project being linked -- while the header said "none yet"
+ *  and a banner said nothing was linked. All three statements were true. */
+describe('App: naming the two project links', () => {
+  beforeEach(() => {
+    // Reset explicitly: the "offers, never links" test asserts over every
+    // saveProject call, and calls leaking from the preceding test made it
+    // fail against a link that test had legitimately performed.
+    saveProjectMock.mockReset()
+    pickProjectDirectoryMock.mockReset()
+    loadProjectMock.mockReset()
+    listProjectsMock.mockReset().mockResolvedValue(['test-project'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    loadConversationMock.mockReset().mockResolvedValue([])
+    getCapabilitiesMock.mockReset().mockResolvedValue({
+      kicad_available: true, kicad_socket_path_checked: '/s', freecad_available: true,
+      freecad_path_checked: '/f', freecad_error: null, kicad_cli_available: true,
+      kicad_cli_path_checked: '/k', kicad_cli_path_source: 'install', kicad_cli_error: null,
+      llm_providers: ['anthropic'], log_path: '/l', python_version: '3.11.9',
+      storage_root: '/s', github_token_configured: false, configured_secret_refs: [],
+    })
+  })
+
+  async function openProjectWithNoKicad() {
+    loadProjectMock.mockResolvedValue({ name: 'test-project' })
+    await renderAppOpen()
+    await waitFor(() => screen.getByTestId('project-header'))
+  }
+
+  it('never uses the word "linked" for a folder', async () => {
+    /** The whole defect in one assertion. Setting a folder said "Linked
+     *  to <path>", which is true about the folder and reads as the other. */
+    pickProjectDirectoryMock.mockResolvedValue('/real/PCBs/blinky')
+    saveProjectMock.mockImplementation(async (p: object) => p)
+    await openProjectWithNoKicad()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set folder…' }))
+
+    expect(await screen.findByText(/Project folder set to \/real\/PCBs\/blinky/)).toBeTruthy()
+    expect(screen.queryByText(/Linked to \/real\/PCBs\/blinky/)).toBeNull()
+  })
+
+  it('states both links separately, so neither can be read as the other', async () => {
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      directory: '/real/PCBs/blinky',
+      kicad_project_path: '/real/PCBs/blinky/Blinky.kicad_pro',
+    })
+    await renderAppOpen()
+    await waitFor(() => screen.getByTestId('project-header'))
+    const header = within(screen.getByTestId('project-header'))
+
+    expect(header.getByText(/Linked KiCad project:/)).toBeTruthy()
+    expect(header.getByText(/Project folder:/)).toBeTruthy()
+    // Shown by name with the extension stripped, as kicadProjectName does.
+    expect(header.getByText('Blinky')).toBeTruthy()
+    expect(header.getByText('blinky')).toBeTruthy()
+  })
+
+  it('says which link the banner is about', async () => {
+    /** It fires on kicad_project_path alone, and a folder may well be set --
+     *  which is what made "No KiCad project linked" read as contradictory. */
+    loadProjectMock.mockResolvedValue({ name: 'test-project', directory: '/real/PCBs/blinky' })
+    await renderAppOpen()
+
+    expect(await screen.findByText(/A project folder is a different setting/)).toBeTruthy()
+  })
+
+  it('offers the KiCad project found in a folder that was just set', async () => {
+    pickProjectDirectoryMock.mockResolvedValue('/real/PCBs/blinky')
+    saveProjectMock.mockImplementation(async (p: object) => p)
+    findProjectsInDirectoryMock.mockResolvedValue({
+      directory: '/real/PCBs/blinky',
+      projects: ['/real/PCBs/blinky/Blinky.kicad_pro'],
+      count: 1,
+    })
+    await openProjectWithNoKicad()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set folder…' }))
+
+    expect(await screen.findByText(/That folder contains a KiCad project/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Link Blinky' }))
+
+    await waitFor(() =>
+      expect(saveProjectMock).toHaveBeenCalledWith(
+        expect.objectContaining({ kicad_project_path: '/real/PCBs/blinky/Blinky.kicad_pro' }),
+      ),
+    )
+  })
+
+  it('offers, and does not link on its own', async () => {
+    /** Settled with the maintainer: offered, never assumed. Setting a folder
+     *  must not perform a second consequential write. */
+    pickProjectDirectoryMock.mockResolvedValue('/real/PCBs/blinky')
+    saveProjectMock.mockImplementation(async (p: object) => p)
+    findProjectsInDirectoryMock.mockResolvedValue({
+      directory: '/real/PCBs/blinky',
+      projects: ['/real/PCBs/blinky/Blinky.kicad_pro'],
+      count: 1,
+    })
+    await openProjectWithNoKicad()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set folder…' }))
+    await screen.findByText(/That folder contains a KiCad project/)
+
+    for (const [saved] of saveProjectMock.mock.calls) {
+      expect(saved).not.toHaveProperty('kicad_project_path', '/real/PCBs/blinky/Blinky.kicad_pro')
+    }
+  })
+
+  it('offers nothing when the folder holds no KiCad project', async () => {
+    /** A project folder legitimately has no KiCad files yet -- SPEC-304's own
+     *  reason for the two fields being separate. */
+    pickProjectDirectoryMock.mockResolvedValue('/real/PCBs/empty')
+    saveProjectMock.mockImplementation(async (p: object) => p)
+    await openProjectWithNoKicad()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set folder…' }))
+
+    expect(await screen.findByText(/Project folder set to/)).toBeTruthy()
+    expect(screen.queryByText(/That folder contains/)).toBeNull()
+  })
+
+  it('does not offer when a KiCad project is already linked', async () => {
+    pickProjectDirectoryMock.mockResolvedValue('/real/PCBs/blinky')
+    saveProjectMock.mockImplementation(async (p: object) => p)
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      kicad_project_path: '/elsewhere/Other.kicad_pro',
+    })
+    await renderAppOpen()
+    await waitFor(() => screen.getByTestId('project-header'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set folder…' }))
+
+    await screen.findByText(/Project folder set to/)
+    expect(findProjectsInDirectoryMock).not.toHaveBeenCalled()
+  })
+
+  it('sets the folder even if scanning it fails', async () => {
+    /** The folder is what the user asked for; a failed scan is not worth
+     *  turning that into a visible error. */
+    pickProjectDirectoryMock.mockResolvedValue('/real/PCBs/blinky')
+    saveProjectMock.mockImplementation(async (p: object) => p)
+    findProjectsInDirectoryMock.mockRejectedValue(new Error('permission denied'))
+    await openProjectWithNoKicad()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set folder…' }))
+
+    expect(await screen.findByText(/Project folder set to/)).toBeTruthy()
+    expect(screen.queryByText(/permission denied/)).toBeNull()
   })
 })

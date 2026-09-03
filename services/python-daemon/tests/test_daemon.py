@@ -3565,3 +3565,73 @@ class TestToolPathsApplyWithoutARestart(unittest.TestCase):
         """Rust's very first request goes through this route; a changed
         response shape would break the handshake."""
         self.assertEqual(daemon.configure_daemon(secrets={}), {"configured": True})
+
+
+class TestFindProjectsInDirectory(unittest.TestCase):
+    """SPEC-337: setting a project folder can offer the KiCad project inside it.
+
+    The folder the maintainer set held exactly one `.kicad_pro` and the app
+    said nothing about it, leaving a project that read as linked and generated
+    an enclosure with no mounting posts.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _touch(self, name):
+        path = os.path.join(self.tmp.name, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as handle:
+            handle.write("(kicad_project)")
+        return path
+
+    def test_001_finds_the_one_project_in_a_folder(self):
+        expected = self._touch("Hello_World_Blinky.kicad_pro")
+        self._touch("Hello_World_Blinky.kicad_pcb")
+        self._touch("Hello_World_Blinky.kicad_sch")
+
+        out = daemon.kicad_find_projects_in_directory(self.tmp.name)
+
+        self.assertEqual(out["projects"], [expected])
+        self.assertEqual(out["count"], 1)
+
+    def test_002_a_folder_with_none_is_a_real_answer_not_an_error(self):
+        """A project folder legitimately has no KiCad files yet -- SPEC-304's
+        own reason for `directory` existing separately."""
+        out = daemon.kicad_find_projects_in_directory(self.tmp.name)
+
+        self.assertEqual(out["projects"], [])
+        self.assertEqual(out["count"], 0)
+
+    def test_003_several_are_all_returned_sorted(self):
+        b = self._touch("b_board.kicad_pro")
+        a = self._touch("a_board.kicad_pro")
+
+        out = daemon.kicad_find_projects_in_directory(self.tmp.name)
+
+        self.assertEqual(out["projects"], [a, b])
+
+    def test_004_does_not_descend_into_subdirectories(self):
+        """A .kicad_pro two levels down is not "the KiCad project in this
+        folder", and walking an arbitrary tree turns a folder pick into an
+        unbounded scan of whatever was selected."""
+        self._touch(os.path.join("nested", "deep.kicad_pro"))
+
+        out = daemon.kicad_find_projects_in_directory(self.tmp.name)
+
+        self.assertEqual(out["projects"], [])
+
+    def test_005_a_directory_that_is_a_file_is_rejected_clearly(self):
+        path = self._touch("not_a_dir.kicad_pro")
+
+        with self.assertRaises(ValueError) as caught:
+            daemon.kicad_find_projects_in_directory(path)
+
+        self.assertIn("Not a directory", str(caught.exception))
+
+    def test_006_the_route_is_registered_and_async(self):
+        """It lists a directory the user just chose, which is disk I/O on a
+        path of unknown size."""
+        self.assertIn("kicad.find_projects_in_directory", daemon.ROUTES)
+        self.assertIn("kicad.find_projects_in_directory", daemon.ASYNC_ROUTES)

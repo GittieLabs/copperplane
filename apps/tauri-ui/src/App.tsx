@@ -38,6 +38,7 @@ import { Overview } from './components/Overview'
 import { PartDetail } from './components/PartDetail'
 import { Rail } from './components/Rail'
 import { NewProjectWizard } from './components/NewProjectWizard'
+import { findProjectsInDirectory } from './lib/kicadProject'
 import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
 import { Welcome } from './components/Welcome'
@@ -89,6 +90,16 @@ type View =
   // a real, separate top-level view rather than folding it into `project`.
   | { kind: 'partDetail'; partId: string }
   | null
+
+/** A project folder shown by its own name, for the same reason the
+ *  `.kicad_pro` beside it is: "we should change this to not show the path of
+ *  the project and use a copy project path button". The full path stays in the
+ *  tooltip and on the copy button. */
+function folderName(directory?: string | null): string | null {
+  if (!directory) return null
+  const parts = directory.split('/').filter(Boolean)
+  return parts[parts.length - 1] ?? directory
+}
 
 /** A .kicad_pro shown by name. The full path is a tooltip: it is long, it is
  *  rarely what a user is checking, and it pushed everything else off the row. */
@@ -317,16 +328,46 @@ function App() {
     setView((prev) => (prev?.kind === 'project' ? { ...prev, area } : prev))
   }
 
-  async function handleLinkDirectory() {
+  /* SPEC-337: this sets the project FOLDER. It does not link a KiCad project,
+     and it no longer says "Linked to <path>" -- which was true, and was read
+     as the other link, by the person who wrote both specs. */
+  async function handleSetProjectFolder() {
     if (!currentProject) return
     setProjectActionError(null)
     setProjectActionMessage(null)
+    setFolderOffer(null)
     try {
       const directory = await pickProjectDirectory()
       if (!directory) return
       const saved = await saveProject({ ...currentProject, directory })
       setCurrentProject(saved)
-      setProjectActionMessage(`Linked to ${directory}`)
+      setProjectActionMessage(`Project folder set to ${directory}`)
+
+      // Offered, never assumed (SPEC-337 §2). A second consequential write
+      // from one choice is exactly what this app has been trimming out.
+      if (!saved.kicad_project_path) {
+        try {
+          const found = await findProjectsInDirectory(directory)
+          if (found.count > 0) setFolderOffer(found.projects)
+        } catch {
+          // A failed scan is not worth a visible error: the folder was set,
+          // which is what the user asked for, and the banner still says a
+          // KiCad project is missing.
+        }
+      }
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /* Links a `.kicad_pro` the folder scan found, without a second file dialog. */
+  async function handleLinkFoundProject(path: string) {
+    if (!currentProject) return
+    setFolderOffer(null)
+    try {
+      const saved = await saveProject({ ...currentProject, kicad_project_path: path })
+      setCurrentProject(saved)
+      setProjectActionMessage(`KiCad project linked: ${kicadProjectName(path) ?? path}`)
     } catch (err) {
       setProjectActionError(err instanceof Error ? err.message : String(err))
     }
@@ -336,6 +377,9 @@ function App() {
   // it in Finder, or to hand to a tool. Copying beats a clickable path that
   // silently opens a dialog, which is what this used to be.
   const [copiedPath, setCopiedPath] = useState(false)
+  /* SPEC-337: `.kicad_pro` files found in a just-set project folder, offered
+     for linking. `null` when there is nothing to offer. */
+  const [folderOffer, setFolderOffer] = useState<string[] | null>(null)
 
   // Linking the .kicad_pro is also offered on the Schematic tab; doing it from
   // the header saves the same field through the same route. The project view
@@ -578,8 +622,9 @@ function App() {
             {currentProject && !currentProject.kicad_project_path && (
               <div className="flex w-full max-w-4xl items-center justify-between gap-3 rounded border border-warning/40 bg-warning/5 px-3 py-2 text-xs">
                 <span className="text-warning">
-                  No KiCad project linked, so board and schematic checks, the component list and the
-                  enclosure cannot run.
+                  No KiCad project (<code>.kicad_pro</code>) is linked, so board and schematic
+                  checks, the component list and the enclosure cannot run. A project folder is a
+                  different setting and does not replace this.
                 </span>
                 <button
                   type="button"
@@ -602,6 +647,8 @@ function App() {
                 <p className="truncate text-xl font-semibold text-fg-bright">
                   {currentProject?.name ?? 'Untitled project'}
                 </p>
+                {/* SPEC-337: two links, two names, both stated. "Linked" is
+                    now used only for the KiCad project; a folder is "set". */}
                 <p className="flex items-center gap-2 text-xs text-fg-muted">
                   <span className="truncate" title={currentProject?.kicad_project_path ?? undefined}>
                     Linked KiCad project:{' '}
@@ -633,23 +680,34 @@ function App() {
                   >
                     Close project
                   </button>
-                  {currentProject?.directory ? (
+                </p>
+                <p className="flex items-center gap-2 text-xs text-fg-muted">
+                  <span
+                    data-testid="project-folder"
+                    className="truncate"
+                    title={currentProject?.directory ?? undefined}
+                  >
+                    Project folder:{' '}
+                    <span className="text-fg-secondary">
+                      {folderName(currentProject?.directory) ?? 'none yet'}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded border border-line px-1 text-fg-tertiary hover:bg-surface-alt hover:text-fg-bright disabled:opacity-50"
+                    onClick={() => void handleSetProjectFolder()}
+                    disabled={!currentProject}
+                  >
+                    {currentProject?.directory ? 'Change folder…' : 'Set folder…'}
+                  </button>
+                  {currentProject?.directory && (
                     <button
                       type="button"
                       className="shrink-0 rounded border border-line px-1 text-fg-tertiary hover:bg-surface-alt hover:text-fg-bright"
                       onClick={() => void handleCopyProjectPath()}
                       title={currentProject.directory}
                     >
-                      {copiedPath ? 'Copied' : 'Copy project path'}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="shrink-0 rounded border border-line px-1 text-fg-tertiary hover:bg-surface-alt hover:text-fg-bright disabled:opacity-50"
-                      onClick={() => void handleLinkDirectory()}
-                      disabled={!currentProject}
-                    >
-                      Choose project folder…
+                      {copiedPath ? 'Copied' : 'Copy folder path'}
                     </button>
                   )}
                 </p>
@@ -662,6 +720,38 @@ function App() {
                   anything a dedicated route had written since (SPEC-333).
                   Every field now persists at the moment it changes. */}
             </div>
+            {/* SPEC-337: the folder that was just set contains a KiCad
+                project. Offered in one click; never linked automatically. */}
+            {folderOffer && folderOffer.length > 0 && (
+              <div className="flex w-full max-w-4xl flex-col gap-2 rounded border border-line bg-surface-alt/50 px-3 py-2 text-xs">
+                <span className="text-fg-secondary">
+                  {folderOffer.length === 1
+                    ? 'That folder contains a KiCad project. Link it too?'
+                    : `That folder contains ${folderOffer.length} KiCad projects. Link one?`}
+                </span>
+                <span className="flex flex-wrap items-center gap-2">
+                  {folderOffer.map((path) => (
+                    <button
+                      key={path}
+                      type="button"
+                      className="rounded border border-line px-2 py-1 text-fg-secondary hover:bg-surface-alt hover:text-fg-bright"
+                      onClick={() => void handleLinkFoundProject(path)}
+                      title={path}
+                    >
+                      Link {kicadProjectName(path) ?? path}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="text-fg-muted hover:text-fg-secondary"
+                    onClick={() => setFolderOffer(null)}
+                  >
+                    Not now
+                  </button>
+                </span>
+              </div>
+            )}
+
             {projectActionError && (
               <p className="w-full max-w-4xl text-xs text-danger">{projectActionError}</p>
             )}
