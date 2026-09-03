@@ -155,6 +155,15 @@ except Exception:
     kicad_cli = None
 
 try:
+    import footprint_detail
+except Exception:
+    logger.exception(
+        "footprint_detail failed to import -- kicad.describe_footprint will be unavailable"
+    )
+    _note_degraded("footprint_detail", "kicad.describe_footprint")
+    footprint_detail = None
+
+try:
     import kicad_board
 except Exception:
     logger.exception(
@@ -1189,6 +1198,40 @@ def _explain_or_report_plainly(findings: list, check_type: str, **kwargs) -> dic
         }
 
 
+def kicad_describe_footprint(footprint_id: str) -> dict:
+    """The kicad.describe_footprint route (SPEC-334).
+
+    What a footprint actually is, read from its own `.kicad_mod`. A user
+    choosing between `P2.54mm_Vertical` and `P2.00mm_Horizontal` cannot tell
+    them apart from the names, and the file already says: *"Through hole
+    straight pin header, 1x04, 2.54mm pitch, single row"*.
+
+    No LLM and no network -- every field is read off disk, so it is instant and
+    can be trusted literally. Adds the courtyard and 3D-model facts
+    `resolve_footprint_model` already knows, since "will this fit in my
+    enclosure" and "can I see it in 3D" are the same question a user is asking
+    when they open this.
+
+    Async: resolves through `fp_lib_table` and reads files per call.
+    """
+    if footprint_detail is None or kicad_bridge is None:
+        raise RuntimeError(
+            "Describing a footprint requires footprint_detail and kicad_bridge, which failed "
+            "to import."
+        )
+
+    resolved = kicad_bridge.resolve_footprint_model(footprint_id)
+    detail = footprint_detail.describe_footprint(footprint_id, resolved.get("footprint_path"))
+    return {
+        **detail,
+        "footprint_found": resolved.get("footprint_found", False),
+        "courtyard": resolved.get("courtyard"),
+        "model_ref": resolved.get("model_ref"),
+        "model_path": resolved.get("model_path"),
+        "has_model": bool(resolved.get("model_path")),
+    }
+
+
 def kicad_check_schematic_parity(pcb_path: str) -> dict:
     """The kicad.check_schematic_parity route (SPEC-326 2.7).
 
@@ -1946,6 +1989,7 @@ def _build_routes() -> dict:
         "kicad.list_schematic_components": kicad_list_schematic_components,
         "kicad.component_envelopes": kicad_component_envelopes,
         "kicad.check_schematic_parity": kicad_check_schematic_parity,
+        "kicad.describe_footprint": kicad_describe_footprint,
         "kicad.list_board_components": kicad_list_board_components,
     }
     if get_kicad_version is not None:
@@ -2070,6 +2114,8 @@ ASYNC_ROUTES = {
     "kicad.component_envelopes",
     # SPEC-326 2.7: runs `kicad-cli pcb drc --schematic-parity`, a subprocess.
     "kicad.check_schematic_parity",
+    # SPEC-334: resolves through fp_lib_table and reads files per call.
+    "kicad.describe_footprint",
     # SPEC-326 2.7: reads the board file, then the footprint libraries per
     # component -- the same per-component library work the schematic reader does.
     "kicad.list_board_components",
