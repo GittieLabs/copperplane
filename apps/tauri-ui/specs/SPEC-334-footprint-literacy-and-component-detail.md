@@ -1,7 +1,7 @@
 ---
 id: SPEC-334
 title: "Footprint Literacy & Component Detail"
-status: Draft
+status: In-Progress
 type: Feature
 created: 2026-09-02
 last_updated: 2026-09-03
