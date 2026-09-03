@@ -8,7 +8,7 @@ last_updated: 2026-08-13
 target_version: v0.1.0
 location: "services/python-daemon/specs/SPEC-109-parametric-enclosure-generator.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
-child_specs: []
+child_specs: ["SPEC-111-board-retention-standoffs.md"]
 user_facing: true
 ---
 
