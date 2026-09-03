@@ -1237,10 +1237,14 @@ check saying what it would have caught and whether a maker should care.
 
 Still open, and what this spec is for:
 
-*   **Mirroring KiCad's own tab structure** — Violations / Unconnected / Schematic Parity / Ignored.
-    The maintainer suggested it and was unsure; the current build uses one findings list plus a
-    collapsible for ignored tests. Worth deciding once there is more than one kind of finding on a
-    real board to look at.
+*   ~~**Mirroring KiCad's own tab structure**~~ — Violations / Unconnected / Schematic Parity /
+    Ignored. **Decided against, 2026-09-03, for the board review and the schematic review alike:**
+    *"since some tabs could be left empty, we chose a different option ... we are not using it in
+    the board review either."* `ViolationsList` names each kind KiCad actually reported in one
+    sentence with counts, shows one findings list, and collapses the switched-off checks. A
+    category with nothing in it does not appear at all, where an empty tab would sit there inviting
+    a click. Recorded in `SPEC-332` §2, including the residual risk: a reader cannot filter to one
+    kind, and if that becomes a complaint the answer is filtering the one list, not tabs.
 *   **Jumping to a finding.** The mm position is shown; nothing uses it. KiCad's own dialog
     centres the view on a double-click, and `kipy` could plausibly do the same when KiCad is open.
 *   ~~**A glossary that is not a hard-coded list.**~~ Fine for the dozen terms KiCad's DRC actually

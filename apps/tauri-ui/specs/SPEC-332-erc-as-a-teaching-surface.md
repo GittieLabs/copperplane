@@ -58,11 +58,13 @@ user_facing: true
     spec at all is a fair question, and the honest answer is that the *first* item is the one worth
     the work: everything else is a paragraph of copy.
 
-    **Delivered in `CTX-332.1` on 2026-09-03**, and it was exactly that size: one line in
-    `kicad_check_schematic`, nine glossary entries, and **no UI change at all** — `SchematicAdvisor`
-    already renders through `ViolationsList`. The three §2 open questions about presentation
-    (mirroring KiCad's tab structure, whether a schematic coordinate is worth showing, whether the
-    glossaries share a module) are untouched and remain open; nothing here needed them answered.
+    **Delivered in `CTX-332.1` on 2026-09-03.** Nearly that size: one line in
+    `kicad_check_schematic`, nine glossary entries, and no change to the findings list, because
+    `SchematicAdvisor` already renders through `ViolationsList`. One correction to that claim —
+    `included_severities` reached the daemon and was neither typed nor rendered, so the third
+    omission was only half-closed until a `SeverityFilter` line was added. Of the three §2
+    presentation questions, the tab-structure one is now settled (above); the other two remain
+    open and nothing here needed them answered.
 
 *   **KiCad already hands us what is missing.** An ERC report's own top-level keys are
     `ignored_checks`, `included_severities`, `sheets`, `source`, `kicad_version`,
@@ -128,9 +130,30 @@ user_facing: true
     board. A schematic coordinate is a sheet plus an x/y, which is meaningful only if the user can
     act on it — and without `kipy` there is no way to move KiCad's view. Decide whether to show it
     at all, or to name the component and pin instead, which is what a person actually searches for.
-*   **Whether to mirror KiCad's own tab structure** (Violations / Unconnected / Parity / Ignored).
-    Left open since `SPEC-332` was first sketched, and still undecided; the current build uses one
-    findings list plus a collapsible for ignored tests.
+*   ~~**Whether to mirror KiCad's own tab structure**~~ (Violations / Unconnected / Parity /
+    Ignored). **Settled: no — and it was already settled in the board review, which this spec had
+    not noticed.** The maintainer, 2026-09-03: *"we addressed the tab issue in the board review
+    solution. since some tabs could be left empty, we chose a different option ... we are not using
+    it in the board review either."*
+
+    What the board review does instead, in `ViolationsList`:
+
+    1.  **A single sentence naming each kind KiCad actually reported, with counts** — *"KiCad
+        reports 0 design-rule violations, 18 unconnected items, and 4 schematic mismatches"* —
+        rendered only when there is more than one kind to name. A category with nothing in it
+        simply does not appear, where an empty tab would sit there inviting a click.
+    2.  **One findings list**, all kinds together, each finding carrying its own severity and
+        location.
+    3.  **A collapsible for the checks that were switched off.**
+
+    This works for ERC unchanged, and works *because* it is category-agnostic: ERC has one kind of
+    finding rather than three, so the counts sentence stays silent and nothing looks missing. Tabs
+    would have needed a decision about what to show in three empty ones.
+
+    **The residual risk this leaves**, worth naming rather than declaring solved: a reader cannot
+    filter to one kind. On a board with 18 unconnected items and 1 violation, the violation is in
+    the same list as everything else. If that becomes a real complaint, filtering the one list is
+    the answer, not tabs.
 *   **Whether `included_severities` is worth surfacing.** The report says which severities it was
     asked for; a result filtered to errors only, presented as "no problems", would be a lie of the
     same shape as the ignored-checks gap this spec exists to close.

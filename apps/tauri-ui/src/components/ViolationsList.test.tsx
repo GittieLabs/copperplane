@@ -101,13 +101,17 @@ describe('ViolationsList: tests KiCad did not run', () => {
  *  ViolationsList -- so these render with no component change at all. */
 describe('ViolationsList: an ERC result', () => {
   const ercResult = {
+    source_path: '/p/Blinky.kicad_sch',
     summary: 'One pin is not connected.',
     violations: [
       {
         severity: 'error',
         description: 'Pin not connected',
+        type: 'pin_not_connected',
         sheet_path: '/',
         items: [{ description: 'Symbol #PWR03 Pin 1 [Power input, Line]' }],
+        explanation: '',
+        suggested_fix: '',
       },
     ],
     truncated_count: 0,
@@ -136,5 +140,39 @@ describe('ViolationsList: an ERC result', () => {
     render(<ViolationsList result={ercResult} />)
 
     expect(screen.getByText(/Symbol #PWR03 Pin 1/)).toBeTruthy()
+  })
+})
+
+/** SPEC-332: a check filtered to one severity, presented as clean, is the same
+ *  lie as a clean result from a test that was switched off. */
+describe('ViolationsList: which severities were included', () => {
+  const base = {
+    source_path: '/p/Blinky.kicad_sch',
+    summary: 'Nothing found.',
+    violations: [],
+    truncated_count: 0,
+  }
+
+  it('says so when warnings were not looked for', () => {
+    render(<ViolationsList result={{ ...base, included_severities: ['error'] }} />)
+
+    expect(screen.getByText(/only looked for error/)).toBeTruthy()
+    expect(screen.getByText(/does not mean there is nothing to see/)).toBeTruthy()
+  })
+
+  it('stays silent on an ordinary full run', () => {
+    /** Saying "errors and warnings were included" on every clean run is noise,
+     *  and noise is how a real warning gets ignored. */
+    render(
+      <ViolationsList result={{ ...base, included_severities: ['error', 'warning', 'exclusion'] }} />,
+    )
+
+    expect(screen.queryByText(/only looked for/)).toBeNull()
+  })
+
+  it('stays silent when the report does not say', () => {
+    render(<ViolationsList result={base} />)
+
+    expect(screen.queryByText(/only looked for/)).toBeNull()
   })
 })

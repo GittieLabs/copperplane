@@ -42,6 +42,8 @@ export function ViolationsList({
         </p>
       ) : null}
 
+      <SeverityFilter severities={result.included_severities} />
+
       <IgnoredChecks checks={result.ignored_checks} />
 
       {result.violations.length === 0 ? (
@@ -153,6 +155,29 @@ function WhereItIs({ items }: { items?: ViolationItem[] }) {
  *
  *  Collapsed by default so it never competes with real findings, but the
  *  count and any that matter are visible without opening it. */
+/** SPEC-332: what the check was NOT asked to look for.
+ *
+ *  KiCad can run a check filtered to one severity. A result that found no
+ *  errors, presented as "no problems", is then the same lie as a clean result
+ *  from a test that was switched off -- which is the failure `IgnoredChecks`
+ *  below already exists to prevent, one level up.
+ *
+ *  Silent in the ordinary case. Saying "errors and warnings were included" on
+ *  every clean run is noise, and noise is how a real warning gets ignored. */
+function SeverityFilter({ severities }: { severities?: string[] }) {
+  if (!severities || severities.length === 0) return null
+  const missing = ['error', 'warning'].filter((s) => !severities.includes(s))
+  if (missing.length === 0) return null
+
+  return (
+    <p className="text-xs text-warning">
+      This check only looked for {severities.join(' and ')} —{' '}
+      {missing.join(' and ')} {missing.length === 1 ? 'was' : 'were'} not included, so a clean
+      result here does not mean there is nothing to see.
+    </p>
+  )
+}
+
 function IgnoredChecks({ checks }: { checks?: { key: string; description: string }[] }) {
   if (!checks || checks.length === 0) return null
 

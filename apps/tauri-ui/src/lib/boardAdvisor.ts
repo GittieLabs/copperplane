@@ -42,6 +42,11 @@ export interface CheckResult {
   /** Checks KiCad did NOT run. A board can look clean because a test is
    *  switched off, and that setting is usually inherited rather than chosen. */
   ignored_checks?: { key: string; description: string }[]
+  /** SPEC-332: which severities the check was actually asked for. A run
+   *  filtered to errors only, presented as "no problems", is the same lie as
+   *  a clean result from a check that was switched off. Optional: an older
+   *  report has neither. */
+  included_severities?: string[]
 }
 
 export interface BoardCandidate {
