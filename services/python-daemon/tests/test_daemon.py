@@ -3635,3 +3635,38 @@ class TestFindProjectsInDirectory(unittest.TestCase):
         path of unknown size."""
         self.assertIn("kicad.find_projects_in_directory", daemon.ROUTES)
         self.assertIn("kicad.find_projects_in_directory", daemon.ASYNC_ROUTES)
+
+
+class TestProjectListInRootRoute(unittest.TestCase):
+    """CTX-110.2: what a storage root holds, without switching to it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _project(self, name):
+        path = os.path.join(self.tmp.name, "projects", name)
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, "project.json"), "w") as handle:
+            json.dump({"name": name}, handle)
+
+    def test_001_reports_the_projects_at_a_root_it_is_not_configured_for(self):
+        self._project("Hello Blinky")
+        self._project("test 1")
+
+        out = daemon.project_list_in_root(self.tmp.name)
+
+        self.assertEqual(out["projects"], ["Hello Blinky", "test 1"])
+        self.assertEqual(out["count"], 2)
+        self.assertEqual(out["root"], self.tmp.name)
+
+    def test_002_an_empty_or_missing_root_is_a_count_of_zero(self):
+        self.assertEqual(daemon.project_list_in_root("/definitely/not/here")["count"], 0)
+        self.assertEqual(daemon.project_list_in_root(self.tmp.name)["count"], 0)
+
+    def test_003_is_registered_and_async(self):
+        """It lists a directory the user just chose, which may be a network
+        mount -- unlike project.list, whose path is always the configured
+        local root."""
+        self.assertIn("project.list_in_root", daemon.ROUTES)
+        self.assertIn("project.list_in_root", daemon.ASYNC_ROUTES)

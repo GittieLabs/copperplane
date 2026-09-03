@@ -577,6 +577,7 @@ function App() {
         {(view === null || view?.kind === 'noProject') && (
           <NoProjectLanding
             projects={projects}
+            storageRoot={capabilities?.storage_root ?? null}
             loading={projectsLoading}
             onCreateProject={() => setView({ kind: 'newProject' })}
             onOpenProject={handleSelectProject}

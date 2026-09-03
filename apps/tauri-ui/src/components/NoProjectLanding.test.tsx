@@ -122,3 +122,56 @@ describe('NoProjectLanding', () => {
     expect(container.textContent).not.toMatch(/docs\.copperplane|copperplane\.(io|dev|com)/)
   })
 })
+
+/** CTX-110.2: an empty list and a list pointed at the wrong folder look
+ *  identical, and the maintainer hit the second one. */
+describe('NoProjectLanding: where it is looking', () => {
+  it('says where it looked when the list is empty', () => {
+    render(
+      <NoProjectLanding
+        projects={[]}
+        storageRoot="/Users/k/Library/Application Support/copperplane/storage"
+        onCreateProject={() => {}}
+        onOpenProject={() => {}}
+      />,
+    )
+
+    expect(screen.getByText(/Looking in .*copperplane\/storage/)).toBeTruthy()
+    expect(screen.getByText(/change the storage location in Settings/)).toBeTruthy()
+  })
+
+  it('says nothing about where it looked when projects were found', () => {
+    /** The question only arises when the answer is empty. */
+    render(
+      <NoProjectLanding
+        projects={['alpha']}
+        storageRoot="/some/root"
+        onCreateProject={() => {}}
+        onOpenProject={() => {}}
+      />,
+    )
+
+    expect(screen.queryByText(/Looking in/)).toBeNull()
+  })
+
+  it('does not guess a location it was not given', () => {
+    render(<NoProjectLanding projects={[]} onCreateProject={() => {}} onOpenProject={() => {}} />)
+
+    expect(screen.queryByText(/Looking in/)).toBeNull()
+    expect(screen.getByText(/No projects yet/)).toBeTruthy()
+  })
+
+  it('does not claim an empty list while still loading', () => {
+    render(
+      <NoProjectLanding
+        projects={[]}
+        storageRoot="/some/root"
+        loading
+        onCreateProject={() => {}}
+        onOpenProject={() => {}}
+      />,
+    )
+
+    expect(screen.queryByText(/Looking in/)).toBeNull()
+  })
+})

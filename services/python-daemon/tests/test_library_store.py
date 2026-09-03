@@ -1924,3 +1924,65 @@ class TestDatasheetFilename(LibraryStoreTestCase):
 
         self.assertEqual(out, "/cached.pdf")
         fetch.assert_called_once()
+
+
+class TestListProjectsAtAnArbitraryRoot(unittest.TestCase):
+    """CTX-110.2: counting projects at a root the daemon is not configured for.
+
+    Changing the storage root replaces the entire project list in one action,
+    because a project is in the list if and only if a folder holding
+    `project.json` sits in `<root>/projects/`. The confirmation can only name
+    what will disappear if it can look at a root that is not the active one.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _project(self, root, name):
+        path = os.path.join(root, "projects", name)
+        os.makedirs(path, exist_ok=True)
+        with open(os.path.join(path, "project.json"), "w") as handle:
+            json.dump({"name": name}, handle)
+
+    def test_001_lists_projects_under_a_root_that_was_never_configured(self):
+        self._project(self.tmp.name, "Hello Blinky")
+        self._project(self.tmp.name, "test 1")
+
+        self.assertEqual(
+            store.list_projects_at(self.tmp.name), ["Hello Blinky", "test 1"]
+        )
+
+    def test_002_a_root_that_does_not_exist_is_empty_not_an_error(self):
+        """"Nothing there yet" is a real and common answer -- a user pointing
+        at a fresh folder is the normal case, not a failure."""
+        self.assertEqual(store.list_projects_at("/definitely/not/here"), [])
+
+    def test_003_a_folder_with_no_projects_subdirectory_is_empty(self):
+        self.assertEqual(store.list_projects_at(self.tmp.name), [])
+
+    def test_004_creates_nothing_at_the_root_it_is_asked_about(self):
+        """`list_projects` goes through `_ensure_dir`, which is right for the
+        active root and wrong for a folder the user is merely considering:
+        making a `projects/` directory inside it would be a side effect of
+        asking a question."""
+        store.list_projects_at(self.tmp.name)
+
+        self.assertEqual(os.listdir(self.tmp.name), [])
+
+    def test_005_a_folder_without_project_json_is_not_a_project(self):
+        os.makedirs(os.path.join(self.tmp.name, "projects", "not-a-project"))
+
+        self.assertEqual(store.list_projects_at(self.tmp.name), [])
+
+    def test_006_the_configured_listing_goes_through_the_same_filter(self):
+        """So anything that later changes what counts as a listed project --
+        SPEC-333's removal flag -- applies to both."""
+        store.configure(storage_root=self.tmp.name)
+        self.addCleanup(store.configure, storage_root=None)
+        self._project(self.tmp.name, "Configured")
+
+        self.assertEqual(store.list_projects(), ["Configured"])
+        self.assertEqual(
+            store.list_projects(), store.list_projects_at(self.tmp.name)
+        )

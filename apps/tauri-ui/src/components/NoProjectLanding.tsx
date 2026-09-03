@@ -16,11 +16,15 @@ import { GITHUB_REPO_URL, openExternal } from '../lib/externalLinks'
  *  same state rather than two that merely look alike. */
 export function NoProjectLanding({
   projects,
+  storageRoot,
   loading = false,
   onCreateProject,
   onOpenProject,
 }: {
   projects: string[]
+  /** Where the app is looking for projects. An empty list and a list pointed
+   *  at the wrong folder look identical without it. */
+  storageRoot?: string | null
   loading?: boolean
   onCreateProject: () => void
   /** Opens a named project. The first version of this took no argument and
@@ -96,10 +100,21 @@ export function NoProjectLanding({
       )}
 
       {!loading && projectCount === 0 && (
-        <p className="text-xs text-fg-muted">
-          No projects yet. Creating one links it to a KiCad project you already have — Copperplane
-          does not make the schematic for you.
-        </p>
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-fg-muted">
+            No projects yet. Creating one links it to a KiCad project you already have — Copperplane
+            does not make the schematic for you.
+          </p>
+          {/* CTX-110.2: an empty list and a list looking in the wrong place
+              are indistinguishable, and the maintainer hit the second one.
+              Saying where it looked is the difference. */}
+          {storageRoot && (
+            <p className="break-all text-xs text-fg-faint">
+              Looking in {storageRoot}. Projects live in this folder — if yours are elsewhere,
+              change the storage location in Settings.
+            </p>
+          )}
+        </div>
       )}
 
       <button

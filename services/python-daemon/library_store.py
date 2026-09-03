@@ -1214,12 +1214,38 @@ def update_thread_turn(scope: str, scope_id: str, turn_id: str, updates: dict) -
     raise SchemaValidationError(f"No turn '{turn_id}' found in thread '{scope}:{scope_id}'.")
 
 
-def list_projects() -> list:
-    projects_root = _ensure_dir("projects")
+def list_projects_at(root: str) -> list:
+    """Every project under an arbitrary storage root, without configuring it.
+
+    CTX-110.2: a project is in the list if and only if a folder holding
+    `project.json` sits in `<root>/projects/` -- there is no registry, so
+    changing the storage root replaces the whole project list in one action.
+    The Settings confirmation needs to name the projects that will stop
+    appearing, which means counting them at BOTH the old root and a root the
+    daemon has never been configured for.
+
+    Deliberately does not create anything. `list_projects` goes through
+    `_ensure_dir`, which is right for the active root and wrong for a folder
+    the user is merely considering: making a `projects/` directory inside it
+    would be a side effect of asking a question.
+
+    A root that does not exist, or holds no `projects/`, is an empty list --
+    not an error. "Nothing there yet" is a real and common answer.
+    """
+    projects_root = os.path.join(root, "projects")
+    if not os.path.isdir(projects_root):
+        return []
     return sorted(
         entry for entry in os.listdir(projects_root)
         if os.path.isfile(os.path.join(projects_root, entry, "project.json"))
     )
+
+
+def list_projects() -> list:
+    # Through the same filter, so anything that later changes what counts as
+    # a listed project -- SPEC-333's removal flag -- applies to both.
+    _ensure_dir("projects")
+    return list_projects_at(_root())
 
 
 def open_project_from_directory(directory: str) -> dict:
