@@ -1236,7 +1236,7 @@ typed is not** — a review that reads someone's own inputs back to them is wors
 because it looks like analysis. Implemented in `CTX-331.1`: the agent now receives a `fit` block
 measured per request from closed files, and the panel is back on.
 
-#### SPEC-330 — Standoffs the Board Actually Mounts To — not yet written, backlog
+#### SPEC-111 — Board Retention: Standoffs the Board Actually Mounts To — written 2026-09-03
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-109, SPEC-311
 
@@ -1251,9 +1251,19 @@ passes through the hole. The render is faithful — the geometry really is like 
 
 What a real enclosure has instead: a standoff bored for a screw, with the screw passing through the
 board's hole into it, or a moulded boss that enters the hole to locate the board. Either makes the
-holes read as mounted rather than empty. Neither exists yet, and `SPEC-109` §1's non-goals
-explicitly ruled out fastener hardware — so this is a deliberate scope re-opening, not an oversight
-to be quietly patched.
+holes read as mounted rather than empty.
+
+**Correction, 2026-09-03.** This entry previously said `SPEC-109` §1's non-goals "explicitly ruled
+out fastener hardware — so this is a deliberate scope re-opening, not an oversight to be quietly
+patched." That is the opposite of what `SPEC-109` says. Its non-goal is *"Not fastener hardware
+**selection**. Standoffs get a hole sized for a screw diameter parameter; choosing a specific screw,
+heat-set insert, or lid-latching mechanism is out of scope."* — and its §2 lists the inputs as
+"per-hole standoff height/**screw diameter**". The bore was always in scope; only choosing hardware
+was out. Neither the bore nor the screw-diameter parameter was ever built, so this is an
+unimplemented part of `SPEC-109`, and this roadmap entry had recorded the omission as a deliberate
+decision. Written up as `SPEC-111`, which also renumbers it: `330` is a `3xx` id meaning
+`apps/tauri-ui`, and this work is FreeCAD geometry in `services/python-daemon`, beside `SPEC-109`
+itself.
 
 Also worth settling here: the standoff diameter currently comes from the hole's own
 `diameter_mm`, which makes the post exactly as wide as the hole it is meant to sit under.
