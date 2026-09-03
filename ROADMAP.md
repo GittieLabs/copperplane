@@ -1078,6 +1078,19 @@ closed files; all three of the maintainer's other boards were also out of sync. 
 Remaining: placeholder geometry in the 3D view (`CTX-326.4`), and the open source-of-truth question
 of whether envelopes should be read from the board instead.
 
+#### Small: the wizard's review step repeats itself — reported 2026-09-03
+
+*Module:* `apps/tauri-ui` · *Owner spec:* SPEC-335
+
+Step 4 of the new-project wizard, with no KiCad project linked, prints *"No KiCad project linked,
+so this cannot run"* once under each of its four checks. Honest, and four identical sentences read
+as a wall rather than as an explanation. One statement above the list, with the checks simply
+greyed, would say the same thing once.
+
+Noticed while verifying `SPEC-336`'s skip path, which is why it is logged here rather than fixed in
+that change: it is copy on a surface `SPEC-335` owns, and worth doing when something else touches
+the wizard.
+
 #### SPEC-337 — Two Things Called "Linked" — not yet written, reported from the app
 
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-325, SPEC-312
