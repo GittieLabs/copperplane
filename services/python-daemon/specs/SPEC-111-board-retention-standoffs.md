@@ -14,6 +14,22 @@ user_facing: true
 
 # SPEC-111: Board Retention: Standoffs the Board Actually Mounts To
 
+> **Deferred by the maintainer on 2026-09-03, the day it was written.** After running the
+> enclosure review against a properly linked project he reported: *"The standoffs are created. The
+> issue is that they don't show through the mount holes. I no longer want to work on the standoffs
+> issue. This is a minor display issue."*
+>
+> That is a correct reading of the severity and it also confirms this spec's premise: the posts
+> generate, and nothing passes through the holes, because they are solid cylinders stopping flush
+> at the board's underside. Everything below stays accurate and unbuilt. The spec is kept rather
+> than closed because the underlying defect is real — a board sitting on posts it cannot be
+> fastened to — and because the reason it went unbuilt is now recorded rather than rediscovered.
+>
+> Worth knowing before picking this up: his first attempt to see the problem produced an enclosure
+> with **no posts at all**, because the project had a folder linked but no `.kicad_pro` (see
+> `SPEC-337` in `ROADMAP.md`). From the 3D view, "no standoffs generated" and "standoffs with
+> nothing through the holes" look identical.
+
 ## 1. Executive Summary & Goals
 
 *   **High-Level Goal:** Make a generated enclosure's standoffs something a board can actually be

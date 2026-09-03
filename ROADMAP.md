@@ -1276,7 +1276,7 @@ typed is not** — a review that reads someone's own inputs back to them is wors
 because it looks like analysis. Implemented in `CTX-331.1`: the agent now receives a `fit` block
 measured per request from closed files, and the panel is back on.
 
-#### SPEC-111 — Board Retention: Standoffs the Board Actually Mounts To — written 2026-09-03
+#### SPEC-111 — Board Retention: Standoffs the Board Actually Mounts To — written 2026-09-03, deferred by the maintainer the same day
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-109, SPEC-311
 
