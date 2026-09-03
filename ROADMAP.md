@@ -1204,7 +1204,11 @@ Still open, and what this spec is for:
 *   **Jumping to a finding.** The mm position is shown; nothing uses it. KiCad's own dialog
     centres the view on a double-click, and `kipy` could plausibly do the same when KiCad is open.
 *   **A glossary that is not a hard-coded list.** Fine for the dozen terms KiCad's DRC actually
-    emits; wrong if it grows into a general PCB dictionary.
+    emits; wrong if it grows into a general PCB dictionary. Answered on 2026-09-03 for the naming
+    vocabulary, under `SPEC-334`/`CTX-334.2`: package families come from KiCad's own `Package_*`
+    libraries and the variants are decoded compositionally, so 33 entries plus 11 prefix letters
+    explain 88.0% of the 15,433 footprints KiCad ships. Still a hard-coded list for the DRC terms
+    in `kicadGlossary.ts`, which remains the right shape for a dozen fixed strings.
 *   **The same treatment for ERC**, which has its own vocabulary and its own ignored-test set.
 
 #### SPEC-331 — Enclosure Fit Review — not yet written, disabled in the app
