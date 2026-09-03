@@ -1,6 +1,6 @@
 ---
 id: SPEC-333
-title: "Project Save Semantics & Rename"
+title: "Project Lifecycle: Save Semantics, Rename & Removal"
 status: Draft
 type: Feature
 created: 2026-09-02
@@ -12,12 +12,19 @@ child_specs: []
 user_facing: true
 ---
 
-# SPEC-333: Project Save Semantics & Rename
+# SPEC-333: Project Lifecycle: Save Semantics, Rename & Removal
 
 ## 1. Executive Summary & Goals
 
-*   **High-Level Goal:** Make saving a project safe when anything else has written to it, and make
-    renaming one a real, supported action instead of a way to end up with two of them.
+*   **High-Level Goal:** Make the three things a person does to a project record — save it, rename
+    it, remove it from the list — real, supported actions rather than ways to end up with two
+    projects, one wrong one, or no way to tidy up.
+
+> **The save half is resolved, 2026-09-02.** The Save Project button was deleted rather than fixed:
+> *"I still don't believe we need a Save project button. We should save the project at project
+> creation time and have all other edits update as things change."* Every field now persists at the
+> moment it changes, so there is no stale snapshot left to write. §1's save analysis is kept as the
+> record of why. **Rename and removal remain.**
 
 *   **Business / Technical Value:** Both problems are reproduced, not predicted, and one of them
     got materially worse this week.
@@ -52,7 +59,16 @@ user_facing: true
     A user who renames gets a duplicate in their project list, and an old entry that loads with a
     name its own folder contradicts.
 
+*   **Removing a project from the list, without deleting anything.** Requested by the maintainer
+    on 2026-09-03: *"I believe we need a way to 'soft delete' a project. All this should do is
+    remove from the project list in the app."* Today a project is in the list if and only if a
+    folder holding `project.json` sits in `<storage_root>/projects/` — `library_store.list_projects`
+    is exactly that `os.listdir`. There is no way to tidy an experiment out of the list short of
+    deleting files by hand outside the app, which is both destructive and invisible to it.
+
 *   **Non-Goals:**
+    *   **Deleting a user's files.** "Soft" is the whole request. Nothing this spec adds removes a
+        board, an export, or a project folder from disk.
     *   Multi-user or concurrent editing. One person, one machine; the race here is between two
         code paths in the same app, not two people.
     *   A general undo/version history for projects. `export_history` records exports and is not
@@ -61,6 +77,21 @@ user_facing: true
         do — `load_project`'s "moved, renamed, or deleted" error already covers the aftermath.
 
 ## 2. System Architecture & Design Choices
+
+*Open questions removal must settle:*
+
+*   **Where "removed" is recorded.** A flag in the project's own `project.json` keeps one record in
+    one place and travels with the folder, which is consistent with `SPEC-312`'s portability. A
+    list in `config.json` keeps the user's own files untouched but makes the state machine-local,
+    so a project hidden on one machine reappears on another.
+*   **How it comes back.** `project.open_from_directory` already exists for restoring a project
+    from a folder (`CTX-312.3`), which is a natural undo if removal is a flag: pointing at the
+    folder again clears it. Settle whether that is the whole story or whether the list needs its
+    own "show removed" view.
+*   **What the confirmation says.** It must state plainly that nothing is deleted, because the word
+    a user brings to this is "delete" and being wrong about that in either direction is bad: a user
+    who thinks files are gone loses trust, and one who thinks they are safe when they are not loses
+    work.
 
 *Open questions this spec must settle, before implementation:*
 
