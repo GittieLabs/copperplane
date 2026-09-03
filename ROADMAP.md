@@ -1211,11 +1211,11 @@ Still open, and what this spec is for:
     in `kicadGlossary.ts`, which remains the right shape for a dozen fixed strings.
 *   **The same treatment for ERC**, which has its own vocabulary and its own ignored-test set.
 
-#### SPEC-331 — Enclosure Fit Review — not yet written, disabled in the app
+#### [SPEC-331](apps/tauri-ui/specs/SPEC-331-enclosure-fit-review.md) — Enclosure Fit Review — Draft
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-326, SPEC-319
 
-`SPEC-319` mounted a Run Review panel on the Enclosure tab. It is switched off as of 2026-09-02,
+`SPEC-319` mounted a Run Review panel on the Enclosure tab. It was switched off on 2026-09-02,
 showing `NotBuiltPlaceholder` rather than a button, at the maintainer's call: *"I don't even know
 what the run review check is supposed to show for the enclosure."*
 
@@ -1231,8 +1231,10 @@ The fix is not a patch: `SPEC-326` built a strictly better source that reads **c
 envelopes and an honest measured/stated/unknown split. Repointing the enclosure agent at it makes
 the review work with KiCad closed *and* gives it better data than it ever had. That is this spec.
 
-Worth settling here too: what a fit review should actually say. "Your box is 16mm and BT1 needs 20mm"
-is useful; restating the parameters the user just typed is not.
+Settled: **"your box is 16mm and BT1 needs 20mm" is useful; restating the parameters the user just
+typed is not** — a review that reads someone's own inputs back to them is worse than silence,
+because it looks like analysis. Implemented in `CTX-331.1`: the agent now receives a `fit` block
+measured per request from closed files, and the panel is back on.
 
 #### SPEC-330 — Standoffs the Board Actually Mounts To — not yet written, backlog
 

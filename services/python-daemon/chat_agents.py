@@ -414,6 +414,80 @@ def _check_status_note(project: dict, area: str) -> str:
     )
 
 
+def _enclosure_fit_note(project: dict) -> dict:
+    """What the parts on the board actually need, measured now.
+
+    The enclosure agent used to get `kicad.get_component_heights`, which went
+    through `kipy` and needed KiCad RUNNING; it was removed on 2026-09-02 after
+    it starved the review of its tool rounds, leaving the agent with no
+    physical board data at all. `SPEC-326`'s `component_envelopes` reads
+    CLOSED files and returns better data than that tool ever had.
+
+    Measured per request rather than read from `last_results`, for the same
+    reason the ERC/DRC block is: a stored number goes stale the moment the user
+    changes anything, and re-running the review would keep showing the old
+    answer. The generated parameters are still read from storage -- they are a
+    record of a real generate, not a measurement.
+
+    Every failure is reported as itself. "We could not measure" and "it fits"
+    must never look the same.
+    """
+    pro_path = project.get("kicad_project_path")
+    if not pro_path:
+        return {
+            "measured": False,
+            "reason": "No KiCad project is linked, so nothing about this board can be measured. "
+                      "This is NOT a statement that anything fits.",
+        }
+
+    try:
+        files = kicad_project.resolve_project(pro_path)
+        board = files["pcb_path"] or files["schematic_path"]
+        if not board:
+            return {
+                "measured": False,
+                "reason": "The linked KiCad project has no board or schematic yet, so there is "
+                          "nothing to measure. This is NOT a statement that anything fits.",
+            }
+        # Imported here, not at module scope: `daemon` imports this module, so
+        # a top-level import would be circular. The measurement itself composes
+        # kicad_board, kicad_bridge and freecad_bridge and belongs there --
+        # re-implementing it here to avoid the cycle would be worse.
+        import daemon
+
+        envelopes = daemon.kicad_component_envelopes(
+            sch_path=files["schematic_path"], pcb_path=files["pcb_path"],
+            height_overrides=project.get("component_heights") or {},
+        )
+    except Exception as exc:  # noqa: BLE001 -- reported, never mistaken for a fit
+        logger.warning("enclosure fit measurement failed for %s: %s", pro_path, exc)
+        return {
+            "measured": False,
+            "reason": f"The board could not be measured ({exc}). This is NOT a statement that "
+                      "anything fits.",
+        }
+
+    tallest = envelopes.get("tallest")
+    return {
+        "measured": True,
+        "measured_from": envelopes.get("measured_from"),
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "min_interior_height_mm": envelopes.get("min_interior_height_mm"),
+        "tallest_component": tallest,
+        "components_measured": envelopes.get("measured"),
+        "components_with_supplied_height": envelopes.get("stated"),
+        # SPEC-326 SS2.3: a component with no known height is NOT counted in the
+        # minimum above, so the real one may be taller. Any fit claim made while
+        # this is non-zero is provisional, and the agent is told so.
+        "components_with_no_known_height": envelopes.get("unknown"),
+        "note": (
+            "Heights come from each footprint's own 3D model, or a height the user supplied. "
+            "Components with no known height are not counted in the minimum, so the real "
+            "minimum may be taller."
+        ),
+    }
+
+
 def _assemble_context(area: str, scope: str, scope_id: str, project_name: str | None) -> str:
     """Builds the real, per-area context block SPEC-318 §2.3 describes
     each chat agent as already having up front -- prepended to the
@@ -453,7 +527,11 @@ def _assemble_context(area: str, scope: str, scope_id: str, project_name: str | 
     else:  # enclosure
         context = {
             "project_intent": project.get("intent"),
+            # A record of a real generate, so genuinely useful -- but written
+            # when the enclosure was generated, which can lag the form the user
+            # is looking at. Said plainly rather than implied.
             "enclosure_parameters": (project.get("last_results") or {}).get("enclosure"),
+            "fit": _enclosure_fit_note(project),
         }
     return json.dumps(context, sort_keys=True, default=str)
 
@@ -824,6 +902,84 @@ _UNEXPLAINED_PREFIX = (
 )
 
 
+def _findings_from_fit_alone(scope_id: str, project_name: str | None) -> list | None:
+    """The enclosure's measured fit, as a finding, with no model prose.
+
+    Same contract as `_findings_from_check_alone` one area over: the
+    measurement is deterministic and has already run, so a model that answers
+    unreadably should not cost the user the numbers.
+
+    It matters more here than it does for a board check. A weak model asked to
+    review an enclosure will happily invent one -- a real captured response
+    described "a USB connector with a height of 4.7mm" on a board that has no
+    USB connector, alongside a wall thickness and standoff height that were
+    never generated. A deterministic finding is not just a fallback; it is the
+    floor under a surface whose whole purpose is to avoid confident advice from
+    no data (SPEC-331 §1).
+    """
+    real_project_name, _, _ = scope_id.partition(":")
+    try:
+        project = library_store.load_project(project_name or real_project_name)
+    except Exception:  # noqa: BLE001 -- nothing to fall back on
+        return None
+
+    fit = _enclosure_fit_note(project)
+    if not fit.get("measured"):
+        # Not a fit verdict, and not silently a clean one either.
+        return [{
+            "severity": "warning",
+            "title": "The enclosure could not be checked",
+            "detail": fit.get("reason", "The board could not be measured."),
+            "sources": [],
+            "general_practice": False,
+            "area": "enclosure",
+        }]
+
+    needed = fit.get("min_interior_height_mm")
+    unknown = fit.get("components_with_no_known_height") or 0
+    params = (project.get("last_results") or {}).get("enclosure") or {}
+    generated = params.get("height_mm")
+    tallest = (fit.get("tallest_component") or {}).get("reference")
+
+    findings = []
+    if needed is not None and generated is not None:
+        short = generated < needed
+        findings.append({
+            "severity": "warning" if short else "info",
+            "title": ("The enclosure is shorter than the parts need"
+                      if short else "The enclosure clears the parts that have been measured"),
+            "detail": (
+                f"The last enclosure generated is {generated}mm inside, and the tallest measured "
+                f"part{f' ({tallest})' if tallest else ''} needs {needed}mm."
+            ),
+            "sources": [], "general_practice": False, "area": "enclosure",
+        })
+    elif needed is not None:
+        findings.append({
+            "severity": "info",
+            "title": "No enclosure has been generated yet",
+            "detail": (
+                f"The parts on this board need at least {needed}mm of interior height"
+                f"{f', set by {tallest}' if tallest else ''}. Generate an enclosure to compare."
+            ),
+            "sources": [], "general_practice": False, "area": "enclosure",
+        })
+
+    if unknown:
+        # SPEC-326 SS2.3: unmeasured parts are not in the minimum, so no fit
+        # claim above is final while this is non-zero.
+        findings.append({
+            "severity": "warning",
+            "title": f"{unknown} component{'s' if unknown != 1 else ''} have no known height",
+            "detail": (
+                "They are not counted in the minimum above, so the real minimum may be taller. "
+                "Supply a height for them on the Schematic tab to firm this up."
+            ),
+            "sources": [], "general_practice": False, "area": "enclosure",
+        })
+    return findings
+
+
 def _findings_from_check_alone(area: str, scope_id: str, project_name: str | None) -> list | None:
     """The check's own findings, as review findings, with no model prose.
 
@@ -837,6 +993,8 @@ def _findings_from_check_alone(area: str, scope_id: str, project_name: str | Non
     That case is a real error and is raised by the caller, because it is the
     one where the board really has not been assessed.
     """
+    if area == "enclosure":
+        return _findings_from_fit_alone(scope_id, project_name)
     if area not in _CHECK_AREA_LABELS:
         return None
 

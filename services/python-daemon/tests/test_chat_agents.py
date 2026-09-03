@@ -1386,3 +1386,173 @@ class TestFindingsWithoutDelimiters(unittest.TestCase):
 
     def test_007_malformed_json_is_not_invented_into_a_finding(self):
         self.assertEqual(chat_agents._extract_findings("[{severity: nope}]"), [])
+
+
+class TestEnclosureFitNote(ChatAgentsTestCase):
+    """SPEC-331. The enclosure agent's one data tool needed KiCad running and
+    was removed on 2026-09-02, leaving it with no physical board data at all.
+    It now gets a `fit` block measured per request from closed files -- and,
+    like the ERC/DRC block, never a stored number that goes stale the moment
+    the user changes something."""
+
+    _FILES = {"schematic_path": "/p/s.kicad_sch", "pcb_path": "/p/b.kicad_pcb"}
+    _ENVELOPES = {
+        "measured_from": "board", "measured": 9, "stated": 0, "unknown": 5,
+        "min_interior_height_mm": 15.515,
+        "tallest": {"reference": "R2", "z_mm": 15.515, "source": "model"},
+    }
+
+    def _note(self, project, envelopes=None, resolve=None):
+        import daemon
+        with patch.object(chat_agents.kicad_project, "resolve_project",
+                          side_effect=resolve, return_value=self._FILES) if resolve else \
+             patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES):
+            with patch.object(daemon, "kicad_component_envelopes",
+                              return_value=envelopes if envelopes is not None else self._ENVELOPES):
+                return chat_agents._enclosure_fit_note(project)
+
+    def test_001_a_linked_board_is_measured_now(self):
+        note = self._note({"kicad_project_path": "/p/p.kicad_pro"})
+
+        self.assertTrue(note["measured"])
+        self.assertEqual(note["min_interior_height_mm"], 15.515)
+        self.assertIn("checked_at", note)
+
+    def test_002_it_names_the_component_that_sets_the_minimum(self):
+        note = self._note({"kicad_project_path": "/p/p.kicad_pro"})
+
+        self.assertEqual(note["tallest_component"]["reference"], "R2")
+        self.assertEqual(note["tallest_component"]["source"], "model")
+
+    def test_003_unmeasured_components_are_reported(self):
+        """SPEC-326 §2.3: they are not counted in the minimum, so any fit claim
+        made while this is non-zero is provisional."""
+        note = self._note({"kicad_project_path": "/p/p.kicad_pro"})
+
+        self.assertEqual(note["components_with_no_known_height"], 5)
+        self.assertIn("may be taller", note["note"])
+
+    def test_004_no_linked_project_is_not_a_fit_verdict(self):
+        note = chat_agents._enclosure_fit_note({"name": "P"})
+
+        self.assertFalse(note["measured"])
+        self.assertIn("NOT a statement that anything fits", note["reason"])
+
+    def test_005_a_project_with_no_board_or_schematic_is_not_a_fit_verdict(self):
+        with patch.object(chat_agents.kicad_project, "resolve_project",
+                          return_value={"schematic_path": None, "pcb_path": None}):
+            note = chat_agents._enclosure_fit_note({"kicad_project_path": "/p/p.kicad_pro"})
+
+        self.assertFalse(note["measured"])
+        self.assertIn("NOT a statement that anything fits", note["reason"])
+
+    def test_006_a_failed_measurement_is_not_a_fit_verdict(self):
+        """"We could not measure" and "it fits" must never look the same."""
+        with patch.object(chat_agents.kicad_project, "resolve_project",
+                          side_effect=OSError("kicad-cli not found")):
+            note = chat_agents._enclosure_fit_note({"kicad_project_path": "/p/p.kicad_pro"})
+
+        self.assertFalse(note["measured"])
+        self.assertIn("could not be measured", note["reason"])
+        self.assertIn("NOT a statement that anything fits", note["reason"])
+
+    def test_007_the_generated_parameters_still_reach_the_agent(self):
+        """They are a record of a real generate, not a measurement -- kept."""
+        store.save_project({
+            "name": "P", "kicad_project_path": None,
+            "last_results": {"enclosure": {"height_mm": 20, "wall_thickness_mm": 2}},
+        })
+        context = json.loads(
+            chat_agents._assemble_context("enclosure", "project", "P:enclosure", None)
+        )
+
+        self.assertEqual(context["enclosure_parameters"]["height_mm"], 20)
+        self.assertIn("fit", context)
+
+    def test_008_the_prompt_promises_no_tool_the_agent_lacks(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "agentflow", "agents",
+                            "chat_enclosure.prompt.md")
+        with open(path, encoding="utf-8") as f:
+            body = f.read()
+
+        self.assertNotIn("kicad.get_component_heights", body)
+        # And it must say what governs the strength of a fit answer.
+        self.assertIn("components_with_no_known_height", body)
+
+
+class TestEnclosureFitFallback(ChatAgentsTestCase):
+    """A model that answers unreadably must not cost the user the measurement.
+
+    This matters more on the enclosure than on a board check. A real captured
+    response from a weak model reviewed an enclosure by describing "a USB
+    connector with a height of 4.7mm" on a board that has none, alongside a
+    wall thickness and standoff height that were never generated. A
+    deterministic finding is the floor under a surface whose whole point is to
+    avoid confident advice from no data."""
+
+    _FIT = {
+        "measured": True, "min_interior_height_mm": 20.0,
+        "tallest_component": {"reference": "BT1", "z_mm": 20.0, "source": "user"},
+        "components_with_no_known_height": 4,
+    }
+
+    def _fallback(self, fit=None, last_results=None):
+        store.save_project({"name": "P", "last_results": last_results or {}})
+        with patch.object(chat_agents, "_enclosure_fit_note", return_value=fit or self._FIT):
+            return chat_agents._findings_from_fit_alone("P:enclosure", "P")
+
+    def test_001_a_box_shorter_than_the_parts_is_flagged(self):
+        out = self._fallback(last_results={"enclosure": {"height_mm": 16}})
+
+        self.assertEqual(out[0]["severity"], "warning")
+        self.assertIn("shorter than the parts need", out[0]["title"])
+        self.assertIn("16mm", out[0]["detail"])
+        self.assertIn("20.0mm", out[0]["detail"])
+        self.assertIn("BT1", out[0]["detail"])
+
+    def test_002_a_box_that_clears_them_is_not_a_warning(self):
+        out = self._fallback(last_results={"enclosure": {"height_mm": 25}})
+
+        self.assertEqual(out[0]["severity"], "info")
+        self.assertIn("clears the parts", out[0]["title"])
+
+    def test_003_unmeasured_parts_keep_any_fit_claim_provisional(self):
+        out = self._fallback(last_results={"enclosure": {"height_mm": 25}})
+
+        titles = [f["title"] for f in out]
+        self.assertTrue(any("no known height" in t for t in titles))
+
+    def test_004_no_generated_enclosure_says_so_rather_than_judging_one(self):
+        out = self._fallback(last_results={})
+
+        self.assertIn("No enclosure has been generated", out[0]["title"])
+        self.assertIn("20.0mm", out[0]["detail"])
+
+    def test_005_an_unmeasurable_board_is_never_a_fit_verdict(self):
+        out = self._fallback(fit={"measured": False, "reason": "No KiCad project is linked."})
+
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["severity"], "warning")
+        self.assertIn("could not be checked", out[0]["title"])
+
+    def test_006_findings_are_not_marked_general_practice(self):
+        """They come from a measurement of the user's own board."""
+        out = self._fallback(last_results={"enclosure": {"height_mm": 16}})
+
+        self.assertTrue(all(f["general_practice"] is False for f in out))
+
+    def test_007_the_review_falls_back_rather_than_erroring(self):
+        """Before this, an unreadable enclosure review raised -- there was no
+        check to fall back on. Now there is a measurement."""
+        store.save_project({"name": "P", "last_results": {"enclosure": {"height_mm": 16}}})
+
+        async def fake_dispatch(*a, **kw):
+            return {"text": "prose with no block", "tool_calls_raw": [], "model": "m", "provider": "p"}
+
+        with patch.object(chat_agents, "_dispatch", side_effect=fake_dispatch), \
+             patch.object(chat_agents.tool_registry, "build_tool_registry", return_value={}), \
+             patch.object(chat_agents, "_enclosure_fit_note", return_value=self._FIT):
+            findings = chat_agents.review("project", "P:enclosure", "enclosure", project_name="P")
+
+        self.assertTrue(findings)
+        self.assertIn("shorter than the parts need", findings[0]["title"])
