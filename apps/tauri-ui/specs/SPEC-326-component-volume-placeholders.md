@@ -8,7 +8,8 @@ last_updated: 2026-09-01
 target_version: v0.4.0
 location: "apps/tauri-ui/specs/SPEC-326-component-volume-placeholders.md"
 parent_spec: "SPEC-311-enclosure-refinement-interactive-preview.md"
-child_specs: []
+child_specs:
+  - "SPEC-331-enclosure-fit-review.md"
 user_facing: true
 ---
 
