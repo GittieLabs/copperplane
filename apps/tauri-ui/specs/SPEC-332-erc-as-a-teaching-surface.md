@@ -16,19 +16,47 @@ user_facing: true
 
 ## 1. Executive Summary & Goals
 
-*   **High-Level Goal:** Give the schematic check the same treatment the board check already got —
-    findings that say where they are, what the jargon means, and which tests are switched off — so
-    a maker can act on an ERC result instead of reading it twice and giving up.
+*   **High-Level Goal:** Close the three specific things the schematic check does not do that the
+    board check does — surface which tests were switched off, explain ERC's own vocabulary, and
+    stop presenting a severity-filtered result as a clean one.
 
-*   **Business / Technical Value:** The board half of this shipped on 2026-09-02 and is now proven
-    end to end: DRC findings carry KiCad's own `items` (pad, net, component, and a millimetre
-    position), a static glossary expands the abbreviations without an LLM call, and
-    `ignored_checks` is surfaced with a note per check saying what it would have caught. The
-    schematic half got none of it.
+*   **Corrected before anything was built, 2026-09-03.** The first draft of this section claimed
+    *"the schematic half got none of it"*, comparing the two routes' return values:
+    `kicad_check_board` returns `violation_count`, `unconnected_count`, `parity_count` and
+    `ignored_checks`; `kicad_check_schematic` returns `violation_count` and `source_path`.
 
-    The gap is measurable, not a matter of taste. `kicad_check_board` returns `violation_count`,
-    `unconnected_count`, `parity_count` and `ignored_checks`. `kicad_check_schematic` returns
-    `violation_count` and `source_path`. That is the whole difference.
+    The maintainer's response — *"this seems like we just added to the schematic review"* — was
+    right, and checking rather than defending showed the draft was comparing the wrong thing. An
+    ERC violation **already carries its location**:
+
+    ```json
+    {"description": "Pin not connected",
+     "items": [{"description": "Symbol #PWR03 Pin 1 [Power input, Line]", "pos": {...}}],
+     "severity": "error", "type": "pin_not_connected"}
+    ```
+
+    and `_explain_or_report_plainly` / `_finding_for_agent` are **shared by both routes**, so the
+    "keep `items`, they are the component and the pin" work `CTX-326.3` did for DRC already applies
+    to ERC. The two halves are not far apart at all.
+
+*   **What is actually missing, having looked:**
+
+    1.  **`ignored_checks` is discarded.** KiCad's ERC report carries it — four entries on a clean
+        run — and `kicad_check_schematic` never reads it. A schematic reported as clean may simply
+        not have been checked for the thing that is wrong, which is the exact failure the DRC side
+        already fixed.
+    2.  **ERC's vocabulary has no glossary entries.** `kicadGlossary` covers the DRC nouns (PTH,
+        F.Cu, `Net-(X-Y)`); ERC speaks in `pin_not_connected`, `power_pin_not_driven`,
+        `lib_symbol_mismatch`, `endpoint_off_grid`. A maker reads "power pin not driven" and hunts
+        for a wiring fault that is usually not there — the schematic is right and a `PWR_FLAG` is
+        missing, which is a KiCad convention, not an electrical fact.
+    3.  **`included_severities` is discarded.** A result filtered to errors only, presented as "no
+        problems", is a lie of the same shape as the ignored-checks gap.
+
+*   **So this is a narrow change, and the spec should say so.** It is not a second teaching
+    surface; it is three specific omissions in one that already exists. Whether that deserves a
+    spec at all is a fair question, and the honest answer is that the *first* item is the one worth
+    the work: everything else is a paragraph of copy.
 
 *   **KiCad already hands us what is missing.** An ERC report's own top-level keys are
     `ignored_checks`, `included_severities`, `sheets`, `source`, `kicad_version`,
