@@ -1,10 +1,10 @@
 ---
 id: SPEC-336
 title: "First-Run Onboarding & Launch Experience"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-02
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 target_version: v0.4.0
 location: "apps/tauri-ui/specs/SPEC-336-first-run-onboarding-and-launch.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
@@ -90,6 +90,18 @@ user_facing: true
         shut.
     *   Installing KiCad or FreeCAD. Detect, let the user point at them, or stop.
     *   Rewriting Settings. Manual setup goes there; guided setup is a different, narrower path.
+
+> **Delivered in [CTX-336.1](../context/CTX-336.1-first-run-onboarding.md)** on 2026-09-03: the
+> welcome screen with a disabled Managed path, guided setup, requirement banners, the landing view,
+> and Close project. All seven §2 questions below are settled — five from evidence in the repo, two
+> by the maintainer (pre-selected provider: `anthropic`; key links: each provider's own docs, no
+> Copperplane docs site). §3's "the docs site does not exist" is therefore answered by *not linking
+> one*, not by building it.
+>
+> The click-through found two defects no test could: a primary button using an invented colour
+> token, invisible in both themes, and a config clobber that silently reverted the provider guided
+> setup had just bound. Both are worth reading in that context's Plan Drift before building another
+> surface that writes `config.json`.
 
 ## 2. System Architecture & Design Choices
 
