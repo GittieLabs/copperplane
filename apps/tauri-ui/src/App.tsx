@@ -39,7 +39,7 @@ import { PartDetail } from './components/PartDetail'
 import { Rail } from './components/Rail'
 import { NewProjectWizard } from './components/NewProjectWizard'
 import { findProjectsInDirectory } from './lib/kicadProject'
-import { listRemovedProjects, setProjectRemoved } from './lib/projects'
+import { listRemovedProjects, renameProject, setProjectRemoved } from './lib/projects'
 import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
 import { Welcome } from './components/Welcome'
@@ -234,6 +234,30 @@ function App() {
   /* SPEC-336: closing a project, which did not exist -- only switching to a
      different one did. Nothing is persisted on the way out: every project
      edit already writes through, as of SPEC-333's resolution. */
+  /* SPEC-333: moves the record rather than writing a second one. The rail,
+     the open view and the project record all key on the name, so all three
+     follow the rename rather than being reloaded from disk. */
+  async function handleRenameProject() {
+    const next = draftName.trim()
+    const current = currentProject?.name
+    if (!current || !next || next === current) {
+      setRenaming(false)
+      return
+    }
+    try {
+      const saved = await renameProject(current, next)
+      setProjects((prev) => prev.map((entry) => (entry === current ? saved : entry)).sort())
+      setCurrentProject((prev) => (prev ? { ...prev, name: saved } : prev))
+      setView((prev) => (prev?.kind === 'project' ? { ...prev, name: saved } : prev))
+      setRenaming(false)
+      setProjectActionMessage(`Renamed to ${saved}`)
+    } catch (err) {
+      // Stays in edit mode: a refused name is something to correct, not to
+      // lose. The collision message names the project already using it.
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   async function refreshRemoved() {
     try {
       setRemovedProjects(await listRemovedProjects())
@@ -421,6 +445,8 @@ function App() {
      visible route back -- a removal with no way back is a different feature,
      and a worse one. */
   const [removedProjects, setRemovedProjects] = useState<string[]>([])
+  const [renaming, setRenaming] = useState(false)
+  const [draftName, setDraftName] = useState('')
 
   // Linking the .kicad_pro is also offered on the Schematic tab; doing it from
   // the header saves the same field through the same route. The project view
@@ -688,9 +714,57 @@ function App() {
                   away, and the project folder is a copy button rather than a
                   wall of text. */}
               <div data-testid="project-header" className="flex min-w-0 flex-col gap-0.5">
-                <p className="truncate text-xl font-semibold text-fg-bright">
-                  {currentProject?.name ?? 'Untitled project'}
-                </p>
+                {/* SPEC-333: renaming happens on the name itself. A native
+                    dialog cannot take text, and a second modal to type into
+                    would be heavier than the thing it renames. */}
+                {renaming ? (
+                  <span className="flex items-center gap-2">
+                    <input
+                      aria-label="Project name"
+                      autoFocus
+                      className="min-w-0 flex-1 rounded border border-line bg-surface px-2 py-0.5 text-xl font-semibold text-fg-bright"
+                      value={draftName}
+                      onChange={(e) => setDraftName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void handleRenameProject()
+                        if (e.key === 'Escape') setRenaming(false)
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="shrink-0 rounded bg-accent px-2 py-1 text-xs font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
+                      disabled={!draftName.trim() || draftName.trim() === currentProject?.name}
+                      onClick={() => void handleRenameProject()}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="shrink-0 text-xs text-fg-muted hover:text-fg-secondary"
+                      onClick={() => setRenaming(false)}
+                    >
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2">
+                    <p className="truncate text-xl font-semibold text-fg-bright">
+                      {currentProject?.name ?? 'Untitled project'}
+                    </p>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded border border-line px-1 text-xs text-fg-tertiary hover:bg-surface-alt hover:text-fg-bright disabled:opacity-50"
+                      onClick={() => {
+                        setDraftName(currentProject?.name ?? '')
+                        setProjectActionError(null)
+                        setRenaming(true)
+                      }}
+                      disabled={!currentProject}
+                    >
+                      Rename
+                    </button>
+                  </span>
+                )}
                 {/* SPEC-337: two links, two names, both stated. "Linked" is
                     now used only for the KiCad project; a folder is "set". */}
                 <p className="flex items-center gap-2 text-xs text-fg-muted">

@@ -16,6 +16,7 @@ const getConfigMock = vi.fn()
 const findProjectsInDirectoryMock = vi.fn()
 const setProjectRemovedMock = vi.fn()
 const listRemovedProjectsMock = vi.fn()
+const renameProjectMock = vi.fn()
 const confirmRemoveProjectMock = vi.fn()
 const updateConfigMock = vi.fn()
 const shellOpenMock = vi.fn()
@@ -90,6 +91,7 @@ vi.mock('@tauri-apps/api/event', () => ({
 vi.mock('./lib/projects', () => ({
   setProjectRemoved: (...args: unknown[]) => setProjectRemovedMock(...args),
   listRemovedProjects: (...args: unknown[]) => listRemovedProjectsMock(...args),
+  renameProject: (...args: unknown[]) => renameProjectMock(...args),
   listProjects: (...args: unknown[]) => listProjectsMock(...args),
   listLibraryParts: (...args: unknown[]) => listLibraryPartsMock(...args),
   saveProject: (...args: unknown[]) => saveProjectMock(...args),
@@ -233,6 +235,7 @@ beforeEach(() => {
   findProjectsInDirectoryMock.mockReset().mockResolvedValue({ directory: '', projects: [], count: 0 })
   setProjectRemovedMock.mockReset().mockResolvedValue(undefined)
   listRemovedProjectsMock.mockReset().mockResolvedValue([])
+  renameProjectMock.mockReset().mockImplementation(async (_o: string, n: string) => n)
   confirmRemoveProjectMock.mockReset().mockResolvedValue(true)
   updateConfigMock.mockReset().mockImplementation(async (patch: object) => ({ ...patch }))
 })
@@ -1563,5 +1566,99 @@ describe('App: removing a project from the list', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Put back' }))
 
     await waitFor(() => expect(setProjectRemovedMock).toHaveBeenCalledWith('unwanted', false))
+  })
+})
+
+/** CTX-333.2: rename had a route, a store function and nine tests, and no way
+ *  to reach any of it. SPEC-333 §1's original defect: saving under a new name
+ *  wrote a SECOND pointer record and left the first. */
+describe('App: renaming a project', () => {
+  beforeEach(() => {
+    listProjectsMock.mockReset().mockResolvedValue(['alpha', 'beta'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    loadProjectMock.mockReset().mockResolvedValue({ name: 'alpha' })
+    loadConversationMock.mockReset().mockResolvedValue([])
+    getCapabilitiesMock.mockReset().mockResolvedValue({
+      kicad_available: true, kicad_socket_path_checked: '/s', freecad_available: true,
+      freecad_path_checked: '/f', freecad_error: null, kicad_cli_available: true,
+      kicad_cli_path_checked: '/k', kicad_cli_path_source: 'install', kicad_cli_error: null,
+      llm_providers: ['anthropic'], log_path: '/l', python_version: '3.11.9',
+      storage_root: '/s', github_token_configured: false, configured_secret_refs: [],
+    })
+  })
+
+  async function openAlpha() {
+    await renderAppOpen('alpha')
+    await waitFor(() => screen.getByTestId('project-header'))
+  }
+
+  it('renames in place, and the name follows everywhere it is shown', async () => {
+    await openAlpha()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'gamma' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(renameProjectMock).toHaveBeenCalledWith('alpha', 'gamma'))
+    const header = within(screen.getByTestId('project-header'))
+    expect(await header.findByText('gamma')).toBeTruthy()
+    // The rail keys on the name too, and reloading from disk to learn a name
+    // we already know would be a round trip for nothing. The selected entry
+    // carries Rail's own "> " marker, so match on the text rather than the
+    // accessible name.
+    // Rail renders the marker and the name as separate text nodes, so "> "
+    // and "gamma" never form one exact string.
+    const rail = within(screen.getByRole('navigation'))
+    expect(rail.getByText(/gamma/)).toBeTruthy()
+    expect(rail.queryByText(/alpha/)).toBeNull()
+  })
+
+  it('stays in edit mode when the name is refused, so nothing is retyped', async () => {
+    renameProjectMock.mockRejectedValue(new Error("A project named 'beta' already exists."))
+    await openAlpha()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'beta' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText(/A project named 'beta' already exists/)).toBeTruthy()
+    expect(screen.getByLabelText('Project name')).toBeTruthy()
+    expect((screen.getByLabelText('Project name') as HTMLInputElement).value).toBe('beta')
+  })
+
+  it('will not save an empty name or an unchanged one', async () => {
+    await openAlpha()
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: '   ' } })
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('cancels without renaming anything', async () => {
+    await openAlpha()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'gamma' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect(renameProjectMock).not.toHaveBeenCalled()
+    expect(within(screen.getByTestId('project-header')).getByText('alpha')).toBeTruthy()
+  })
+
+  it('saves on Enter and cancels on Escape', async () => {
+    await openAlpha()
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }))
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'gamma' } })
+
+    fireEvent.keyDown(screen.getByLabelText('Project name'), { key: 'Enter' })
+
+    await waitFor(() => expect(renameProjectMock).toHaveBeenCalledWith('alpha', 'gamma'))
+  })
+
+  it('leaves the rename editor closed until asked', async () => {
+    await openAlpha()
+
+    expect(screen.queryByLabelText('Project name')).toBeNull()
   })
 })
