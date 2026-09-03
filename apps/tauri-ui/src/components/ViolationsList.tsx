@@ -14,9 +14,15 @@ const _SEVERITY_COLOR: Record<string, string> = {
  * repeating it here. */
 export function ViolationsList({
   result,
+  kind,
   hideSourcePath = false,
 }: {
   result: CheckResult
+  /** Which check produced this. Required rather than defaulted: the ignored-
+   *  checks block names the tool and the menu path to fix it, and defaulting
+   *  to one of them would put DRC's wording on the Schematic tab -- which is
+   *  exactly what it did until this prop existed. */
+  kind: 'drc' | 'erc'
   hideSourcePath?: boolean
 }) {
   return (
@@ -44,7 +50,7 @@ export function ViolationsList({
 
       <SeverityFilter severities={result.included_severities} />
 
-      <IgnoredChecks checks={result.ignored_checks} />
+      <IgnoredChecks checks={result.ignored_checks} kind={kind} />
 
       {result.violations.length === 0 ? (
         <p className={result.unconnected_count || result.parity_count
@@ -178,15 +184,29 @@ function SeverityFilter({ severities }: { severities?: string[] }) {
   )
 }
 
-function IgnoredChecks({ checks }: { checks?: { key: string; description: string }[] }) {
+function IgnoredChecks({
+  checks,
+  kind,
+}: {
+  checks?: { key: string; description: string }[]
+  kind: 'drc' | 'erc'
+}) {
   if (!checks || checks.length === 0) return null
 
   const notable = checks.filter((c) => IGNORED_CHECK_NOTES[c.key]?.matters)
+  // Both paths read from KiCad's own binaries rather than from memory:
+  // eeschema and pcbnew each carry "Edit ignored tests", under their own
+  // checker. Getting this wrong sends a user hunting through the wrong editor.
+  const where =
+    kind === 'erc'
+      ? 'Inspect → Electrical Rules Checker → Edit ignored tests'
+      : 'Inspect → Design Rules Checker → Edit ignored tests'
+  const subject = kind === 'erc' ? 'schematic' : 'board'
 
   return (
     <details className="rounded border border-line-subtle p-2 text-xs">
       <summary className="cursor-pointer text-fg-muted">
-        {checks.length} DRC test{checks.length === 1 ? '' : 's'} switched off
+        {checks.length} {kind.toUpperCase()} test{checks.length === 1 ? '' : 's'} switched off
         {notable.length > 0 && (
           <span className="text-warning">
             {' '}— {notable.length} worth turning back on
@@ -194,9 +214,8 @@ function IgnoredChecks({ checks }: { checks?: { key: string; description: string
         )}
       </summary>
       <p className="mt-2 text-fg-tertiary">
-        KiCad did not run these, so your board can look clean because a check is off rather than
-        because it passed. Turn them on in KiCad under{' '}
-        <strong>Inspect → Design Rules Checker → Edit ignored tests</strong>.
+        KiCad did not run these, so your {subject} can look clean because a check is off rather
+        than because it passed. Turn them on in KiCad under <strong>{where}</strong>.
       </p>
       <ul className="mt-2 flex flex-col gap-2">
         {checks.map((check) => {

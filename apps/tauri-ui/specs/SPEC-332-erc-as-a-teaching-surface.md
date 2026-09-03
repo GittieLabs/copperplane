@@ -126,10 +126,24 @@ user_facing: true
     obvious: the schematic is usually correct and missing only a `PWR_FLAG`, which is a KiCad
     convention rather than an electrical fact. A maker reads "not driven" and looks for a wiring
     fault that is not there.
-*   **Whether an ERC finding can say where it is.** DRC findings carry a millimetre position on a
-    board. A schematic coordinate is a sheet plus an x/y, which is meaningful only if the user can
-    act on it — and without `kipy` there is no way to move KiCad's view. Decide whether to show it
-    at all, or to name the component and pin instead, which is what a person actually searches for.
+*   ~~**Whether an ERC finding can say where it is.**~~ **Settled: do not show a schematic
+    coordinate.** The maintainer, 2026-09-03: *"The user still needs to open the schematic to
+    review and there is not coord markings visible that would make finding the error/issue with
+    coords useful other than a general direction such as upper left so i would not add."*
+
+    Decisive, and it applies to the board too, where the coordinate *is* shown: *"we have the coord
+    show for the board review but i don't know that it is useful yet."* A millimetre position is
+    only actionable against something that displays millimetre positions. KiCad's schematic editor
+    shows no coordinate grid a reader can match against, so the number would buy a vague direction
+    and cost a line of noise on every finding.
+
+    What is shown instead is what a person actually searches for, and ERC already provides it:
+    `Symbol #PWR03 Pin 1 [Power input, Line]` — the component and the pin, matching the text KiCad's
+    own dialog shows.
+
+    **Revisit only on evidence:** if a user says the board's coordinate helped them find something,
+    the schematic's is worth reconsidering. Until then the board's own coordinate is on probation
+    rather than endorsed.
 *   ~~**Whether to mirror KiCad's own tab structure**~~ (Violations / Unconnected / Parity /
     Ignored). **Settled: no — and it was already settled in the board review, which this spec had
     not noticed.** The maintainer, 2026-09-03: *"we addressed the tab issue in the board review
