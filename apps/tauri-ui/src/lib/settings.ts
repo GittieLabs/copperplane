@@ -47,6 +47,15 @@ export type ModelRole = 'reasoning' | 'fast'
  * -- a pure TypeScript typing gap, not a missing IPC command. */
 export interface DaemonConfig {
   freecadcmd_path_override?: string | null
+  /** CTX-336.1: where `kicad-cli` lives when it is not on PATH or in a
+   *  standard install. The FreeCAD field above has existed since SPEC-303;
+   *  this one did not, so SPEC-336's path picker had nothing to write to. */
+  kicad_cli_path_override?: string | null
+  /** CTX-336.1: first-run setup has been offered and dismissed. Not "the app
+   *  is configured" -- that is `isFullyConfigured(capabilities)`, computed
+   *  live. A user who finished the wizard and later uninstalled KiCad is not
+   *  configured; one who skipped every step and already had both tools is. */
+  onboarding_completed?: boolean | null
   kicad_socket_path?: string | null
   kicad_timeout_ms?: number | null
   llm_provider?: string | null
@@ -74,6 +83,16 @@ export interface DaemonCapabilities {
    * straight from find_freecadcmd()'s own exception message -- never set
    * alongside a real freecad_path_checked. */
   freecad_error: string | null
+  /** SPEC-309: whether `kicad-cli` was located. Returned by the daemon since
+   *  SPEC-309 and never declared on this type until CTX-336.1 needed it --
+   *  every board check, ERC/DRC run and schematic read goes through it. */
+  kicad_cli_available: boolean
+  /** CTX-336.1: the binary that was actually resolved, and how. "Found"
+   *  cannot tell a user whether the KiCad they pointed at is the one in use,
+   *  which is the only question a path picker leaves them with. */
+  kicad_cli_path_checked: string | null
+  kicad_cli_path_source: 'override' | 'path' | 'install' | 'none' | null
+  kicad_cli_error: string | null
   llm_providers: string[]
   log_path: string | null
   python_version: string
@@ -305,6 +324,85 @@ export async function confirmRemoveRoleBoundProvider(
       'the next chat or extraction that uses it. Remove it anyway?',
     { title: 'Provider still in use', kind: 'warning', okLabel: 'Remove Anyway', cancelLabel: 'Cancel' },
   )
+}
+
+/** CTX-336.1: read-modify-write against what is actually on disk.
+ *
+ *  Every other config writer takes a `currentConfig` snapshot and saves the
+ *  whole object over it. That is a last-write-wins clobber whenever two
+ *  surfaces hold snapshots taken at different moments, and it cost a real
+ *  defect: guided setup bound both model roles to the provider the user
+ *  chose, and then finishing the wizard wrote `App`'s launch-time snapshot
+ *  back with `onboarding_completed` added -- silently restoring the provider
+ *  that was bound before. The user picked Anthropic, entered an Anthropic
+ *  key, and ended with Google still answering. Nothing failed, and nothing
+ *  said so.
+ *
+ *  A patch applied to a freshly-read config cannot do that: it can only
+ *  overwrite the keys it actually names. */
+export async function updateConfig(patch: Partial<DaemonConfig>): Promise<DaemonConfig> {
+  const latest = await getConfig()
+  const next = { ...latest, ...patch }
+  await saveConfig(next)
+  return next
+}
+
+/** CTX-336.1: binds BOTH model roles to one provider, for guided setup.
+ *
+ *  `setLlmProviderAndModel` above writes the legacy `llm_provider`/`llm_model`
+ *  pair, and `llm_providers.py`'s `_migrate_provider_roles` only consults
+ *  those when `provider_roles` is *unset*: an existing map wins and the legacy
+ *  field is ignored. So on a fresh install the legacy write happens to work,
+ *  and after any Settings save that persisted `provider_roles` it silently
+ *  would not -- guided setup would report success and change nothing about
+ *  which provider actually answers.
+ *
+ *  Binding both roles is also exactly what an unconfigured install already
+ *  resolves to (`llm_providers.py:473`), so this makes the existing default
+ *  explicit rather than inventing a policy. */
+export async function bindBothRolesTo(providerId: string): Promise<void> {
+  const provider_roles = { reasoning: providerId, fast: providerId } as Record<ModelRole, string>
+  const response = await dispatch('daemon.configure', {
+    provider_roles,
+    llm_provider: providerId,
+  })
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+  await updateConfig({ provider_roles, llm_provider: providerId })
+}
+
+/** CTX-336.1: applies a tool path to the RUNNING daemon and persists it.
+ *
+ *  `saveConfig` alone would only take effect at the next spawn -- see its own
+ *  docstring. SPEC-336's guided setup fixes a missing tool and then shows the
+ *  user the result, so `daemon.configure` goes first and the write follows.
+ *
+ *  Pass `null` to clear an override. The route distinguishes "leave unchanged"
+ *  (field absent) from "clear" (empty string), so this sends the empty string
+ *  deliberately rather than omitting the field. */
+export async function setToolPath(
+  tool: 'kicad' | 'freecad',
+  path: string | null,
+): Promise<void> {
+  const field = tool === 'kicad' ? 'kicad_cli_path_override' : 'freecadcmd_path_override'
+  const response = await dispatch('daemon.configure', { [field]: path ?? '' })
+  if (response.error) {
+    throw new Error(response.error.message)
+  }
+  await updateConfig({ [field]: path })
+}
+
+/** CTX-336.1: a native picker for an executable, not a folder. SPEC-336's
+ *  step 5 asks the user to point at `kicad-cli` or `freecadcmd` themselves,
+ *  and a text field for an absolute path to a binary inside a .app bundle is
+ *  not a reasonable thing to ask anyone to type. */
+export async function chooseToolExecutable(currentPath?: string | null): Promise<string | null> {
+  const selected = await open({ directory: false, multiple: false, defaultPath: currentPath ?? undefined })
+  if (Array.isArray(selected)) {
+    return selected[0] ?? null
+  }
+  return selected
 }
 
 /** SPEC-110: a real native directory picker, not a raw text field --
