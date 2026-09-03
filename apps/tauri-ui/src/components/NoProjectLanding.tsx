@@ -16,11 +16,21 @@ import { GITHUB_REPO_URL, openExternal } from '../lib/externalLinks'
  *  same state rather than two that merely look alike. */
 export function NoProjectLanding({
   projects,
+  removedProjects = [],
+  storageRoot,
   loading = false,
   onCreateProject,
   onOpenProject,
+  onRestoreProject,
 }: {
   projects: string[]
+  /** SPEC-333: projects hidden from the list. Shown only when there are any,
+   *  because a removal with no visible route back is a trap. */
+  removedProjects?: string[]
+  onRestoreProject?: (name: string) => void
+  /** Where the app is looking for projects. An empty list and a list pointed
+   *  at the wrong folder look identical without it. */
+  storageRoot?: string | null
   loading?: boolean
   onCreateProject: () => void
   /** Opens a named project. The first version of this took no argument and
@@ -29,6 +39,7 @@ export function NoProjectLanding({
   onOpenProject: (name: string) => void
 }) {
   const [choosing, setChoosing] = useState(false)
+  const [showingRemoved, setShowingRemoved] = useState(false)
   const projectCount = projects.length
 
   return (
@@ -96,10 +107,50 @@ export function NoProjectLanding({
       )}
 
       {!loading && projectCount === 0 && (
-        <p className="text-xs text-fg-muted">
-          No projects yet. Creating one links it to a KiCad project you already have — Copperplane
-          does not make the schematic for you.
-        </p>
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-fg-muted">
+            No projects yet. Creating one links it to a KiCad project you already have — Copperplane
+            does not make the schematic for you.
+          </p>
+          {/* CTX-110.2: an empty list and a list looking in the wrong place
+              are indistinguishable, and the maintainer hit the second one.
+              Saying where it looked is the difference. */}
+          {storageRoot && (
+            <p className="break-all text-xs text-fg-faint">
+              Looking in {storageRoot}. Projects live in this folder — if yours are elsewhere,
+              change the storage location in Settings.
+            </p>
+          )}
+        </div>
+      )}
+
+      {removedProjects.length > 0 && onRestoreProject && (
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            className="self-start text-xs text-fg-muted underline decoration-dotted underline-offset-2 hover:text-fg-secondary"
+            aria-expanded={showingRemoved}
+            onClick={() => setShowingRemoved((prev) => !prev)}
+          >
+            {removedProjects.length} removed from this list
+          </button>
+          {showingRemoved && (
+            <ul className="flex w-full max-w-md flex-col gap-1">
+              {removedProjects.map((name) => (
+                <li key={name} className="flex items-center justify-between gap-3">
+                  <span className="truncate text-xs text-fg-secondary">{name}</span>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded border border-line px-2 py-1 text-xs text-fg-secondary hover:bg-surface-alt"
+                    onClick={() => onRestoreProject(name)}
+                  >
+                    Put back
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
 
       <button

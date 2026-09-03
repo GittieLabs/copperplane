@@ -429,12 +429,81 @@ export async function restartApp(): Promise<void> {
  * safely -- files saved between now and a restart still go to the *old*
  * location, and nothing moves automatically once the new one is live.
  * Returns true if the user chose to restart now. */
-export async function confirmStorageLocationChange(): Promise<boolean> {
-  return ask(
-    'New files will be saved to the new location once you restart. Anything already saved stays ' +
-      'at the old location and will not move automatically. Restart now to apply this safely?',
-    { title: 'Storage location changed', kind: 'warning', okLabel: 'Restart Now', cancelLabel: 'Later' },
+export interface ProjectsInRoot {
+  root: string
+  projects: string[]
+  count: number
+}
+
+/** CTX-110.2: what projects a storage root holds, without switching to it. */
+export async function listProjectsInRoot(root: string): Promise<ProjectsInRoot> {
+  const handle = await submitJob<ProjectsInRoot>('project.list_in_root', { root })
+  return handle.result
+}
+
+/** The sentence the old warning could not say.
+ *
+ *  It used to read: "New files will be saved to the new location once you
+ *  restart. Anything already saved stays at the old location and will not move
+ *  automatically." Every clause is true, and it still failed — because it
+ *  describes FILES, and a user's model is a LIST OF PROJECTS. The maintainer
+ *  changed his storage location, lost sight of two projects, and asked how
+ *  projects are found at all.
+ *
+ *  There is no project registry: a project is listed if and only if a folder
+ *  holding `project.json` sits in `<storage_root>/projects/`. So changing the
+ *  root replaces the entire list, and the only warning that could have stopped
+ *  him is one that names the projects about to disappear. */
+export function storageChangeMessage(leaving: ProjectsInRoot, arriving: ProjectsInRoot): string {
+  const name = (list: string[]) =>
+    list.length <= 3 ? list.join(', ') : `${list.slice(0, 3).join(', ')} and ${list.length - 3} more`
+
+  const lines: string[] = []
+
+  if (leaving.count > 0) {
+    lines.push(
+      `${leaving.count === 1 ? 'This project is' : `These ${leaving.count} projects are`} ` +
+        `stored in the current location and will no longer appear in Copperplane: ` +
+        `${name(leaving.projects)}.`,
+    )
+  }
+
+  lines.push(
+    arriving.count > 0
+      ? `The new location already holds ${arriving.count} ` +
+        `${arriving.count === 1 ? 'project' : 'projects'}: ${name(arriving.projects)}. ` +
+        `Those are what you will see instead.`
+      : 'The new location holds no projects yet, so your project list will start empty.',
   )
+
+  // Said last and said plainly: the word a user brings to this is "lost".
+  lines.push(
+    'Nothing is deleted. Every file stays exactly where it is, and pointing Copperplane back at ' +
+      'the old folder brings those projects back.',
+  )
+
+  return lines.join('\n\n')
+}
+
+export async function confirmStorageLocationChange(
+  leaving?: ProjectsInRoot,
+  arriving?: ProjectsInRoot,
+): Promise<boolean> {
+  const detail =
+    leaving && arriving
+      ? `${storageChangeMessage(leaving, arriving)}\n\nRestart now to apply this?`
+      : // No counts available (the probe failed): the original wording, which
+        // is honest, rather than a confident claim about projects we could not
+        // actually look at.
+        'New files will be saved to the new location once you restart. Anything already saved ' +
+        'stays at the old location and will not move automatically. Restart now to apply this ' +
+        'safely?'
+  return ask(detail, {
+    title: 'Storage location changed',
+    kind: 'warning',
+    okLabel: 'Restart Now',
+    cancelLabel: 'Later',
+  })
 }
 
 /** The app's own version -- a compile-time Rust constant
@@ -494,4 +563,19 @@ export async function copyDiagnostics(): Promise<void> {
   ]
 
   await writeText(lines.join('\n'))
+}
+
+/** SPEC-333: the confirmation for removing a project from the list.
+ *
+ *  Says plainly that nothing is deleted. The word a user brings to this is
+ *  "delete", and being wrong in either direction costs something: believing
+ *  files are gone costs trust, believing they are safe when they are not costs
+ *  work. */
+export async function confirmRemoveProject(name: string): Promise<boolean> {
+  return ask(
+    `Remove "${name}" from your project list?\n\nNothing is deleted. Its files, its board and ` +
+      'anything you exported stay exactly where they are, and you can put it back from the ' +
+      'projects screen.',
+    { title: 'Remove from list', kind: 'warning', okLabel: 'Remove', cancelLabel: 'Cancel' },
+  )
 }

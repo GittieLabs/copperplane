@@ -3,6 +3,8 @@ import {
   chooseStorageFolder,
   clearSecret,
   confirmStorageLocationChange,
+  listProjectsInRoot,
+  type ProjectsInRoot,
   copyDiagnostics,
   getCapabilities,
   getConfig,
@@ -147,7 +149,24 @@ export function Settings() {
       // un-applied storage change risks real files landing in two
       // different places depending on whether a restart happened yet.
       if (storageOverrideChanged) {
-        const shouldRestart = await confirmStorageLocationChange()
+        // CTX-110.2: name the projects that will stop appearing. Both roots
+        // are probed before the modal, and a failed probe falls back to the
+        // original wording rather than a confident claim about projects we
+        // could not look at.
+        let leaving: ProjectsInRoot | undefined
+        let arriving: ProjectsInRoot | undefined
+        try {
+          if (oldEffectiveRoot && newEffectiveRoot) {
+            ;[leaving, arriving] = await Promise.all([
+              listProjectsInRoot(oldEffectiveRoot),
+              listProjectsInRoot(newEffectiveRoot),
+            ])
+          }
+        } catch {
+          leaving = undefined
+          arriving = undefined
+        }
+        const shouldRestart = await confirmStorageLocationChange(leaving, arriving)
         if (shouldRestart) {
           await restartApp()
         }
@@ -410,6 +429,11 @@ export function Settings() {
               Choose folder…
             </button>
           </div>
+          <span className="text-xs text-fg-muted">
+            Where your projects and your parts library are kept. Your project list is whatever this
+            folder contains, so changing it changes which projects Copperplane can see — nothing is
+            deleted, and pointing back here brings them back.
+          </span>
           {capabilities?.storage_root && (
             <span className="text-xs text-fg-muted">Currently: {capabilities.storage_root}</span>
           )}

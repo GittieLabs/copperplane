@@ -813,6 +813,49 @@ def kicad_find_projects_in_directory(directory: str) -> dict:
     return {"directory": directory, "projects": found, "count": len(found)}
 
 
+def project_set_removed(name: str, removed: bool = True) -> dict:
+    """The project.set_removed route (SPEC-333).
+
+    Hides a project from the list, or brings it back. Deletes nothing: the flag
+    goes on the storage-root pointer record, which is the app's own
+    bookkeeping, and a linked project's real manifest in the user's own folder
+    is untouched.
+    """
+    return library_store.set_project_removed(name, removed)
+
+
+def project_list_removed() -> dict:
+    """The project.list_removed route (SPEC-333): what is hidden, so there is
+    always a route back from a removal."""
+    names = library_store.list_removed_projects()
+    return {"projects": names, "count": len(names)}
+
+
+def project_rename(name: str, new_name: str) -> dict:
+    """The project.rename route (SPEC-333).
+
+    Moves the record rather than writing a second one. The user's own linked
+    folder is never renamed -- SPEC-333's existing non-goal.
+    """
+    return library_store.rename_project(name, new_name)
+
+
+def project_list_in_root(root: str) -> dict:
+    """The project.list_in_root route (CTX-110.2).
+
+    What projects a storage root holds, without switching to it. Changing the
+    storage location replaces the entire project list, and the confirmation
+    that warns about it can only be specific if it can look at both roots.
+
+    Reported by the maintainer after losing sight of two projects: "how are
+    projects found by the app bc there was another project not found when the
+    app was loaded?" They were under a root that a deleted config.json had
+    stopped pointing at.
+    """
+    projects = library_store.list_projects_at(root)
+    return {"root": root, "projects": projects, "count": len(projects)}
+
+
 def project_get_directory(name: str) -> dict:
     """CTX-311.13: the real, single source of truth for a project's own
     real directory path -- used to default the Enclosure Export dialog's
@@ -2105,6 +2148,10 @@ def _build_routes() -> dict:
         routes["project.load_conversation"] = project_load_conversation
         routes["project.get_directory"] = project_get_directory
         routes["project.open_from_directory"] = project_open_from_directory
+        routes["project.list_in_root"] = project_list_in_root
+        routes["project.set_removed"] = project_set_removed
+        routes["project.list_removed"] = project_list_removed
+        routes["project.rename"] = project_rename
         routes["project.set_intent"] = project_set_intent
         routes["project.set_check_result"] = project_set_check_result
         routes["project.add_part_reference"] = project_add_part_reference
@@ -2182,6 +2229,9 @@ ASYNC_ROUTES = {
     # SPEC-334: resolves through fp_lib_table and reads files per call.
     "kicad.describe_footprint",
     "kicad.find_projects_in_directory",
+    # Lists a directory the user just chose, which may be a network mount --
+    # unlike project.list, whose path is always the configured local root.
+    "project.list_in_root",
     # SPEC-326 2.7: reads the board file, then the footprint libraries per
     # component -- the same per-component library work the schematic reader does.
     "kicad.list_board_components",

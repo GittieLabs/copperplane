@@ -39,6 +39,7 @@ import { PartDetail } from './components/PartDetail'
 import { Rail } from './components/Rail'
 import { NewProjectWizard } from './components/NewProjectWizard'
 import { findProjectsInDirectory } from './lib/kicadProject'
+import { listRemovedProjects, setProjectRemoved } from './lib/projects'
 import { SchematicAdvisor } from './components/SchematicAdvisor'
 import { Settings } from './components/Settings'
 import { Welcome } from './components/Welcome'
@@ -47,6 +48,7 @@ import { NoProjectLanding } from './components/NoProjectLanding'
 import { RequirementsBanner } from './components/RequirementsBanner'
 import type { Requirement } from './lib/requirements'
 import {
+  confirmRemoveProject,
   getCapabilities,
   getConfig,
   updateConfig,
@@ -232,6 +234,40 @@ function App() {
   /* SPEC-336: closing a project, which did not exist -- only switching to a
      different one did. Nothing is persisted on the way out: every project
      edit already writes through, as of SPEC-333's resolution. */
+  async function refreshRemoved() {
+    try {
+      setRemovedProjects(await listRemovedProjects())
+    } catch {
+      // Not worth surfacing: it only feeds an optional "show removed" line.
+    }
+  }
+
+  /* SPEC-333: "All this should do is remove from the project list in the app."
+     Deletes nothing, and says so -- the word a user brings to this is
+     "delete", and being wrong in either direction is bad. */
+  async function handleRemoveProject(name: string) {
+    const confirmed = await confirmRemoveProject(name)
+    if (!confirmed) return
+    try {
+      await setProjectRemoved(name, true)
+      setProjects((prev) => prev.filter((entry) => entry !== name))
+      await refreshRemoved()
+      setView({ kind: 'noProject' })
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  async function handleRestoreProject(name: string) {
+    try {
+      await setProjectRemoved(name, false)
+      setProjects((prev) => (prev.includes(name) ? prev : [...prev, name].sort()))
+      await refreshRemoved()
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
   function handleCloseProject() {
     setView({ kind: 'noProject' })
   }
@@ -246,6 +282,7 @@ function App() {
         // already in state, and this list was read before it existed.
         setProjects((prev) => [...names, ...prev.filter((n) => !names.includes(n))])
         setLibraryCount(parts.length)
+        void refreshRemoved()
         // SPEC-336: emphatically NOT `names[0]`. `list_projects` is sorted,
         // so that opened the alphabetically first project -- "stable, and
         // meaningless", and possibly one that has since moved or broken.
@@ -380,6 +417,10 @@ function App() {
   /* SPEC-337: `.kicad_pro` files found in a just-set project folder, offered
      for linking. `null` when there is nothing to offer. */
   const [folderOffer, setFolderOffer] = useState<string[] | null>(null)
+  /* SPEC-333: projects hidden from the list. Tracked so a removal always has a
+     visible route back -- a removal with no way back is a different feature,
+     and a worse one. */
+  const [removedProjects, setRemovedProjects] = useState<string[]>([])
 
   // Linking the .kicad_pro is also offered on the Schematic tab; doing it from
   // the header saves the same field through the same route. The project view
@@ -577,6 +618,9 @@ function App() {
         {(view === null || view?.kind === 'noProject') && (
           <NoProjectLanding
             projects={projects}
+            removedProjects={removedProjects}
+            onRestoreProject={(name) => void handleRestoreProject(name)}
+            storageRoot={capabilities?.storage_root ?? null}
             loading={projectsLoading}
             onCreateProject={() => setView({ kind: 'newProject' })}
             onOpenProject={handleSelectProject}
@@ -679,6 +723,14 @@ function App() {
                     onClick={handleCloseProject}
                   >
                     Close project
+                  </button>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded border border-line px-1 text-fg-tertiary hover:bg-surface-alt hover:text-fg-bright disabled:opacity-50"
+                    onClick={() => currentProject && void handleRemoveProject(currentProject.name)}
+                    disabled={!currentProject}
+                  >
+                    Remove from list
                   </button>
                 </p>
                 <p className="flex items-center gap-2 text-xs text-fg-muted">

@@ -14,6 +14,9 @@ const appendConversationTurnMock = vi.fn()
 const getCapabilitiesMock = vi.fn()
 const getConfigMock = vi.fn()
 const findProjectsInDirectoryMock = vi.fn()
+const setProjectRemovedMock = vi.fn()
+const listRemovedProjectsMock = vi.fn()
+const confirmRemoveProjectMock = vi.fn()
 const updateConfigMock = vi.fn()
 const shellOpenMock = vi.fn()
 const listOpenBoardsMock = vi.fn()
@@ -85,6 +88,8 @@ vi.mock('@tauri-apps/api/event', () => ({
 }))
 
 vi.mock('./lib/projects', () => ({
+  setProjectRemoved: (...args: unknown[]) => setProjectRemovedMock(...args),
+  listRemovedProjects: (...args: unknown[]) => listRemovedProjectsMock(...args),
   listProjects: (...args: unknown[]) => listProjectsMock(...args),
   listLibraryParts: (...args: unknown[]) => listLibraryPartsMock(...args),
   saveProject: (...args: unknown[]) => saveProjectMock(...args),
@@ -99,6 +104,7 @@ vi.mock('./lib/settings', () => ({
   getCapabilities: (...args: unknown[]) => getCapabilitiesMock(...args),
   getConfig: (...args: unknown[]) => getConfigMock(...args),
   updateConfig: (...args: unknown[]) => updateConfigMock(...args),
+  confirmRemoveProject: (...args: unknown[]) => confirmRemoveProjectMock(...args),
 }))
 
 vi.mock('./lib/library', () => ({
@@ -225,6 +231,9 @@ beforeEach(() => {
   // tests below set this deliberately.
   getConfigMock.mockReset().mockResolvedValue({ onboarding_completed: true })
   findProjectsInDirectoryMock.mockReset().mockResolvedValue({ directory: '', projects: [], count: 0 })
+  setProjectRemovedMock.mockReset().mockResolvedValue(undefined)
+  listRemovedProjectsMock.mockReset().mockResolvedValue([])
+  confirmRemoveProjectMock.mockReset().mockResolvedValue(true)
   updateConfigMock.mockReset().mockImplementation(async (patch: object) => ({ ...patch }))
 })
 
@@ -1479,5 +1488,80 @@ describe('App: naming the two project links', () => {
 
     expect(await screen.findByText(/Project folder set to/)).toBeTruthy()
     expect(screen.queryByText(/permission denied/)).toBeNull()
+  })
+})
+
+/** SPEC-333: "I believe we need a way to 'soft delete' a project. All this
+ *  should do is remove from the project list in the app." */
+describe('App: removing a project from the list', () => {
+  beforeEach(() => {
+    listProjectsMock.mockReset().mockResolvedValue(['keeper', 'unwanted'])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    loadProjectMock.mockReset().mockResolvedValue({ name: 'unwanted' })
+    loadConversationMock.mockReset().mockResolvedValue([])
+    getCapabilitiesMock.mockReset().mockResolvedValue({
+      kicad_available: true, kicad_socket_path_checked: '/s', freecad_available: true,
+      freecad_path_checked: '/f', freecad_error: null, kicad_cli_available: true,
+      kicad_cli_path_checked: '/k', kicad_cli_path_source: 'install', kicad_cli_error: null,
+      llm_providers: ['anthropic'], log_path: '/l', python_version: '3.11.9',
+      storage_root: '/s', github_token_configured: false, configured_secret_refs: [],
+    })
+  })
+
+  it('asks first, then hides it and returns to the launch view', async () => {
+    await renderAppOpen('unwanted')
+    await waitFor(() => screen.getByTestId('project-header'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from list' }))
+
+    await waitFor(() => expect(setProjectRemovedMock).toHaveBeenCalledWith('unwanted', true))
+    expect(confirmRemoveProjectMock).toHaveBeenCalledWith('unwanted')
+    expect(await screen.findByRole('button', { name: 'New project' })).toBeTruthy()
+  })
+
+  it('removes nothing when the confirmation is declined', async () => {
+    confirmRemoveProjectMock.mockResolvedValue(false)
+    await renderAppOpen('unwanted')
+    await waitFor(() => screen.getByTestId('project-header'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from list' }))
+
+    await waitFor(() => expect(confirmRemoveProjectMock).toHaveBeenCalled())
+    expect(setProjectRemovedMock).not.toHaveBeenCalled()
+  })
+
+  it('takes it out of the rail without a reload', async () => {
+    await renderAppOpen('unwanted')
+    await waitFor(() => screen.getByTestId('project-header'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from list' }))
+
+    await waitFor(() => expect(setProjectRemovedMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(within(screen.getByRole('navigation')).queryByRole('button', { name: 'unwanted' })).toBeNull(),
+    )
+    expect(within(screen.getByRole('navigation')).getByRole('button', { name: 'keeper' })).toBeTruthy()
+  })
+
+  it('surfaces a failed removal instead of pretending it worked', async () => {
+    setProjectRemovedMock.mockRejectedValue(new Error('read-only volume'))
+    await renderAppOpen('unwanted')
+    await waitFor(() => screen.getByTestId('project-header'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from list' }))
+
+    expect(await screen.findByText('read-only volume')).toBeTruthy()
+  })
+
+  it('offers a removed project back on the launch view', async () => {
+    listRemovedProjectsMock.mockResolvedValue(['unwanted'])
+    listProjectsMock.mockResolvedValue(['keeper'])
+    render(<App />)
+
+    expect(await screen.findByRole('button', { name: '1 removed from this list' })).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '1 removed from this list' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Put back' }))
+
+    await waitFor(() => expect(setProjectRemovedMock).toHaveBeenCalledWith('unwanted', false))
   })
 })

@@ -23,6 +23,7 @@ const clearSecretMock = vi.fn()
 const copyDiagnosticsMock = vi.fn()
 const chooseStorageFolderMock = vi.fn()
 const confirmStorageLocationChangeMock = vi.fn()
+const listProjectsInRootMock = vi.fn()
 const restartAppMock = vi.fn()
 const checkForUpdatesMock = vi.fn()
 const installUpdateAndRelaunchMock = vi.fn()
@@ -40,6 +41,7 @@ vi.mock('../lib/settings', async () => {
     chooseStorageFolder: (...args: unknown[]) => chooseStorageFolderMock(...args),
     confirmStorageLocationChange: (...args: unknown[]) => confirmStorageLocationChangeMock(...args),
     restartApp: (...args: unknown[]) => restartAppMock(...args),
+    listProjectsInRoot: (...args: unknown[]) => listProjectsInRootMock(...args),
   }
 })
 
@@ -106,6 +108,7 @@ beforeEach(() => {
   clearSecretMock.mockReset().mockResolvedValue(undefined)
   chooseStorageFolderMock.mockReset()
   confirmStorageLocationChangeMock.mockReset().mockResolvedValue(false)
+  listProjectsInRootMock.mockReset().mockResolvedValue({ root: '', projects: [], count: 0 })
   restartAppMock.mockReset().mockResolvedValue(undefined)
   checkForUpdatesMock.mockReset()
   installUpdateAndRelaunchMock.mockReset().mockResolvedValue(undefined)
@@ -584,5 +587,76 @@ describe('Settings: Tier 3 (Copy Diagnostics)', () => {
 
     await waitFor(() => expect(screen.getByText('clipboard unavailable')).toBeTruthy())
     expect(screen.queryByText('Copied to clipboard.')).toBeNull()
+  })
+})
+
+/** CTX-110.2: the storage-location warning names what will disappear.
+ *
+ *  The maintainer changed his storage location, lost sight of two projects,
+ *  and asked how projects are found at all. They are found by listing
+ *  `<storage_root>/projects/` -- there is no registry -- so the change
+ *  replaced his whole project list in one action. */
+describe('Settings: changing the storage location', () => {
+  async function changeStorageTo(path: string) {
+    getConfigMock.mockResolvedValue({ storage_root_override: null })
+    getCapabilitiesMock.mockResolvedValue({ ...EMPTY_CAPABILITIES, storage_root: '/old/root' })
+    render(<Settings />)
+    await waitFor(() => screen.getByLabelText('Storage location'))
+
+    fireEvent.change(screen.getByLabelText('Storage location'), { target: { value: path } })
+    const saveButtons = screen.getAllByRole('button', { name: 'Save' })
+    fireEvent.click(saveButtons[saveButtons.length - 1])
+  }
+
+  it('looks at both roots and hands the modal what it found', async () => {
+    listProjectsInRootMock.mockImplementation(async (root: string) =>
+      root === '/old/root'
+        ? { root, projects: ['Hello Blinky', 'test 1'], count: 2 }
+        : { root, projects: [], count: 0 },
+    )
+
+    await changeStorageTo('/new/root')
+
+    await waitFor(() => expect(confirmStorageLocationChangeMock).toHaveBeenCalledTimes(1))
+    const [leaving, arriving] = confirmStorageLocationChangeMock.mock.calls[0]
+    expect(leaving).toEqual({ root: '/old/root', projects: ['Hello Blinky', 'test 1'], count: 2 })
+    expect(arriving).toEqual({ root: '/new/root', projects: [], count: 0 })
+  })
+
+  it('still asks, with the plain wording, when the roots cannot be read', async () => {
+    /** A confident claim about projects we could not actually look at would
+     *  be worse than the original honest sentence. */
+    listProjectsInRootMock.mockRejectedValue(new Error('permission denied'))
+
+    await changeStorageTo('/new/root')
+
+    await waitFor(() => expect(confirmStorageLocationChangeMock).toHaveBeenCalledTimes(1))
+    expect(confirmStorageLocationChangeMock.mock.calls[0]).toEqual([undefined, undefined])
+  })
+
+  it('does not probe anything when the location did not change', async () => {
+    getConfigMock.mockResolvedValue({ storage_root_override: null })
+    getCapabilitiesMock.mockResolvedValue({ ...EMPTY_CAPABILITIES, storage_root: '/old/root' })
+    render(<Settings />)
+    await waitFor(() => screen.getByLabelText('Storage location'))
+
+    const saveButtons = screen.getAllByRole('button', { name: 'Save' })
+    fireEvent.click(saveButtons[saveButtons.length - 1])
+
+    await waitFor(() => expect(saveConfigMock).toHaveBeenCalled())
+    expect(listProjectsInRootMock).not.toHaveBeenCalled()
+    expect(confirmStorageLocationChangeMock).not.toHaveBeenCalled()
+  })
+
+  it('says what the storage location actually is, before it is changed', async () => {
+    /** "I see that the settings handle setting a storage location and doesn't
+     *  specify a default project location." There is no separate project
+     *  location -- this is it, and the copy never said so. */
+    getConfigMock.mockResolvedValue({})
+    render(<Settings />)
+
+    await waitFor(() => screen.getByLabelText('Storage location'))
+    expect(screen.getByText(/Where your projects and your parts library are kept/)).toBeTruthy()
+    expect(screen.getByText(/changing it changes which projects Copperplane can see/)).toBeTruthy()
   })
 })

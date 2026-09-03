@@ -122,3 +122,98 @@ describe('NoProjectLanding', () => {
     expect(container.textContent).not.toMatch(/docs\.copperplane|copperplane\.(io|dev|com)/)
   })
 })
+
+/** CTX-110.2: an empty list and a list pointed at the wrong folder look
+ *  identical, and the maintainer hit the second one. */
+describe('NoProjectLanding: where it is looking', () => {
+  it('says where it looked when the list is empty', () => {
+    render(
+      <NoProjectLanding
+        projects={[]}
+        storageRoot="/Users/k/Library/Application Support/copperplane/storage"
+        onCreateProject={() => {}}
+        onOpenProject={() => {}}
+      />,
+    )
+
+    expect(screen.getByText(/Looking in .*copperplane\/storage/)).toBeTruthy()
+    expect(screen.getByText(/change the storage location in Settings/)).toBeTruthy()
+  })
+
+  it('says nothing about where it looked when projects were found', () => {
+    /** The question only arises when the answer is empty. */
+    render(
+      <NoProjectLanding
+        projects={['alpha']}
+        storageRoot="/some/root"
+        onCreateProject={() => {}}
+        onOpenProject={() => {}}
+      />,
+    )
+
+    expect(screen.queryByText(/Looking in/)).toBeNull()
+  })
+
+  it('does not guess a location it was not given', () => {
+    render(<NoProjectLanding projects={[]} onCreateProject={() => {}} onOpenProject={() => {}} />)
+
+    expect(screen.queryByText(/Looking in/)).toBeNull()
+    expect(screen.getByText(/No projects yet/)).toBeTruthy()
+  })
+
+  it('does not claim an empty list while still loading', () => {
+    render(
+      <NoProjectLanding
+        projects={[]}
+        storageRoot="/some/root"
+        loading
+        onCreateProject={() => {}}
+        onOpenProject={() => {}}
+      />,
+    )
+
+    expect(screen.queryByText(/Looking in/)).toBeNull()
+  })
+})
+
+/** SPEC-333: a removal with no visible route back is a different feature, and
+ *  a worse one. */
+describe('NoProjectLanding: removed projects', () => {
+  it('says nothing when nothing has been removed', () => {
+    render(<NoProjectLanding projects={['a']} onCreateProject={() => {}} onOpenProject={() => {}} />)
+
+    expect(screen.queryByText(/removed from this list/)).toBeNull()
+  })
+
+  it('offers to put a removed project back', () => {
+    const onRestoreProject = vi.fn()
+    render(
+      <NoProjectLanding
+        projects={['a']}
+        removedProjects={['Hello Blinky']}
+        onRestoreProject={onRestoreProject}
+        onCreateProject={() => {}}
+        onOpenProject={() => {}}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '1 removed from this list' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Put back' }))
+
+    expect(onRestoreProject).toHaveBeenCalledWith('Hello Blinky')
+  })
+
+  it('keeps the removed list closed until asked', () => {
+    render(
+      <NoProjectLanding
+        projects={['a']}
+        removedProjects={['Hello Blinky']}
+        onRestoreProject={() => {}}
+        onCreateProject={() => {}}
+        onOpenProject={() => {}}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Put back' })).toBeNull()
+  })
+})

@@ -215,3 +215,25 @@ export async function setProjectCheckResult(
     }),
   )
 }
+
+/** SPEC-333: hide a project from the list, or bring it back. Deletes nothing.
+ *
+ *  Requested as a "soft delete": "All this should do is remove from the
+ *  project list in the app." The flag lives on the app's own pointer record;
+ *  a linked project's folder is not touched. */
+export async function setProjectRemoved(name: string, removed: boolean): Promise<void> {
+  unwrap(await dispatch('project.set_removed', { name, removed }))
+}
+
+/** What is currently hidden, so a removal always has a route back. */
+export async function listRemovedProjects(): Promise<string[]> {
+  const result = unwrap<{ projects: string[] }>(await dispatch('project.list_removed', {}))
+  return result.projects
+}
+
+/** SPEC-333: moves the record rather than writing a second one. The user's own
+ *  linked folder is never renamed. */
+export async function renameProject(name: string, newName: string): Promise<string> {
+  const result = unwrap<{ name: string }>(await dispatch('project.rename', { name, new_name: newName }))
+  return result.name
+}
