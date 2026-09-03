@@ -169,7 +169,7 @@ export function NewProjectWizard({
             </p>
             {kicadPath ? (
               <p className="break-all text-xs text-fg-muted">
-                Linked: <span className="text-fg-secondary">{kicadPath}</span>
+                KiCad project linked: <span className="text-fg-secondary">{kicadPath}</span>
               </p>
             ) : (
               <p className="text-xs text-fg-muted">

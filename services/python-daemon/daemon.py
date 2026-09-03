@@ -788,6 +788,31 @@ def project_open_from_directory(directory: str) -> dict:
     return library_store.open_project_from_directory(directory)
 
 
+def kicad_find_projects_in_directory(directory: str) -> dict:
+    """The kicad.find_projects_in_directory route (SPEC-337).
+
+    Every `.kicad_pro` directly inside a folder, so setting a project folder
+    can offer to link the KiCad project it obviously contains.
+
+    Exists because a folder was set, reported as "Linked to <path>", and the
+    KiCad project inside it was never mentioned -- leaving a project that
+    looked linked, generated an enclosure with no mounting posts, and said
+    nothing about why.
+
+    Not recursive. A `.kicad_pro` two directories down is not "the KiCad
+    project in this folder", and walking a deep tree to find one would turn a
+    folder pick into an unbounded scan of whatever the user selected.
+    """
+    if not os.path.isdir(directory):
+        raise ValueError(f"Not a directory: {directory}")
+    found = sorted(
+        os.path.join(directory, name)
+        for name in os.listdir(directory)
+        if name.endswith(".kicad_pro") and os.path.isfile(os.path.join(directory, name))
+    )
+    return {"directory": directory, "projects": found, "count": len(found)}
+
+
 def project_get_directory(name: str) -> dict:
     """CTX-311.13: the real, single source of truth for a project's own
     real directory path -- used to default the Enclosure Export dialog's
@@ -2029,6 +2054,7 @@ def _build_routes() -> dict:
         "kicad.component_envelopes": kicad_component_envelopes,
         "kicad.check_schematic_parity": kicad_check_schematic_parity,
         "kicad.describe_footprint": kicad_describe_footprint,
+        "kicad.find_projects_in_directory": kicad_find_projects_in_directory,
         "kicad.list_board_components": kicad_list_board_components,
     }
     if get_kicad_version is not None:
@@ -2155,6 +2181,7 @@ ASYNC_ROUTES = {
     "kicad.check_schematic_parity",
     # SPEC-334: resolves through fp_lib_table and reads files per call.
     "kicad.describe_footprint",
+    "kicad.find_projects_in_directory",
     # SPEC-326 2.7: reads the board file, then the footprint libraries per
     # component -- the same per-component library work the schematic reader does.
     "kicad.list_board_components",

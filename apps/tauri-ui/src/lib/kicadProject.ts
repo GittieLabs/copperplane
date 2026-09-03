@@ -254,3 +254,21 @@ export async function describeFootprint(footprintId: string): Promise<FootprintD
   })
   return handle.result
 }
+
+/** SPEC-337: the `.kicad_pro` files directly inside a folder.
+ *
+ *  Setting a project folder used to say nothing about the KiCad project it
+ *  obviously contained — leaving a project that read as linked, generated an
+ *  enclosure with no mounting posts, and explained none of it. */
+export interface ProjectsInDirectory {
+  directory: string
+  projects: string[]
+  count: number
+}
+
+export async function findProjectsInDirectory(directory: string): Promise<ProjectsInDirectory> {
+  const handle = await submitJob<ProjectsInDirectory>('kicad.find_projects_in_directory', {
+    directory,
+  })
+  return handle.result
+}
