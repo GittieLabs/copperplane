@@ -1233,7 +1233,7 @@ search returns vendor part numbers, because the two were never connected. Whethe
 should recognise a footprint-shaped query and answer from KiCad's own libraries is a question this
 spec settles.
 
-#### SPEC-332 — DRC as a Teaching Surface — not yet written, partly delivered
+#### SPEC-332 — ERC as a Teaching Surface — written 2026-09-03 (the DRC half is delivered)
 
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-309, SPEC-319
 
@@ -1250,19 +1250,28 @@ check saying what it would have caught and whether a maker should care.
 
 Still open, and what this spec is for:
 
-*   **Mirroring KiCad's own tab structure** — Violations / Unconnected / Schematic Parity / Ignored.
-    The maintainer suggested it and was unsure; the current build uses one findings list plus a
-    collapsible for ignored tests. Worth deciding once there is more than one kind of finding on a
-    real board to look at.
+*   ~~**Mirroring KiCad's own tab structure**~~ — Violations / Unconnected / Schematic Parity /
+    Ignored. **Decided against, 2026-09-03, for the board review and the schematic review alike:**
+    *"since some tabs could be left empty, we chose a different option ... we are not using it in
+    the board review either."* `ViolationsList` names each kind KiCad actually reported in one
+    sentence with counts, shows one findings list, and collapses the switched-off checks. A
+    category with nothing in it does not appear at all, where an empty tab would sit there inviting
+    a click. Recorded in `SPEC-332` §2, including the residual risk: a reader cannot filter to one
+    kind, and if that becomes a complaint the answer is filtering the one list, not tabs.
 *   **Jumping to a finding.** The mm position is shown; nothing uses it. KiCad's own dialog
     centres the view on a double-click, and `kipy` could plausibly do the same when KiCad is open.
-*   **A glossary that is not a hard-coded list.** Fine for the dozen terms KiCad's DRC actually
+*   ~~**A glossary that is not a hard-coded list.**~~ Fine for the dozen terms KiCad's DRC actually
     emits; wrong if it grows into a general PCB dictionary. Answered on 2026-09-03 for the naming
     vocabulary, under `SPEC-334`/`CTX-334.2`: package families come from KiCad's own `Package_*`
     libraries and the variants are decoded compositionally, so 33 entries plus 11 prefix letters
     explain 88.0% of the 15,433 footprints KiCad ships. Still a hard-coded list for the DRC terms
     in `kicadGlossary.ts`, which remains the right shape for a dozen fixed strings.
 *   **The same treatment for ERC**, which has its own vocabulary and its own ignored-test set.
+    **Written up as `SPEC-332` on 2026-09-03**, with the gap measured rather than asserted:
+    `kicad_check_board` returns `violation_count`, `unconnected_count`, `parity_count` and
+    `ignored_checks`; `kicad_check_schematic` returns `violation_count` and `source_path`. KiCad's
+    ERC report already carries `ignored_checks` — four of them on a clean run — and the route
+    throws them away.
 
 #### [SPEC-331](apps/tauri-ui/specs/SPEC-331-enclosure-fit-review.md) — Enclosure Fit Review — Draft
 

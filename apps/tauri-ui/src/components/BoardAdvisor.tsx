@@ -357,7 +357,7 @@ function BoardCheckSection({
         </p>
       )}
       {checkError && <p className="text-sm text-danger">{checkError}</p>}
-      {checkResult && <ViolationsList result={checkResult} hideSourcePath />}
+      {checkResult && <ViolationsList result={checkResult} kind="drc" hideSourcePath />}
     </div>
   )
 }

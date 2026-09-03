@@ -1956,6 +1956,14 @@ def kicad_check_schematic(sch_path: str) -> dict:
     )
     result["source_path"] = sch_path
     result["violation_count"] = len(flattened)
+    # SPEC-332: the board check has surfaced these since CTX-326.3 and the
+    # schematic check discarded them, though `run_erc` returns the whole
+    # report. A schematic reported clean may simply not have been checked for
+    # the thing that is wrong -- the exact failure the board side already
+    # fixed. `included_severities` is the same shape of omission: a result
+    # filtered to errors only, presented as "no problems", is a lie.
+    result["ignored_checks"] = report.get("ignored_checks", [])
+    result["included_severities"] = report.get("included_severities", [])
     return result
 
 

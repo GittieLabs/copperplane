@@ -15,6 +15,31 @@ export interface GlossaryEntry {
 }
 
 const _STATIC: GlossaryEntry[] = [
+  // SPEC-332: ERC's own vocabulary. The entry that earns the most is
+  // "power pin not driven" -- the schematic is usually correct and missing
+  // only a PWR_FLAG, which is a KiCad convention rather than an electrical
+  // fact, so a maker reads "not driven" and hunts for a wiring fault that is
+  // not there.
+  {
+    term: 'Power input',
+    plain: 'A pin that expects to be fed power. KiCad wants to see something it considers a power source on that net, which is what PWR_FLAG provides.',
+  },
+  {
+    term: 'PWR_FLAG',
+    plain: "A marker telling KiCad \"power really does come from here\". It is a note to the checker, not a component — nothing is added to your board.",
+  },
+  {
+    term: 'not driven',
+    plain: 'Nothing on this net looks like a source to KiCad. Usually the wiring is right and a PWR_FLAG is missing, rather than the circuit being wrong.',
+  },
+  {
+    term: 'off grid',
+    plain: 'A wire end that does not sit on the drawing grid. It often looks connected and is not — the commonest cause of a wire that will not join.',
+  },
+  {
+    term: 'no-connect',
+    plain: 'The X marker saying a pin is deliberately unused, so the checker stops asking about it.',
+  },
   { term: 'PTH', plain: 'Plated through-hole — a hole with metal through it, for a part with legs.' },
   { term: 'NPTH', plain: 'Non-plated through-hole — a plain hole with no metal, usually for a screw.' },
   { term: 'SMD', plain: 'Surface-mount — a flat pad soldered on top of the board, with no hole.' },
@@ -69,6 +94,24 @@ export function explainTerms(text: string): GlossaryEntry[] {
  *  should care before sending a board out. Keys are KiCad's own stable
  *  `ignored_checks[].key` values. */
 export const IGNORED_CHECK_NOTES: Record<string, { plain: string; matters: boolean }> = {
+  // SPEC-332: the ERC keys. KiCad reports these on a schematic run and the app
+  // discarded them, so a schematic could read clean because a test was off.
+  single_global_label: {
+    plain: 'A global label used in only one place is not flagged. That usually means a typo — a label meant to connect to something and connecting to nothing. Worth having on.',
+    matters: true,
+  },
+  four_way_junction: {
+    plain: 'Four wires meeting at one point is not flagged. Legal, and easy to misread on screen as two wires crossing rather than joining.',
+    matters: false,
+  },
+  simulation_model_issue: {
+    plain: 'Problems with SPICE simulation models are not flagged. Irrelevant unless you actually simulate the circuit.',
+    matters: false,
+  },
+  footprint_filter: {
+    plain: 'A footprint that does not match the list the symbol suggests is not flagged. Worth having on if you pick footprints by hand — it catches an 0805 part assigned a through-hole footprint.',
+    matters: true,
+  },
   missing_courtyard: {
     plain: 'Parts with no keep-clear outline are not checked for overlapping each other. This app also measures courtyards to size your enclosure, so a missing one weakens that too.',
     matters: true,
