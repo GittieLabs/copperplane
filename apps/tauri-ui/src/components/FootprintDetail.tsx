@@ -151,6 +151,16 @@ export function FootprintDetailView({
               ? 'Has a 3D model, so its height is measured automatically.'
               : 'No 3D model is installed for this footprint, so its height has to be supplied by hand before an enclosure can account for it.'}
           </p>
+          {/* Which model, not just whether. A footprint naming a .step KiCad
+              does not have is a different problem from one naming none at all,
+              and only the path tells them apart. */}
+          {detail.model_ref && (
+            <p className="break-all text-fg-faint">
+              {detail.has_model
+                ? `Model: ${detail.model_path ?? detail.model_ref}`
+                : `The footprint names ${detail.model_ref}, which is not installed.`}
+            </p>
+          )}
 
           {detail.datasheet_url && (
             <p className="break-all text-fg-muted">
