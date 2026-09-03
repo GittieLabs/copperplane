@@ -1,10 +1,10 @@
 ---
 id: SPEC-335
 title: "New Project Wizard"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-02
-last_updated: 2026-09-02
+last_updated: 2026-09-03
 target_version: v0.4.0
 location: "apps/tauri-ui/specs/SPEC-335-new-project-wizard.md"
 parent_spec: "SPEC-312-application-shell-project-portability-persistence.md"

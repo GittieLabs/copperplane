@@ -1,7 +1,7 @@
 ---
 id: SPEC-331
 title: "Enclosure Fit Review"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-03
 last_updated: 2026-09-03
