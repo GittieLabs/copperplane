@@ -1116,6 +1116,31 @@ written on every run, the window routinely contains real work.
 pointer and leaves the first, so one folder becomes two entries in the project list, and the old one
 still loads with a name its own folder's manifest contradicts.
 
+#### [SPEC-336](apps/tauri-ui/specs/SPEC-336-first-run-onboarding-and-launch.md) — First-Run Onboarding & Launch Experience — Draft
+
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-300, SPEC-303, SPEC-320/404 (for the disabled path)
+
+Three problems at the front door.
+
+**Settings is the onboarding surface and is not one** — a first-time user's first screen is five
+provider records, provider kinds, two model-role bindings, a GitHub token and a KiCad socket path:
+*"I think this would feel overwhelming for a user who is trying to initially use the app."*
+
+**Nothing checks the app can work.** KiCad and FreeCAD are hard requirements and are never verified;
+a user finds out by watching features fail one at a time. Onboarding must detect them, offer a path
+picker (they are often installed outside the default location), and otherwise **halt with no visible
+bypass**.
+
+**Launch opens an arbitrary project.** `App.tsx` takes `names[0]` from a `sorted()` listing — the
+*alphabetically first* project, not the most recent. Confirmed in `library_store.list_projects`.
+Replaced by a no-project landing view (what the app is, repo and docs links, create or open), which
+also becomes the launch view. Adds the close-project action that does not exist today.
+
+The **Managed** path is shown but disabled and marked coming soon: `SPEC-320` and `SPEC-404` are
+both Draft and the backing service is unfinished. The docs pages the guided flow links to do not
+exist either — placeholders now, their own context to write them, because a link that 404s on first
+run is worse than no link.
+
 #### [SPEC-335](apps/tauri-ui/specs/SPEC-335-new-project-wizard.md) — New Project Wizard — Draft
 
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-312, SPEC-325, SPEC-319
