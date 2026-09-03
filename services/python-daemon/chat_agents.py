@@ -930,6 +930,17 @@ def review(
         # and the tool then failed on every call until the rounds ran out.
         # Logged rather than swallowed, so the next instance of this shape is
         # one grep away instead of another round of guessing.
+        # A block that STARTED and never finished is truncation, not a model
+        # ignoring the format -- worth saying separately, because the two have
+        # opposite fixes (a bigger token budget vs. clearer instructions).
+        if "<<<FINDINGS>>>" in result["text"]:
+            logger.warning(
+                "review(%s): findings block was started but never terminated -- the response was "
+                "cut off at %s characters. This is a token-budget problem, not a format problem. "
+                "Gemini charges a thinking model's reasoning against max_output_tokens, so an "
+                "agent's max_tokens has to cover both.",
+                area, len(result["text"]),
+            )
         logger.warning(
             "review(%s) produced no findings block after %s tool call(s): %s",
             area,

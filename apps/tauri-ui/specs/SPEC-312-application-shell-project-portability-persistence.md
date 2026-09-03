@@ -10,6 +10,7 @@ location: "apps/tauri-ui/specs/SPEC-312-application-shell-project-portability-pe
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
 child_specs:
   - "SPEC-333-project-save-semantics-and-rename.md"
+  - "SPEC-335-new-project-wizard.md"
 user_facing: true
 ---
 

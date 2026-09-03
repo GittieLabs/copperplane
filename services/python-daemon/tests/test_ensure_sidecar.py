@@ -356,3 +356,71 @@ class TestBundledAgentPrompts(unittest.TestCase):
         agents = os.path.join(tree, "agents")
         prompts = [n for n in os.listdir(agents) if n.endswith(".prompt.md")]
         self.assertGreater(len(prompts), 0, "no agent prompts to bundle")
+
+
+class TestBundledPromptsCountAsSource(unittest.TestCase):
+    """`daemon.spec` bundles the whole `agentflow` tree through `datas`, so a
+    prompt is as much frozen source as a module is -- and the currency check
+    did not watch it. Confirmed by touching a prompt and watching the check
+    report "current": raising an agent's `max_tokens` (which lives in a
+    prompt's frontmatter) would have shipped stale and silently.
+
+    That is `CTX-407.4`'s defect from the other direction -- there, `datas`
+    the freeze never carried; here, `datas` the staleness check never noticed.
+    """
+
+    def _tree(self, tmp):
+        os.makedirs(os.path.join(tmp, "agentflow", "agents"))
+        with open(os.path.join(tmp, "daemon.py"), "w") as f:
+            f.write("# module\n")
+        prompt = os.path.join(tmp, "agentflow", "agents", "chat_pcb.prompt.md")
+        with open(prompt, "w") as f:
+            f.write("---\nmax_tokens: 8192\n---\n")
+        return prompt
+
+    def test_001_a_prompt_is_seen_as_frozen_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt = self._tree(tmp)
+            os.utime(os.path.join(tmp, "daemon.py"), (1_000, 1_000))
+            os.utime(prompt, (2_000, 2_000))
+
+            newest, which = es.newest_source_mtime(tmp)
+
+        self.assertEqual(newest, 2_000)
+        self.assertIn("chat_pcb.prompt.md", which)
+
+    def test_002_the_named_file_is_relative_so_the_message_is_readable(self):
+        """The reason is printed to a user; an absolute temp path is noise."""
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt = self._tree(tmp)
+            # daemon.py keeps its real (just-written) mtime unless aged, and
+            # would otherwise legitimately win this comparison.
+            os.utime(os.path.join(tmp, "daemon.py"), (1_000, 1_000))
+            os.utime(prompt, (2_000, 2_000))
+
+            _newest, which = es.newest_source_mtime(tmp)
+
+        self.assertFalse(os.path.isabs(which))
+        self.assertEqual(which, os.path.join("agentflow", "agents", "chat_pcb.prompt.md"))
+
+    def test_003_a_python_module_still_wins_when_it_is_newer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prompt = self._tree(tmp)
+            os.utime(prompt, (1_000, 1_000))
+            os.utime(os.path.join(tmp, "daemon.py"), (3_000, 3_000))
+
+            newest, which = es.newest_source_mtime(tmp)
+
+        self.assertEqual(newest, 3_000)
+        self.assertEqual(which, "daemon.py")
+
+    def test_004_a_tree_with_no_agentflow_dir_does_not_crash(self):
+        """Not every checkout being scanned has one."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "daemon.py"), "w") as f:
+                f.write("# module\n")
+
+            newest, which = es.newest_source_mtime(tmp)
+
+        self.assertIsNotNone(newest)
+        self.assertEqual(which, "daemon.py")

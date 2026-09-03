@@ -4,7 +4,7 @@ description: Scoped conversational agent for the Enclosure area -- discusses gen
 model_role: fast
 requires: [tool_use]
 temperature: 0.3
-max_tokens: 2048
+max_tokens: 8192
 max_tool_rounds: 4
 tools:
   - context.search

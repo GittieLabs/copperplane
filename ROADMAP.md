@@ -1116,6 +1116,25 @@ written on every run, the window routinely contains real work.
 pointer and leaves the first, so one folder becomes two entries in the project list, and the old one
 still loads with a name its own folder's manifest contradicts.
 
+#### [SPEC-335](apps/tauri-ui/specs/SPEC-335-new-project-wizard.md) — New Project Wizard — Draft
+
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-312, SPEC-325, SPEC-319
+
+Creating a project is a name and an optional intent in a 192px sidebar column, with no way to
+cancel, after which the user lands on a tabbed view with nothing in it. Nothing in this app works
+without a linked `.kicad_pro` (SPEC-325), and creation never mentions one — so a user can finish and
+find every tab empty with no indication why.
+
+Four steps, specified by the maintainer: name; link the KiCad project (prompting to create one if
+none exists, *"as nothing else works without one"*); describe the goal in a short chat the assistant
+summarises and confirms; then a real review — parity, board components, missing footprints and 3D
+models, initial ERC/DRC — ending in four buttons that dismiss the wizard onto the chosen tab.
+
+Related and deliberately unresolved: the Overview tab's four per-area status cards and its
+project-level Run Review were **removed** on 2026-09-02 as *"a guess at what the future would
+need"*. What a returning user should see there is a separate question this spec must not quietly
+answer.
+
 #### [SPEC-334](apps/tauri-ui/specs/SPEC-334-footprint-literacy-and-component-detail.md) — Footprint Literacy & Component Detail — Draft
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-325, SPEC-332

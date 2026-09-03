@@ -313,11 +313,14 @@ describe('App: Overview plain chat', () => {
     expect(loadConversationMock).toHaveBeenCalledWith('test-project')
   })
 
-  it('CTX-313.1 TEST-007: Overview renders the real per-project dashboard alongside the existing, still-functional chat surface', async () => {
+  it('Overview shows the project chat, and no per-area status cards', async () => {
     await renderAppOnOverview()
 
-    expect(screen.getByTestId('status-card-pcb').textContent).toContain('Not yet checked this session')
-    expect(screen.getByTestId('status-card-enclosure').textContent).toContain('Not yet checked this session')
+    // CTX-313.1's dashboard was removed: the cards said "Not yet checked this
+    // session" for two areas whose checks run on demand on their own tabs, and
+    // for two that have no check at all.
+    expect(screen.queryByTestId('status-card-pcb')).toBeNull()
+    expect(screen.queryByTestId('status-card-enclosure')).toBeNull()
     expect(screen.getByPlaceholderText(/ask a question/)).toBeTruthy()
   })
 })
