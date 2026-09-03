@@ -532,12 +532,10 @@ function App() {
 
         {(view === null || view?.kind === 'noProject') && (
           <NoProjectLanding
-            projectCount={projects.length}
+            projects={projects}
             loading={projectsLoading}
             onCreateProject={() => setView({ kind: 'newProject' })}
-            /* The rail is the list. Pointing at it beats duplicating it here
-               and then having two lists to keep honest. */
-            onOpenProject={() => setProjectActionMessage('Pick a project from the list on the left.')}
+            onOpenProject={handleSelectProject}
           />
         )}
 

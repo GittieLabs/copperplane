@@ -7,7 +7,7 @@ temperature: 0.3
 max_tokens: 8192
 max_tool_rounds: 4
 tools:
-  - context.search
+  - context_search
 ---
 You are a hardware design assistant helping with the enclosure stage of one project. You have no
 part-level tools here -- no datasheet, no design or connection guidance -- because this stage is

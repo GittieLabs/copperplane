@@ -174,6 +174,32 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
 # to open -- every other registered route reads, or writes only to this
 # app's own local storage (verified against every route in daemon.ROUTES,
 # SPEC-204 SS2).
+def tool_name_for_route(route: str) -> str:
+    """A route name a model provider will actually accept.
+
+    Anthropic validates every tool name against `^[a-zA-Z0-9_-]{1,128}$` and
+    rejects the whole request with a 400 otherwise. Our route names are dotted
+    (`kicad.check_board`), which is right for a JSON-RPC method and invalid as
+    a tool name -- so every one of these tools was rejected, and with it every
+    review, every chat turn and every part lookup, on Anthropic specifically.
+
+    It went unnoticed because the maintainer's roles were bound to Google,
+    which accepts dots. The first Anthropic key configured through SPEC-336's
+    guided setup surfaced it immediately:
+
+        tools.0.custom.name: String should match pattern '^[a-zA-Z0-9_-]{1,128}$'
+
+    The route keeps its dot -- it is the JSON-RPC wire and nothing about that
+    changes. Only the name the model sees is translated, in one place.
+    """
+    return route.replace(".", "_")
+
+
+#: Tool name -> route, so a tool call can be dispatched back to daemon.ROUTES.
+ROUTE_FOR_TOOL: dict[str, str] = {
+    tool_name_for_route(route): route for route in TOOL_DEFINITIONS
+}
+
 CONFIRMATION_REQUIRED_TOOLS = {"kicad.inject_component"}
 
 
@@ -216,15 +242,19 @@ def build_tool_registry(exclude: set | None = None) -> ToolRegistry:
     trying to remove from it after."""
     exclude = exclude or set()
     registry = ToolRegistry()
-    for name, definition in TOOL_DEFINITIONS.items():
-        if name in exclude:
+    for route, definition in TOOL_DEFINITIONS.items():
+        if route in exclude:
             continue
-        handler = daemon.ROUTES.get(name)
+        handler = daemon.ROUTES.get(route)
         if handler is None:
             continue
+        # Registered under the provider-safe name; dispatched to the dotted
+        # route. `_wrap_route` still receives the route, so confirmation
+        # gating and every existing comparison against a route name keep
+        # working unchanged.
         registry.add_tool(
-            name,
-            _wrap_route(name, handler),
+            tool_name_for_route(route),
+            _wrap_route(route, handler),
             description=definition["description"],
             input_schema=definition["input_schema"],
         )

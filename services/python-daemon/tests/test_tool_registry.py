@@ -1,5 +1,7 @@
 import json
+import glob
 import os
+import re
 import sys
 import threading
 import time
@@ -18,7 +20,12 @@ class TestBuildToolRegistry(unittest.TestCase):
     def test_001_registers_exactly_the_intended_routes(self):
         registry = tool_registry.build_tool_registry()
         registered_names = {t["name"] for t in registry.list_tools()}
-        expected_names = set(tool_registry.TOOL_DEFINITIONS) & set(daemon.ROUTES)
+        # Registered under the provider-safe name, dispatched to the dotted
+        # route (CTX-204.x: Anthropic rejects a dot in a tool name).
+        expected_names = {
+            tool_registry.tool_name_for_route(route)
+            for route in set(tool_registry.TOOL_DEFINITIONS) & set(daemon.ROUTES)
+        }
         self.assertEqual(registered_names, expected_names)
         # Every named tool actually exists in daemon.ROUTES on this real,
         # fully-imported daemon module -- not a hypothetical route.
@@ -34,14 +41,21 @@ class TestBuildToolRegistry(unittest.TestCase):
         full_names = {t["name"] for t in full.list_tools()}
         filtered_names = {t["name"] for t in filtered.list_tools()}
 
-        self.assertEqual(full_names - filtered_names, tool_registry.CONFIRMATION_REQUIRED_TOOLS & full_names)
+        gated = {
+            tool_registry.tool_name_for_route(route)
+            for route in tool_registry.CONFIRMATION_REQUIRED_TOOLS
+        }
+        self.assertEqual(full_names - filtered_names, gated & full_names)
         self.assertTrue(filtered_names, "expected at least one real route to survive the exclusion")
 
     def test_003_exclude_a_name_that_is_not_registered_at_all_is_a_harmless_no_op(self):
         registry = tool_registry.build_tool_registry(exclude={"not.a.real.tool"})
         self.assertEqual(
             {t["name"] for t in registry.list_tools()},
-            set(tool_registry.TOOL_DEFINITIONS) & set(daemon.ROUTES),
+            {
+                tool_registry.tool_name_for_route(route)
+                for route in set(tool_registry.TOOL_DEFINITIONS) & set(daemon.ROUTES)
+            },
         )
 
 
@@ -137,8 +151,14 @@ class TestChatAgentToolDefinitions(unittest.TestCase):
                             in_tools_block = False
 
         for tool_name in referenced_tools:
-            self.assertIn(tool_name, tool_registry.TOOL_DEFINITIONS, f"{tool_name} has no TOOL_DEFINITIONS entry")
-            self.assertIn(tool_name, daemon.ROUTES, f"{tool_name} is not a real, registered daemon route")
+            # A prompt names the tool the MODEL sees, which is the
+            # provider-safe name, not the dotted route behind it.
+            self.assertIn(
+                tool_name, tool_registry.ROUTE_FOR_TOOL,
+                f"{tool_name} is not a tool this app offers under that name",
+            )
+            route = tool_registry.ROUTE_FOR_TOOL[tool_name]
+            self.assertIn(route, daemon.ROUTES, f"{route} is not a real, registered daemon route")
 
     def test_002_datasheet_read_pages_requires_part_id_and_pages(self):
         schema = tool_registry.TOOL_DEFINITIONS["datasheet.read_pages"]["input_schema"]
@@ -246,3 +266,63 @@ class TestAgentDispatchToolEndToEnd(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestEveryToolNameIsAcceptableToEveryProvider(unittest.TestCase):
+    """The check that would have caught it, and did not exist.
+
+    Anthropic validates tool names against `^[a-zA-Z0-9_-]{1,128}$` and
+    rejects the entire request with a 400 if any one fails. Every tool this
+    app offered was named for its dotted JSON-RPC route, so every review,
+    chat turn and part lookup failed on Anthropic -- reported from the built
+    app the first time an Anthropic key was configured:
+
+        tools.0.custom.name: String should match pattern '^[a-zA-Z0-9_-]{1,128}$'
+
+    It survived because the maintainer's roles were bound to Google, which
+    accepts dots. A test suite that never asserted the constraint could not
+    tell the two providers apart.
+    """
+
+    #: Anthropic's published constraint, and the strictest of the providers
+    #: this app supports -- so satisfying it satisfies all of them.
+    NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
+
+    def test_001_every_registered_tool_name_matches_the_pattern(self):
+        registry = tool_registry.build_tool_registry()
+        offenders = [
+            t["name"] for t in registry.list_tools()
+            if not self.NAME_PATTERN.match(t["name"])
+        ]
+        self.assertEqual(offenders, [])
+
+    def test_002_every_definition_maps_to_an_acceptable_name(self):
+        """Covers definitions whose route is absent from ROUTES on this
+        machine, which build_tool_registry silently skips."""
+        offenders = [
+            route for route in tool_registry.TOOL_DEFINITIONS
+            if not self.NAME_PATTERN.match(tool_registry.tool_name_for_route(route))
+        ]
+        self.assertEqual(offenders, [])
+
+    def test_003_the_translation_is_reversible_and_collision_free(self):
+        """Two routes must never map to one tool name -- a silent collision
+        would send a tool call to the wrong handler."""
+        names = [tool_registry.tool_name_for_route(r) for r in tool_registry.TOOL_DEFINITIONS]
+
+        self.assertEqual(len(names), len(set(names)))
+        for route in tool_registry.TOOL_DEFINITIONS:
+            self.assertEqual(tool_registry.ROUTE_FOR_TOOL[tool_registry.tool_name_for_route(route)], route)
+
+    def test_004_every_prompt_names_a_tool_that_survives_translation(self):
+        """A prompt naming a dotted tool would be describing a tool the model
+        is never offered -- the failure that produced this bug, one layer up."""
+        agents_dir = os.path.join(os.path.dirname(__file__), "..", "agentflow", "agents")
+        offenders = []
+        for path in glob.glob(os.path.join(agents_dir, "*.prompt.md")):
+            with open(path, encoding="utf-8") as handle:
+                for route in tool_registry.TOOL_DEFINITIONS:
+                    if route in handle.read():
+                        offenders.append(f"{os.path.basename(path)} names the route {route}")
+                        break
+        self.assertEqual(offenders, [])

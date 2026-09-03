@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import { GITHUB_REPO_URL, openExternal } from '../lib/externalLinks'
 
 /** SPEC-336: the launch view.
@@ -13,16 +15,22 @@ import { GITHUB_REPO_URL, openExternal } from '../lib/externalLinks'
  *  perverse. That also makes "closed a project" and "launched with none" the
  *  same state rather than two that merely look alike. */
 export function NoProjectLanding({
-  projectCount,
+  projects,
   loading = false,
   onCreateProject,
   onOpenProject,
 }: {
-  projectCount: number
+  projects: string[]
   loading?: boolean
   onCreateProject: () => void
-  onOpenProject: () => void
+  /** Opens a named project. The first version of this took no argument and
+   *  set a message telling the user to use the rail -- a message rendered
+   *  only inside the project view, so the button did nothing at all. */
+  onOpenProject: (name: string) => void
 }) {
+  const [choosing, setChoosing] = useState(false)
+  const projectCount = projects.length
+
   return (
     <div className="flex h-full flex-col items-start justify-center gap-6 p-10">
       <div className="flex flex-col gap-2">
@@ -52,7 +60,8 @@ export function NoProjectLanding({
           <button
             type="button"
             className="rounded border border-line px-3 py-2 text-sm text-fg-secondary hover:bg-surface-alt"
-            onClick={onOpenProject}
+            aria-expanded={choosing}
+            onClick={() => setChoosing((prev) => !prev)}
           >
             Open a project
             <span className="ml-1 text-fg-muted">
@@ -66,6 +75,25 @@ export function NoProjectLanding({
           </span>
         )}
       </div>
+
+      {/* The list itself, not a pointer at the rail. A button whose whole
+          effect is "look over there" is barely a button, and the first
+          version's message did not even render on this view. */}
+      {choosing && projectCount > 0 && (
+        <ul className="flex w-full max-w-md flex-col gap-1">
+          {projects.map((name) => (
+            <li key={name}>
+              <button
+                type="button"
+                className="w-full rounded border border-line-subtle px-3 py-2 text-left text-sm text-fg-secondary hover:bg-surface-alt hover:text-fg-bright"
+                onClick={() => onOpenProject(name)}
+              >
+                {name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
 
       {!loading && projectCount === 0 && (
         <p className="text-xs text-fg-muted">
