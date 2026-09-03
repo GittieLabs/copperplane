@@ -6,6 +6,7 @@ const resolveKicadProjectMock = vi.fn()
 const listSchematicComponentsMock = vi.fn()
 const componentEnvelopesMock = vi.fn()
 const checkSchematicParityMock = vi.fn()
+const describeFootprintMock = vi.fn()
 const loadProjectMock = vi.fn()
 const saveProjectMock = vi.fn()
 
@@ -15,6 +16,7 @@ vi.mock('../lib/kicadProject', () => ({
   listSchematicComponents: (...a: unknown[]) => listSchematicComponentsMock(...a),
   componentEnvelopes: (...a: unknown[]) => componentEnvelopesMock(...a),
   checkSchematicParity: (...a: unknown[]) => checkSchematicParityMock(...a),
+  describeFootprint: (...a: unknown[]) => describeFootprintMock(...a),
 }))
 vi.mock('../lib/projects', () => ({
   loadProject: (...a: unknown[]) => loadProjectMock(...a),
@@ -66,6 +68,20 @@ beforeEach(() => {
   checkSchematicParityMock.mockReset().mockResolvedValue({
     pcb_path: FILES.pcb_path, in_sync: true, issue_count: 0, issues: [],
     checked_at: READ.read_at,
+  })
+  describeFootprintMock.mockReset().mockResolvedValue({
+    footprint_id: 'Battery:Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles',
+    library: 'Battery',
+    name: 'Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles',
+    description: 'Panasonic CR-2032/HFN battery',
+    tags: ['battery'],
+    datasheet_url: null,
+    pad_count: 2,
+    mounting: 'through-hole -- the part\u2019s legs go through the board',
+    name_notes: ['Horizontal means the part lies flat against the board.'],
+    footprint_found: true,
+    courtyard: { x_mm: 22.59, y_mm: 20.5 },
+    model_ref: null, model_path: null, has_model: false,
   })
   loadProjectMock.mockReset().mockResolvedValue({ name: 'p' })
   saveProjectMock.mockReset().mockResolvedValue({ name: 'p' })
@@ -386,5 +402,65 @@ describe('SchematicComponents', () => {
 
     expect(await screen.findByText('D1')).toBeTruthy()
     expect(screen.queryByText(/board does not match your schematic/)).toBeNull()
+  })
+})
+
+/** SPEC-334. The maintainer's question, verbatim: "it's hard to know what
+ *  P2.54mm_Vertical means when to use over P2.00mm_Horizontal. If I am a user,
+ *  that's what I am trying to get clarification on." */
+describe('SchematicComponents footprint explanation', () => {
+  it('explains a footprint when its name is clicked', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    fireEvent.click(await screen.findByText(
+      'Battery:Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles',
+    ))
+
+    expect(await screen.findByText('Panasonic CR-2032/HFN battery')).toBeTruthy()
+    expect(screen.getByText(/lies flat against the board/)).toBeTruthy()
+    expect(describeFootprintMock).toHaveBeenCalledWith(
+      'Battery:Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles',
+    )
+  })
+
+  it('says plainly that a footprint with no 3D model cannot be measured', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    fireEvent.click(await screen.findByText(
+      'Battery:Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles',
+    ))
+
+    expect(await screen.findByText(/No 3D model is installed/)).toBeTruthy()
+  })
+
+  it('closes again, so one part is explained at a time', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+    const name = await screen.findByText(
+      'Battery:Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles',
+    )
+
+    fireEvent.click(name)
+    expect(await screen.findByText('Panasonic CR-2032/HFN battery')).toBeTruthy()
+    fireEvent.click(name)
+
+    await waitFor(() =>
+      expect(screen.queryByText('Panasonic CR-2032/HFN battery')).toBeNull(),
+    )
+  })
+
+  it('keeps the row readable when the footprint cannot be read at all', async () => {
+    describeFootprintMock.mockRejectedValue(new Error('no such library'))
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    fireEvent.click(await screen.findByText(
+      'Battery:Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles',
+    ))
+
+    expect(await screen.findByText(/Could not read this footprint/)).toBeTruthy()
+    expect(screen.getByText('BT1')).toBeTruthy()
   })
 })

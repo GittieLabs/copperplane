@@ -220,3 +220,37 @@ export async function linkedProjectSchematic(
     return null
   }
 }
+
+/** SPEC-334: what a footprint actually is, read from its own `.kicad_mod`.
+ *
+ *  A user cannot tell `P2.54mm_Vertical` from `P2.00mm_Horizontal` by name, and
+ *  KiCad's own file already says: "Through hole straight pin header, 1x04,
+ *  2.54mm pitch, single row". Measured before being relied on — 400 of 400
+ *  sampled KiCad footprints carry a non-empty description. */
+export interface FootprintDetail {
+  footprint_id: string
+  library: string | null
+  name: string
+  /** The library author's own words. `null` for a library that carries none. */
+  description: string | null
+  tags: string[]
+  /** Whatever URL the description contained. Surfaced, never followed. */
+  datasheet_url: string | null
+  pad_count: number | null
+  mounting: string | null
+  /** Plain-language readings of the naming conventions, silent about anything
+   *  unrecognised rather than inventing one. */
+  name_notes: string[]
+  footprint_found: boolean
+  courtyard: { x_mm: number; y_mm: number } | null
+  model_ref: string | null
+  model_path: string | null
+  has_model: boolean
+}
+
+export async function describeFootprint(footprintId: string): Promise<FootprintDetail> {
+  const handle = await submitJob<FootprintDetail>('kicad.describe_footprint', {
+    footprint_id: footprintId,
+  })
+  return handle.result
+}

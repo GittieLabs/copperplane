@@ -48,12 +48,18 @@ user_facing: true
 
 *Open questions this spec must settle:*
 
-*   **Where the naming knowledge comes from.** KiCad's footprint names are conventional, not
-    formal: `Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles` encodes library, manufacturer
-    part, mounting orientation and hole style, with no schema to parse against. Options: a parsed
-    convention (brittle but instant and free), the footprint's own `descr`/`tags` fields in the
-    `.kicad_mod` (authoritative but terse), an LLM explanation (fluent but needs grounding), or a
-    combination. `SPEC-332`'s static glossary is the precedent for the cheap half.
+*   **Settled: the footprint's own `descr` and `tags` are the primary source.** This was left open
+    because those fields were assumed to be "often empty or unhelpful". Measured instead, across a
+    random sample of 400 footprints from KiCad 10's own 155 libraries: **100% have a non-empty
+    `descr` and 98% have `tags`.** They are also better than a parser could be —
+    `PinHeader_1x04_P2.54mm_Vertical` reads *"Through hole straight pin header, 1x04, 2.54mm pitch,
+    single row"*, which answers the maintainer's `P2.54mm_Vertical` question directly, and
+    `Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles` carries a datasheet URL.
+
+    So: read the file. It is authoritative, instant, free, and cannot hallucinate. A static decoder
+    covers the naming conventions `descr` does not spell out (`SPEC-332`'s glossary is the
+    precedent), and an LLM is reserved for the comparative question — *which of these should I
+    use* — grounded in both.
 *   **Whether KiCad's own libraries are searchable.** The maintainer searched a *footprint* name in
     *component* search and got vendor part numbers, because the two namespaces were never
     connected: *"I have a hunch that the component I searched for ... is a kicad only reference name
@@ -71,8 +77,10 @@ user_facing: true
 *   Footprint naming is a convention, not a contract. A parser will meet names it cannot decode,
     and must say so rather than inventing a reading — the failure mode `SPEC-326` §1 exists to
     prevent.
-*   `.kicad_mod` files carry `descr` and `tags`, but they are written by many hands and are often
-    empty or unhelpful. Verify against real footprints before depending on them.
+*   `.kicad_mod` `descr`/`tags` were verified before being depended on (see §2): 400/400 and
+    395/400 respectively, on KiCad 10's bundled libraries. **That is a claim about KiCad's own
+    libraries only.** A user's personal or community `.pretty` may carry neither, so the surface
+    must degrade to the naming decoder rather than showing an empty panel.
 *   An LLM explanation of a footprint name is exactly the kind of confident-sounding output that is
     hard to check. It needs grounding in the footprint file, and must be marked when it is not.
 

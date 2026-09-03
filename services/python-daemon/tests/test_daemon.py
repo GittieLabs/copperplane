@@ -3354,3 +3354,49 @@ class TestFindingsSurviveAFailedExplanation(unittest.TestCase):
         self.assertEqual(len(out["violations"]), 1)
         self.assertEqual(out["violation_count"], 1)
         self.assertTrue(out["explanations_failed"])
+
+
+class TestDescribeFootprintRoute(unittest.TestCase):
+    """SPEC-334: kicad.describe_footprint."""
+
+    def test_001_the_route_is_registered(self):
+        self.assertIn("kicad.describe_footprint", daemon.ROUTES)
+
+    def test_002_the_route_is_async(self):
+        """It resolves through fp_lib_table and reads files off disk. A
+        blocking route stalls main()'s whole stdin loop -- CTX-314.2's lesson,
+        paid for once already."""
+        self.assertIn("kicad.describe_footprint", daemon.ASYNC_ROUTES)
+
+    def test_003_it_merges_the_footprint_file_with_what_the_bridge_knows(self):
+        """The enclosure facts (courtyard, 3D model) belong here: "will this
+        fit" is the same question the user has when they open this view."""
+        with patch.object(daemon.kicad_bridge, "resolve_footprint_model") as resolve, \
+             patch.object(daemon.footprint_detail, "describe_footprint") as describe:
+            resolve.return_value = {
+                "footprint_found": True,
+                "footprint_path": "/lib/X.pretty/Y.kicad_mod",
+                "courtyard": {"x_mm": 10.4, "y_mm": 3.4},
+                "model_ref": "y.step",
+                "model_path": "/models/y.step",
+            }
+            describe.return_value = {"name": "Y", "description": "a thing", "name_notes": []}
+
+            out = daemon.kicad_describe_footprint("Lib:Y")
+
+        describe.assert_called_once_with("Lib:Y", "/lib/X.pretty/Y.kicad_mod")
+        self.assertEqual(out["description"], "a thing")
+        self.assertEqual(out["courtyard"], {"x_mm": 10.4, "y_mm": 3.4})
+        self.assertTrue(out["has_model"])
+
+    def test_004_a_footprint_with_no_model_says_so_rather_than_omitting_it(self):
+        with patch.object(daemon.kicad_bridge, "resolve_footprint_model") as resolve, \
+             patch.object(daemon.footprint_detail, "describe_footprint") as describe:
+            resolve.return_value = {"footprint_found": True, "footprint_path": "/x.kicad_mod",
+                                    "courtyard": None, "model_ref": "z.step", "model_path": None}
+            describe.return_value = {"name": "Y", "name_notes": []}
+
+            out = daemon.kicad_describe_footprint("Lib:Y")
+
+        self.assertFalse(out["has_model"])
+        self.assertIsNone(out["model_path"])

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 
 import {
   checkSchematicParity,
@@ -13,6 +13,7 @@ import {
   type SchematicRead,
 } from '../lib/kicadProject'
 import { loadProject, saveProject } from '../lib/projects'
+import { FootprintDetailView } from './FootprintDetail'
 
 /** KiCad repeats an identical parity description once per offending item --
  *  a real board of the maintainer's reports "Duplicate footprints" three
@@ -50,6 +51,9 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
   const [parity, setParity] = useState<ParityResult | null>(null)
   /* Why the numbers are missing, when they are. Never swallowed. */
   const [measureError, setMeasureError] = useState<string | null>(null)
+  /** SPEC-334: which row has its footprint explanation open. One at a time --
+   *  the point is to answer a question about one part, not to produce a wall. */
+  const [explaining, setExplaining] = useState<string | null>(null)
 
   const readSchematic = useCallback(
     async (resolved: KicadProjectFiles, supplied: Record<string, number>) => {
@@ -339,12 +343,29 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
               <tbody>
                 {read.components.map((component) => {
                   const status = statusOf(component)
-                  return (
-                    <tr key={component.reference} className="border-t border-line-subtle">
+                  const row = (
+                    <tr className="border-t border-line-subtle">
                       <td className="py-1 pr-3 text-fg-bright">{component.reference}</td>
                       <td className="py-1 pr-3 text-fg-secondary">{component.value ?? '—'}</td>
                       <td className="py-1 pr-3 break-all text-fg-tertiary">
-                        {component.footprint ?? '—'}
+                        {/* SPEC-334: the footprint name is the thing the user
+                            cannot read, so it is itself the way in. */}
+                        {component.footprint ? (
+                          <button
+                            type="button"
+                            className="text-left underline decoration-dotted underline-offset-2 hover:text-fg-secondary"
+                            aria-expanded={explaining === component.reference}
+                            onClick={() =>
+                              setExplaining((prev) =>
+                                prev === component.reference ? null : component.reference,
+                              )
+                            }
+                          >
+                            {component.footprint}
+                          </button>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td className={`py-1 ${status.tone}`}>
                         {status.label}
@@ -384,6 +405,23 @@ export function SchematicComponents({ projectName }: { projectName: string }) {
                         )}
                       </td>
                     </tr>
+                  )
+                  const open = explaining === component.reference && component.footprint
+                  return (
+                    <Fragment key={component.reference}>
+                      {row}
+                      {open && (
+                        <tr className="border-t border-line-subtle">
+                          <td colSpan={4} className="py-2">
+                            <FootprintDetailView
+                              footprintId={component.footprint as string}
+                              reference={component.reference}
+                              onClose={() => setExplaining(null)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   )
                 })}
               </tbody>
