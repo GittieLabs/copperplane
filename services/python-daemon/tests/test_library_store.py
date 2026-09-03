@@ -1986,3 +1986,158 @@ class TestListProjectsAtAnArbitraryRoot(unittest.TestCase):
         self.assertEqual(
             store.list_projects(), store.list_projects_at(self.tmp.name)
         )
+
+
+class TestRemovingAndRestoringAProject(unittest.TestCase):
+    """SPEC-333: "All this should do is remove from the project list in the app."
+
+    Soft is the whole request: nothing this touches deletes a board, an export,
+    or a folder.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        store.configure(storage_root=self.tmp.name)
+        self.addCleanup(store.configure, storage_root=None)
+
+    def test_001_a_removed_project_leaves_the_list(self):
+        store.save_project({"name": "Keep"})
+        store.save_project({"name": "Hide"})
+
+        store.set_project_removed("Hide", True)
+
+        self.assertEqual(store.list_projects(), ["Keep"])
+        self.assertEqual(store.list_removed_projects(), ["Hide"])
+
+    def test_002_a_removed_project_still_loads(self):
+        """Hidden, not gone -- anything holding a reference must not break."""
+        store.save_project({"name": "Hide", "intent": "a real field"})
+        store.set_project_removed("Hide", True)
+
+        self.assertEqual(store.load_project("Hide")["intent"], "a real field")
+
+    def test_003_nothing_on_disk_is_deleted(self):
+        store.save_project({"name": "Hide"})
+        before = os.listdir(os.path.join(self.tmp.name, "projects", "Hide"))
+
+        store.set_project_removed("Hide", True)
+
+        self.assertEqual(os.listdir(os.path.join(self.tmp.name, "projects", "Hide")), before)
+
+    def test_004_a_linked_projects_own_folder_is_never_touched(self):
+        """The flag is app bookkeeping. The user's folder is the user's."""
+        user_folder = os.path.join(self.tmp.name, "user-board")
+        os.makedirs(user_folder)
+        store.save_project({"name": "Linked", "directory": user_folder})
+        before = sorted(os.listdir(user_folder))
+
+        store.set_project_removed("Linked", True)
+
+        self.assertEqual(sorted(os.listdir(user_folder)), before)
+
+    def test_005_restoring_brings_it_back(self):
+        store.save_project({"name": "Hide"})
+        store.set_project_removed("Hide", True)
+
+        store.set_project_removed("Hide", False)
+
+        self.assertEqual(store.list_projects(), ["Hide"])
+        self.assertEqual(store.list_removed_projects(), [])
+
+    def test_006_removing_a_project_that_does_not_exist_is_a_clean_error(self):
+        with self.assertRaises(FileNotFoundError):
+            store.set_project_removed("Nope", True)
+
+    def test_007_a_damaged_pointer_is_listed_rather_than_hidden(self):
+        """Hiding a project because its JSON is damaged would be a worse answer
+        than listing it and letting load_project report the real problem."""
+        store.save_project({"name": "Broken"})
+        with open(os.path.join(self.tmp.name, "projects", "Broken", "project.json"), "w") as handle:
+            handle.write("{not json")
+
+        self.assertIn("Broken", store.list_projects())
+
+
+class TestRenamingAProject(unittest.TestCase):
+    """SPEC-333 §1: there was no rename route, and saving under a new name
+    wrote a SECOND pointer record and left the first -- one folder, two
+    projects, and an old entry loading with a name its own folder contradicts.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        store.configure(storage_root=self.tmp.name)
+        self.addCleanup(store.configure, storage_root=None)
+
+    def test_001_moves_the_record_rather_than_writing_a_second_one(self):
+        store.save_project({"name": "Old"})
+
+        store.rename_project("Old", "New")
+
+        self.assertEqual(store.list_projects(), ["New"])
+        self.assertEqual(store.load_project("New")["name"], "New")
+
+    def test_002_carries_the_record_across(self):
+        store.save_project({"name": "Old", "intent": "a blinky"})
+
+        store.rename_project("Old", "New")
+
+        self.assertEqual(store.load_project("New")["intent"], "a blinky")
+
+    def test_003_refuses_a_name_that_already_exists(self):
+        """Two projects silently becoming one is the failure this prevents."""
+        store.save_project({"name": "One"})
+        store.save_project({"name": "Two"})
+
+        with self.assertRaises(store.SchemaValidationError):
+            store.rename_project("One", "Two")
+
+        self.assertEqual(store.list_projects(), ["One", "Two"])
+
+    def test_004_refuses_an_empty_name(self):
+        store.save_project({"name": "Old"})
+
+        with self.assertRaises(store.SchemaValidationError):
+            store.rename_project("Old", "   ")
+
+    def test_005_renaming_to_the_same_name_is_a_no_op(self):
+        store.save_project({"name": "Same"})
+
+        self.assertEqual(store.rename_project("Same", "Same")["renamed"], False)
+        self.assertEqual(store.list_projects(), ["Same"])
+
+    def test_006_never_renames_the_users_own_folder(self):
+        """SPEC-333's existing non-goal: "the folder is the user's, and moving
+        it is theirs to do"."""
+        user_folder = os.path.join(self.tmp.name, "user-board")
+        os.makedirs(user_folder)
+        store.save_project({"name": "Old", "directory": user_folder})
+
+        store.rename_project("Old", "New")
+
+        self.assertTrue(os.path.isdir(user_folder))
+        self.assertEqual(store.load_project("New")["directory"], user_folder)
+
+    def test_007_a_linked_manifest_learns_the_new_name(self):
+        user_folder = os.path.join(self.tmp.name, "user-board")
+        os.makedirs(user_folder)
+        store.save_project({"name": "Old", "directory": user_folder})
+
+        store.rename_project("Old", "New")
+
+        self.assertEqual(store.load_project("New")["name"], "New")
+
+    def test_008_renaming_something_that_does_not_exist_is_a_clean_error(self):
+        with self.assertRaises(FileNotFoundError):
+            store.rename_project("Nope", "New")
+
+    def test_009_asking_for_a_rename_target_does_not_create_it(self):
+        """`_project_dir` goes through `_ensure_dir`, so merely computing the
+        target's path created it and the collision check always fired."""
+        store.save_project({"name": "Old"})
+
+        store.rename_project("Old", "New")
+
+        self.assertEqual(sorted(os.listdir(os.path.join(self.tmp.name, "projects"))), ["New"])

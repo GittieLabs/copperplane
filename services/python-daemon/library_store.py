@@ -1232,13 +1232,45 @@ def list_projects_at(root: str) -> list:
     A root that does not exist, or holds no `projects/`, is an empty list --
     not an error. "Nothing there yet" is a real and common answer.
     """
+    return sorted(name for name, record in _projects_at(root) if not record.get("removed"))
+
+
+def _projects_at(root: str) -> list:
+    """Every project folder under a root, with its pointer record.
+
+    Reading each `project.json` rather than only checking it exists is what
+    lets `removed` be respected (SPEC-333). A project's pointer lives in the
+    app's own storage, not in the user's folder, so the flag never touches
+    anything of theirs.
+    """
     projects_root = os.path.join(root, "projects")
     if not os.path.isdir(projects_root):
         return []
-    return sorted(
-        entry for entry in os.listdir(projects_root)
-        if os.path.isfile(os.path.join(projects_root, entry, "project.json"))
-    )
+    found = []
+    for entry in sorted(os.listdir(projects_root)):
+        pointer = os.path.join(projects_root, entry, "project.json")
+        if not os.path.isfile(pointer):
+            continue
+        try:
+            with open(pointer, encoding="utf-8") as handle:
+                record = json.load(handle)
+        except (OSError, ValueError):
+            # An unreadable pointer is still a project the user has. Hiding it
+            # because its JSON is damaged would be a worse answer than listing
+            # it and letting load_project report the real problem.
+            record = {}
+        found.append((entry, record if isinstance(record, dict) else {}))
+    return found
+
+
+def list_removed_projects_at(root: str) -> list:
+    """The projects hidden from the list, so there is always a way back.
+
+    SPEC-333's removal is explicitly soft: "All this should do is remove from
+    the project list in the app." A removal with no route back would be a
+    different feature, and a worse one.
+    """
+    return sorted(name for name, record in _projects_at(root) if record.get("removed"))
 
 
 def list_projects() -> list:
@@ -1246,6 +1278,79 @@ def list_projects() -> list:
     # a listed project -- SPEC-333's removal flag -- applies to both.
     _ensure_dir("projects")
     return list_projects_at(_root())
+
+
+def list_removed_projects() -> list:
+    return list_removed_projects_at(_root())
+
+
+def set_project_removed(name: str, removed: bool) -> dict:
+    """Hide a project from the list, or bring it back. Deletes nothing.
+
+    SPEC-333, requested 2026-09-03: "I believe we need a way to 'soft delete' a
+    project. All this should do is remove from the project list in the app."
+
+    The flag goes on the storage-root pointer record, which is the app's own
+    bookkeeping -- a linked project's real manifest, in the user's own folder,
+    is not touched at all. `load_project` keeps working on a removed project,
+    so anything holding a reference to one does not break.
+    """
+    pointer_path = _project_pointer_path(name)
+    if not os.path.isfile(pointer_path):
+        raise FileNotFoundError(f"No project named {name!r}.")
+    record = _read_json(pointer_path)
+    if removed:
+        record["removed"] = True
+    else:
+        record.pop("removed", None)
+    _write_json(pointer_path, record)
+    return {"name": name, "removed": bool(removed)}
+
+
+def rename_project(name: str, new_name: str) -> dict:
+    """Move a project's record to a new name, rather than writing a second one.
+
+    SPEC-333 §1: there was no rename route, and saving under a new name wrote a
+    *second* pointer record and left the first -- one folder, two projects, and
+    an old entry loading with a name its own folder contradicts.
+
+    Identity is the `projects/<name>/` folder name (`load_project`'s own
+    disk-truth rule, CTX-110.1), so a rename is a move of that folder in the
+    app's storage. **The user's own linked folder is never touched** --
+    SPEC-333's existing non-goal, unchanged: "the folder is the user's, and
+    moving it is theirs to do."
+    """
+    new_name = (new_name or "").strip()
+    if not new_name:
+        raise SchemaValidationError("A project name cannot be empty.")
+    if new_name == name:
+        return {"name": name, "renamed": False}
+
+    old_dir = os.path.join(_root(), "projects", name)
+    new_dir = os.path.join(_root(), "projects", new_name)
+    if not os.path.isfile(os.path.join(old_dir, "project.json")):
+        raise FileNotFoundError(f"No project named {name!r}.")
+    if os.path.exists(new_dir):
+        # Refused, never merged: two projects silently becoming one is the
+        # failure this route exists to prevent, not a nicety.
+        raise SchemaValidationError(f"A project named {new_name!r} already exists.")
+
+    os.rename(old_dir, new_dir)
+    record = _read_json(os.path.join(new_dir, "project.json"))
+    record["name"] = new_name
+    _write_json(os.path.join(new_dir, "project.json"), record)
+
+    # A linked project's real manifest carries the name too, and it lives in
+    # the user's folder -- updating the name inside it is not moving anything.
+    directory = record.get("directory")
+    if directory:
+        state_path = _project_state_path(directory)
+        if os.path.isfile(state_path):
+            manifest = _read_json(state_path)
+            manifest["name"] = new_name
+            _write_json(state_path, manifest)
+
+    return {"name": new_name, "renamed": True}
 
 
 def open_project_from_directory(directory: str) -> dict:

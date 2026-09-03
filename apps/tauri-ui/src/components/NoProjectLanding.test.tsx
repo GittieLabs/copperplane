@@ -175,3 +175,45 @@ describe('NoProjectLanding: where it is looking', () => {
     expect(screen.queryByText(/Looking in/)).toBeNull()
   })
 })
+
+/** SPEC-333: a removal with no visible route back is a different feature, and
+ *  a worse one. */
+describe('NoProjectLanding: removed projects', () => {
+  it('says nothing when nothing has been removed', () => {
+    render(<NoProjectLanding projects={['a']} onCreateProject={() => {}} onOpenProject={() => {}} />)
+
+    expect(screen.queryByText(/removed from this list/)).toBeNull()
+  })
+
+  it('offers to put a removed project back', () => {
+    const onRestoreProject = vi.fn()
+    render(
+      <NoProjectLanding
+        projects={['a']}
+        removedProjects={['Hello Blinky']}
+        onRestoreProject={onRestoreProject}
+        onCreateProject={() => {}}
+        onOpenProject={() => {}}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '1 removed from this list' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Put back' }))
+
+    expect(onRestoreProject).toHaveBeenCalledWith('Hello Blinky')
+  })
+
+  it('keeps the removed list closed until asked', () => {
+    render(
+      <NoProjectLanding
+        projects={['a']}
+        removedProjects={['Hello Blinky']}
+        onRestoreProject={() => {}}
+        onCreateProject={() => {}}
+        onOpenProject={() => {}}
+      />,
+    )
+
+    expect(screen.queryByRole('button', { name: 'Put back' })).toBeNull()
+  })
+})

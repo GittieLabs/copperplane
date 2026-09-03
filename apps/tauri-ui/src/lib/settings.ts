@@ -564,3 +564,18 @@ export async function copyDiagnostics(): Promise<void> {
 
   await writeText(lines.join('\n'))
 }
+
+/** SPEC-333: the confirmation for removing a project from the list.
+ *
+ *  Says plainly that nothing is deleted. The word a user brings to this is
+ *  "delete", and being wrong in either direction costs something: believing
+ *  files are gone costs trust, believing they are safe when they are not costs
+ *  work. */
+export async function confirmRemoveProject(name: string): Promise<boolean> {
+  return ask(
+    `Remove "${name}" from your project list?\n\nNothing is deleted. Its files, its board and ` +
+      'anything you exported stay exactly where they are, and you can put it back from the ' +
+      'projects screen.',
+    { title: 'Remove from list', kind: 'warning', okLabel: 'Remove', cancelLabel: 'Cancel' },
+  )
+}

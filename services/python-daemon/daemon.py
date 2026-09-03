@@ -813,6 +813,33 @@ def kicad_find_projects_in_directory(directory: str) -> dict:
     return {"directory": directory, "projects": found, "count": len(found)}
 
 
+def project_set_removed(name: str, removed: bool = True) -> dict:
+    """The project.set_removed route (SPEC-333).
+
+    Hides a project from the list, or brings it back. Deletes nothing: the flag
+    goes on the storage-root pointer record, which is the app's own
+    bookkeeping, and a linked project's real manifest in the user's own folder
+    is untouched.
+    """
+    return library_store.set_project_removed(name, removed)
+
+
+def project_list_removed() -> dict:
+    """The project.list_removed route (SPEC-333): what is hidden, so there is
+    always a route back from a removal."""
+    names = library_store.list_removed_projects()
+    return {"projects": names, "count": len(names)}
+
+
+def project_rename(name: str, new_name: str) -> dict:
+    """The project.rename route (SPEC-333).
+
+    Moves the record rather than writing a second one. The user's own linked
+    folder is never renamed -- SPEC-333's existing non-goal.
+    """
+    return library_store.rename_project(name, new_name)
+
+
 def project_list_in_root(root: str) -> dict:
     """The project.list_in_root route (CTX-110.2).
 
@@ -2122,6 +2149,9 @@ def _build_routes() -> dict:
         routes["project.get_directory"] = project_get_directory
         routes["project.open_from_directory"] = project_open_from_directory
         routes["project.list_in_root"] = project_list_in_root
+        routes["project.set_removed"] = project_set_removed
+        routes["project.list_removed"] = project_list_removed
+        routes["project.rename"] = project_rename
         routes["project.set_intent"] = project_set_intent
         routes["project.set_check_result"] = project_set_check_result
         routes["project.add_part_reference"] = project_add_part_reference
