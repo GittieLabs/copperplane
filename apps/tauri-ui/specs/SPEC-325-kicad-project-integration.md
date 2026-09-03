@@ -10,6 +10,7 @@ location: "apps/tauri-ui/specs/SPEC-325-kicad-project-integration.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
 child_specs:
   - "SPEC-334-footprint-literacy-and-component-detail.md"
+  - "SPEC-337-naming-the-two-project-links.md"
 user_facing: true
 ---
 
