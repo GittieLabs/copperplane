@@ -95,3 +95,46 @@ describe('ViolationsList: tests KiCad did not run', () => {
     expect(screen.queryByText(/switched off/)).toBeNull()
   })
 })
+
+/** SPEC-332: the schematic check now reports what the board check does. The
+ *  renderer was already shared -- SchematicAdvisor and BoardAdvisor both use
+ *  ViolationsList -- so these render with no component change at all. */
+describe('ViolationsList: an ERC result', () => {
+  const ercResult = {
+    summary: 'One pin is not connected.',
+    violations: [
+      {
+        severity: 'error',
+        description: 'Pin not connected',
+        sheet_path: '/',
+        items: [{ description: 'Symbol #PWR03 Pin 1 [Power input, Line]' }],
+      },
+    ],
+    truncated_count: 0,
+    ignored_checks: [
+      { key: 'single_global_label', description: 'Global label only appears once in the schematic' },
+      { key: 'simulation_model_issue', description: 'SPICE model issue' },
+    ],
+  }
+
+  it('shows which schematic checks were switched off', () => {
+    render(<ViolationsList result={ercResult} />)
+
+    expect(screen.getByText(/A global label used in only one place/)).toBeTruthy()
+    expect(screen.getByText(/Irrelevant unless you actually simulate/)).toBeTruthy()
+  })
+
+  it('explains ERC vocabulary in the finding itself', () => {
+    /** "Power input" is the term a maker cannot act on: the schematic is
+     *  usually right and a PWR_FLAG is missing. */
+    render(<ViolationsList result={ercResult} />)
+
+    expect(screen.getByText(/expects to be fed power/)).toBeTruthy()
+  })
+
+  it('still says where the problem is', () => {
+    render(<ViolationsList result={ercResult} />)
+
+    expect(screen.getByText(/Symbol #PWR03 Pin 1/)).toBeTruthy()
+  })
+})

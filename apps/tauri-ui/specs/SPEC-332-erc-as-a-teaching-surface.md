@@ -1,7 +1,7 @@
 ---
 id: SPEC-332
 title: "ERC as a Teaching Surface"
-status: Draft
+status: In-Progress
 type: Feature
 created: 2026-09-03
 last_updated: 2026-09-03
@@ -57,6 +57,12 @@ user_facing: true
     surface; it is three specific omissions in one that already exists. Whether that deserves a
     spec at all is a fair question, and the honest answer is that the *first* item is the one worth
     the work: everything else is a paragraph of copy.
+
+    **Delivered in `CTX-332.1` on 2026-09-03**, and it was exactly that size: one line in
+    `kicad_check_schematic`, nine glossary entries, and **no UI change at all** — `SchematicAdvisor`
+    already renders through `ViolationsList`. The three §2 open questions about presentation
+    (mirroring KiCad's tab structure, whether a schematic coordinate is worth showing, whether the
+    glossaries share a module) are untouched and remain open; nothing here needed them answered.
 
 *   **KiCad already hands us what is missing.** An ERC report's own top-level keys are
     `ignored_checks`, `included_severities`, `sheets`, `source`, `kicad_version`,

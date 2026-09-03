@@ -3670,3 +3670,83 @@ class TestProjectListInRootRoute(unittest.TestCase):
         local root."""
         self.assertIn("project.list_in_root", daemon.ROUTES)
         self.assertIn("project.list_in_root", daemon.ASYNC_ROUTES)
+
+
+class TestSchematicCheckMatchesTheBoardCheck(unittest.TestCase):
+    """SPEC-332: three omissions in a surface that already existed.
+
+    Corrected before building: ERC findings already carry their component and
+    pin, and already share `_explain_or_report_plainly` with DRC. What was
+    genuinely missing is what the route DISCARDED from a report it already had.
+    """
+
+    FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "parity_match.kicad_sch")
+
+    def _report(self, ignored=None, severities=None):
+        return {
+            "sheets": [{"path": "/", "violations": [
+                {"description": "Pin not connected", "severity": "error",
+                 "type": "pin_not_connected",
+                 "items": [{"description": "Symbol #PWR03 Pin 1 [Power input, Line]"}]},
+            ]}],
+            "ignored_checks": ignored if ignored is not None else [
+                {"key": "single_global_label", "description": "Global label only appears once"},
+                {"key": "footprint_filter", "description": "Assigned footprint doesn't match filters"},
+            ],
+            "included_severities": severities if severities is not None else ["error", "warning"],
+        }
+
+    def test_001_ignored_checks_reach_the_caller(self):
+        """A schematic reported clean may simply not have been checked for the
+        thing that is wrong -- the failure the board side already fixed."""
+        with patch.object(daemon.kicad_cli, "run_erc", return_value=self._report()), \
+             patch.object(daemon, "_explain_or_report_plainly", return_value={"violations": []}):
+            out = daemon.kicad_check_schematic("/x.kicad_sch")
+
+        self.assertEqual([c["key"] for c in out["ignored_checks"]],
+                         ["single_global_label", "footprint_filter"])
+
+    def test_002_included_severities_reach_the_caller(self):
+        """A result filtered to errors only, presented as "no problems", is a
+        lie of the same shape as the ignored-checks gap."""
+        with patch.object(daemon.kicad_cli, "run_erc", return_value=self._report(severities=["error"])), \
+             patch.object(daemon, "_explain_or_report_plainly", return_value={"violations": []}):
+            out = daemon.kicad_check_schematic("/x.kicad_sch")
+
+        self.assertEqual(out["included_severities"], ["error"])
+
+    def test_003_a_report_without_the_keys_does_not_crash(self):
+        """An older kicad-cli, or a cached report, simply has neither."""
+        bare = {"sheets": [{"path": "/", "violations": []}]}
+        with patch.object(daemon.kicad_cli, "run_erc", return_value=bare), \
+             patch.object(daemon, "_explain_or_report_plainly", return_value={"violations": []}):
+            out = daemon.kicad_check_schematic("/x.kicad_sch")
+
+        self.assertEqual(out["ignored_checks"], [])
+        self.assertEqual(out["included_severities"], [])
+
+    def test_004_the_schematic_route_now_returns_what_the_board_route_does(self):
+        """The comparison that produced this spec, as an assertion."""
+        with patch.object(daemon.kicad_cli, "run_erc", return_value=self._report()), \
+             patch.object(daemon, "_explain_or_report_plainly", return_value={"violations": []}):
+            out = daemon.kicad_check_schematic("/x.kicad_sch")
+
+        for key in ("violation_count", "ignored_checks", "source_path"):
+            self.assertIn(key, out, f"the board check reports {key} and the schematic check must too")
+
+    @unittest.skipUnless(
+        os.path.isfile("/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"),
+        "kicad-cli is not installed on this machine",
+    )
+    def test_005_against_the_real_committed_fixture(self):
+        """SPEC-332 §2: this is testable without anyone's personal files.
+        `parity_match.kicad_sch` is 26 lines and produces real violations."""
+        with patch.object(daemon, "_explain_or_report_plainly",
+                          side_effect=lambda findings, *a, **k: {"violations": findings}):
+            out = daemon.kicad_check_schematic(self.FIXTURE)
+
+        self.assertGreater(out["violation_count"], 0, "the fixture must produce real violations")
+        self.assertTrue(out["included_severities"])
+        # And the finding carries its component, which ERC already provided.
+        located = [v for v in out["violations"] if v.get("items")]
+        self.assertTrue(located, "an ERC finding should say where it is")
