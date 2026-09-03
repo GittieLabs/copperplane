@@ -1091,7 +1091,7 @@ Noticed while verifying `SPEC-336`'s skip path, which is why it is logged here r
 that change: it is copy on a surface `SPEC-335` owns, and worth doing when something else touches
 the wizard.
 
-#### SPEC-337 — Two Things Called "Linked" — not yet written, reported from the app
+#### SPEC-337 — Naming the Two Project Links — written and delivered 2026-09-03
 
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-325, SPEC-312
 
