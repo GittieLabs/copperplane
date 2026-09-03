@@ -113,15 +113,33 @@ def newest_source_mtime(daemon_dir: str):
     is always newer there and the check is inert. Locally, dist/ survives
     `git pull`, which is exactly the case this catches."""
     newest, which = None, None
-    names = [n for n in os.listdir(daemon_dir) if n.endswith(".py")]
-    names += [n for n in _FROZEN_SOURCE_EXTRAS if os.path.isfile(os.path.join(daemon_dir, n))]
-    for name in names:
+    paths = [
+        os.path.join(daemon_dir, n) for n in os.listdir(daemon_dir) if n.endswith(".py")
+    ]
+    paths += [
+        os.path.join(daemon_dir, n) for n in _FROZEN_SOURCE_EXTRAS
+        if os.path.isfile(os.path.join(daemon_dir, n))
+    ]
+    # The agentflow tree is bundled by daemon.spec's own `datas`, so a prompt
+    # is as much frozen source as a module is -- and was not watched here.
+    # Confirmed by touching a prompt and watching this report "current":
+    # raising an agent's max_tokens, or any prompt edit, would ship stale and
+    # silently. That is CTX-407.4's defect exactly (`datas` the freeze did not
+    # carry), reached from the other direction.
+    agentflow_dir = os.path.join(daemon_dir, "agentflow")
+    for root, _dirs, files in os.walk(agentflow_dir):
+        paths += [
+            os.path.join(root, f) for f in files
+            if f.endswith((".md", ".py", ".yaml", ".yml", ".json"))
+        ]
+
+    for path in paths:
         try:
-            stamp = os.path.getmtime(os.path.join(daemon_dir, name))
+            stamp = os.path.getmtime(path)
         except OSError:
             continue
         if newest is None or stamp > newest:
-            newest, which = stamp, name
+            newest, which = stamp, os.path.relpath(path, daemon_dir)
     return newest, which
 
 

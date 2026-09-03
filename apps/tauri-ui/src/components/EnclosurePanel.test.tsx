@@ -10,6 +10,9 @@ const pickExportDestinationMock = vi.fn()
 const getProjectDirectoryMock = vi.fn()
 const exportBoardGlbMock = vi.fn()
 const getComponentHeightsMock = vi.fn()
+const componentEnvelopesMock = vi.fn()
+const linkedProjectBoardMock = vi.fn()
+const setProjectCheckResultMock = vi.fn()
 
 vi.mock('../lib/enclosure', () => ({
   generateEnclosure: (...args: unknown[]) => generateEnclosureMock(...args),
@@ -19,6 +22,15 @@ vi.mock('../lib/enclosure', () => ({
   getProjectDirectory: (...args: unknown[]) => getProjectDirectoryMock(...args),
   exportBoardGlb: (...args: unknown[]) => exportBoardGlbMock(...args),
   getComponentHeights: (...args: unknown[]) => getComponentHeightsMock(...args),
+}))
+
+vi.mock('../lib/kicadProject', () => ({
+  componentEnvelopes: (...args: unknown[]) => componentEnvelopesMock(...args),
+  linkedProjectBoard: (...args: unknown[]) => linkedProjectBoardMock(...args),
+}))
+
+vi.mock('../lib/projects', () => ({
+  setProjectCheckResult: (...args: unknown[]) => setProjectCheckResultMock(...args),
 }))
 
 vi.mock('../lib/boardAdvisor', () => ({
@@ -139,6 +151,11 @@ const fakeResult = {
 
 beforeEach(() => {
   generateEnclosureMock.mockReset()
+  componentEnvelopesMock.mockReset().mockRejectedValue(new Error('not measured by default'))
+  // No linked KiCad project by default, so these tests keep exercising the
+  // open-in-KiCad discovery path they were written for.
+  linkedProjectBoardMock.mockReset().mockResolvedValue(null)
+  setProjectCheckResultMock.mockReset().mockResolvedValue({ name: 'test-project' })
   pickPcbFileMock.mockReset()
   listOpenBoardsMock.mockReset().mockResolvedValue({ status: 'no_board_open' })
   openKicadMock.mockReset().mockResolvedValue(undefined)
@@ -846,9 +863,12 @@ describe('EnclosurePanel: SPEC-316 menuCommand', () => {
       />,
     )
 
-    await waitFor(() =>
-      expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('menuCommand=enclosure:run_review:4'),
-    )
+    // The enclosure ReviewPanel is switched off (see the describe below), so
+    // a Design > Enclosure > Run Review menu click has nothing to forward to.
+    // Asserting the panel is absent is the honest replacement for asserting
+    // it received the command.
+    await waitFor(() => screen.getByText(/Review the enclosure — not built yet/))
+    expect(screen.queryByText(/ReviewPanel stub/)).toBeNull()
   })
 })
 
@@ -876,25 +896,201 @@ describe('EnclosurePanel: CTX-318.4 AgentChat wiring', () => {
   })
 })
 
-describe('EnclosurePanel: CTX-319.4 ReviewPanel wiring', () => {
-  it('mounts ReviewPanel scoped to the project enclosure area', async () => {
+describe('EnclosurePanel: the enclosure review is off until it has real data', () => {
+  /* CTX-319.4 mounted a live ReviewPanel here. Switched off deliberately:
+     its one real data tool, `kicad.get_component_heights`, goes through
+     `kipy` and needs KiCad RUNNING, so with KiCad closed the agent had
+     nothing but the project intent and produced confident advice from no
+     data. Reported as "I don't even know what the run review check is
+     supposed to show for the enclosure."
+
+     Shown rather than hidden (SPEC-305 §2, "visible-but-empty beats
+     hidden") -- a review button that silently advises from nothing is worse
+     than one that says it is not built. */
+  it('does not run an enclosure review', async () => {
     render(<EnclosurePanel projectName="weather-pcb" />)
 
-    await waitFor(() => screen.getByText(/ReviewPanel stub/))
-    const stub = screen.getByText(/ReviewPanel stub/)
-    expect(stub.textContent).toContain('area=enclosure')
-    expect(stub.textContent).toContain('scope=project')
-    expect(stub.textContent).toContain('scopeId=weather-pcb:enclosure')
-    expect(stub.textContent).toContain('title="Review the enclosure"')
-    expect(stub.textContent).toContain('projectName=weather-pcb')
+    await waitFor(() => screen.getByText(/Review the enclosure/))
+    expect(screen.queryByText(/ReviewPanel stub/)).toBeNull()
   })
 
-  it('re-scopes ReviewPanel when the project changes', async () => {
-    const { rerender } = render(<EnclosurePanel projectName="project-a" />)
-    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+  it('names the feature and the spec that will restore it', async () => {
+    render(<EnclosurePanel projectName="weather-pcb" />)
 
-    rerender(<EnclosurePanel projectName="project-b" />)
+    expect(await screen.findByText(/Review the enclosure — not built yet/)).toBeTruthy()
+    expect(screen.getByText(/SPEC-331/)).toBeTruthy()
+  })
 
-    await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:enclosure'))
+  it('says why, in terms of the data it lacked', async () => {
+    render(<EnclosurePanel projectName="weather-pcb" />)
+
+    expect(await screen.findByText(/needed KiCad running/)).toBeTruthy()
+  })
+})
+
+describe('EnclosurePanel: interior height comes from the board, not a default', () => {
+  /* The maintainer reported this three times. The field showed 20 while the
+     component review said the parts needed a different number, and the two
+     surfaces were not connected at all -- 20 was a literal in
+     `_DEFAULT_BOARD_PARAMS`. That it once matched a height he had typed for
+     BT1 was coincidence, which made it look derived. */
+  const MEASURED = {
+    envelopes: [], components: [], measured: 9, stated: 0, unknown: 5,
+    source_path: '/p/board.kicad_pcb', read_at: '2026-09-01T00:00:00Z',
+    measured_from: 'board' as const,
+    min_interior_height_mm: 15.515,
+    tallest: { reference: 'R2', z_mm: 15.515, source: 'model' },
+  }
+
+  beforeEach(() => {
+    listOpenBoardsMock.mockResolvedValue({
+      status: 'boards_found',
+      candidates: [{ path: '/p/board.kicad_pcb', label: 'board.kicad_pcb' }],
+    })
+  })
+
+  it('starts the height at what the board needs, rounded up, not at 20', async () => {
+    componentEnvelopesMock.mockResolvedValue(MEASURED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() =>
+      expect((screen.getByLabelText(/Height \(mm\)/) as HTMLInputElement).value).toBe('16'),
+    )
+  })
+
+  it('says which component set the number, and that unknowns may push it higher', async () => {
+    componentEnvelopesMock.mockResolvedValue(MEASURED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    expect(await screen.findByText(/15\.515mm needed, set by R2/)).toBeTruthy()
+    expect(screen.getByText(/real minimum may be taller/)).toBeTruthy()
+  })
+
+  it('warns when a height the user typed is below what the parts need', async () => {
+    componentEnvelopesMock.mockResolvedValue(MEASURED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    const field = await screen.findByLabelText(/Height \(mm\)/)
+    fireEvent.change(field, { target: { value: '10' } })
+
+    expect(await screen.findByText(/Too short/)).toBeTruthy()
+  })
+
+  it('never overwrites a height the user has already typed', async () => {
+    componentEnvelopesMock.mockResolvedValue(MEASURED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    const field = await screen.findByLabelText(/Height \(mm\)/) as HTMLInputElement
+    fireEvent.change(field, { target: { value: '40' } })
+
+    await waitFor(() => expect(field.value).toBe('40'))
+  })
+
+  it('leaves the generator working when the board cannot be measured', async () => {
+    componentEnvelopesMock.mockRejectedValue(new Error('freecadcmd missing'))
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    expect(screen.getByRole('button', { name: 'Generate Enclosure' })).toBeTruthy()
+  })
+})
+
+describe('EnclosurePanel: KiCad does not need to be open', () => {
+  /* Reported directly: "i have kicad closed and the schematic for the project
+     seems to still work but the pcb and enclosure view are not and are asking
+     for kicad to be opened."
+
+     The Schematic tab stopped needing KiCad open at SPEC-325. This tab kept
+     demanding it even though every route it calls -- generate_enclosure, the
+     envelope measurement -- takes an explicit path and reads the file. Only
+     the DISCOVERY step ever needed the IPC. */
+  const LINKED = { path: '/p/Blinky.kicad_pcb', label: 'Blinky.kicad_pcb' }
+
+  it('uses the linked project board when KiCad is closed', async () => {
+    listOpenBoardsMock.mockResolvedValue({ status: 'no_board_open' })
+    linkedProjectBoardMock.mockResolvedValue(LINKED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('Blinky.kicad_pcb'))
+    expect(screen.queryByText('No board is currently open in KiCad.')).toBeNull()
+  })
+
+  it('does not ask KiCad at all when the project is linked', async () => {
+    linkedProjectBoardMock.mockResolvedValue(LINKED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('Blinky.kicad_pcb'))
+    expect(listOpenBoardsMock).not.toHaveBeenCalled()
+  })
+
+  it('still guides the user to KiCad when nothing is linked and nothing is open', async () => {
+    listOpenBoardsMock.mockResolvedValue({ status: 'no_board_open' })
+    linkedProjectBoardMock.mockResolvedValue(null)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('No board is currently open in KiCad.'))
+  })
+
+  it('Open KiCad opens the board itself, not a bare KiCad window', async () => {
+    linkedProjectBoardMock.mockResolvedValue(LINKED)
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('Blinky.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to KiCad' }))
+
+    await waitFor(() => expect(openKicadMock).toHaveBeenCalledWith('/p/Blinky.kicad_pcb'))
+  })
+})
+
+describe('EnclosurePanel: the enclosure review has something to review', () => {
+  /* Reported: "i don't think the enclosure view is actually connected to do
+     anything." Accurate. `chat_agents._assemble_context` gives the enclosure
+     agent `last_results.enclosure` as `enclosure_parameters`, and that was
+     written ONLY on export -- so a generated-but-not-exported enclosure left
+     the agent with nothing but the project intent. */
+  it('records the generated enclosure, not only an exported one', async () => {
+    listOpenBoardsMock.mockResolvedValue({
+      status: 'boards_found',
+      candidates: [{ path: '/p/b.kicad_pcb', label: 'b.kicad_pcb' }],
+    })
+    generateEnclosureMock.mockResolvedValue(fakeJobHandle(Promise.resolve(fakeResult)))
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('b.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(setProjectCheckResultMock).toHaveBeenCalled())
+    const [name, area, record] = setProjectCheckResultMock.mock.calls[0]
+    expect(name).toBe('test-project')
+    expect(area).toBe('enclosure')
+    expect(record.pcb_path).toBe('/p/b.kicad_pcb')
+    expect(record.height_mm).toBeDefined()
+  })
+
+  it('carries what the parts need, so the agent can reason about fit', async () => {
+    listOpenBoardsMock.mockResolvedValue({
+      status: 'boards_found',
+      candidates: [{ path: '/p/b.kicad_pcb', label: 'b.kicad_pcb' }],
+    })
+    componentEnvelopesMock.mockResolvedValue({
+      envelopes: [], components: [], measured: 9, stated: 0, unknown: 5,
+      source_path: '/p/b.kicad_pcb', read_at: 'now', measured_from: 'board' as const,
+      min_interior_height_mm: 15.515,
+      tallest: { reference: 'R2', z_mm: 15.515, source: 'model' },
+    })
+    generateEnclosureMock.mockResolvedValue(fakeJobHandle(Promise.resolve(fakeResult)))
+    render(<EnclosurePanel projectName="test-project" />)
+
+    // Wait for the MEASUREMENT to land, not just the board list. Clicking
+    // Generate on the board alone races the envelope fetch, and this test
+    // failed roughly one run in two before this line.
+    await screen.findByText(/15\.515mm needed/)
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(setProjectCheckResultMock).toHaveBeenCalled())
+    const record = setProjectCheckResultMock.mock.calls[0][2]
+    expect(record.min_interior_height_mm).toBe(15.515)
+    expect(record.tallest_component).toBe('R2')
+    expect(record.components_without_known_height).toBe(5)
   })
 })

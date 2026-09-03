@@ -1629,7 +1629,10 @@ class TestKicadCheckBoardRoute(unittest.TestCase):
              patch('daemon.component_pipeline.explain_violations', return_value={"violations": [], "summary": "clean", "truncated_count": 0}):
             result = daemon.kicad_check_board('/explicit/path.kicad_pcb')
 
-        mock_run_drc.assert_called_once_with('/explicit/path.kicad_pcb')
+        # schematic_parity is requested: a board's parity with its schematic is
+        # a real DRC finding to a user, and KiCad only reports it when asked.
+        mock_run_drc.assert_called_once_with(
+            '/explicit/path.kicad_pcb', schematic_parity=True)
         self.assertEqual(result["source_path"], '/explicit/path.kicad_pcb')
         self.assertEqual(result["status"], "ok")
 
@@ -3124,3 +3127,230 @@ class TestSchematicComponentRoutes(unittest.TestCase):
             out = daemon.kicad_list_schematic_components("/tmp/board.kicad_sch")
         self.assertEqual("/tmp/board.kicad_sch", out["source_path"])
         self.assertIn("T", out["read_at"])
+
+
+class TestSchematicParityRoute(unittest.TestCase):
+    """SPEC-326 §2.7: kicad.check_schematic_parity."""
+
+    def test_001_the_route_is_registered(self):
+        self.assertIn("kicad.check_schematic_parity", daemon.ROUTES)
+
+    def test_002_the_route_is_async_because_it_spawns_kicad_cli(self):
+        """CTX-314.2's bug shape: a route that runs a real subprocess but is
+        absent from ASYNC_ROUTES blocks main()'s whole stdin read loop for
+        its duration, freezing every other IPC command. This one takes
+        ~1.7s on a real board."""
+        self.assertIn("kicad.check_schematic_parity", daemon.ASYNC_ROUTES)
+
+    def test_003_an_agreeing_board_reports_in_sync_with_no_issues(self):
+        with patch.object(daemon.kicad_cli, "check_schematic_parity", return_value=[]):
+            out = daemon.kicad_check_schematic_parity("/p/board.kicad_pcb")
+
+        self.assertTrue(out["in_sync"])
+        self.assertEqual(out["issue_count"], 0)
+        self.assertEqual(out["issues"], [])
+
+    def test_004_a_disagreeing_board_reports_each_real_difference(self):
+        issue = {
+            "type": "footprint_symbol_mismatch",
+            "severity": "warning",
+            "description": "A doesn't match footprint given by symbol (B)",
+            "items": [{"uuid": "x"}],
+        }
+        with patch.object(daemon.kicad_cli, "check_schematic_parity", return_value=[issue]):
+            out = daemon.kicad_check_schematic_parity("/p/board.kicad_pcb")
+
+        self.assertFalse(out["in_sync"])
+        self.assertEqual(out["issue_count"], 1)
+        self.assertEqual(out["issues"][0]["type"], "footprint_symbol_mismatch")
+        # `items` carries KiCad's internal uuids, which mean nothing to a
+        # user and nothing to this app -- dropped rather than passed through.
+        self.assertNotIn("items", out["issues"][0])
+
+
+class TestEnvelopeSourceIsTheBoard(unittest.TestCase):
+    """SPEC-326 §2.7: the enclosure is built around the board, so the board
+    is what gets measured -- with the schematic as a stated fallback, never
+    a silent one."""
+
+    _BOARD = {"source_path": "/p/b.kicad_pcb", "read_at": "t",
+              "components": [{"reference": "R1", "footprint": "L:F", "value": "1k",
+                              "dnp": False, "footprint_found": True, "model_ref": None,
+                              "model_path": None, "has_model": False, "courtyard": None}]}
+    _SCH = {"source_path": "/p/s.kicad_sch", "read_at": "t",
+            "components": [{"reference": "R9", "footprint": "L:G", "value": "2k",
+                            "dnp": False, "footprint_found": True, "model_ref": None,
+                            "model_path": None, "has_model": False, "courtyard": None}]}
+
+    def test_001_the_board_is_preferred_when_it_has_footprints(self):
+        with patch.object(daemon, "kicad_list_board_components", return_value=self._BOARD), \
+             patch.object(daemon, "kicad_list_schematic_components", return_value=self._SCH):
+            out = daemon.kicad_component_envelopes(
+                sch_path="/p/s.kicad_sch", pcb_path="/p/b.kicad_pcb")
+
+        self.assertEqual(out["measured_from"], "board")
+        self.assertEqual(out["source_path"], "/p/b.kicad_pcb")
+        self.assertEqual([e["reference"] for e in out["envelopes"]], ["R1"])
+
+    def test_002_an_empty_board_falls_back_to_the_schematic_and_says_so(self):
+        """A project drawn but not laid out yet has NO footprints on the
+        board. One of the maintainer's own four projects is in that state.
+        Reporting an empty design would be the worse answer, but the caller
+        must be able to see that this is not a board measurement."""
+        empty = {**self._BOARD, "components": []}
+        with patch.object(daemon, "kicad_list_board_components", return_value=empty), \
+             patch.object(daemon, "kicad_list_schematic_components", return_value=self._SCH):
+            out = daemon.kicad_component_envelopes(
+                sch_path="/p/s.kicad_sch", pcb_path="/p/b.kicad_pcb")
+
+        self.assertEqual(out["measured_from"], "schematic")
+        self.assertEqual([e["reference"] for e in out["envelopes"]], ["R9"])
+
+    def test_003_an_unreadable_board_falls_back_rather_than_failing_the_panel(self):
+        with patch.object(daemon, "kicad_list_board_components",
+                          side_effect=RuntimeError("bad board")), \
+             patch.object(daemon, "kicad_list_schematic_components", return_value=self._SCH):
+            out = daemon.kicad_component_envelopes(
+                sch_path="/p/s.kicad_sch", pcb_path="/p/b.kicad_pcb")
+
+        self.assertEqual(out["measured_from"], "schematic")
+
+    def test_004_a_schematic_only_project_still_works(self):
+        with patch.object(daemon, "kicad_list_schematic_components", return_value=self._SCH):
+            out = daemon.kicad_component_envelopes(sch_path="/p/s.kicad_sch")
+
+        self.assertEqual(out["measured_from"], "schematic")
+
+    def test_005_neither_path_is_a_loud_error_not_an_empty_answer(self):
+        with self.assertRaises(RuntimeError):
+            daemon.kicad_component_envelopes()
+
+    def test_006_the_board_route_is_registered_and_async(self):
+        self.assertIn("kicad.list_board_components", daemon.ROUTES)
+        self.assertIn("kicad.list_board_components", daemon.ASYNC_ROUTES)
+
+
+class TestBoardCheckReportsEveryKindOfFinding(unittest.TestCase):
+    """SPEC-309 + SPEC-326 §2.7. `kicad_check_board` explained
+    `report["violations"]` alone, silently discarding two other things KiCad
+    reports about the same board.
+
+    Caught on the maintainer's own project, in the running app: 0 violations
+    but 18 `unconnected_items`, every one severity ERROR, plus a schematic
+    parity failure. The tab called the board clean while KiCad's own DRC
+    dialog would show 19 problems. A user does not care which JSON key KiCad
+    filed a problem under."""
+
+    _REPORT = {
+        "violations": [{"description": "v", "severity": "warning", "type": "clearance"}],
+        "unconnected_items": [
+            {"description": "u1", "severity": "error", "type": "unconnected_items"},
+            {"description": "u2", "severity": "error", "type": "unconnected_items"},
+        ],
+        "schematic_parity": [
+            {"description": "p", "severity": "warning", "type": "footprint_symbol_mismatch"},
+        ],
+    }
+
+    def _check(self):
+        seen = {}
+
+        def explain(findings, kind, **kwargs):
+            seen["findings"] = findings
+            return {"violations": [], "summary": "s", "truncated_count": 0}
+
+        with patch("daemon.kicad_cli.run_drc", return_value=self._REPORT), \
+             patch("daemon.component_pipeline.explain_violations", side_effect=explain):
+            return daemon.kicad_check_board("/p/b.kicad_pcb"), seen["findings"]
+
+    def test_001_unconnected_items_reach_the_explainer(self):
+        _, findings = self._check()
+        self.assertIn("u1", [f["description"] for f in findings])
+        self.assertIn("u2", [f["description"] for f in findings])
+
+    def test_002_parity_findings_reach_the_explainer(self):
+        _, findings = self._check()
+        self.assertIn("p", [f["description"] for f in findings])
+
+    def test_003_ordinary_violations_are_still_included(self):
+        _, findings = self._check()
+        self.assertIn("v", [f["description"] for f in findings])
+        self.assertEqual(len(findings), 4)
+
+    def test_004_each_kind_is_counted_separately(self):
+        """A user reads "18 unconnected" and "1 mismatch" very differently
+        from one undifferentiated number."""
+        result, _ = self._check()
+        self.assertEqual(result["violation_count"], 1)
+        self.assertEqual(result["unconnected_count"], 2)
+        self.assertEqual(result["parity_count"], 1)
+
+    def test_005_a_report_lacking_the_newer_keys_does_not_crash(self):
+        """`unconnected_items` and `schematic_parity` are absent from a report
+        produced without --schematic-parity, and from older KiCad output."""
+        with patch("daemon.kicad_cli.run_drc", return_value={"violations": []}), \
+             patch("daemon.component_pipeline.explain_violations",
+                   return_value={"violations": [], "summary": "s", "truncated_count": 0}):
+            result = daemon.kicad_check_board("/p/b.kicad_pcb")
+
+        self.assertEqual(result["unconnected_count"], 0)
+        self.assertEqual(result["parity_count"], 0)
+
+
+class TestFindingsSurviveAFailedExplanation(unittest.TestCase):
+    """KiCad's output is a deterministic fact about the user's board; the
+    plain-language explanation of it is an LLM call. Letting that call's
+    failure take down the route means a board with real errors reports as an
+    error *of the app*, and the user learns nothing about their board."""
+
+    _REPORT = {
+        "violations": [],
+        "unconnected_items": [
+            {"description": "Missing connection between items",
+             "severity": "error", "type": "unconnected_items"},
+            {"description": "Missing connection between items",
+             "severity": "error", "type": "unconnected_items"},
+        ],
+    }
+
+    def test_001_the_findings_are_still_reported_when_the_llm_call_fails(self):
+        with patch("daemon.kicad_cli.run_drc", return_value=self._REPORT), \
+             patch("daemon.component_pipeline.explain_violations",
+                   side_effect=RuntimeError("no api key")):
+            out = daemon.kicad_check_board("/p/b.kicad_pcb")
+
+        self.assertEqual(len(out["violations"]), 2)
+        self.assertEqual(out["unconnected_count"], 2)
+        self.assertTrue(out["explanations_failed"])
+
+    def test_002_the_summary_says_why_the_prose_is_missing(self):
+        with patch("daemon.kicad_cli.run_drc", return_value=self._REPORT), \
+             patch("daemon.component_pipeline.explain_violations",
+                   side_effect=RuntimeError("no api key")):
+            out = daemon.kicad_check_board("/p/b.kicad_pcb")
+
+        self.assertIn("no api key", out["summary"])
+        self.assertIn("2", out["summary"])
+
+    def test_003_a_successful_explanation_is_unchanged(self):
+        explained = {"violations": [{"description": "x", "explanation": "e",
+                                     "suggested_fix": "f"}],
+                     "summary": "s", "truncated_count": 0}
+        with patch("daemon.kicad_cli.run_drc", return_value=self._REPORT), \
+             patch("daemon.component_pipeline.explain_violations", return_value=explained):
+            out = daemon.kicad_check_board("/p/b.kicad_pcb")
+
+        self.assertNotIn("explanations_failed", out)
+        self.assertEqual(out["summary"], "s")
+
+    def test_004_the_schematic_route_degrades_the_same_way(self):
+        erc = {"sheets": [{"path": "/", "violations": [
+            {"description": "v", "severity": "error", "type": "x"}]}]}
+        with patch("daemon.kicad_cli.run_erc", return_value=erc), \
+             patch("daemon.component_pipeline.explain_violations",
+                   side_effect=RuntimeError("rate limited")):
+            out = daemon.kicad_check_schematic("/p/s.kicad_sch")
+
+        self.assertEqual(len(out["violations"]), 1)
+        self.assertEqual(out["violation_count"], 1)
+        self.assertTrue(out["explanations_failed"])

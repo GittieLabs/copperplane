@@ -12,6 +12,7 @@
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 
 import { dispatch, submitJob } from './ipc'
+import type { BoardCandidate } from './boardAdvisor'
 
 export interface KicadProjectFiles {
   project_name: string
@@ -102,22 +103,120 @@ export interface ComponentEnvelope {
 
 export interface EnvelopeResult {
   envelopes: ComponentEnvelope[]
+  /** The components these envelopes were computed from. Rendered as the
+   *  table, so the rows and the summary above them are the same set by
+   *  construction rather than by two calls staying in step. */
+  components: SchematicComponent[]
   measured: number
   stated: number
   unknown: number
   source_path: string
+  /** SPEC-326 §2.7: which file these numbers describe. The BOARD is the
+   *  source of truth — it is the thing going in the box. `'schematic'` means
+   *  the board had no footprints on it at all (a project drawn but not laid
+   *  out yet), and the caller must say so rather than let it pass as a board
+   *  measurement. */
+  measured_from: 'board' | 'schematic'
   read_at: string
   min_interior_height_mm: number | null
   tallest: { reference: string; z_mm: number; source: string } | null
 }
 
 export async function componentEnvelopes(
-  schPath: string,
+  schPath: string | null,
+  pcbPath: string | null,
   heightOverrides: Record<string, number> = {},
 ): Promise<EnvelopeResult> {
   const handle = await submitJob<EnvelopeResult>('kicad.component_envelopes', {
     sch_path: schPath,
+    pcb_path: pcbPath,
     height_overrides: heightOverrides,
   })
   return handle.result
+}
+
+/** SPEC-326 §2.7: where the board and its schematic disagree.
+ *
+ *  KiCad does not push a schematic edit to the board -- a user runs
+ *  "Update PCB from Schematic" by hand, and until they do the two files
+ *  disagree silently. Each opens and renders correctly on its own, so
+ *  neither KiCad view shows a problem.
+ *
+ *  This matters to SPEC-326 specifically and not just as hygiene: every
+ *  volume number above is read from the SCHEMATIC's footprints, while the
+ *  enclosure is built around the BOARD. When they disagree, the interior
+ *  height describes a part that is not on the board being built. */
+export interface ParityIssue {
+  type: string
+  severity: string
+  description: string
+}
+
+export interface ParityResult {
+  pcb_path: string
+  in_sync: boolean
+  issue_count: number
+  issues: ParityIssue[]
+  checked_at: string
+}
+
+/** Async route: runs `kicad-cli pcb drc`, a real subprocess. */
+export async function checkSchematicParity(pcbPath: string): Promise<ParityResult> {
+  const handle = await submitJob<ParityResult>('kicad.check_schematic_parity', {
+    pcb_path: pcbPath,
+  })
+  return handle.result
+}
+
+
+/** SPEC-325 §2.1 applied to the PCB and Enclosure tabs.
+ *
+ *  Board discovery used to run only through `kicad.list_open_boards`, which
+ *  talks to KiCad's IPC and therefore needs KiCad running with a board
+ *  focused — three preconditions for a fact that is sitting in a file. The
+ *  Schematic tab stopped needing KiCad open at SPEC-325; the other two tabs
+ *  kept asking for it, for no reason that survives inspection: every route
+ *  they actually call (`kicad.check_board`, `freecad.generate_enclosure`)
+ *  takes an explicit path and reads the file.
+ *
+ *  So: if a project has a linked `.kicad_pro`, its board is knowable with
+ *  KiCad closed. Returns `null` when nothing is linked, which is the one
+ *  case that genuinely has nothing to fall back on. */
+export async function linkedProjectBoard(projectName: string): Promise<BoardCandidate | null> {
+  const { loadProject } = await import('./projects')
+  try {
+    const project = await loadProject(projectName)
+    if (!project.kicad_project_path) return null
+    const files = await resolveKicadProject(project.kicad_project_path)
+    if (!files.pcb_path) return null
+    return { path: files.pcb_path, label: files.pcb_path.split('/').pop() ?? files.pcb_path }
+  } catch {
+    // A project with no link, or a .kicad_pro that has moved. Neither is an
+    // error worth surfacing here -- the caller's existing "open KiCad"
+    // guidance is still the honest fallback.
+    return null
+  }
+}
+
+/** SPEC-325 §2.1 for the Schematic tab, the last one still asking for KiCad.
+ *
+ *  `kicad.list_project_schematics` derives a schematic from whichever board
+ *  KiCad currently has open, because KiCad's IPC has never implemented
+ *  schematic listing at all -- which is why the guidance told users to open
+ *  the PCB Editor to find their *schematic*. A linked `.kicad_pro` names it
+ *  outright. */
+export async function linkedProjectSchematic(
+  projectName: string,
+): Promise<{ path: string; label: string } | null> {
+  const { loadProject } = await import('./projects')
+  try {
+    const project = await loadProject(projectName)
+    if (!project.kicad_project_path) return null
+    const files = await resolveKicadProject(project.kicad_project_path)
+    if (!files.schematic_path) return null
+    const path = files.schematic_path
+    return { path, label: path.split('/').pop() ?? path }
+  } catch {
+    return null
+  }
 }

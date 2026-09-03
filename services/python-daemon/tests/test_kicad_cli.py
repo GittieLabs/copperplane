@@ -17,6 +17,8 @@ from kicad_cli import (
 _FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 _EMPTY_BOARD = os.path.join(_FIXTURES_DIR, 'empty_board.kicad_pcb')
 _EMPTY_SCHEMATIC = os.path.join(_FIXTURES_DIR, 'empty_schematic.kicad_sch')
+_PARITY_MATCH = os.path.join(_FIXTURES_DIR, 'parity_match.kicad_pcb')
+_PARITY_MISMATCH = os.path.join(_FIXTURES_DIR, 'parity_mismatch.kicad_pcb')
 
 
 def _find_real_kicad_cli():
@@ -400,3 +402,45 @@ class TestSchematicBom(unittest.TestCase):
 
     def test_024_a_genuinely_empty_schematic_is_an_empty_list_not_an_error(self):
         self.assertEqual([], self._run_with_bom(self._bom([])))
+
+
+class TestRealSchematicParity(unittest.TestCase):
+    """SPEC-326 §2.7. Real kicad-cli against a committed board/schematic
+    PAIR -- the fixture is two files, because parity has nothing to
+    compare against when the `.kicad_sch` sibling is absent.
+
+    Both fixtures were built by hand and then run through the real CLI
+    until each produced its intended result; the "match" pair needed
+    explicit pad nets, because without them KiCad reports two real
+    `net_conflict` parity issues and the clean case is not clean."""
+
+    def setUp(self):
+        if not _find_real_kicad_cli():
+            self.skipTest("kicad-cli not found on this machine.")
+
+    def test_001_a_board_matching_its_schematic_reports_no_parity_issues(self):
+        """The control. Without this, the mismatch test below proves only
+        that the function returns a non-empty list, not that it is
+        reading anything real -- CLAUDE.md's 'a check that cannot fail is
+        not evidence'."""
+        self.assertEqual([], kicad_cli.check_schematic_parity(_PARITY_MATCH))
+
+    def test_002_a_footprint_the_schematic_disagrees_with_is_reported(self):
+        issues = kicad_cli.check_schematic_parity(_PARITY_MISMATCH)
+
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["type"], "footprint_symbol_mismatch")
+        self.assertIn("R_0603_1608Metric", issues[0]["description"])
+        self.assertIn("R_0805_2012Metric", issues[0]["description"])
+
+    def test_003_parity_findings_do_not_come_back_as_ordinary_drc_violations(self):
+        """KiCad reports parity under its own top-level `schematic_parity`
+        key, separate from `violations`. Confirms we read the right key --
+        a board can be DRC-clean and still disagree with its schematic,
+        which is exactly the case this feature exists for."""
+        report = kicad_cli._run_report(
+            ["pcb", "drc", "--schematic-parity"], _PARITY_MISMATCH)
+
+        self.assertIn("schematic_parity", report)
+        types = [v.get("type") for v in report["violations"]]
+        self.assertNotIn("footprint_symbol_mismatch", types)

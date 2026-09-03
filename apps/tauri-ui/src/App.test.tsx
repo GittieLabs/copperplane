@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const submitJobMock = vi.fn()
+const writeTextMock = vi.fn()
 const dispatchToolMock = vi.fn()
 const listProjectsMock = vi.fn()
 const listLibraryPartsMock = vi.fn()
@@ -26,10 +27,13 @@ const syncLibraryMenuMock = vi.fn()
 const setDesignMenuEnabledMock = vi.fn()
 const loadPartMock = vi.fn()
 
+vi.mock('@tauri-apps/plugin-clipboard-manager', () => ({
+  writeText: (...args: unknown[]) => writeTextMock(...args),
+}))
+
 vi.mock('./lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
   dispatchTool: (...args: unknown[]) => dispatchToolMock(...args),
-  MENU_SAVE_PROJECT_EVENT: 'menu://save-project',
   MENU_OPEN_PROJECT_EVENT: 'menu://open-project',
   MENU_OPEN_SETTINGS_EVENT: 'menu://open-settings',
   MENU_OPEN_DEFAULT_LIBRARY_EVENT: 'menu://open-library-default',
@@ -287,7 +291,13 @@ describe('App: Overview plain chat', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Components' }))
 
     await waitFor(() => screen.getByPlaceholderText(/search for a part/))
-    expect(screen.queryByText(/not built yet/)).toBeNull()
+    // Scoped to this area on purpose. Every area stays mounted (hidden), so a
+    // global search for "not built yet" also matches the Enclosure tab's own
+    // deliberately-disabled review panel -- which says nothing about whether
+    // Components rendered.
+    expect(
+      within(screen.getByTestId('components-area')).queryByText(/not built yet/),
+    ).toBeNull()
   })
 
   it('TEST-008: loads an existing project\'s persisted conversation into view on first render', async () => {
@@ -303,11 +313,14 @@ describe('App: Overview plain chat', () => {
     expect(loadConversationMock).toHaveBeenCalledWith('test-project')
   })
 
-  it('CTX-313.1 TEST-007: Overview renders the real per-project dashboard alongside the existing, still-functional chat surface', async () => {
+  it('Overview shows the project chat, and no per-area status cards', async () => {
     await renderAppOnOverview()
 
-    expect(screen.getByTestId('status-card-pcb').textContent).toContain('Not yet checked this session')
-    expect(screen.getByTestId('status-card-enclosure').textContent).toContain('Not yet checked this session')
+    // CTX-313.1's dashboard was removed: the cards said "Not yet checked this
+    // session" for two areas whose checks run on demand on their own tabs, and
+    // for two that have no check at all.
+    expect(screen.queryByTestId('status-card-pcb')).toBeNull()
+    expect(screen.queryByTestId('status-card-enclosure')).toBeNull()
     expect(screen.getByPlaceholderText(/ask a question/)).toBeTruthy()
   })
 })
@@ -458,6 +471,16 @@ describe('App: Enclosure tab persists across area switches', () => {
     loadConversationMock.mockReset().mockResolvedValue([])
     listOpenBoardsMock.mockReset().mockResolvedValue(ONE_BOARD_OPEN)
     submitJobMock.mockReset()
+    // SPEC-326 §2.7: picking a board now also measures its components, so the
+    // enclosure height can start from what the parts need instead of an
+    // arbitrary 20. That call must not consume the mockResolvedValueOnce
+    // queue the generate/export assertions below depend on, so it is answered
+    // by route rather than by position.
+    submitJobMock.mockImplementation((method: string) =>
+      method === 'kicad.component_envelopes'
+        ? Promise.resolve(fakeJobHandle(Promise.reject(new Error('not measured in this test'))))
+        : Promise.resolve(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT))),
+    )
   })
 
   function enclosureArea() {
@@ -479,12 +502,26 @@ describe('App: Enclosure tab persists across area switches', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Enclosure' }))
 
     enclosureArea().getByRole('button', { name: 'Export…' })
-    expect(submitJobMock).toHaveBeenCalledTimes(1)
+    // Generated exactly once -- the measurement call is a separate route and
+    // is deliberately not counted here.
+    expect(
+      submitJobMock.mock.calls.filter(([m]) => m === 'freecad.generate_enclosure'),
+    ).toHaveLength(1)
   })
 
   it('CTX-312.1: a real successful Export immediately persists a real export_history entry, not deferred to a separate Save click', async () => {
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT)))
-    submitJobMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({ dest_path: '/real/dest/combined.step' })))
+    // Answered by route, not by position: the board measurement added in
+    // SPEC-326 §2.7 fires before Generate and would otherwise consume the
+    // first queued response.
+    submitJobMock.mockImplementation((method: string) => {
+      if (method === 'kicad.component_envelopes') {
+        return Promise.resolve(fakeJobHandle(Promise.reject(new Error('not measured in this test'))))
+      }
+      if (method === 'freecad.export_enclosure') {
+        return Promise.resolve(fakeJobHandle(Promise.resolve({ dest_path: '/real/dest/combined.step' })))
+      }
+      return Promise.resolve(fakeJobHandle(Promise.resolve(ENCLOSURE_RESULT)))
+    })
     saveDialogMock.mockResolvedValueOnce('/real/dest/combined.step')
 
     render(<App />)
@@ -514,14 +551,18 @@ describe('App: Enclosure tab persists across area switches', () => {
     render(<App />)
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Link to folder…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose project folder…' }))
 
     await waitFor(() =>
       expect(saveProjectMock).toHaveBeenCalledWith(
         expect.objectContaining({ directory: '/real/PCBs/test-project' }),
       ),
     )
-    await waitFor(() => screen.getByRole('button', { name: 'Linked: /real/PCBs/test-project' }))
+    // Once a folder exists the header stops printing its path and offers to
+    // copy it instead -- the path is long and was only clutter.
+    await waitFor(() =>
+      within(screen.getByTestId('project-header')).getByRole('button', { name: 'Copy project path' }),
+    )
     // CTX-312.2: real user feedback -- a successful link/save previously
     // gave no visible confirmation at all, reading as "nothing happened."
     screen.getByText('Linked to /real/PCBs/test-project')
@@ -533,53 +574,13 @@ describe('App: Enclosure tab persists across area switches', () => {
     render(<App />)
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Link to folder…' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Choose project folder…' }))
 
     await waitFor(() => expect(pickProjectDirectoryMock).toHaveBeenCalled())
     expect(saveProjectMock).not.toHaveBeenCalled()
   })
 
-  it('CTX-312.1: "Save Project" saves the current real project state on demand', async () => {
-    render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
-    await waitFor(() => {
-      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
-      expect(button.disabled).toBe(false)
-    })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save Project' }))
-
-    await waitFor(() =>
-      expect(saveProjectMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'test-project' })),
-    )
-    // CTX-312.2: real user feedback -- a successful save previously gave
-    // no visible confirmation at all, reading as "nothing happened."
-    await waitFor(() => screen.getByText('Project saved.'))
-  })
-
-  it('CTX-312.3: the real native menu\'s own Save Project event runs the same real handleSaveProject flow as the button', async () => {
-    render(<App />)
-    await waitFor(() => screen.getByPlaceholderText(/ask a question/))
-    // The menu-event listener effect re-subscribes whenever `currentProject`
-    // changes (so `handleSaveProject`'s own closure is never stale) --
-    // waiting for the button to become enabled is the real signal that the
-    // *latest* subscription (the one with a real, loaded project) is in
-    // place, not an earlier one registered while it was still null.
-    await waitFor(() => {
-      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
-      expect(button.disabled).toBe(false)
-    })
-
-    const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://save-project')!
-    await act(async () => {
-      menuHandler()
-    })
-
-    await waitFor(() =>
-      expect(saveProjectMock).toHaveBeenCalledWith(expect.objectContaining({ name: 'test-project' })),
-    )
-    await waitFor(() => screen.getByText('Project saved.'))
-  })
 
   it('CTX-312.3: the real native menu\'s own Open Project… event picks a real linked folder and selects it', async () => {
     pickProjectDirectoryMock.mockResolvedValueOnce('/real/PCBs/other-project')
@@ -589,10 +590,9 @@ describe('App: Enclosure tab persists across area switches', () => {
 
     render(<App />)
     await waitFor(() => screen.getByPlaceholderText(/ask a question/))
-    await waitFor(() => {
-      const button = screen.getByRole('button', { name: 'Save Project' }) as HTMLButtonElement
-      expect(button.disabled).toBe(false)
-    })
+    // Waiting on the project NAME in the header: the Save Project button used
+    // to serve as this signal, and no longer exists.
+    await waitFor(() => screen.getByText('test-project'))
 
     const [, menuHandler] = listenMock.mock.calls.findLast(([event]) => event === 'menu://open-project')!
     await act(async () => {
@@ -821,7 +821,10 @@ describe('App: Schematic tab persists across area switches, resets on project sw
   it('the Schematic tab renders the real SchematicAdvisor, not a not-built placeholder', async () => {
     await renderAppOnSchematic()
 
-    expect(screen.queryByText(/not built yet/)).toBeNull()
+    // Scoped for the same reason as TEST-008b above.
+    expect(
+      within(screen.getByTestId('schematic-area')).queryByText(/not built yet/),
+    ).toBeNull()
   })
 
   it('a finished check is still shown after switching to another area and back to Schematic', async () => {
@@ -847,5 +850,143 @@ describe('App: Schematic tab persists across area switches, resets on project sw
     fireEvent.click(screen.getByRole('button', { name: 'Schematic' }))
 
     expect(screen.queryByText('No violations found.')).toBeNull()
+  })
+})
+
+describe('App: the project header', () => {
+  /* "showing the complete paths to the linked project or project folder could
+     show a long string and only clutters the screen. Neither offers enough
+     value to be statically shown." So: the KiCad project by FILE NAME, its
+     full path on hover, and the project folder behind a copy button. */
+  async function renderLinked() {
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      directory: '/real/PCBs/test-project',
+      kicad_project_path: '/elsewhere/Blinky/Blinky.kicad_pro',
+    })
+    render(<App />)
+    await waitFor(() => screen.getByText('test-project'))
+    return within(screen.getByTestId('project-header'))
+  }
+
+  it('shows the KiCad project by name, not by path', async () => {
+    const header = await renderLinked()
+
+    expect(header.getByText('Blinky')).toBeTruthy()
+    expect(header.queryByText('/elsewhere/Blinky/Blinky.kicad_pro')).toBeNull()
+  })
+
+  it('keeps the full path available without spending a line on it', async () => {
+    const header = await renderLinked()
+
+    expect(
+      header.getByTitle('/elsewhere/Blinky/Blinky.kicad_pro'),
+    ).toBeTruthy()
+  })
+
+  it('does not print the project folder path at all', async () => {
+    const header = await renderLinked()
+
+    expect(header.queryByText('/real/PCBs/test-project')).toBeNull()
+    expect(header.getByRole('button', { name: 'Copy project path' })).toBeTruthy()
+  })
+
+  it('copies the project folder path', async () => {
+    writeTextMock.mockResolvedValue(undefined)
+    const header = await renderLinked()
+
+    fireEvent.click(header.getByRole('button', { name: 'Copy project path' }))
+
+    await waitFor(() => expect(writeTextMock).toHaveBeenCalledWith('/real/PCBs/test-project'))
+    await waitFor(() => header.getByText('Copied'))
+  })
+
+  it('names what the button changes, rather than saying "folder"', async () => {
+    const header = await renderLinked()
+
+    // "Change folder…" sat beside two different paths and could be read as
+    // either. This one sits on the KiCad project line and says Change.
+    expect(header.getByRole('button', { name: 'Change' })).toBeTruthy()
+  })
+
+  it('offers to link a KiCad project when none is linked', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'test-project', directory: '/real/PCBs/test-project' })
+    render(<App />)
+
+    await waitFor(() => screen.getByText('test-project'))
+    const header = within(screen.getByTestId('project-header'))
+    expect(header.getByText('none yet')).toBeTruthy()
+    expect(header.getByRole('button', { name: 'Link' })).toBeTruthy()
+  })
+
+  it('offers a folder only while the project has none', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'test-project' })
+    render(<App />)
+
+    await waitFor(() => screen.getByText('test-project'))
+    const header = within(screen.getByTestId('project-header'))
+    expect(header.getByRole('button', { name: 'Choose project folder…' })).toBeTruthy()
+    expect(header.queryByRole('button', { name: 'Copy project path' })).toBeNull()
+  })
+
+  it('has no Save Project button -- every field persists as it changes', async () => {
+    await renderLinked()
+
+    expect(screen.queryByRole('button', { name: 'Save Project' })).toBeNull()
+  })
+})
+
+describe('App: loading the project list', () => {
+  /* Reported: "The projects can take some time to load and in the meantime,
+     we are left with an empty main content section and no indication that
+     projects are loading... I am not certain that we would not run into a
+     race condition that mixes a new project with an existing but just loaded
+     project."
+
+     The race was real. handleCreateProject appends to `projects`, and the
+     in-flight listProjects() then REPLACED that state with the list as it was
+     before the new project existed -- so the project vanished from the rail. */
+
+  it('says the projects are loading instead of showing a blank area', async () => {
+    let release: (v: string[]) => void = () => {}
+    listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
+    render(<App />)
+
+    expect(await screen.findByText('Loading your projects…')).toBeTruthy()
+
+    await act(async () => { release([]) })
+    await waitFor(() => screen.getByText('Create a project on the left to get started.'))
+  })
+
+  it('does not offer to create a project until the list has loaded', async () => {
+    let release: (v: string[]) => void = () => {}
+    listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
+    render(<App />)
+
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: '+ New…' }) as HTMLButtonElement
+      expect(button.disabled).toBe(true)
+    })
+
+    await act(async () => { release([]) })
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: '+ New…' }) as HTMLButtonElement
+      expect(button.disabled).toBe(false)
+    })
+  })
+
+  it('never drops a project created while the list was still in flight', async () => {
+    let release: (v: string[]) => void = () => {}
+    listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
+    render(<App />)
+    await waitFor(() => screen.getByText('Loading your projects…'))
+
+    // The defence in depth: even if creation happens mid-flight, the list
+    // that arrives afterwards merges rather than replaces.
+    await act(async () => { release(['older-project']) })
+
+    // Queried by role: a selected project renders as '> ' + name, two text
+    // nodes, so an exact text match misses it.
+    await waitFor(() => screen.getByRole('button', { name: /older-project/ }))
   })
 })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { MenuCommand } from '../lib/areas'
 import {
   checkBoard,
+  checkResultForProject,
   listOpenBoards,
   openKicad,
   type BoardCandidate,
@@ -11,6 +12,16 @@ import {
 import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { ViolationsList } from './ViolationsList'
+import { linkedProjectBoard } from '../lib/kicadProject'
+import { setProjectCheckResult } from '../lib/projects'
+
+/** The one board's path, when there is exactly one. More than one is never
+ *  guessed -- opening the wrong board is worse than opening none. */
+function soleCandidatePath(result: ListOpenBoardsResult | null): string | null {
+  return result?.status === 'boards_found' && result.candidates.length === 1
+    ? result.candidates[0].path
+    : null
+}
 
 /** SPEC-309: real DRC via kicad-cli (CTX-309.1), explained in plain
  * language. Lives in the PCB area (App.tsx) -- the Schematic (ERC)
@@ -78,13 +89,23 @@ export function BoardAdvisor({
     setLoadingBoardList(true)
     setBoardListError(null)
     try {
+      // The linked project first: its board is a fact in a file, knowable
+      // with KiCad closed. Asking KiCad's IPC needs KiCad running with the
+      // right document focused -- three preconditions the Schematic tab
+      // stopped requiring at SPEC-325, and that this tab kept demanding even
+      // though `kicad.check_board` only ever wanted a path.
+      const linked = await linkedProjectBoard(projectName)
+      if (linked) {
+        setBoardListResult({ status: 'boards_found', candidates: [linked] })
+        return
+      }
       setBoardListResult(await listOpenBoards())
     } catch (err) {
       setBoardListError(err instanceof Error ? err.message : String(err))
     } finally {
       setLoadingBoardList(false)
     }
-  }, [])
+  }, [projectName])
 
   // Scan for open boards as soon as this screen is shown, instead of
   // waiting for a blind first click -- the user sees real state
@@ -97,7 +118,10 @@ export function BoardAdvisor({
     setOpeningKicad(true)
     setOpenKicadError(null)
     try {
-      await openKicad()
+      // Open the board itself when we know which one -- the selected board,
+      // or the project's single linked one. A bare KiCad window makes the
+      // user go find a file the app is already holding the path to.
+      await openKicad(selectedBoard?.path ?? soleCandidatePath(boardListResult))
     } catch (err) {
       // Deliberately its own state, not folded into boardListError: a
       // failed *launch* (e.g. KiCad isn't installed where expected) is a
@@ -116,7 +140,26 @@ export function BoardAdvisor({
     setBoardCheckError(null)
     setBoardCheckResult(null)
     try {
-      setBoardCheckResult(await checkBoard(candidate.path))
+      const result = await checkBoard(candidate.path)
+      setBoardCheckResult(result)
+      // SPEC-319 §2.1's prerequisite: persist it so the review and chat
+      // agents can actually see it. Held only in React state before, which
+      // is why the PCB review was told "No DRC check result is available
+      // this session" on a board with real errors -- it has no tool to run
+      // DRC itself, so it had nothing to review.
+      try {
+        await setProjectCheckResult(projectName, 'pcb', checkResultForProject(result, 'pcb'))
+      } catch (persistErr) {
+        // The check itself succeeded and is on screen. Failing to record it
+        // degrades the review, not this result -- never swallow it silently
+        // though, since a review that then finds nothing looks like a clean
+        // board rather than a missing record.
+        setBoardCheckError(
+          `Checked, but could not save the result for review: ${
+            persistErr instanceof Error ? persistErr.message : String(persistErr)
+          }`,
+        )
+      }
     } catch (err) {
       setBoardCheckError(err instanceof Error ? err.message : String(err))
     } finally {

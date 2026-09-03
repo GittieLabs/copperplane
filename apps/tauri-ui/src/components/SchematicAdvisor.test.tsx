@@ -4,7 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const checkSchematicMock = vi.fn()
 const pickSchematicFileMock = vi.fn()
 const listProjectSchematicsMock = vi.fn()
+const linkedProjectSchematicMock = vi.fn()
 const openKicadMock = vi.fn()
+
+vi.mock('../lib/kicadProject', () => ({
+  linkedProjectSchematic: (...args: unknown[]) => linkedProjectSchematicMock(...args),
+}))
 
 vi.mock('../lib/boardAdvisor', () => ({
   checkSchematic: (...args: unknown[]) => checkSchematicMock(...args),
@@ -99,6 +104,9 @@ beforeEach(() => {
   checkSchematicMock.mockReset()
   pickSchematicFileMock.mockReset()
   listProjectSchematicsMock.mockReset().mockResolvedValue({ status: 'no_schematic_found' })
+  // No linked project by default, so the existing tests keep exercising the
+  // ask-KiCad fallback they were written for.
+  linkedProjectSchematicMock.mockReset().mockResolvedValue(null)
   openKicadMock.mockReset().mockResolvedValue(undefined)
 })
 
@@ -201,7 +209,7 @@ describe('SchematicAdvisor: list-first flow', () => {
   it('no schematic found shows a real walkthrough plus Open KiCad, Refresh, and manual pick', async () => {
     render(<SchematicAdvisor projectName="test-project" />)
 
-    await waitFor(() => screen.getByText('No schematic could be found automatically.'))
+    await waitFor(() => screen.getByText('No schematic is linked yet.'))
     screen.getByRole('button', { name: 'Open KiCad' })
     screen.getByRole('button', { name: 'Refresh' })
     screen.getByRole('button', { name: 'Pick file manually…' })
@@ -236,7 +244,7 @@ describe('SchematicAdvisor: list-first flow', () => {
 
     render(<SchematicAdvisor projectName="test-project" />)
 
-    await waitFor(() => screen.getByText("KiCad doesn't appear to be running yet."))
+    await waitFor(() => screen.getByText('No schematic is linked yet.'))
     expect(screen.queryByText(/Could not connect to KiCad/)).toBeNull()
     screen.getByRole('button', { name: 'Open KiCad' })
   })
@@ -418,5 +426,46 @@ describe('SchematicAdvisor: CTX-319.3 ReviewPanel wiring', () => {
     rerender(<SchematicAdvisor projectName="project-b" />)
 
     await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:schematic'))
+  })
+})
+
+describe('SchematicAdvisor: KiCad does not need to be open', () => {
+  /* The last tab still asking for it. Reported: "We no longer need kicad to
+     run in order to see the schematic and we can determine the schematic file
+     from the profile file."
+
+     The old guidance told a user to launch KiCad and open the PCB EDITOR --
+     to find a SCHEMATIC -- because discovery went through KiCad's IPC, which
+     cannot list schematics at all. A linked .kicad_pro names it outright. */
+  const LINKED = { path: '/p/Blinky.kicad_sch', label: 'Blinky.kicad_sch' }
+
+  it('uses the linked project schematic rather than asking KiCad', async () => {
+    linkedProjectSchematicMock.mockResolvedValue(LINKED)
+    render(<SchematicAdvisor projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('Blinky.kicad_sch'))
+    expect(listProjectSchematicsMock).not.toHaveBeenCalled()
+  })
+
+  it('no longer tells the user to open the PCB Editor to find a schematic', async () => {
+    linkedProjectSchematicMock.mockResolvedValue(null)
+    render(<SchematicAdvisor projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('No schematic is linked yet.'))
+    expect(screen.queryByText(/PCB Editor/)).toBeNull()
+    expect(screen.queryByText(/doesn't appear to be running/)).toBeNull()
+  })
+
+  it('points at linking a project, with a direct file pick as the alternative', async () => {
+    linkedProjectSchematicMock.mockResolvedValue(null)
+    render(<SchematicAdvisor projectName="test-project" />)
+
+    await waitFor(() => screen.getByText('No schematic is linked yet.'))
+    // SchematicComponents says the same thing in its own empty state, so this
+    // is scoped to the guidance block rather than matching either.
+    // A <code> element splits the sentence, so this matches the contiguous
+    // text node after it rather than across the element boundary.
+    expect(screen.getByText(/names the schematic/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Pick file manually/ })).toBeTruthy()
   })
 })

@@ -1068,6 +1068,16 @@ already generates parametric geometry in FreeCAD. A footprint with no resolvable
 this must settle: a coin-cell holder's *assembled* height (holder plus installed cell) is the
 number that matters for clearance, and is not either part's datasheet height.
 
+Extended mid-flight by §2.7 (`CTX-326.3`): every volume number here is read from the **schematic**,
+while the enclosure is built around the **board**, and KiCad keeps those in step only when a user
+runs *Update PCB from Schematic* by hand. The maintainer's own board is currently out of sync on
+exactly the CR2032 above — schematic says horizontal, board says vertical — so the recommendation
+describes a part that is not on the board. `kicad-cli pcb drc --schematic-parity` detects this on
+closed files; all three of the maintainer's other boards were also out of sync. Detection ships;
+*triggering* the sync needs `kipy`'s explicitly-unstable `run_action`, so it stays in SPEC-329.
+Remaining: placeholder geometry in the 3D view (`CTX-326.4`), and the open source-of-truth question
+of whether envelopes should be read from the board instead.
+
 #### SPEC-327 — Design Advice: Layout & Clearance Warnings — not yet written
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-325, SPEC-326
@@ -1088,6 +1098,159 @@ questions, and offers a **general** parts list — "10K resistor, 100µF capacit
 not a vendor search. The user searches for real parts through the existing flow; what this adds is
 a stated goal, carried forward so the library, schematic, PCB and enclosure stages all know what
 the project is *for* (does it need a lid, will a connector exit the enclosure).
+
+#### [SPEC-333](apps/tauri-ui/specs/SPEC-333-project-save-semantics-and-rename.md) — Project Save Semantics & Rename — Draft
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-312
+
+Two reproduced defects in the persistence model, one of which `CTX-326.3` made much easier to hit.
+
+**Save Project discards newer data.** It writes the whole in-memory project snapshot, replacing the
+stored record — so anything a dedicated route wrote since that snapshot was loaded is erased. A DRC
+result recorded at 10:00 is gone after a Save Project click at 10:05 using a copy loaded at 09:55.
+`SPEC-312` already avoided this for intent and footprint overrides by adding dedicated routes; the
+Save button itself was never brought along, and now that check results and enclosure parameters are
+written on every run, the window routinely contains real work.
+
+**Rename forks the project.** There is no rename route. Saving under a new name writes a second
+pointer and leaves the first, so one folder becomes two entries in the project list, and the old one
+still loads with a name its own folder's manifest contradicts.
+
+#### [SPEC-336](apps/tauri-ui/specs/SPEC-336-first-run-onboarding-and-launch.md) — First-Run Onboarding & Launch Experience — Draft
+
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-300, SPEC-303, SPEC-320/404 (for the disabled path)
+
+Three problems at the front door.
+
+**Settings is the onboarding surface and is not one** — a first-time user's first screen is five
+provider records, provider kinds, two model-role bindings, a GitHub token and a KiCad socket path:
+*"I think this would feel overwhelming for a user who is trying to initially use the app."*
+
+**Nothing tells the user the app cannot work.** KiCad and FreeCAD are hard requirements and are
+never verified; a user finds out by watching features fail one at a time. Onboarding detects them
+and offers a path picker (they are often installed outside the default location) — but does **not**
+block. Every step is skippable and missing requirements become persistent, specific banners, on the
+maintainer's own reconsideration: *"Blocking the user may not be the answer... Its really no
+different than the manual setup where a user still has to setup before using and they do it at their
+own pace."* Consistency settles it — the manual path never gated anyone, so gating the guided path
+would punish the user who asked for help.
+
+**Launch opens an arbitrary project.** `App.tsx` takes `names[0]` from a `sorted()` listing — the
+*alphabetically first* project, not the most recent. Confirmed in `library_store.list_projects`.
+Replaced by a no-project landing view (what the app is, repo and docs links, create or open), which
+also becomes the launch view. Adds the close-project action that does not exist today.
+
+The **Managed** path is shown but disabled and marked coming soon: `SPEC-320` and `SPEC-404` are
+both Draft and the backing service is unfinished. The docs pages the guided flow links to do not
+exist either — placeholders now, their own context to write them, because a link that 404s on first
+run is worse than no link.
+
+#### [SPEC-335](apps/tauri-ui/specs/SPEC-335-new-project-wizard.md) — New Project Wizard — Draft
+
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-312, SPEC-325, SPEC-319
+
+Creating a project is a name and an optional intent in a 192px sidebar column, with no way to
+cancel, after which the user lands on a tabbed view with nothing in it. Nothing in this app works
+without a linked `.kicad_pro` (SPEC-325), and creation never mentions one — so a user can finish and
+find every tab empty with no indication why.
+
+Four steps, specified by the maintainer: name; link the KiCad project (prompting to create one if
+none exists, *"as nothing else works without one"*); describe the goal in a short chat the assistant
+summarises and confirms; then a real review — parity, board components, missing footprints and 3D
+models, initial ERC/DRC — ending in four buttons that dismiss the wizard onto the chosen tab.
+
+Related and deliberately unresolved: the Overview tab's four per-area status cards and its
+project-level Run Review were **removed** on 2026-09-02 as *"a guess at what the future would
+need"*. What a returning user should see there is a separate question this spec must not quietly
+answer.
+
+#### [SPEC-334](apps/tauri-ui/specs/SPEC-334-footprint-literacy-and-component-detail.md) — Footprint Literacy & Component Detail — Draft
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-325, SPEC-332
+
+`SPEC-332` made a DRC finding legible. This does the same one stage earlier, for the parts
+themselves. From the maintainer's own board: *"there are often many options to choose from that have
+very similar names and it's hard to know what `P2.54mm_Vertical` means when to use over
+`P2.00mm_Horizontal`."* And on a real `NE555P` search returning NE555P/NE555D/SA555P/NA555P/SE555P:
+*"each option in kicad for adding to a schematic has different pin layouts... Which NE555P am I
+getting."*
+
+Also names a namespace gap found the same way: searching a KiCad **footprint** name in **component**
+search returns vendor part numbers, because the two were never connected. Whether component search
+should recognise a footprint-shaped query and answer from KiCad's own libraries is a question this
+spec settles.
+
+#### SPEC-332 — DRC as a Teaching Surface — not yet written, partly delivered
+
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-309, SPEC-319
+
+The maintainer, reading a real finding: *"I don't know what [Net-(U2-THRES)] of U2 means or actually
+any of the abbreviations in order to find them. We have an opportunity to help the user learn what
+these are and know to locate the problem on the board."* And on the target reader: *"a hobbyist/maker
+that enjoys getting to the end product but is not a professional in schematics, pcbs, or cad and we
+are their co-pilot assisting them with the areas they are weak in."*
+
+Delivered on 2026-09-02: findings now carry KiCad's own `items` (the pad/net/component text and the
+millimetre position, previously discarded as "internal uuids" — only `uuid` is), a static glossary
+expands the abbreviations without an LLM call, and `ignored_checks` is surfaced with a note per
+check saying what it would have caught and whether a maker should care.
+
+Still open, and what this spec is for:
+
+*   **Mirroring KiCad's own tab structure** — Violations / Unconnected / Schematic Parity / Ignored.
+    The maintainer suggested it and was unsure; the current build uses one findings list plus a
+    collapsible for ignored tests. Worth deciding once there is more than one kind of finding on a
+    real board to look at.
+*   **Jumping to a finding.** The mm position is shown; nothing uses it. KiCad's own dialog
+    centres the view on a double-click, and `kipy` could plausibly do the same when KiCad is open.
+*   **A glossary that is not a hard-coded list.** Fine for the dozen terms KiCad's DRC actually
+    emits; wrong if it grows into a general PCB dictionary.
+*   **The same treatment for ERC**, which has its own vocabulary and its own ignored-test set.
+
+#### SPEC-331 — Enclosure Fit Review — not yet written, disabled in the app
+
+*Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-326, SPEC-319
+
+`SPEC-319` mounted a Run Review panel on the Enclosure tab. It is switched off as of 2026-09-02,
+showing `NotBuiltPlaceholder` rather than a button, at the maintainer's call: *"I don't even know
+what the run review check is supposed to show for the enclosure."*
+
+It is a real feature, not a stub — `chat_enclosure.prompt.md` defines it as physical fit: the
+board's outline and mounting holes, per-component heights, and the generated enclosure parameters.
+The problem is its data. Its one real tool, `kicad.get_component_heights`, goes through `kicad_bridge`
+→ `kipy`, which needs **KiCad running**. With KiCad closed it had nothing but the project intent,
+and produced confident-sounding advice from no data at all — the exact failure mode `SPEC-326` §1
+exists to prevent, reached from a different direction.
+
+The fix is not a patch: `SPEC-326` built a strictly better source that reads **closed** files —
+`kicad.component_envelopes`, already driving the interior-height recommendation, with per-part
+envelopes and an honest measured/stated/unknown split. Repointing the enclosure agent at it makes
+the review work with KiCad closed *and* gives it better data than it ever had. That is this spec.
+
+Worth settling here too: what a fit review should actually say. "Your box is 16mm and BT1 needs 20mm"
+is useful; restating the parameters the user just typed is not.
+
+#### SPEC-330 — Standoffs the Board Actually Mounts To — not yet written, backlog
+
+*Module:* `services/python-daemon` · *Depends on:* SPEC-109, SPEC-311
+
+Reported by the maintainer from the running app, 2026-09-01: in the enclosure preview you can see
+the board's mounting holes, but **nothing comes through them** — the holes read as empty.
+
+Confirmed in the geometry, not guessed. `freecad_bridge.py`'s `_STANDOFF_CYLINDER_TEMPLATE` unions
+a **solid** cylinder of `height_mm` at each recognised hole position, and the preview lifts the
+board by `wall_thickness_mm + standoff_height_mm` (`EnclosureViewer.computeBoardOffset`). So the
+post stops flush at the board's underside by construction: it supports the board and nothing
+passes through the hole. The render is faithful — the geometry really is like that.
+
+What a real enclosure has instead: a standoff bored for a screw, with the screw passing through the
+board's hole into it, or a moulded boss that enters the hole to locate the board. Either makes the
+holes read as mounted rather than empty. Neither exists yet, and `SPEC-109` §1's non-goals
+explicitly ruled out fastener hardware — so this is a deliberate scope re-opening, not an oversight
+to be quietly patched.
+
+Also worth settling here: the standoff diameter currently comes from the hole's own
+`diameter_mm`, which makes the post exactly as wide as the hole it is meant to sit under.
 
 #### SPEC-329 — Assisted Authoring: Adding a Part on Request — not yet written, deliberately last
 

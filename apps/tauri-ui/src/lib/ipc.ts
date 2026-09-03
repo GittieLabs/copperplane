@@ -4,10 +4,10 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 /** Must match `daemon::DAEMON_RESPONSE_EVENT` in core/tauri-rust/src/daemon.rs. */
 export const DAEMON_RESPONSE_EVENT = 'daemon://response'
 
-/** CTX-312.3: real native menu clicks -- must match `menu::
- * MENU_SAVE_PROJECT_EVENT`/`MENU_OPEN_PROJECT_EVENT` in
- * `core/tauri-rust/src/menu.rs`. */
-export const MENU_SAVE_PROJECT_EVENT = 'menu://save-project'
+/** CTX-312.3: a real native menu click -- must match the const of the same
+ *  name in `core/tauri-rust/src/menu.rs`. (Save Project was removed alongside
+ *  its button: every field persists as it changes, so the command had nothing
+ *  to do, and a whole-record write was destructive -- SPEC-333.) */
 export const MENU_OPEN_PROJECT_EVENT = 'menu://open-project'
 
 /** CTX-316.1: the rest of the native menu's command surface -- each

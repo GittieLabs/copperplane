@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { writeText } from '@tauri-apps/plugin-clipboard-manager'
+import { pickKicadProject } from './lib/kicadProject'
 import { listen } from '@tauri-apps/api/event'
 import {
-  MENU_SAVE_PROJECT_EVENT,
   MENU_OPEN_PROJECT_EVENT,
   MENU_OPEN_SETTINGS_EVENT,
   MENU_OPEN_DEFAULT_LIBRARY_EVENT,
@@ -64,8 +65,20 @@ type View =
   | { kind: 'partDetail'; partId: string }
   | null
 
+/** A .kicad_pro shown by name. The full path is a tooltip: it is long, it is
+ *  rarely what a user is checking, and it pushed everything else off the row. */
+function kicadProjectName(path?: string | null): string | null {
+  if (!path) return null
+  return (path.split('/').pop() ?? path).replace(/\.kicad_pro$/, '')
+}
+
 function App() {
   const [projects, setProjects] = useState<string[]>([])
+  /* Listing projects reads every project record off disk and can take a
+     visible moment. Until it finishes the main area was simply blank, with
+     nothing to say why -- and a project created in that window was dropped
+     when the in-flight list came back and overwrote it. */
+  const [projectsLoading, setProjectsLoading] = useState(true)
   const [libraryCount, setLibraryCount] = useState(0)
   const [view, setView] = useState<View>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -104,7 +117,6 @@ function App() {
   // `export_history`). Reloaded whenever the selected project changes;
   // `null` while loading or when no project is selected at all.
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
-  const [savingProject, setSavingProject] = useState(false)
   const [projectActionError, setProjectActionError] = useState<string | null>(null)
   // CTX-312.2: real user feedback -- clicking "Save Project" (or "Link to
   // folder…") gave no visible confirmation at all, so a real successful
@@ -119,7 +131,9 @@ function App() {
       try {
         const [names, parts] = await Promise.all([listProjects(), listLibraryParts()])
         if (cancelled) return
-        setProjects(names)
+        // Merged, not replaced: a project created while this was in flight is
+        // already in state, and this list was read before it existed.
+        setProjects((prev) => [...names, ...prev.filter((n) => !names.includes(n))])
         setLibraryCount(parts.length)
         setView((prev) => {
           if (prev !== null) return prev
@@ -127,6 +141,8 @@ function App() {
         })
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!cancelled) setProjectsLoading(false)
       }
     }
     load()
@@ -196,21 +212,38 @@ function App() {
     }
   }
 
-  async function handleSaveProject() {
+  // A project's folder is a real path a user needs outside this app -- to open
+  // it in Finder, or to hand to a tool. Copying beats a clickable path that
+  // silently opens a dialog, which is what this used to be.
+  const [copiedPath, setCopiedPath] = useState(false)
+
+  // Linking the .kicad_pro is also offered on the Schematic tab; doing it from
+  // the header saves the same field through the same route. The project view
+  // is keyed on the path (below) so panels holding schematic/board data
+  // re-read rather than showing the previous project's components.
+  async function handleChangeKicadProject() {
     if (!currentProject) return
-    setSavingProject(true)
-    setProjectActionError(null)
-    setProjectActionMessage(null)
     try {
-      const saved = await saveProject(currentProject)
+      const picked = await pickKicadProject()
+      if (!picked) return
+      const saved = await saveProject({ ...currentProject, kicad_project_path: picked })
       setCurrentProject(saved)
-      setProjectActionMessage('Project saved.')
     } catch (err) {
       setProjectActionError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setSavingProject(false)
     }
   }
+
+  async function handleCopyProjectPath() {
+    if (!currentProject?.directory) return
+    try {
+      await writeText(currentProject.directory)
+      setCopiedPath(true)
+      window.setTimeout(() => setCopiedPath(false), 1500)
+    } catch (err) {
+      setProjectActionError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
 
   // CTX-312.3: the real backend for the native menu's "Open Project…" --
   // restores a project from a real, already-linked folder (e.g. copied
@@ -264,7 +297,6 @@ function App() {
       setMenuCommand((prev) => ({ area, command, nonce: prev ? prev.nonce + 1 : 0 }))
     }
 
-    on(MENU_SAVE_PROJECT_EVENT, () => void handleSaveProject())
     on(MENU_OPEN_PROJECT_EVENT, () => void handleOpenProject())
     on(MENU_OPEN_SETTINGS_EVENT, () => setView({ kind: 'settings' }))
     on(MENU_OPEN_DEFAULT_LIBRARY_EVENT, () => setView({ kind: 'library', initialLibraryId: 'default' }))
@@ -338,6 +370,7 @@ function App() {
         selectedProject={view?.kind === 'project' ? view.name : null}
         onSelectProject={handleSelectProject}
         onCreateProject={handleCreateProject}
+        projectsLoading={projectsLoading}
         libraryCount={libraryCount}
         librarySelected={view?.kind === 'library' || view?.kind === 'partDetail'}
         onSelectLibrary={() => setView({ kind: 'library' })}
@@ -347,7 +380,11 @@ function App() {
       <main className="flex flex-1 flex-col items-center gap-6 overflow-auto p-8">
         {loadError && <p className="w-full max-w-4xl text-sm text-danger">{loadError}</p>}
 
-        {view === null && (
+        {view === null && projectsLoading && (
+          <p className="text-sm text-fg-muted" role="status">Loading your projects…</p>
+        )}
+
+        {view === null && !projectsLoading && (
           <p className="text-sm text-fg-muted">Create a project on the left to get started.</p>
         )}
 
@@ -373,23 +410,66 @@ function App() {
              * these real, already-scoped actions don't get entangled
              * with a surface whose future shape isn't settled yet. */}
             <div className="flex w-full max-w-4xl items-center justify-between gap-2 text-xs">
-              <button
-                type="button"
-                className="truncate text-left text-fg-tertiary hover:text-fg-bright"
-                onClick={() => void handleLinkDirectory()}
-                disabled={!currentProject}
-                title={currentProject?.directory ?? undefined}
-              >
-                {currentProject?.directory ? `Linked: ${currentProject.directory}` : 'Link to folder…'}
-              </button>
-              <button
-                type="button"
-                className="shrink-0 rounded border border-line px-2 py-1 font-medium text-fg-bright hover:bg-surface-alt disabled:opacity-50"
-                onClick={() => void handleSaveProject()}
-                disabled={!currentProject || savingProject}
-              >
-                {savingProject ? 'Saving…' : 'Save Project'}
-              </button>
+              {/* Paths are long, and neither one earns permanent screen space:
+                  "showing the complete paths ... only clutters the screen.
+                  Neither offers enough value to be statically shown." So the
+                  KiCad project shows by FILE NAME, its full path is one hover
+                  away, and the project folder is a copy button rather than a
+                  wall of text. */}
+              <div data-testid="project-header" className="flex min-w-0 flex-col gap-0.5">
+                <p className="truncate text-xl font-semibold text-fg-bright">
+                  {currentProject?.name ?? 'Untitled project'}
+                </p>
+                <p className="flex items-center gap-2 text-xs text-fg-muted">
+                  <span className="truncate" title={currentProject?.kicad_project_path ?? undefined}>
+                    Linked KiCad project:{' '}
+                    <span className="text-fg-secondary">
+                      {kicadProjectName(currentProject?.kicad_project_path) ?? 'none yet'}
+                    </span>
+                  </span>
+                  {/* Names what it changes. "Change folder…" sat next to two
+                      different paths and could be read as either. */}
+                  <button
+                    type="button"
+                    className="shrink-0 rounded border border-line px-1 text-fg-tertiary hover:bg-surface-alt hover:text-fg-bright disabled:opacity-50"
+                    onClick={() => void handleChangeKicadProject()}
+                    disabled={!currentProject}
+                  >
+                    {currentProject?.kicad_project_path ? 'Change' : 'Link'}
+                  </button>
+                  {/* A new project has no folder until one is chosen, and the
+                      folder is where its artifacts and portable manifest live
+                      -- so linking stays reachable, just only while it is
+                      actually missing. Once linked, the path is a copy button
+                      rather than a permanent line of text. */}
+                  {currentProject?.directory ? (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded border border-line px-1 text-fg-tertiary hover:bg-surface-alt hover:text-fg-bright"
+                      onClick={() => void handleCopyProjectPath()}
+                      title={currentProject.directory}
+                    >
+                      {copiedPath ? 'Copied' : 'Copy project path'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded border border-line px-1 text-fg-tertiary hover:bg-surface-alt hover:text-fg-bright disabled:opacity-50"
+                      onClick={() => void handleLinkDirectory()}
+                      disabled={!currentProject}
+                    >
+                      Choose project folder…
+                    </button>
+                  )}
+                </p>
+              </div>
+              {/* "I still don't believe we need a Save project button. We
+                  should save the project at project creation time and have all
+                  other edits update as things change which is mostly what is
+                  happening anyway." -- correct, and it was worse than
+                  redundant: it wrote a whole in-memory snapshot, erasing
+                  anything a dedicated route had written since (SPEC-333).
+                  Every field now persists at the moment it changes. */}
             </div>
             {projectActionError && (
               <p className="w-full max-w-4xl text-xs text-danger">{projectActionError}</p>

@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -1802,3 +1803,124 @@ class TestConnectionGuidanceStorage(LibraryStoreTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestProjectCheckResults(LibraryStoreTestCase):
+    """`Project.last_results[area]`, written per area.
+
+    Built for SPEC-319 §2.1, to feed the review agents stored ERC/DRC
+    findings. That is no longer what grounds them: `_check_status_note` now
+    RUNS the check on request, because `kicad-cli` reads a closed file and a
+    stored finding can go stale in ways this app cannot detect (the user can
+    fix everything in KiCad and never tell us).
+
+    This record is kept for a genuinely different job -- `OverviewDashboard`
+    reads `last_results` to show per-area status -- so it is still written,
+    just no longer load-bearing for an agent's grounding."""
+
+    def _result(self, n=3):
+        return {
+            "checked_at": "2026-09-02T00:00:00Z",
+            "source_path": "/p/b.kicad_pcb",
+            "violation_count": 0,
+            "unconnected_count": n,
+            "findings": [
+                {"severity": "error", "type": "unconnected_items",
+                 "description": f"Missing connection {i}"} for i in range(n)
+            ],
+        }
+
+    def test_001_a_check_result_is_readable_after_a_restart(self):
+        store.save_project({"name": "P"})
+        store.set_project_check_result("P", "pcb", self._result())
+
+        stored = store.load_project("P")["last_results"]["pcb"]
+        self.assertEqual(stored["unconnected_count"], 3)
+        self.assertEqual(len(stored["findings"]), 3)
+
+    def test_002_areas_do_not_overwrite_each_other(self):
+        store.save_project({"name": "P"})
+        store.set_project_check_result("P", "pcb", self._result())
+        store.set_project_check_result("P", "schematic", {"violation_count": 0, "findings": []})
+
+        last = store.load_project("P")["last_results"]
+        self.assertIn("pcb", last)
+        self.assertIn("schematic", last)
+        self.assertEqual(last["pcb"]["unconnected_count"], 3)
+
+    def test_003_an_existing_enclosure_result_survives(self):
+        """The one area that already wrote here must not be clobbered."""
+        store.save_project({"name": "P", "last_results": {"enclosure": {"glb_path": "/x.glb"}}})
+        store.set_project_check_result("P", "pcb", self._result())
+
+        last = store.load_project("P")["last_results"]
+        self.assertEqual(last["enclosure"]["glb_path"], "/x.glb")
+
+    def test_004_a_huge_finding_list_is_capped_and_says_so(self):
+        """This record is read straight into an LLM context window. A real
+        board can produce hundreds of findings."""
+        store.save_project({"name": "P"})
+        store.set_project_check_result("P", "pcb", self._result(n=200))
+
+        stored = store.load_project("P")["last_results"]["pcb"]
+        self.assertEqual(len(stored["findings"]), 25)
+        self.assertEqual(stored["findings_omitted"], 175)
+        # The COUNT stays exact even though the detail is capped -- an agent
+        # told "3 of 200" must not conclude the board has 25 problems.
+        self.assertEqual(stored["unconnected_count"], 200)
+
+    def test_005_an_unknown_area_is_refused(self):
+        store.save_project({"name": "P"})
+        with self.assertRaises(store.SchemaValidationError):
+            store.set_project_check_result("P", "firmware", self._result())
+
+
+class TestDatasheetFilename(LibraryStoreTestCase):
+    """Real part numbers contain characters a filename cannot. Panasonic's
+    coin cells are `CR-2032/HFN`, and the app used to REFUSE them outright --
+    "'CR-2032/HFN' is not a safe part_number for a cache filename" -- so a
+    whole class of real parts could never cache a datasheet. Reported from the
+    part lookup, which showed exactly that error after confirming the part."""
+
+    def test_001_a_slash_in_a_real_part_number_is_handled_not_refused(self):
+        name = store.datasheet_filename("CR-2032/HFN")
+
+        self.assertNotIn("/", name)
+        self.assertIn("CR-2032", name)
+
+    def test_002_an_already_safe_part_number_is_unchanged(self):
+        """Every datasheet cached before this keeps its filename."""
+        self.assertEqual(store.datasheet_filename("NE555P"), "NE555P")
+        self.assertEqual(store.datasheet_filename("ATtiny85"), "ATtiny85")
+
+    def test_003_path_traversal_is_still_neutralised(self):
+        """Refusing traversal and refusing a manufacturer's slash were never
+        the same requirement; only the first was ever wanted."""
+        name = store.datasheet_filename("../../etc/passwd")
+
+        self.assertNotIn("..", name)
+        self.assertNotIn("/", name)
+
+    def test_004_two_part_numbers_that_sanitise_alike_do_not_collide(self):
+        self.assertNotEqual(
+            store.datasheet_filename("CR-2032/HFN"),
+            store.datasheet_filename("CR-2032\\HFN"),
+        )
+
+    def test_005_an_empty_part_number_is_still_an_error(self):
+        with self.assertRaises(store.DatasheetFetchError):
+            store.datasheet_filename("")
+
+    def test_006_the_cache_path_uses_the_safe_name(self):
+        path = store.datasheet_cache_path("CR-2032/HFN")
+
+        self.assertTrue(path.endswith(".pdf"))
+        self.assertNotIn("/HFN", path)
+
+    def test_007_ensure_datasheet_cached_no_longer_refuses_such_a_part(self):
+        """It used to raise before touching the network at all."""
+        with patch.object(store, "cache_datasheet", return_value="/cached.pdf") as fetch:
+            out = store.ensure_datasheet_cached("CR-2032/HFN", "https://example.com/x.pdf")
+
+        self.assertEqual(out, "/cached.pdf")
+        fetch.assert_called_once()

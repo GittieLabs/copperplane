@@ -6,11 +6,21 @@ import { dispatch, submitJob } from './ipc'
  * (CTX-309.1) -- each real KiCad violation enriched with a real
  * explanation/suggested_fix, plus items/sheet_path passed straight
  * through from kicad-cli's own real JSON. */
+/** One item KiCad flagged, with the text KiCad's own dialog shows and its
+ *  millimetre position. This is the answer to "where is it" -- the whole
+ *  `items` array used to be discarded as internal uuids, which only the
+ *  `uuid` field actually is. */
+export interface ViolationItem {
+  description?: string
+  pos?: { x: number; y: number }
+  uuid?: string
+}
+
 export interface Violation {
   description: string
   severity: string
   type: string
-  items: unknown[]
+  items: ViolationItem[]
   sheet_path?: string
   explanation: string
   suggested_fix: string
@@ -21,6 +31,17 @@ export interface CheckResult {
   summary: string
   truncated_count: number
   source_path: string
+  /** KiCad's own counts, per kind, independent of the LLM explanation
+   *  path. Reported so the UI can never say "no violations" about a board
+   *  KiCad found problems on: `violations` is empty on the maintainer's
+   *  own board while `unconnected_count` is 18, every one severity error.
+   *  Optional because a result cached before SPEC-326 §2.7 lacks them. */
+  violation_count?: number
+  unconnected_count?: number
+  parity_count?: number
+  /** Checks KiCad did NOT run. A board can look clean because a test is
+   *  switched off, and that setting is usually inherited rather than chosen. */
+  ignored_checks?: { key: string; description: string }[]
 }
 
 export interface BoardCandidate {
@@ -61,8 +82,11 @@ export async function listOpenBoards(): Promise<ListOpenBoardsResult> {
  * not verified on Windows/Linux (see the Rust command's own doc
  * comment) -- if it fails there, the caller's existing walkthrough text
  * is still the real fallback. */
-export async function openKicad(): Promise<void> {
-  await invoke('open_kicad')
+export async function openKicad(path?: string | null): Promise<void> {
+  // A path opens that board rather than just launching the app. The PCB and
+  // Enclosure tabs know exactly which board the user means, so dropping them
+  // into a bare KiCad window to find it themselves is a worse answer.
+  await invoke('open_kicad', path ? { path } : {})
 }
 
 /** kicad.check_board (SPEC-309/CTX-309.4) always takes an explicit,
@@ -121,4 +145,28 @@ export async function pickSchematicFile(): Promise<string | null> {
 export async function checkSchematic(schPath: string): Promise<CheckResult> {
   const handle = await submitJob<CheckResult>('kicad.check_schematic', { sch_path: schPath })
   return handle.result
+}
+
+/** The bounded record of a check, for `Project.last_results` — what the
+ *  review and chat agents actually read. Counts are exact; the per-finding
+ *  detail is what an LLM context can carry, and `library_store` caps it
+ *  again on the way in. */
+export function checkResultForProject(result: CheckResult, area: 'schematic' | 'pcb') {
+  return {
+    checked_at: new Date().toISOString(),
+    source_path: result.source_path,
+    summary: result.summary,
+    violation_count: result.violation_count ?? result.violations.length,
+    ...(area === 'pcb'
+      ? {
+          unconnected_count: result.unconnected_count ?? 0,
+          parity_count: result.parity_count ?? 0,
+        }
+      : {}),
+    findings: result.violations.map((v) => ({
+      severity: v.severity,
+      type: v.type,
+      description: v.description,
+    })),
+  }
 }

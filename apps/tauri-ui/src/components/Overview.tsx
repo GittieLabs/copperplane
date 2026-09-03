@@ -8,8 +8,6 @@ import {
   type Project,
 } from '../lib/projects'
 import { AgentChat } from './AgentChat'
-import { ReviewPanel } from './ReviewPanel'
-import { OverviewDashboard } from './OverviewDashboard'
 
 type Status = 'pending' | 'done' | 'error'
 
@@ -140,7 +138,15 @@ export function Overview({
     <div className="flex w-full max-w-4xl flex-col gap-3">
       {loadError && <p className="text-sm text-danger">{loadError}</p>}
       <IntentEditor projectName={projectName} project={project} onProjectUpdated={onProjectUpdated} />
-      <OverviewDashboard project={project} chatHistory={chatHistory} />
+      {/* The four per-area status cards were removed. They said "Not yet
+          checked this session" for PCB and Schematic -- which the on-demand
+          checks make irrelevant, since a check runs when asked and its result
+          is on that area's own tab -- and for Enclosure and Components, which
+          have no check at all. "We essentially built a guess at what the
+          future would need and it's time to remove this work and re-imagine
+          if there are glanceable/summarizable content that we would want to
+          see when we open a project." What replaces them is SPEC-335's
+          question, not a card grid guessed at again. */}
       <div className="flex flex-col gap-2">
         {messages.map((message) => (
           <ChatMessageView key={message.id} message={message} />
@@ -165,17 +171,10 @@ export function Overview({
           Send
         </button>
       </div>
-      {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
-          is a flow step with a typed result, not a conversational turn.
-          No Design submenu exists for Overview (SPEC-316's own menu has
-          none), so the in-area button is this area's only entry point. */}
-      <ReviewPanel
-        area="overview"
-        scope="project"
-        scopeId={`${projectName}:overview`}
-        title="Review this project"
-        projectName={projectName}
-      />
+      {/* The Overview Run Review was removed: it reviewed a project whose
+          only real check results live on the PCB and Schematic tabs, where
+          the review already runs against a live check. "The Run Review on the
+          overview doesn't do anything and is unneccessary." */}
       {/* SPEC-318 §5: a second, separately-scoped chat panel -- the real
           project agent, grounded in project intent/last_results/
           export_history/referenced Parts (§2.3's Overview row), with

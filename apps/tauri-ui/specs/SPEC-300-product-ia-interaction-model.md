@@ -9,6 +9,7 @@ target_version: v0.1.0
 location: "apps/tauri-ui/specs/SPEC-300-product-ia-interaction-model.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
 child_specs:
+  - "SPEC-336-first-run-onboarding-and-launch.md"
   - "SPEC-304-project-library-storage.md"
   - "SPEC-305-app-shell-navigation.md"
   - "SPEC-306-component-discovery.md"

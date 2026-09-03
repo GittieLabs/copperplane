@@ -57,17 +57,17 @@ describe('ReviewPanel', () => {
     await waitFor(() => screen.getByText('No project intent set'))
     screen.getByText('Agents will answer generically until one is added.')
     screen.getByText('Warning')
-    screen.getByText(/General engineering practice/)
+    screen.getByText(/Includes general engineering practice/)
     screen.getByText('1 finding')
   })
 
-  it('TEST-003: an empty findings list shows an honest "nothing stood out", not silence or an error', async () => {
+  it('TEST-003: an empty findings list shows an honest "reviewed, nothing worth flagging", not silence or an error', async () => {
     runReviewMock.mockResolvedValueOnce([])
 
     render(<ReviewPanel area="overview" scope="project" scopeId="weather-pcb:overview" title="Review this project" />)
     fireEvent.click(screen.getByRole('button', { name: 'Run Review' }))
 
-    await waitFor(() => screen.getByText('Nothing stood out.'))
+    await waitFor(() => screen.getByText('Reviewed — nothing worth flagging.'))
   })
 
   it('TEST-004: multiple findings all render, each with its own severity', async () => {

@@ -5,6 +5,7 @@ const pickKicadProjectMock = vi.fn()
 const resolveKicadProjectMock = vi.fn()
 const listSchematicComponentsMock = vi.fn()
 const componentEnvelopesMock = vi.fn()
+const checkSchematicParityMock = vi.fn()
 const loadProjectMock = vi.fn()
 const saveProjectMock = vi.fn()
 
@@ -13,6 +14,7 @@ vi.mock('../lib/kicadProject', () => ({
   resolveKicadProject: (...a: unknown[]) => resolveKicadProjectMock(...a),
   listSchematicComponents: (...a: unknown[]) => listSchematicComponentsMock(...a),
   componentEnvelopes: (...a: unknown[]) => componentEnvelopesMock(...a),
+  checkSchematicParity: (...a: unknown[]) => checkSchematicParityMock(...a),
 }))
 vi.mock('../lib/projects', () => ({
   loadProject: (...a: unknown[]) => loadProjectMock(...a),
@@ -56,8 +58,14 @@ beforeEach(() => {
   listSchematicComponentsMock.mockReset().mockResolvedValue(READ)
   componentEnvelopesMock.mockReset().mockResolvedValue({
     envelopes: [], measured: 1, stated: 1, unknown: 0,
-    source_path: FILES.schematic_path, read_at: READ.read_at,
+    components: READ.components,
+    source_path: FILES.pcb_path, read_at: READ.read_at,
     min_interior_height_mm: 20, tallest: { reference: 'BT1', z_mm: 20, source: 'user' },
+    measured_from: 'board',
+  })
+  checkSchematicParityMock.mockReset().mockResolvedValue({
+    pcb_path: FILES.pcb_path, in_sync: true, issue_count: 0, issues: [],
+    checked_at: READ.read_at,
   })
   loadProjectMock.mockReset().mockResolvedValue({ name: 'p' })
   saveProjectMock.mockReset().mockResolvedValue({ name: 'p' })
@@ -70,13 +78,17 @@ describe('SchematicComponents', () => {
     expect(screen.getByText(/does not need to be running/)).toBeTruthy()
   })
 
-  it('reads the schematic after a project is picked, and remembers it', async () => {
+  it('reads the project after one is picked, and remembers it', async () => {
     pickKicadProjectMock.mockResolvedValue(FILES.pro_path)
     render(<SchematicComponents projectName="p" />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Link KiCad project…' }))
 
-    await waitFor(() => expect(listSchematicComponentsMock).toHaveBeenCalledWith(FILES.schematic_path))
+    await waitFor(() =>
+      expect(componentEnvelopesMock).toHaveBeenCalledWith(
+        FILES.schematic_path, FILES.pcb_path, {},
+      ),
+    )
     await waitFor(() =>
       expect(saveProjectMock).toHaveBeenCalledWith(
         expect.objectContaining({ kicad_project_path: FILES.pro_path }),
@@ -129,7 +141,9 @@ describe('SchematicComponents', () => {
 
   it('reports a read failure instead of rendering a stale or empty table', async () => {
     loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
-    listSchematicComponentsMock.mockRejectedValue(new Error("kicad-cli's BOM is missing expected column(s)"))
+    const boom = new Error("kicad-cli's BOM is missing expected column(s)")
+    componentEnvelopesMock.mockRejectedValue(boom)
+    listSchematicComponentsMock.mockRejectedValue(boom)
     render(<SchematicComponents projectName="p" />)
 
     expect(await screen.findByText(/missing expected column/)).toBeTruthy()
@@ -153,8 +167,10 @@ describe('SchematicComponents', () => {
     loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
     componentEnvelopesMock.mockResolvedValue({
       envelopes: [], measured: 1, stated: 0, unknown: 1,
-      source_path: FILES.schematic_path, read_at: READ.read_at,
+      components: READ.components,
+      source_path: FILES.pcb_path, read_at: READ.read_at,
       min_interior_height_mm: 15.5, tallest: { reference: 'R1', z_mm: 15.5, source: 'model' },
+      measured_from: 'board',
     })
     render(<SchematicComponents projectName="p" />)
 
@@ -188,5 +204,187 @@ describe('SchematicComponents', () => {
 
     await screen.findByText('D1')
     expect(screen.queryByLabelText('Height for LED_THT:LED_D1.8mm_W3.3mm_H2.4mm')).toBeNull()
+  })
+
+  /* SPEC-326 §2.7. This is the maintainer's own live case: the schematic
+     carries a horizontal CR2032 holder, the board a vertical one. Both
+     files open and render correctly in KiCad, so neither view shows it. */
+  it('says so when the board no longer matches the schematic', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    checkSchematicParityMock.mockResolvedValue({
+      pcb_path: FILES.pcb_path, in_sync: false, issue_count: 1,
+      issues: [{
+        type: 'footprint_symbol_mismatch', severity: 'warning',
+        description:
+          "Battery:Battery_Panasonic_CR2032-VS1N_Vertical_CircularHoles doesn't match footprint " +
+          'given by symbol (Battery:Battery_Panasonic_CR2032-HFN_Horizontal_CircularHoles)',
+      }],
+      checked_at: READ.read_at,
+    })
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText(/board does not match your schematic/)).toBeTruthy()
+    expect(screen.getByText(/VS1N_Vertical_CircularHoles/)).toBeTruthy()
+    // Names the fix as a thing the USER does in KiCad. This app does not
+    // write to the board, and must not imply that it might.
+    expect(screen.getByText(/Update PCB from Schematic/)).toBeTruthy()
+  })
+
+  /* The bug the maintainer caught in the running app: the table listed the
+     SCHEMATIC's 10 components under a summary counting the BOARD's 14, with a
+     BT1 whose footprint was not the one measured. Table and summary now come
+     from one read, so they cannot disagree. */
+  it('lists the components it actually measured, not a separate read', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    componentEnvelopesMock.mockResolvedValue({
+      envelopes: [], measured: 9, stated: 0, unknown: 5,
+      components: [{
+        reference: 'BT1', value: 'Battery_Cell',
+        footprint: 'Battery:Battery_Panasonic_CR2032-VS1N_Vertical_CircularHoles',
+        dnp: false, footprint_found: true, model_ref: null, model_path: null, has_model: false,
+      }],
+      source_path: FILES.pcb_path, read_at: READ.read_at,
+      min_interior_height_mm: 15.515, tallest: { reference: 'R2', z_mm: 15.515, source: 'model' },
+      measured_from: 'board',
+    })
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText(/VS1N_Vertical_CircularHoles/)).toBeTruthy()
+    // The schematic's footprint must NOT appear: it is not what was measured.
+    expect(screen.queryByText(/HFN_Horizontal_CircularHoles/)).toBeNull()
+    expect(listSchematicComponentsMock).not.toHaveBeenCalled()
+  })
+
+  it('calls the panel Board components when it measured the board', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText('Board components')).toBeTruthy()
+  })
+
+  /* The silent fallback cost three rounds of debugging a live defect: the
+     panel showed the schematic's components under a "Board components"
+     heading with nothing to say measurement had failed, which looks exactly
+     like the measurement being wrong. */
+  it('says why, and names the real error, when measurement fails', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    componentEnvelopesMock.mockRejectedValue(new Error('freecadcmd not found on this machine'))
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText(/Could not measure/)).toBeTruthy()
+    expect(screen.getByText(/freecadcmd not found on this machine/)).toBeTruthy()
+  })
+
+  it('does not call itself Board components when nothing was measured', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    componentEnvelopesMock.mockRejectedValue(new Error('boom'))
+    render(<SchematicComponents projectName="p" />)
+
+    await screen.findByText('D1')
+    expect(screen.getByText('Schematic components')).toBeTruthy()
+    expect(screen.queryByText('Board components')).toBeNull()
+  })
+
+  it('falls back to the schematic list so a failed measurement still shows a table', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    componentEnvelopesMock.mockRejectedValue(new Error('no freecad'))
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText('D1')).toBeTruthy()
+    expect(listSchematicComponentsMock).toHaveBeenCalled()
+  })
+
+  /* SPEC-326 §2.7: the board is the source of truth, because the board is
+     what goes in the enclosure. */
+  it('measures from the board, passing both paths so the schematic can be a fallback', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    await screen.findByText('D1')
+    expect(componentEnvelopesMock).toHaveBeenCalledWith(
+      FILES.schematic_path, FILES.pcb_path, {},
+    )
+  })
+
+  it('says so when it had to fall back to the schematic because the board is empty', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    componentEnvelopesMock.mockResolvedValue({
+      envelopes: [], measured: 1, stated: 0, unknown: 0,
+      components: READ.components,
+      source_path: FILES.schematic_path, read_at: READ.read_at,
+      min_interior_height_mm: 15, tallest: { reference: 'R1', z_mm: 15, source: 'model' },
+      measured_from: 'schematic',
+    })
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText(/board has no footprints on it yet/)).toBeTruthy()
+  })
+
+  it('does not claim a schematic fallback when it measured the board', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    await screen.findByText('D1')
+    expect(screen.queryByText(/board has no footprints on it yet/)).toBeNull()
+  })
+
+  it('tells the user the board is what gets measured, and how to sync if it should not be', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    checkSchematicParityMock.mockResolvedValue({
+      pcb_path: FILES.pcb_path, in_sync: false, issue_count: 1,
+      issues: [{ type: 'footprint_symbol_mismatch', severity: 'warning', description: 'X vs Y' }],
+      checked_at: READ.read_at,
+    })
+    render(<SchematicComponents projectName="p" />)
+
+    await screen.findByText(/board does not match your schematic/)
+    expect(screen.getByText(/measured from the/)).toBeTruthy()
+    expect(screen.getByText(/Update PCB from Schematic/)).toBeTruthy()
+  })
+
+  /* Real shape from the maintainer's NFC_Reader_ESP32, which reports an
+     identical "Duplicate footprints" description three times -- once per
+     offending item. Three identical lines say nothing a count does not. */
+  it('collapses a repeated parity description into one line with a count', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    const dup = {
+      type: 'duplicate_footprints', severity: 'warning', description: 'Duplicate footprints',
+    }
+    checkSchematicParityMock.mockResolvedValue({
+      pcb_path: FILES.pcb_path, in_sync: false, issue_count: 3,
+      issues: [dup, dup, dup], checked_at: READ.read_at,
+    })
+    render(<SchematicComponents projectName="p" />)
+
+    await screen.findByText(/board does not match your schematic/)
+    expect(screen.getAllByText(/Duplicate footprints/)).toHaveLength(1)
+    expect(screen.getByText(/×3/)).toBeTruthy()
+  })
+
+  it('stays quiet about parity when the board and schematic agree', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    render(<SchematicComponents projectName="p" />)
+
+    await screen.findByText('D1')
+    expect(screen.queryByText(/board does not match your schematic/)).toBeNull()
+  })
+
+  it('still lists components when the project has no board to check against', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    resolveKicadProjectMock.mockResolvedValue({ ...FILES, pcb_path: null })
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText('D1')).toBeTruthy()
+    expect(checkSchematicParityMock).not.toHaveBeenCalled()
+    expect(screen.queryByText(/board does not match your schematic/)).toBeNull()
+  })
+
+  it('does not blank the component list when the parity check itself fails', async () => {
+    loadProjectMock.mockResolvedValue({ name: 'p', kicad_project_path: FILES.pro_path })
+    checkSchematicParityMock.mockRejectedValue(new Error('kicad-cli not found'))
+    render(<SchematicComponents projectName="p" />)
+
+    expect(await screen.findByText('D1')).toBeTruthy()
+    expect(screen.queryByText(/board does not match your schematic/)).toBeNull()
   })
 })

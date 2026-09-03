@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Markdown } from './Markdown'
 import type { Area, MenuCommand } from '../lib/areas'
 import { runReview, type ChatScope, type ReviewFinding, type SourceRef } from '../lib/chat'
 import { isOpenableSource, openSource, sourceChipLabel } from '../lib/sourceRefs'
@@ -117,7 +118,14 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs text-fg-muted">
               {findings.length === 0
-                ? 'Nothing stood out.'
+                ? // "Nothing stood out" used to be said whether or not any check
+                  // had run -- and for the PCB and schematic areas, none ever
+                  // had, so it read as "your design is fine" when it meant
+                  // "the agent was shown nothing". The check now runs as part
+                  // of the review, so this only ever follows a real one; the
+                  // wording still says what was actually done rather than
+                  // pronouncing the design clean.
+                  'Reviewed — nothing worth flagging.'
                 : `${findings.length} finding${findings.length === 1 ? '' : 's'}`}
             </p>
             <button type="button" className="text-xs text-fg-muted underline" onClick={handleDismiss}>
@@ -131,10 +139,16 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
                 {SEVERITY_LABEL[finding.severity]}
               </p>
               <p className="text-sm font-medium text-fg">{finding.title}</p>
-              <p className="text-sm text-fg-secondary">{finding.detail}</p>
+              <Markdown text={finding.detail} className="text-sm text-fg-secondary" />
+              {/* `general_practice` means "SOME of this relies on general
+                  engineering knowledge", not "none of this is grounded". The
+                  old wording claimed the latter, and appeared under a finding
+                  that opened "DRC detected 2 missing connections" -- measured
+                  from the user's own board seconds earlier. Telling someone to
+                  discount a real measurement is worse than saying nothing. */}
               {finding.general_practice && (
                 <p className="text-xs font-medium text-warning">
-                  General engineering practice -- not from this area's own data.
+                  Includes general engineering practice, not only this area's own data.
                 </p>
               )}
               {finding.sources.length > 0 && (

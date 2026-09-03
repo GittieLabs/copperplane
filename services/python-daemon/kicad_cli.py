@@ -195,12 +195,40 @@ def run_erc(sch_path: str) -> dict:
     return _run_report(["sch", "erc"], sch_path)
 
 
-def run_drc(pcb_path: str) -> dict:
+def run_drc(pcb_path: str, schematic_parity: bool = False) -> dict:
     """Real Design Rules Check on a .kicad_pcb file -- SPEC-309. Real
     JSON shape (confirmed the same way): {..., unconnected_items,
     violations: [{description, items, severity, type}]} -- flat, since a
     board is one PCB, not several sheets."""
-    return _run_report(["pcb", "drc"], pcb_path)
+    subcommand = ["pcb", "drc"]
+    if schematic_parity:
+        # Off by default: parity needs the `.kicad_sch` sibling, and a board
+        # checked on its own is a legitimate call. Callers that want it ask.
+        subcommand.append("--schematic-parity")
+    return _run_report(subcommand, pcb_path)
+
+
+def check_schematic_parity(pcb_path: str) -> list:
+    """Every place the board and its schematic disagree -- SPEC-326 2.7.
+
+    KiCad performs this comparison itself, via `pcb drc
+    --schematic-parity`, on a CLOSED board: it reads the `.kicad_sch`
+    sitting beside the `.kicad_pcb` and reports each symbol/footprint
+    disagreement under a `schematic_parity` key. We deliberately do not
+    hand-roll the comparison. A hand-rolled diff of `sch export bom`
+    footprints against `pcb export pos` packages was written first and
+    produced FIVE findings on the maintainer's own board, of which one
+    was real: the other four were the mounting holes H1-H4, which are
+    board-only by design and carry no schematic symbol at all. KiCad's
+    own check reports exactly the one real issue and correctly stays
+    silent about the mounting holes, because it knows which absences are
+    legitimate and a footprint-name diff does not.
+
+    Returns the raw parity entries -- each {description, severity, type,
+    items} -- and an empty list when the board and schematic agree.
+    """
+    report = _run_report(["pcb", "drc", "--schematic-parity"], pcb_path)
+    return report.get("schematic_parity", [])
 
 
 def export_board_glb(pcb_path: str, origin_x_mm: float = None, origin_y_mm: float = None) -> str:

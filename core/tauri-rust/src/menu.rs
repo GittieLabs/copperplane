@@ -53,10 +53,6 @@ pub struct LibraryMenuEntry {
 /// inherently open-ended and user-defined.
 pub const MENU_OPEN_LIBRARY_EVENT: &str = "menu://open-library";
 
-/// Emitted when "Save Project" is clicked -- the frontend's own
-/// already-existing `handleSaveProject()` (`CTX-312.1`) is the real
-/// handler; this file only ever tells it to run.
-pub const MENU_SAVE_PROJECT_EVENT: &str = "menu://save-project";
 /// Emitted when "Open Project…" is clicked -- the frontend picks the
 /// real folder and calls the real `project.open_from_directory` route
 /// (`CTX-312.3`); this file only ever tells it to start.
@@ -88,7 +84,6 @@ pub const MENU_DESIGN_ENCLOSURE_RUN_REVIEW_EVENT: &str = "menu://design/enclosur
 
 const GITHUB_REPO_URL: &str = "https://github.com/GittieLabs/copperplane";
 
-const FILE_SAVE_PROJECT_ID: &str = "file_save_project";
 const FILE_OPEN_PROJECT_ID: &str = "file_open_project";
 #[cfg(debug_assertions)]
 const VIEW_TOGGLE_DEVTOOLS_ID: &str = "view_toggle_devtools";
@@ -169,14 +164,15 @@ fn build_menu_inner(app: &AppHandle<Wry>, custom_libraries: &[LibraryMenuEntry])
         .item(&quit)
         .build()?;
 
-    let save_project = MenuItemBuilder::with_id(FILE_SAVE_PROJECT_ID, "Save Project")
-        .accelerator("CmdOrCtrl+S")
-        .build(app)?;
     let open_project = MenuItemBuilder::with_id(FILE_OPEN_PROJECT_ID, "Open Project…")
         .accelerator("CmdOrCtrl+O")
         .build(app)?;
+    // "Save Project" and its Cmd+S were removed with the button: every field
+    // now persists at the moment it changes, so a save command had nothing
+    // left to do, and a whole-record write was actively destructive
+    // (SPEC-333). A menu item that appears to save and does nothing useful is
+    // worse than no menu item.
     let file_menu = SubmenuBuilder::new(app, "File")
-        .item(&save_project)
         .item(&open_project)
         .build()?;
 
@@ -329,9 +325,6 @@ pub fn set_design_menu_enabled(app: AppHandle<Wry>, enabled: bool) -> Result<(),
 /// reaching this function.
 pub fn handle_menu_event(app: &AppHandle<Wry>, event: MenuEvent) {
     match event.id().as_ref() {
-        FILE_SAVE_PROJECT_ID => {
-            let _ = app.emit(MENU_SAVE_PROJECT_EVENT, ());
-        }
         FILE_OPEN_PROJECT_ID => {
             let _ = app.emit(MENU_OPEN_PROJECT_EVENT, ());
         }

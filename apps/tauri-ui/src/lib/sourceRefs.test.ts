@@ -33,7 +33,7 @@ describe('sourceChipLabel', () => {
     expect(sourceChipLabel({ kind: 'project_intent' })).toBe('Project intent')
     expect(sourceChipLabel({ kind: 'chat_turn' })).toBe('Earlier answer')
     expect(sourceChipLabel({ kind: 'note' })).toBe('Saved note')
-    expect(sourceChipLabel({ kind: 'check_finding' })).toBe('Check finding')
+    expect(sourceChipLabel({ kind: 'check_finding' })).toBe('DRC finding')
   })
 })
 

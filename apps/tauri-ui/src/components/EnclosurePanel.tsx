@@ -15,8 +15,10 @@ import {
   type ExportParts,
 } from '../lib/enclosure'
 import { listOpenBoards, openKicad, type BoardCandidate, type ListOpenBoardsResult } from '../lib/boardAdvisor'
+import { componentEnvelopes, linkedProjectBoard, type EnvelopeResult } from '../lib/kicadProject'
+import { setProjectCheckResult } from '../lib/projects'
 import { AgentChat } from './AgentChat'
-import { ReviewPanel } from './ReviewPanel'
+import { NotBuiltPlaceholder } from './NotBuiltPlaceholder'
 import { EnclosureViewer } from './EnclosureViewer'
 
 /** Real, defensive path join -- avoids pulling in `@tauri-apps/api/path`
@@ -104,6 +106,13 @@ export function EnclosurePanel({
   const [manualPcbPath, setManualPcbPath] = useState<string | null>(null)
 
   const [dims, setDims] = useState({ width: 50, depth: 30, height: 20 })
+  /* SPEC-326 §2.7: what the parts on the BOARD actually need. The 20mm
+     default above is arbitrary — it was chosen before anything could be
+     measured, and it looked derived while being pure coincidence. A default
+     replaced by a measurement is not the "recommendation as override" that
+     SPEC-326 §2 rules out: a value the user has typed is never overwritten. */
+  const [measured, setMeasured] = useState<EnvelopeResult | null>(null)
+  const [heightTouched, setHeightTouched] = useState(false)
   const [boardParams, setBoardParams] = useState(_DEFAULT_BOARD_PARAMS)
 
   // SPEC-311/CTX-311.2: lid is board-driven-mode-only on the daemon
@@ -167,6 +176,36 @@ export function EnclosurePanel({
   // explicit override of whatever the list auto-selected or offered.
   const pcbPath = manualPcbPath ?? selectedBoard?.path ?? null
 
+  // SPEC-326 §2.7: measure the board's own components and let the height
+  // field start from what they need, rather than from an arbitrary 20.
+  // Read-only and advisory -- a height the user has typed is never replaced.
+  useEffect(() => {
+    let cancelled = false
+    if (!pcbPath) {
+      setMeasured(null)
+      return
+    }
+    void (async () => {
+      try {
+        const result = await componentEnvelopes(null, pcbPath, {})
+        if (cancelled) return
+        setMeasured(result)
+        if (result.min_interior_height_mm != null) {
+          // Only while untouched: replacing a default is help, replacing a
+          // decision is an override.
+          setBoardParams((prev) =>
+            heightTouched ? prev : { ...prev, height: Math.ceil(result.min_interior_height_mm!) },
+          )
+        }
+      } catch {
+        // Measurement is advisory. Failing to measure must not block the
+        // generator, which worked without any of this before.
+        if (!cancelled) setMeasured(null)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [pcbPath, heightTouched])
+
   useEffect(() => {
     setSelectedBoard(null)
     setManualPcbPath(null)
@@ -178,7 +217,14 @@ export function EnclosurePanel({
     setLoadingList(true)
     setListError(null)
     try {
-      const listed = await listOpenBoards()
+      // The linked project first -- its board is a fact in a file, readable
+      // with KiCad closed. Everything this panel does with a board
+      // (`freecad.generate_enclosure`, the envelope measurement) takes an
+      // explicit path; only the discovery step ever needed KiCad running.
+      const linked = await linkedProjectBoard(projectName)
+      const listed: ListOpenBoardsResult = linked
+        ? { status: 'boards_found', candidates: [linked] }
+        : await listOpenBoards()
       setListResult(listed)
       // Real user feedback: "if we know that a pcb file has been
       // loaded, we should have that as selected." Only when exactly
@@ -191,7 +237,7 @@ export function EnclosurePanel({
     } finally {
       setLoadingList(false)
     }
-  }, [])
+  }, [projectName])
 
   useEffect(() => {
     void refreshList()
@@ -201,7 +247,8 @@ export function EnclosurePanel({
     setOpeningKicad(true)
     setOpenKicadError(null)
     try {
-      await openKicad()
+      // This panel already knows the board it is building an enclosure for.
+      await openKicad(pcbPath)
     } catch (err) {
       setOpenKicadError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -263,7 +310,35 @@ export function EnclosurePanel({
       handle.onUpdate((update) => setStatus(update.status))
 
       setLidVisible(true)
-      setResult(await handle.result)
+      const generated = await handle.result
+      setResult(generated)
+      // SPEC-319 §2.1: `last_results.enclosure` is what the enclosure review
+      // and chat agents are given as `enclosure_parameters` -- and it was
+      // written ONLY on export, so an enclosure that had been generated but
+      // not exported left the agent with nothing but the project intent.
+      // Reported as "the enclosure view isn't connected to do anything",
+      // which was accurate.
+      try {
+        await setProjectCheckResult(projectName, 'enclosure', {
+          generated_at: new Date().toISOString(),
+          mode,
+          pcb_path: mode === 'board' ? pcbPath : null,
+          height_mm: mode === 'board' ? boardParams.height : dims.height,
+          wall_thickness_mm: boardParams.wall_thickness_mm,
+          clearance_mm: boardParams.clearance_mm,
+          standoff_height_mm: boardParams.standoff_height_mm,
+          lid: mode === 'board' ? lid : false,
+          // What the parts actually need, so the agent can reason about fit
+          // rather than only repeating the numbers back.
+          min_interior_height_mm: measured?.min_interior_height_mm ?? null,
+          tallest_component: measured?.tallest?.reference ?? null,
+          components_without_known_height: measured?.unknown ?? null,
+          findings: [],
+        })
+      } catch {
+        // Advisory only: a generated enclosure that could not be recorded is
+        // still generated and on screen.
+      }
       if (mode === 'board' && pcbPath) {
         setResultBoardParams({
           pcbPath,
@@ -466,10 +541,57 @@ export function EnclosurePanel({
                   type="number"
                   className="w-full rounded border border-line bg-surface px-3 py-2 text-sm"
                   value={boardParams[field]}
-                  onChange={(e) => setBoardParams((prev) => ({ ...prev, [field]: Number(e.target.value) }))}
+                  onChange={(e) => {
+                    if (field === 'height') setHeightTouched(true)
+                    setBoardParams((prev) => ({ ...prev, [field]: Number(e.target.value) }))
+                  }}
                   disabled={running}
                 />
                 <span className="text-fg-muted">{hint}</span>
+                {/* Deliberately NOT styled like the grey hint above it. This
+                    is the only number on the panel derived from the user's own
+                    board, and as a third muted line it read as boilerplate --
+                    reported directly: "it blends into what labels look like". */}
+                {field === 'height' && measured?.min_interior_height_mm != null && (
+                  <div
+                    className={`mt-1 flex items-start gap-2 rounded border px-2 py-1.5 ${
+                      boardParams.height < measured.min_interior_height_mm
+                        ? 'border-warning/50 bg-warning/10'
+                        : 'border-accent/40 bg-accent/5'
+                    }`}
+                  >
+                    <span
+                      aria-hidden
+                      className={
+                        boardParams.height < measured.min_interior_height_mm
+                          ? 'text-warning'
+                          : 'text-accent'
+                      }
+                    >
+                      {boardParams.height < measured.min_interior_height_mm ? '⚠' : '↳'}
+                    </span>
+                    <span className="flex flex-col gap-0.5">
+                      <span
+                        className={`font-medium ${
+                          boardParams.height < measured.min_interior_height_mm
+                            ? 'text-warning'
+                            : 'text-fg-bright'
+                        }`}
+                      >
+                        {boardParams.height < measured.min_interior_height_mm
+                          ? `Too short — your board needs ${measured.min_interior_height_mm}mm`
+                          : `Measured from your board: ${measured.min_interior_height_mm}mm needed`}
+                        {measured.tallest ? `, set by ${measured.tallest.reference}` : ''}
+                      </span>
+                      {measured.unknown > 0 && (
+                        <span className="text-fg-tertiary">
+                          {measured.unknown} component{measured.unknown === 1 ? '' : 's'} still have
+                          no known height, so the real minimum may be taller.
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                )}
               </label>
             ))}
 
@@ -679,15 +801,24 @@ export function EnclosurePanel({
         </div>
       )}
     </div>
-    {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
-        is a flow step with a typed result, not a conversational turn. */}
-    <ReviewPanel
-      area="enclosure"
-      scope="project"
-      scopeId={`${projectName}:enclosure`}
+    {/* SPEC-319 §2.4 mounted a ReviewPanel here. Disabled deliberately,
+        not deleted, and not left running: it is a real feature (physical
+        fit -- do the parts fit the box) whose one real data tool,
+        `kicad.get_component_heights`, goes through `kipy` and needs KiCad
+        RUNNING. With KiCad closed it had nothing but the project intent,
+        so it produced confident-sounding advice from no data. SPEC-326
+        since built a strictly better source that reads closed files
+        (`kicad.component_envelopes` -- the same measurement driving the
+        interior-height recommendation above), so repointing it is real
+        work with a real payoff, not a patch. SPEC-331 owns that.
+
+        Shown rather than hidden, per SPEC-305 §2's "visible-but-empty
+        beats hidden" -- a review button that silently advises from no data
+        is worse than one that says it is not built. */}
+    <NotBuiltPlaceholder
+      specId="SPEC-331"
       title="Review the enclosure"
-      projectName={projectName}
-      menuCommand={menuCommand}
+      description="Checking that your parts actually fit the box you generated. Its data source needed KiCad running and gave advice from nothing when it was closed, so it is switched off until it reads the same board measurements the height recommendation above already uses."
     />
     {/* SPEC-318 §5: "a collapsible chat panel at the foot of each area."
         A project-scoped chat has no single Part to offer as a promotion

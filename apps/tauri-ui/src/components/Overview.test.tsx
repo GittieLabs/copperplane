@@ -138,25 +138,33 @@ describe('Overview: CTX-318.5 AgentChat wiring', () => {
   })
 })
 
-describe('Overview: CTX-319.5 ReviewPanel wiring', () => {
-  it('mounts ReviewPanel scoped to the project overview area', async () => {
+describe('Overview: the per-area cards and project review are gone', () => {
+  /* "The PCB, Schematic, Enclosure and Components cards offer no value. We do
+     the PCB and Schematic reviews on demand and stating one has run doesn't
+     add anything here. The enclosure and components don't even have checks."
+     And: "The Run Review on the overview doesn't do anything and is
+     unneccessary."
+
+     Removed rather than reworked -- what belongs on an opened project is
+     SPEC-335's question, not another guess at a card grid. */
+  it('shows no per-area status cards', async () => {
     await renderOverview()
 
-    const stub = screen.getByText(/ReviewPanel stub/)
-    expect(stub.textContent).toContain('area=overview')
-    expect(stub.textContent).toContain('scope=project')
-    expect(stub.textContent).toContain('scopeId=weather-pcb:overview')
-    expect(stub.textContent).toContain('title="Review this project"')
-    expect(stub.textContent).toContain('projectName=weather-pcb')
+    expect(screen.queryByTestId('status-card-pcb')).toBeNull()
+    expect(screen.queryByText(/Not yet checked this session/)).toBeNull()
   })
 
-  it('re-scopes ReviewPanel when the project changes', async () => {
-    const { rerender } = render(<Overview projectName="project-a" project={{ name: 'project-a' }} />)
-    await waitFor(() => screen.getByText(/ReviewPanel stub/))
+  it('offers no project-level Run Review', async () => {
+    await renderOverview()
 
-    rerender(<Overview projectName="project-b" project={{ name: 'project-b' }} />)
+    expect(screen.queryByText(/ReviewPanel stub/)).toBeNull()
+  })
 
-    await waitFor(() => expect(screen.getByText(/ReviewPanel stub/).textContent).toContain('scopeId=project-b:overview'))
+  it('keeps what the overview is actually for -- intent and the project chat', async () => {
+    await renderOverview()
+
+    expect(screen.getByPlaceholderText(/ask a question about this project/)).toBeTruthy()
+    expect(screen.getByText(/AgentChat stub/)).toBeTruthy()
   })
 })
 

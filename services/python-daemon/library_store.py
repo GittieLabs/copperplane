@@ -1082,6 +1082,49 @@ def set_project_intent(name: str, intent: str) -> dict:
     return save_project(project)
 
 
+_CHECK_RESULT_AREAS = ("schematic", "pcb", "enclosure")
+_MAX_PERSISTED_FINDINGS = 25
+
+
+def set_project_check_result(name: str, area: str, result: dict) -> dict:
+    """SPEC-319 §2.1's named prerequisite, finally built.
+
+    `chat_agents._check_status_note` reads `Project.last_results[area]` to
+    give the review and chat agents the user's real ERC/DRC findings. Until
+    now only `enclosure` was ever written -- the schematic and PCB checks
+    held their results in local React state and threw them away, so the PCB
+    review agent was told "No DRC check result is available this session"
+    every single time, on a board with real errors. `chat_agents.py`'s own
+    docstring named this gap and left it: "Real ERC/DRC persistence is a
+    separate, later prerequisite."
+
+    Bounded on purpose: a real board can produce hundreds of findings, and
+    this record is read straight into an LLM context window. The counts are
+    always exact; the per-finding detail is capped, and says so when it has
+    been.
+
+    Round-trips through load_project/save_project for the same reason
+    `set_project_intent` does -- CTX-312.1's pointer/manifest routing comes
+    free rather than being re-derived.
+    """
+    if area not in _CHECK_RESULT_AREAS:
+        raise SchemaValidationError(
+            f"'{area}' is not a real check area. Expected one of {', '.join(_CHECK_RESULT_AREAS)}."
+        )
+
+    findings = result.get("findings") or []
+    stored = {
+        **{k: v for k, v in result.items() if k != "findings"},
+        "findings": findings[:_MAX_PERSISTED_FINDINGS],
+    }
+    if len(findings) > _MAX_PERSISTED_FINDINGS:
+        stored["findings_omitted"] = len(findings) - _MAX_PERSISTED_FINDINGS
+
+    project = load_project(name)
+    project["last_results"] = {**(project.get("last_results") or {}), area: stored}
+    return save_project(project)
+
+
 def add_project_part_reference(project_name: str, part_id: str) -> dict:
     """CTX-304.3 (SPEC-304 §2): a Project holds real *references* to
     Library Parts, not copies -- `SPEC-304`'s own directory diagram
@@ -1271,13 +1314,42 @@ def _datasheets_dir() -> str:
     return _ensure_dir("library", "datasheets")
 
 
+_UNSAFE_IN_FILENAME = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def datasheet_filename(part_number: str) -> str:
+    """`part_number` as a safe filename stem.
+
+    Real part numbers contain characters a filename cannot: Panasonic's
+    coin cells are `CR-2032/HFN`, and plenty of others carry `#`, spaces or
+    commas. This used to REJECT any such part -- "'CR-2032/HFN' is not a
+    safe part_number for a cache filename" -- so an entire class of real
+    parts could never have a cached datasheet. Rejecting a path-traversal
+    attempt and rejecting a slash in a manufacturer's own part number are
+    not the same requirement; only the first one was ever wanted.
+
+    A stem that is already safe is returned unchanged, so every datasheet
+    cached before this keeps its existing filename. Anything else is
+    transliterated and given a short hash of the ORIGINAL, so two different
+    part numbers that sanitise to the same text do not collide on disk.
+    """
+    if not part_number:
+        raise DatasheetFetchError("A part number is required to cache a datasheet.")
+
+    safe = _UNSAFE_IN_FILENAME.sub("_", part_number)
+    if safe == part_number and ".." not in part_number:
+        return part_number
+    digest = hashlib.sha256(part_number.encode("utf-8")).hexdigest()[:8]
+    return f"{safe.strip('._-') or 'part'}-{digest}"
+
+
 def datasheet_cache_path(part_number: str) -> str:
     """The real, deterministic local cache path for `part_number`'s
     datasheet PDF -- a pure path computation, no filesystem check, no
     network. `CTX-206.4` (SPEC-206 §2.3) needs this to resolve a
     `datasheet_page` `SourceRef` without re-fetching or re-parsing
     anything."""
-    return os.path.join(_datasheets_dir(), f"{part_number}.pdf")
+    return os.path.join(_datasheets_dir(), f"{datasheet_filename(part_number)}.pdf")
 
 
 def cache_datasheet(part_number: str, datasheet_url: str) -> str:
@@ -1289,8 +1361,10 @@ def cache_datasheet(part_number: str, datasheet_url: str) -> str:
     save_part/_validate_part_provenance: a cached datasheet is a new,
     additional fact about a part number, not a replacement for the
     datasheet_url provenance entry that check already enforces."""
-    if not part_number or "/" in part_number or "\\" in part_number or ".." in part_number:
-        raise DatasheetFetchError(f"'{part_number}' is not a safe part_number for a cache filename.")
+    # datasheet_filename does the sanitising; it raises only for an empty
+    # part number. A slash in a real manufacturer part number is not an
+    # attack, and is no longer treated as one.
+    datasheet_filename(part_number)
 
     request = urllib.request.Request(
         datasheet_url, headers={"User-Agent": "copperplane/0.1"}
@@ -1349,8 +1423,10 @@ def ensure_datasheet_cached(part_number: str, datasheet_url: str) -> str:
     `cache_datasheet` -- duplicated, not shared, since raising before
     ever touching the filesystem here (an existence check) is a
     genuinely different real code path from raising mid-fetch there."""
-    if not part_number or "/" in part_number or "\\" in part_number or ".." in part_number:
-        raise DatasheetFetchError(f"'{part_number}' is not a safe part_number for a cache filename.")
+    # datasheet_filename does the sanitising; it raises only for an empty
+    # part number. A slash in a real manufacturer part number is not an
+    # attack, and is no longer treated as one.
+    datasheet_filename(part_number)
     path = datasheet_cache_path(part_number)
     if os.path.exists(path):
         return path

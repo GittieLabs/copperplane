@@ -525,12 +525,17 @@ class TestAssembleContext(ChatAgentsTestCase):
         self.assertEqual(len(context["export_history"]), 1)
         self.assertEqual(context["parts"], [{"part_id": "ATtiny85", "manufacturer": "Microchip", "package": "SOIC-8"}])
 
-    def test_004_schematic_area_reports_not_checked_this_session_when_no_last_results_entry_exists(self):
+    def test_004_schematic_area_says_no_check_could_be_run_without_a_linked_project(self):
+        """Was "not checked this session", back when the check block was read
+        from stored results. The check now RUNS on request (`kicad-cli` reads
+        a closed file), so the only reason to have no result is that there is
+        no file to check -- and that must never read as a clean design."""
         store.save_project({"name": "weather-pcb", "parts": []})
 
         context = json.loads(chat_agents._assemble_context("schematic", "project", "weather-pcb:schematic", None))
 
-        self.assertIn("No ERC check result is available this session.", context["check_status"])
+        self.assertIn("no KiCad project linked", context["check_status"])
+        self.assertIn("NOT a clean result", context["check_status"])
 
     def test_005_pcb_area_includes_full_part_guidance_not_just_identity(self):
         self._save_part(connection_guidance={
@@ -953,3 +958,431 @@ class TestPromoteTurn(ChatAgentsTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestLiveCheckStatusNote(unittest.TestCase):
+    """The review agents' check block is computed NOW, not read from storage.
+
+    Persisting results and warning about their age was the obvious repair and
+    is the wrong one: the maintainer pointed out that a stored finding goes
+    stale in ways this app cannot detect -- he can run DRC in KiCad, fix
+    everything, and never tell us -- so re-running the review would "still
+    just show cached and potentially stale results". `kicad-cli` reads a
+    CLOSED file in about two seconds, so there is nothing worth caching."""
+
+    _FILES = {"schematic_path": "/p/s.kicad_sch", "pcb_path": "/p/b.kicad_pcb"}
+
+    def test_001_an_unlinked_project_is_not_reported_as_clean(self):
+        note = chat_agents._check_status_note({"name": "P"}, "pcb")
+
+        self.assertIn("no KiCad project linked", note)
+        self.assertIn("NOT a clean result", note)
+
+    def test_002_a_real_drc_run_reaches_the_agent(self):
+        report = {
+            "violations": [],
+            "unconnected_items": [{"description": "Missing connection",
+                                   "severity": "error", "type": "unconnected_items"}],
+            "schematic_parity": [],
+        }
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_drc", return_value=report):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertTrue(note["ran_now"])
+        self.assertEqual(note["unconnected_count"], 1)
+        self.assertEqual(note["findings"][0]["description"], "Missing connection")
+
+    def test_003_the_drc_run_asks_for_schematic_parity(self):
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_drc",
+                          return_value={"violations": []}) as run_drc:
+            chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+
+        run_drc.assert_called_once_with("/p/b.kicad_pcb", schematic_parity=True)
+
+    def test_004_erc_violations_are_flattened_across_sheets(self):
+        erc = {"sheets": [
+            {"path": "/", "violations": [{"description": "a", "severity": "error", "type": "x"}]},
+            {"path": "/sub", "violations": [{"description": "b", "severity": "warning", "type": "y"}]},
+        ]}
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_erc", return_value=erc):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "schematic")
+            )
+
+        self.assertEqual(note["violation_count"], 2)
+
+    def test_005_a_failed_check_is_never_mistaken_for_a_clean_one(self):
+        """'We could not check' and 'we checked and it is fine' must not look
+        the same to the agent -- the whole complaint about the old behaviour."""
+        with patch.object(chat_agents.kicad_project, "resolve_project",
+                          side_effect=OSError("kicad-cli not found")):
+            note = chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+
+        self.assertIn("could not be run", note)
+        self.assertIn("NOT a clean result", note)
+
+    def test_006_a_clean_board_says_a_check_actually_ran(self):
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_drc", return_value={"violations": []}):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertTrue(note["ran_now"])
+        self.assertEqual(note["findings"], [])
+        self.assertIn("checked_at", note)
+
+    def test_007_the_note_says_it_read_the_file_not_the_editor(self):
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_drc", return_value={"violations": []}):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertIn("unsaved changes", note["read_from"])
+
+    def test_008_a_huge_finding_list_is_capped_but_the_counts_are_not(self):
+        many = [{"description": f"v{i}", "severity": "error", "type": "unconnected_items"}
+                for i in range(200)]
+        with patch.object(chat_agents.kicad_project, "resolve_project", return_value=self._FILES), \
+             patch.object(chat_agents.kicad_cli, "run_drc",
+                          return_value={"violations": [], "unconnected_items": many}):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertEqual(len(note["findings"]), 25)
+        self.assertEqual(note["findings_omitted"], 175)
+        self.assertEqual(note["unconnected_count"], 200)
+
+
+class TestCheckFindingSourceRef(unittest.TestCase):
+    """A citation of a finding the check itself just produced.
+
+    `check_finding` resolved to `_resolve_deferred` (always False) from
+    SPEC-206 until now -- correct while the check block was read from stored
+    results nothing ever wrote, wrong the moment it started carrying a real
+    DRC run. Every such citation was dropped, so `sources` came back empty
+    and the UI fell through to a general-practice note beneath a finding
+    that opened "DRC detected 2 missing connections"."""
+
+    def test_001_a_citation_of_a_real_checked_file_resolves(self):
+        with tempfile.NamedTemporaryFile(suffix=".kicad_pcb") as f:
+            self.assertTrue(
+                chat_agents.resolve_source_ref(
+                    {"kind": "check_finding", "source_path": f.name}
+                )
+            )
+
+    def test_002_a_citation_of_a_file_that_is_not_there_is_dropped(self):
+        self.assertFalse(
+            chat_agents.resolve_source_ref(
+                {"kind": "check_finding", "source_path": "/nope/never.kicad_pcb"}
+            )
+        )
+
+    def test_003_a_citation_with_no_path_is_dropped(self):
+        self.assertFalse(chat_agents.resolve_source_ref({"kind": "check_finding"}))
+        self.assertFalse(
+            chat_agents.resolve_source_ref({"kind": "check_finding", "source_path": ""})
+        )
+
+    def test_004_it_travels_through_validate_source_refs(self):
+        """The path a real response takes -- resolve_source_ref is only
+        reached through here."""
+        with tempfile.NamedTemporaryFile(suffix=".kicad_pcb") as f:
+            resolved, dropped = chat_agents.validate_source_refs([
+                {"kind": "check_finding", "source_path": f.name},
+                {"kind": "check_finding", "source_path": "/nope/x.kicad_pcb"},
+            ])
+
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(dropped, 1)
+
+
+class TestFindingLocations(unittest.TestCase):
+    """`items` used to be dropped from every finding as "KiCad's internal
+    uuids, which mean nothing to a user". Only `uuid` is: the rest names the
+    pad, the net, the component and the millimetre position -- the answer to
+    "where is it". Reported as "we didn't even tell the user where to find the
+    problems on the board."."""
+
+    _REAL = {
+        "description": "Missing connection between items",
+        "severity": "error",
+        "type": "unconnected_items",
+        "items": [
+            {"description": "PTH pad 2 [Net-(U2-THRES)] of U2",
+             "pos": {"x": 99.695, "y": 68.23}, "uuid": "316be86b"},
+            {"description": "Track [Net-(U2-THRES)] on F.Cu, length 1.5556 mm",
+             "pos": {"x": 107.315, "y": 70.77}, "uuid": "8568ccf9"},
+        ],
+    }
+
+    def test_001_locations_reach_the_agent_with_their_positions(self):
+        out = chat_agents._finding_for_agent(self._REAL)
+
+        self.assertEqual(len(out["locations"]), 2)
+        self.assertEqual(out["locations"][0]["description"], "PTH pad 2 [Net-(U2-THRES)] of U2")
+        self.assertEqual(out["locations"][0]["pos_mm"], {"x": 99.695, "y": 68.23})
+
+    def test_002_the_uuid_is_not_carried(self):
+        """The one part of an item that really is meaningless to a reader."""
+        out = chat_agents._finding_for_agent(self._REAL)
+
+        self.assertNotIn("uuid", out["locations"][0])
+
+    def test_003_a_finding_with_no_items_still_works(self):
+        out = chat_agents._finding_for_agent({"description": "x", "severity": "warning"})
+
+        self.assertEqual(out["locations"], [])
+
+    def test_004_an_item_with_no_description_is_skipped(self):
+        out = chat_agents._finding_for_agent(
+            {"description": "x", "items": [{"uuid": "only-a-uuid"}]}
+        )
+
+        self.assertEqual(out["locations"], [])
+
+    def test_005_ignored_checks_reach_the_agent(self):
+        """A board can look clean because a check is switched off."""
+        report = {"violations": [], "ignored_checks": [
+            {"key": "missing_courtyard", "description": "Footprint has no courtyard defined"},
+        ]}
+        with patch.object(chat_agents.kicad_project, "resolve_project",
+                          return_value={"pcb_path": "/p/b.kicad_pcb", "schematic_path": None}), \
+             patch.object(chat_agents.kicad_cli, "run_drc", return_value=report):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertEqual(note["ignored_checks"][0]["key"], "missing_courtyard")
+
+
+class TestAnUnreadableReviewIsNotACleanBoard(unittest.TestCase):
+    """Reported: "Reviewed -- nothing worth flagging" on a board with two
+    unconnected errors, right after a build where the same review had found
+    them. The model had written prose and no FINDINGS block, `_extract_findings`
+    returned [] for that exactly as it does for a genuinely clean board, and
+    the UI could not tell the two apart."""
+
+    def _review_returning(self, text):
+        async def fake_dispatch(*a, **kw):
+            return {"text": text, "tool_calls_raw": [], "model": "m", "provider": "p"}
+        with patch.object(chat_agents, "_dispatch", side_effect=fake_dispatch), \
+             patch.object(chat_agents.tool_registry, "build_tool_registry", return_value={}):
+            return chat_agents.review("project", "P:pcb", "pcb", project_name="P")
+
+    def test_001_the_checks_own_findings_survive_the_prose_failing(self):
+        """"Try again" was the first answer here and it was wrong: the check
+        is on demand and deterministic, it has already run, and only the
+        model's formatting failed. Re-running would recompute findings this
+        process is already holding."""
+        with patch.object(chat_agents, "_findings_from_check_alone", return_value=[
+            {"severity": "warning", "title": "Missing connection between items",
+             "detail": "raw", "sources": [], "general_practice": False, "area": "pcb"},
+        ]):
+            findings = self._review_returning("prose, and no block at all")
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["title"], "Missing connection between items")
+
+    def test_002_it_raises_only_when_there_is_no_check_to_fall_back_on(self):
+        """An unlinked project, or an area with no check: the one case where
+        the area really has not been assessed."""
+        with patch.object(chat_agents, "_findings_from_check_alone", return_value=None), \
+             self.assertRaises(chat_agents.ReviewFormatError) as ctx:
+            self._review_returning("prose only")
+
+        self.assertIn("NOT a clean result", str(ctx.exception))
+        # No longer tells the user to re-run: re-running would not help.
+        self.assertNotIn("Try again", str(ctx.exception))
+
+    def test_003_an_explicitly_empty_block_is_still_an_honest_clean_review(self):
+        """The other half: a model that DID answer in the format and found
+        nothing must not be turned into an error."""
+        findings = self._review_returning("<<<FINDINGS>>>\n[]\n<<<END_FINDINGS>>>")
+
+        self.assertEqual(findings, [])
+
+    def test_004_a_malformed_block_is_still_read_as_present(self):
+        """Present-but-unparseable drops to no findings rather than raising:
+        the model did answer in the format, and the per-entry validation above
+        already governs what survives."""
+        findings = self._review_returning("<<<FINDINGS>>>\nnot json\n<<<END_FINDINGS>>>")
+
+        self.assertEqual(findings, [])
+
+    def test_005_real_findings_still_come_through(self):
+        block = (
+            '<<<FINDINGS>>>\n'
+            '[{"severity": "warning", "title": "Unconnected items", '
+            '"detail": "Two pads are not joined.", "sources": [], "general_practice": false}]\n'
+            '<<<END_FINDINGS>>>'
+        )
+        findings = self._review_returning(block)
+
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["title"], "Unconnected items")
+
+
+class TestFindingsFromCheckAlone(unittest.TestCase):
+    """The check's own findings, rendered as review findings with no model
+    prose at all."""
+
+    _NOTE = {
+        "check": "DRC", "ran_now": True, "source_path": "/p/b.kicad_pcb",
+        "findings": [{
+            "description": "Missing connection between items",
+            "severity": "error", "type": "unconnected_items",
+            "locations": [
+                {"description": "PTH pad 2 [Net-(U2-THRES)] of U2", "pos_mm": {"x": 1, "y": 2}},
+            ],
+        }],
+    }
+
+    def _run(self, note, project=None):
+        with patch.object(chat_agents.library_store, "load_project",
+                          return_value=project if project is not None else {"name": "P"}), \
+             patch.object(chat_agents, "_check_status_note", return_value=json.dumps(note)):
+            return chat_agents._findings_from_check_alone("pcb", "P:pcb", "P")
+
+    def test_001_a_finding_carries_where_it_is(self):
+        out = self._run(self._NOTE)
+
+        self.assertIn("PTH pad 2 [Net-(U2-THRES)] of U2", out[0]["detail"])
+
+    def test_002_it_says_the_explanation_is_missing_rather_than_pretending(self):
+        out = self._run(self._NOTE)
+
+        self.assertIn("explanation could not be generated", out[0]["detail"])
+
+    def test_003_it_is_not_marked_general_practice(self):
+        """It came straight from KiCad's check, which is the opposite of
+        general engineering knowledge."""
+        out = self._run(self._NOTE)
+
+        self.assertFalse(out[0]["general_practice"])
+
+    def test_004_it_cites_the_file_the_check_read(self):
+        with patch("os.path.exists", return_value=True):
+            out = self._run(self._NOTE)
+
+        self.assertEqual(out[0]["sources"][0]["kind"], "check_finding")
+
+    def test_005_a_clean_check_falls_back_to_an_honestly_empty_review(self):
+        out = self._run({**self._NOTE, "findings": []})
+
+        self.assertEqual(out, [])
+
+    def test_006_a_check_that_could_not_run_is_not_a_fallback(self):
+        """`_check_status_note` returns prose, not JSON, when it could not run
+        -- that is the case where the board really has not been assessed."""
+        with patch.object(chat_agents.library_store, "load_project", return_value={"name": "P"}), \
+             patch.object(chat_agents, "_check_status_note",
+                          return_value="No DRC check could be run: ..."):
+            self.assertIsNone(chat_agents._findings_from_check_alone("pcb", "P:pcb", "P"))
+
+    def test_007_an_area_with_no_check_has_nothing_to_fall_back_on(self):
+        self.assertIsNone(
+            chat_agents._findings_from_check_alone("enclosure", "P:enclosure", "P")
+        )
+
+
+class TestAgentToolsWorkWithKicadClosed(unittest.TestCase):
+    """`kicad.get_component_heights` goes through `kipy` and needs KiCad
+    RUNNING. Once the PCB and Enclosure tabs stopped requiring that, the tool
+    failed on every call -- and agentflow returns ACCUMULATED TOOL RESULTS as
+    its text when an agent exhausts `max_tool_rounds`, so a permanently
+    failing tool turned into "the review came back without its findings
+    block". Reported as "Why is the plain-language text not generated?"."""
+
+    def _tools_of(self, agent):
+        import re
+        path = os.path.join(os.path.dirname(__file__), "..", "agentflow", "agents",
+                            f"{agent}.prompt.md")
+        with open(path, encoding="utf-8") as f:
+            head = f.read().split("---")[1]
+        block = re.search(r"tools:\n((?:\s+- .*\n)+)", head)
+        return [l.strip("- ").strip() for l in block.group(1).splitlines()] if block else []
+
+    def test_001_the_pcb_agent_declares_no_kicad_ipc_tool(self):
+        self.assertNotIn("kicad.get_component_heights", self._tools_of("chat_pcb"))
+
+    def test_002_the_enclosure_agent_declares_no_kicad_ipc_tool(self):
+        """Its review panel is switched off, but its chat panel is still live."""
+        self.assertNotIn("kicad.get_component_heights", self._tools_of("chat_enclosure"))
+
+    def test_003_the_pcb_agent_keeps_the_tools_that_work_from_files(self):
+        tools = self._tools_of("chat_pcb")
+        self.assertIn("context.search", tools)
+        self.assertIn("datasheet.read_pages", tools)
+
+    def test_004_no_prompt_still_promises_the_removed_tool(self):
+        for agent in ("chat_pcb", "chat_enclosure"):
+            path = os.path.join(os.path.dirname(__file__), "..", "agentflow", "agents",
+                                f"{agent}.prompt.md")
+            with open(path, encoding="utf-8") as f:
+                self.assertNotIn("kicad.get_component_heights", f.read(), agent)
+
+
+class TestFindingsWithoutDelimiters(unittest.TestCase):
+    """Captured from a real run, not guessed: the model returned the finding
+    correctly shaped and simply omitted the `<<<FINDINGS>>>` markers, and the
+    app threw a real answer away over its packaging.
+
+        {"severity": "warning", "title": "Empty array", "detail": "...",
+         "sources": ["check block"], "general_practice": true}
+    """
+
+    _REAL_CAPTURE = (
+        '{"severity": "warning", "title": "Empty array", "detail": '
+        '"The check block lists an empty array as a valid result.", '
+        '"sources": [], "general_practice": true}'
+    )
+
+    def test_001_the_exact_captured_response_is_read(self):
+        out = chat_agents._extract_findings(self._REAL_CAPTURE)
+
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["title"], "Empty array")
+
+    def test_002_a_bare_array_is_read(self):
+        out = chat_agents._extract_findings(
+            '[{"severity": "info", "title": "t", "detail": "d"}]'
+        )
+
+        self.assertEqual(len(out), 1)
+
+    def test_003_json_wrapped_in_a_sentence_is_still_read(self):
+        out = chat_agents._extract_findings(
+            'Here are my findings:\n[{"severity": "info", "title": "t", "detail": "d"}]\nHope that helps.'
+        )
+
+        self.assertEqual(len(out), 1)
+
+    def test_004_the_delimited_form_still_works(self):
+        out = chat_agents._extract_findings(
+            '<<<FINDINGS>>>\n[{"severity": "info", "title": "t", "detail": "d"}]\n<<<END_FINDINGS>>>'
+        )
+
+        self.assertEqual(len(out), 1)
+
+    def test_005_prose_with_no_json_is_still_not_a_review(self):
+        """The honesty rule this must not weaken: nothing readable is still
+        not a clean board."""
+        self.assertEqual(
+            chat_agents._extract_findings("I looked at your board and it seems fine."), []
+        )
+
+    def test_006_an_empty_response_is_not_a_review(self):
+        self.assertEqual(chat_agents._extract_findings(""), [])
+        self.assertIsNone(chat_agents._findings_json_without_delimiters("   "))
+
+    def test_007_malformed_json_is_not_invented_into_a_finding(self):
+        self.assertEqual(chat_agents._extract_findings("[{severity: nope}]"), [])

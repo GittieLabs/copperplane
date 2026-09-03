@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import uuid
 from datetime import datetime, timezone
 
@@ -34,6 +35,8 @@ from agentflow import AgentExecutor, ConfigLoader, RouterEngine
 from agentflow.types import Message, Role
 
 import agent_roles
+import kicad_cli
+import kicad_project
 import library_store
 import llm_providers
 import tool_registry
@@ -163,8 +166,41 @@ def _resolve_note(ref: dict) -> bool:
     return any(n.get("note_id") == note_id for n in (record.get("notes") or []))
 
 
+class ReviewFormatError(Exception):
+    """A review response with no findings block at all.
+
+    Deliberately an error rather than an empty result: an empty list is a
+    real, honest answer ("nothing worth flagging"), and a missing block is
+    the model failing to answer in the required format. Collapsing the two
+    told a user their board was fine when it had not been assessed."""
+
+
 def _resolve_deferred(ref: dict) -> bool:
     return False
+
+
+def _resolve_check_finding(ref: dict) -> bool:
+    """A citation of an ERC/DRC finding this request itself produced.
+
+    Stubbed to `_resolve_deferred` (always False) since SPEC-206, for a good
+    reason at the time: the check block was read from stored results that
+    nothing ever wrote, so there was never a real finding to cite. Every
+    `check_finding` ref was therefore dropped, `sources` came back empty, and
+    the UI fell through to "General engineering practice -- not from this
+    area's own data" beneath a finding that opened "DRC detected 2 missing
+    connections". Reported directly.
+
+    Now that `_check_status_note` runs the check, a citation resolves when the
+    file it names is still on disk. That is a deliberately modest claim: it
+    says the check had a real subject, not that the finding is still present
+    -- the board may have been fixed since, which is exactly why nothing here
+    is cached. `source_path` is written by us, never by the model, so a
+    citation cannot point at a file the check never read.
+    """
+    if not isinstance(ref, dict):
+        return False
+    path = ref.get("source_path")
+    return isinstance(path, str) and bool(path) and os.path.exists(path)
 
 
 _RESOLVERS = {
@@ -174,7 +210,7 @@ _RESOLVERS = {
     "part_field": _resolve_part_field,
     "chat_turn": _resolve_chat_turn,
     "project_intent": _resolve_project_intent,
-    "check_finding": _resolve_deferred,
+    "check_finding": _resolve_check_finding,
     "note": _resolve_note,
 }
 
@@ -256,25 +292,126 @@ def _part_guidance_summary(part: dict) -> dict:
 
 
 _CHECK_AREA_LABELS = {"schematic": "ERC", "pcb": "DRC"}
+# This note is read straight into an LLM context window; a real board can
+# produce hundreds of findings. The COUNTS above stay exact either way.
+_MAX_LIVE_FINDINGS = 25
+
+
+def _finding_for_agent(finding: dict) -> dict:
+    """One check finding, keeping WHERE it is.
+
+    `items` used to be dropped here on the grounds that it carried "KiCad's
+    internal uuids, which mean nothing to a user". The uuids do not; the rest
+    of each item very much does. A real one reads:
+
+        {"description": "PTH pad 2 [Net-(U2-THRES)] of U2",
+         "pos": {"x": 99.695, "y": 68.23}}
+
+    -- which is the pad, the net, the component, and the millimetre position
+    on the board. Dropping it left the agent able to say only that two
+    connections were missing, never which two or where, and the maintainer
+    reported exactly that: "we didn't even tell the user where to find the
+    problems on the board."
+    """
+    return {
+        "severity": finding.get("severity"),
+        "type": finding.get("type"),
+        "description": finding.get("description"),
+        "locations": [
+            {"description": i.get("description"), "pos_mm": i.get("pos")}
+            for i in (finding.get("items") or [])
+            if isinstance(i, dict) and i.get("description")
+        ],
+    }
 
 
 def _check_status_note(project: dict, area: str) -> str:
-    """SPEC-318's `chat_schematic`/`chat_pcb` prompts both explicitly
-    anticipate this exact honesty requirement ("if another area shows
-    nothing, say plainly that it hasn't been checked this session,
-    never that it passed"). A real, named gap this context found but
-    does not fix: today `Project.last_results` is only ever populated
-    for `enclosure` (`EnclosurePanel.tsx`'s own real save call) --
-    SchematicAdvisor/BoardAdvisor hold their own check results in local
-    React state only, never persisted anywhere this route can read.
-    Real ERC/DRC persistence is a separate, later prerequisite (the same
-    category of gap `CTX-206.1` already fixed for connection guidance) --
-    until it exists, this always honestly reports "not checked this
-    session" rather than fabricating or guessing a result."""
-    result = (project.get("last_results") or {}).get(area)
-    if not result:
-        return f"No {_CHECK_AREA_LABELS[area]} check result is available this session."
-    return json.dumps(result, sort_keys=True)
+    """Runs the real ERC/DRC now, rather than reporting a stored one.
+
+    This used to read `Project.last_results[area]`, which nothing but the
+    enclosure ever wrote -- so the review agent was handed "No DRC check
+    result is available this session" on boards with real errors, and found
+    nothing because it was shown nothing.
+
+    Persisting the result and warning about its age was the obvious repair
+    and is the wrong one. `kicad-cli` reads a **closed** `.kicad_sch` /
+    `.kicad_pcb` (SPEC-325 §2.2) in about two seconds, so there is nothing
+    to cache: a stored finding can be stale in ways this app cannot detect
+    -- the user can run DRC in KiCad, fix everything, and never tell us --
+    while a finding computed now cannot. The maintainer put it plainly:
+    re-running the review would "still just show cached and potentially
+    stale results", and even "nothing stood out" is misleading when no
+    check was ever run.
+
+    The one honest caveat left is that this reads the FILE, so an editor
+    holding unsaved changes will differ. Said explicitly in the note rather
+    than implied.
+
+    Every failure is reported as itself, never as a clean board: no linked
+    project, no such file, no `kicad-cli` installed. "We could not check"
+    and "we checked and it is fine" must never look the same to the agent.
+    """
+    label = _CHECK_AREA_LABELS[area]
+    pro_path = project.get("kicad_project_path")
+    if not pro_path:
+        return (
+            f"No {label} check could be run: this project has no KiCad project linked, "
+            "so there is no file to check. This is NOT a clean result."
+        )
+
+    try:
+        files = kicad_project.resolve_project(pro_path)
+        path = files["schematic_path"] if area == "schematic" else files["pcb_path"]
+        if not path:
+            return (
+                f"No {label} check could be run: the linked KiCad project has no "
+                f"{'schematic' if area == 'schematic' else 'board'} file yet. "
+                "This is NOT a clean result."
+            )
+
+        if area == "schematic":
+            report = kicad_cli.run_erc(path)
+            findings = [v for sheet in report["sheets"] for v in sheet["violations"]]
+            counts = {"violation_count": len(findings)}
+        else:
+            report = kicad_cli.run_drc(path, schematic_parity=True)
+            findings = [
+                *report["violations"],
+                *report.get("unconnected_items", []),
+                *report.get("schematic_parity", []),
+            ]
+            counts = {
+                "violation_count": len(report["violations"]),
+                "unconnected_count": len(report.get("unconnected_items", [])),
+                "parity_count": len(report.get("schematic_parity", [])),
+            }
+    except Exception as exc:  # noqa: BLE001 -- reported, never mistaken for clean
+        logger.warning("live %s check failed for %s: %s", label, pro_path, exc)
+        return (
+            f"The {label} check could not be run ({exc}). This is NOT a clean result -- "
+            "say so rather than implying the design passed."
+        )
+
+    return json.dumps(
+        {
+            "check": label,
+            "ran_now": True,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "source_path": path,
+            "read_from": (
+                "the file on disk -- an editor holding unsaved changes will differ"
+            ),
+            **counts,
+            "findings": [_finding_for_agent(f) for f in findings[:_MAX_LIVE_FINDINGS]],
+            "findings_omitted": max(0, len(findings) - _MAX_LIVE_FINDINGS),
+            # Which checks KiCad did not run at all. A disabled check makes a
+            # board look clean for a reason that is invisible everywhere else,
+            # and these settings are routinely inherited from whatever project
+            # a user copied their template from.
+            "ignored_checks": report.get("ignored_checks", []),
+        },
+        sort_keys=True,
+    )
 
 
 def _assemble_context(area: str, scope: str, scope_id: str, project_name: str | None) -> str:
@@ -365,6 +502,43 @@ def _extract_self_reported(text: str) -> tuple:
     return visible, sources, bool(payload.get("general_practice", True))
 
 
+def _findings_json_without_delimiters(text: str):
+    """The findings JSON when the model omitted the `<<<FINDINGS>>>` markers.
+
+    Captured from a real run rather than guessed at: the model returned
+
+        {"severity": "warning", "title": "...", "detail": "...", ...}
+
+    -- the right content, correctly shaped, with no wrapper. Discarding that
+    threw away a real answer over its packaging, and the user saw the raw
+    check output instead of the explanation the model had actually written.
+
+    Custom sentinels are a lot to ask of a model that is already producing
+    JSON. Being tolerant here does not weaken the honesty rule that matters:
+    text that yields no findings JSON at all is still not a clean board, and
+    still falls back to the check's own findings.
+
+    Returns the JSON substring, or `None` when there is none to read.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    # Whole response is the JSON, which is the common case.
+    if stripped[0] in "[{" and stripped[-1] in "]}":
+        return stripped
+
+    # Otherwise take the outermost array, then the outermost object, that the
+    # response contains -- a model that adds a sentence either side of its
+    # JSON has still answered.
+    for opener, closer in (("[", "]"), ("{", "}")):
+        start = stripped.find(opener)
+        end = stripped.rfind(closer)
+        if start != -1 and end > start:
+            return stripped[start:end + 1]
+    return None
+
+
 def _extract_findings(text: str) -> list:
     """CTX-319.1, SPEC-319 §2.1/§2.3: parses a review response's own
     trailing `<<<FINDINGS>>>[...]<<<END_FINDINGS>>>` block -- a JSON
@@ -380,12 +554,17 @@ def _extract_findings(text: str) -> list:
     `review()` does that per-entry validation, this function only
     guarantees every returned item is at least a dict."""
     match = _FINDINGS_PATTERN.search(text)
-    if not match:
+    raw = match.group(1).strip() if match else _findings_json_without_delimiters(text)
+    if raw is None:
         return []
     try:
-        payload = json.loads(match.group(1).strip())
+        payload = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return []
+    # A single finding object, unwrapped, is what a model actually returned
+    # when asked for an array -- read as a one-item list rather than dropped.
+    if isinstance(payload, dict):
+        payload = [payload]
     if not isinstance(payload, list):
         return []
     return [f for f in payload if isinstance(f, dict)]
@@ -617,12 +796,89 @@ def send(
 # format" section, matching the existing "Citation format" section's
 # own per-agent-appropriate-subset convention, not a second prompt file
 # per area.
+# The message the model actually receives. It used to defer entirely -- "in
+# the format described in your own instructions" -- to a system prompt that is
+# now well over a hundred lines, with the format two thirds of the way down.
+# Responses came back with no block at all. The requirement is stated here, in
+# the request itself, because that is the text nearest the model's answer.
 _REVIEW_PROMPT = (
     "Review this area for anything worth flagging -- a real risk, a gap, or a suggestion -- "
-    "using only what you're actually grounded in. Return your findings in the format described "
-    "in your own instructions. An empty list is a normal, honest result when nothing stands out."
+    "using only what you're actually grounded in.\n\n"
+    "Every finding in the check block you were given is worth flagging: explain each one in "
+    "plain language for a maker who does not know the abbreviations, and say where on the board "
+    "it is, using that finding's own `locations`.\n\n"
+    "Answer with ONLY this block and nothing else -- no preamble, no prose before or after:\n\n"
+    "<<<FINDINGS>>>\n"
+    '[{"severity": "info" | "suggestion" | "warning", "title": "...", "detail": "...", '
+    '"sources": [...], "general_practice": true|false}]\n'
+    "<<<END_FINDINGS>>>\n\n"
+    "An empty array is a normal, honest result when nothing stands out -- but it is wrong if the "
+    "check block listed anything. A reply without the block cannot be read at all."
 )
 _REVIEW_SEVERITIES = ("info", "suggestion", "warning")
+
+
+_UNEXPLAINED_PREFIX = (
+    "Reported by KiCad's own check. The plain-language explanation could not be "
+    "generated this time, so this is the raw finding: "
+)
+
+
+def _findings_from_check_alone(area: str, scope_id: str, project_name: str | None) -> list | None:
+    """The check's own findings, as review findings, with no model prose.
+
+    Used when the model answers without its findings block. The check is
+    deterministic and has already run; discarding it because the wording
+    failed would make a user re-run everything to recover data this process is
+    already holding.
+
+    Returns `None` -- meaning "there is genuinely nothing to fall back on" --
+    for an area with no check, or a project whose check could not run at all.
+    That case is a real error and is raised by the caller, because it is the
+    one where the board really has not been assessed.
+    """
+    if area not in _CHECK_AREA_LABELS:
+        return None
+
+    real_project_name, _, _ = scope_id.partition(":")
+    try:
+        project = library_store.load_project(project_name or real_project_name)
+    except Exception:  # noqa: BLE001 -- no project is a real "nothing to fall back on"
+        return None
+
+    note = _check_status_note(project, area)
+    try:
+        parsed = json.loads(note)
+    except json.JSONDecodeError:
+        # The note is prose, which is what `_check_status_note` returns when
+        # the check could NOT be run. Not a clean result, and not a fallback.
+        return None
+
+    label = parsed.get("check", _CHECK_AREA_LABELS[area])
+    findings = []
+    for raw in parsed.get("findings", []):
+        where = ", ".join(
+            loc["description"] for loc in (raw.get("locations") or []) if loc.get("description")
+        )
+        findings.append({
+            # KiCad's own severity vocabulary is not this app's: it says
+            # "error"/"warning", the review surface says info/suggestion/
+            # warning. Everything real maps to `warning` rather than being
+            # invented into a finer grade we did not measure.
+            "severity": "warning",
+            "title": raw.get("description") or f"{label} finding",
+            "detail": _UNEXPLAINED_PREFIX + (
+                f"{raw.get('description')}. Where: {where}." if where
+                else f"{raw.get('description')}."
+            ),
+            "sources": validate_source_refs(
+                [{"kind": "check_finding", "source_path": parsed.get("source_path")}]
+            )[0],
+            # Straight from the check, so not general practice at all.
+            "general_practice": False,
+            "area": area,
+        })
+    return findings
 
 
 def review(
@@ -651,6 +907,69 @@ def review(
         area, scope, scope_id, project_name, _REVIEW_PROMPT, [], secrets, provider, model,
         tools=read_only_tools, config=config,
     ))
+
+    # An absent FINDINGS block is NOT a clean review -- but it is also not a
+    # reason to throw away the check. "Try again" was the first answer here and
+    # it was the wrong one: the ERC/DRC is on demand and deterministic, it has
+    # already run, and only the model's FORMATTING failed. Asking the user to
+    # re-run costs another check plus another LLM call to recompute findings
+    # that are sitting right here.
+    #
+    # So the findings survive the prose failing, exactly as they do in
+    # `daemon.kicad_check_board`'s `_explain_or_report_plainly`: KiCad's output
+    # is a fact about the user's board, the explanation of it is not. Only when
+    # there is no check to fall back on -- an unlinked project, an area with no
+    # check at all -- is this a real error.
+    if _FINDINGS_PATTERN.search(result["text"]) is None \
+            and _findings_json_without_delimiters(result["text"]) is None:
+        # Why, when we can tell. agentflow returns ACCUMULATED TOOL RESULTS as
+        # its text when an agent exhausts `max_tool_rounds` without answering,
+        # so a tool that always fails silently turns into "no findings block".
+        # That is exactly what happened here: `kicad.get_component_heights`
+        # needs KiCad RUNNING, the PCB and Enclosure tabs stopped requiring it,
+        # and the tool then failed on every call until the rounds ran out.
+        # Logged rather than swallowed, so the next instance of this shape is
+        # one grep away instead of another round of guessing.
+        # A block that STARTED and never finished is truncation, not a model
+        # ignoring the format -- worth saying separately, because the two have
+        # opposite fixes (a bigger token budget vs. clearer instructions).
+        if "<<<FINDINGS>>>" in result["text"]:
+            logger.warning(
+                "review(%s): findings block was started but never terminated -- the response was "
+                "cut off at %s characters. This is a token-budget problem, not a format problem. "
+                "Gemini charges a thinking model's reasoning against max_output_tokens, so an "
+                "agent's max_tokens has to cover both.",
+                area, len(result["text"]),
+            )
+        logger.warning(
+            "review(%s) produced no findings block after %s tool call(s): %s",
+            area,
+            len(result.get("tool_calls_raw") or []),
+            [tc.get("name") for tc in (result.get("tool_calls_raw") or [])],
+        )
+        # The model's ACTUAL words, written where they can be read. Three
+        # rounds of fixing this have been guesses at what the model returned,
+        # because the daemon's stderr goes to a parent process that has no
+        # console when the app is launched from Finder. A log line nobody can
+        # read is not a diagnostic.
+        try:
+            debug_path = os.path.join(tempfile.gettempdir(), "copperplane-review-debug.txt")
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write(f"area={area} scope_id={scope_id}\n")
+                f.write(f"tool_calls={[tc.get('name') for tc in (result.get('tool_calls_raw') or [])]}\n")
+                f.write(f"text_length={len(result.get('text') or '')}\n")
+                f.write("--- raw model text ---\n")
+                f.write(result.get("text") or "<empty>")
+            logger.warning("review(%s): raw model text written to %s", area, debug_path)
+        except OSError:
+            pass
+        fallback = _findings_from_check_alone(area, scope_id, project_name)
+        if fallback is not None:
+            return fallback
+        raise ReviewFormatError(
+            "The review came back without its findings block, so it could not be read. "
+            "This is NOT a clean result -- the area has not been assessed."
+        )
 
     findings = []
     for raw in _extract_findings(result["text"]):
