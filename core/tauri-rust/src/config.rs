@@ -37,6 +37,15 @@ pub const DAEMON_CONFIG_ENV_VAR: &str = "HAS_DAEMON_CONFIG";
 pub struct DaemonConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub freecadcmd_path_override: Option<String>,
+    /// CTX-336.1: where `kicad-cli` lives, when it is not on PATH or in a
+    /// standard install location. `kicad_cli.configure()` has accepted a
+    /// `path_override` since SPEC-309 and nothing ever passed one -- this
+    /// field is the missing half, and SPEC-336's "offer a path picker when a
+    /// tool is missing from its default location" cannot work without it.
+    /// Mirrors `freecadcmd_path_override` above exactly, including being a
+    /// real `config.json` field rather than a Rust-computed one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kicad_cli_path_override: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kicad_socket_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -230,6 +239,7 @@ mod tests {
 
         let config = DaemonConfig {
             freecadcmd_path_override: Some("/opt/freecad/bin/freecadcmd".to_string()),
+            kicad_cli_path_override: Some("/opt/kicad/bin/kicad-cli".to_string()),
             kicad_socket_path: Some("/tmp/kicad/api.sock".to_string()),
             kicad_timeout_ms: Some(5000),
             llm_provider: Some("anthropic".to_string()),
@@ -288,6 +298,35 @@ mod tests {
     }
 
     #[test]
+    fn kicad_cli_path_override_round_trips_and_is_none_when_absent() {
+        // CTX-336.1 TEST-003. SPEC-336 offers a path picker for KiCad and for
+        // FreeCAD; only FreeCAD's had a field to write into. A config.json
+        // written before this field existed must still load, with None.
+        let base = std::env::temp_dir().join(format!("ctx-336.1-kicad-cli-path-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        let config = DaemonConfig {
+            kicad_cli_path_override: Some("/opt/kicad/bin/kicad-cli".to_string()),
+            ..Default::default()
+        };
+        save_config_to_dir(&base, &config).expect("save_config_to_dir should succeed");
+        assert_eq!(load_config_from_dir(&base), config);
+
+        let env = build_daemon_env(&config);
+        let parsed: serde_json::Value = serde_json::from_str(&env[0].1).unwrap();
+        assert_eq!(parsed["kicad_cli_path_override"], "/opt/kicad/bin/kicad-cli");
+
+        // An older config.json, with no such key at all.
+        std::fs::write(base.join("config.json"), r#"{"llm_provider":"anthropic"}"#)
+            .expect("writing a legacy config should succeed");
+        let legacy = load_config_from_dir(&base);
+        assert_eq!(legacy.kicad_cli_path_override, None);
+        assert_eq!(legacy.llm_provider, Some("anthropic".to_string()));
+
+        std::fs::remove_dir_all(&base).expect("test cleanup should succeed");
+    }
+
+    #[test]
     fn load_config_from_dir_defaults_cleanly_when_no_file_exists_yet() {
         let base = std::env::temp_dir().join(format!("ctx-303.1-config-missing-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
@@ -300,6 +339,7 @@ mod tests {
     fn build_daemon_env_serializes_set_fields_and_omits_unset_ones() {
         let config = DaemonConfig {
             freecadcmd_path_override: Some("/opt/freecad/bin/freecadcmd".to_string()),
+            kicad_cli_path_override: None,
             kicad_socket_path: None,
             kicad_timeout_ms: Some(5000),
             llm_provider: None,

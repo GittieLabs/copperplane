@@ -3400,3 +3400,168 @@ class TestDescribeFootprintRoute(unittest.TestCase):
 
         self.assertFalse(out["has_model"])
         self.assertIsNone(out["model_path"])
+
+
+class TestKicadCliPathOverrideIsActuallyWired(unittest.TestCase):
+    """CTX-336.1 TEST-001/TEST-002.
+
+    `kicad_cli.configure()` has accepted a `path_override` since SPEC-309 and
+    `daemon.py` passed it only `output_dir`, so a configured KiCad path could
+    never reach `find_kicad_cli`. SPEC-336's path picker is built on this, so
+    it is wired and proved before any UI exists to set it -- a picker over a
+    dead parameter would look like it worked.
+    """
+
+    def setUp(self):
+        self._saved = (daemon.kicad_cli._path_override, daemon.kicad_cli._output_dir_override)
+
+    def tearDown(self):
+        daemon.kicad_cli.configure(path_override=self._saved[0], output_dir=self._saved[1])
+
+    def test_001_env_config_reaches_kicad_cli(self):
+        """The gap itself: proved through `_apply_env_config`, the real path a
+        config.json value travels, not by calling configure() directly."""
+        with tempfile.NamedTemporaryFile(suffix="-kicad-cli", delete=False) as handle:
+            fake_cli = handle.name
+        self.addCleanup(os.unlink, fake_cli)
+
+        with patch.dict(os.environ, {
+            daemon._DAEMON_CONFIG_ENV_VAR: json.dumps({
+                "kicad_cli_path_override": fake_cli,
+                "output_dir": "/tmp/out",
+            })
+        }):
+            daemon._apply_env_config()
+
+        self.assertEqual(daemon.kicad_cli._path_override, fake_cli)
+        # And it actually wins over PATH, which is the point of an override.
+        self.assertEqual(daemon.kicad_cli.find_kicad_cli(), fake_cli)
+
+    def test_002_an_absent_override_leaves_discovery_alone(self):
+        """A config.json with no such key -- every one written before this
+        field existed -- must not turn into an override of None that breaks
+        discovery."""
+        daemon.kicad_cli.configure(path_override="/stale/kicad-cli")
+        with patch.dict(os.environ, {
+            daemon._DAEMON_CONFIG_ENV_VAR: json.dumps({"output_dir": "/tmp/out"})
+        }):
+            daemon._apply_env_config()
+
+        self.assertIsNone(daemon.kicad_cli._path_override)
+        # Not `path_source() == path_source()`, which was the first version of
+        # this line and could not fail -- CLAUDE.md's rule, caught here.
+        self.assertNotEqual(daemon.kicad_cli.path_source(), "override")
+
+    def test_003_capabilities_report_which_binary_and_from_where(self):
+        """TEST-002: "found" cannot distinguish a configured override from a
+        stale copy on PATH, and that is the question a user has right after
+        pointing the app at their own install."""
+        with tempfile.NamedTemporaryFile(suffix="-kicad-cli", delete=False) as handle:
+            fake_cli = handle.name
+        self.addCleanup(os.unlink, fake_cli)
+        daemon.kicad_cli.configure(path_override=fake_cli)
+
+        caps = daemon._detect_capabilities()
+
+        self.assertTrue(caps["kicad_cli_available"])
+        self.assertEqual(caps["kicad_cli_path_checked"], fake_cli)
+        self.assertEqual(caps["kicad_cli_path_source"], "override")
+        self.assertIsNone(caps["kicad_cli_error"])
+
+    def test_004_a_bad_override_says_it_was_the_override_that_failed(self):
+        """The most likely misconfiguration once a picker exists. A bare
+        "not found" would send the user looking for a missing KiCad they have
+        actually installed."""
+        daemon.kicad_cli.configure(path_override="/definitely/not/here/kicad-cli")
+
+        caps = daemon._detect_capabilities()
+
+        self.assertFalse(caps["kicad_cli_available"])
+        self.assertEqual(caps["kicad_cli_path_source"], "override")
+        self.assertIn("override", caps["kicad_cli_error"])
+
+    def test_005_no_override_reports_where_it_really_looked(self):
+        daemon.kicad_cli.configure(path_override=None)
+
+        caps = daemon._detect_capabilities()
+
+        self.assertIn(caps["kicad_cli_path_source"], ("path", "install", "none"))
+        if caps["kicad_cli_available"]:
+            self.assertTrue(os.path.isfile(caps["kicad_cli_path_checked"]))
+        else:
+            self.assertEqual(caps["kicad_cli_path_source"], "none")
+
+
+class TestToolPathsApplyWithoutARestart(unittest.TestCase):
+    """CTX-336.1: a path picker whose effect needs a restart is not a picker.
+
+    Until this, a saved tool path reached the daemon only at the next spawn --
+    `_apply_env_config` reads its env var once, and `lib/settings.ts` says so
+    in as many words. SPEC-336's guided setup fixes a missing tool and then
+    shows the banner state, so the fix has to land live.
+    """
+
+    def setUp(self):
+        self._kicad = (daemon.kicad_cli._path_override, daemon.kicad_cli._output_dir_override)
+        self._freecad = (daemon.freecad_bridge._path_override,
+                         daemon.freecad_bridge._output_dir_override)
+
+    def tearDown(self):
+        daemon.kicad_cli.configure(path_override=self._kicad[0], output_dir=self._kicad[1])
+        daemon.freecad_bridge.configure(path_override=self._freecad[0],
+                                        output_dir=self._freecad[1])
+
+    def test_001_a_configured_kicad_path_takes_effect_immediately(self):
+        with tempfile.NamedTemporaryFile(suffix="-kicad-cli", delete=False) as handle:
+            fake = handle.name
+        self.addCleanup(os.unlink, fake)
+
+        daemon.configure_daemon(kicad_cli_path_override=fake)
+
+        self.assertEqual(daemon.kicad_cli.find_kicad_cli(), fake)
+        self.assertEqual(daemon._detect_capabilities()["kicad_cli_path_source"], "override")
+
+    def test_002_the_empty_string_clears_an_override(self):
+        """None already means "leave unchanged", so it cannot also mean
+        "remove". A picker the user can only ever add to is its own trap."""
+        daemon.kicad_cli.configure(path_override="/stale/kicad-cli")
+
+        daemon.configure_daemon(kicad_cli_path_override="")
+
+        self.assertIsNone(daemon.kicad_cli._path_override)
+        self.assertNotEqual(daemon._detect_capabilities()["kicad_cli_path_source"], "override")
+
+    def test_003_omitting_the_field_leaves_a_configured_path_alone(self):
+        """Every existing caller -- Rust's spawn-time call, every secrets-only
+        save from Settings -- passes neither field, and must not wipe them."""
+        daemon.kicad_cli.configure(path_override="/keep/me/kicad-cli")
+
+        daemon.configure_daemon(secrets={"anthropic_api_key": "x"})
+
+        self.assertEqual(daemon.kicad_cli._path_override, "/keep/me/kicad-cli")
+
+    def test_004_setting_a_path_does_not_discard_the_output_dir(self):
+        """`configure()` replaces both module globals on every call, so
+        passing only a path would silently drop the Rust-computed output_dir
+        that SPEC-311's .glb export writes into."""
+        daemon.kicad_cli.configure(path_override=None, output_dir="/real/output")
+
+        daemon.configure_daemon(kicad_cli_path_override="/some/kicad-cli")
+
+        self.assertEqual(daemon.kicad_cli._output_dir_override, "/real/output")
+
+    def test_005_the_same_contract_holds_for_freecad(self):
+        with tempfile.NamedTemporaryFile(suffix="-freecadcmd", delete=False) as handle:
+            fake = handle.name
+        self.addCleanup(os.unlink, fake)
+        daemon.freecad_bridge.configure(path_override=None, output_dir="/real/output")
+
+        daemon.configure_daemon(freecadcmd_path_override=fake)
+
+        self.assertEqual(daemon.freecad_bridge._path_override, fake)
+        self.assertEqual(daemon.freecad_bridge._output_dir_override, "/real/output")
+
+    def test_006_the_route_still_answers_its_old_shape(self):
+        """Rust's very first request goes through this route; a changed
+        response shape would break the handshake."""
+        self.assertEqual(daemon.configure_daemon(secrets={}), {"configured": True})

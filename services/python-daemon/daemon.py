@@ -273,7 +273,16 @@ def _apply_env_config() -> None:
         # module's first real, persistent-file-producing route, so it's
         # the first to need the same real output_dir (SPEC-301 §2)
         # freecad_bridge.configure already receives above.
-        kicad_cli.configure(output_dir=env_config.get("output_dir"))
+        #
+        # CTX-336.1: `path_override` is the other half, and stayed dead for
+        # even longer -- the parameter has existed since SPEC-309 and this
+        # call passed only `output_dir`, so a configured KiCad path could
+        # never reach `find_kicad_cli`. SPEC-336's path picker for a KiCad
+        # installed somewhere non-standard is built on this line.
+        kicad_cli.configure(
+            path_override=env_config.get("kicad_cli_path_override"),
+            output_dir=env_config.get("output_dir"),
+        )
     if library_store is not None:
         library_store.configure(storage_root=env_config.get("storage_root"))
 
@@ -933,6 +942,7 @@ _INTERNAL_ONLY_PARAMS = {"cancel_event"}
 def configure_daemon(
     secrets: dict = None, llm_provider: str = None, llm_model: str = None,
     providers: list = None, provider_roles: dict = None,
+    kicad_cli_path_override: str = None, freecadcmd_path_override: str = None,
 ) -> dict:
     """The daemon.configure route (SPEC-106 §2, extended by SPEC-303, then
     SPEC-321): merges secrets Rust hands over on the daemon's very first
@@ -949,6 +959,20 @@ def configure_daemon(
     "leave unchanged" -- Rust's spawn-time call never passes them, so this
     extension can't regress that call.
 
+    `kicad_cli_path_override`/`freecadcmd_path_override` (CTX-336.1) are the
+    same two paths `config.json` carries, applied to the *running* daemon.
+    Until now a saved tool path only took effect at the next spawn, because
+    `_apply_env_config` reads the env var once -- `lib/settings.ts` says so in
+    as many words. SPEC-336 offers a path picker during first-run setup, and a
+    picker whose effect appears only after a restart would leave the user
+    looking at the same "KiCad not found" banner they just fixed.
+
+    These follow the same "None means leave unchanged" contract as
+    `llm_provider`, with one addition it needs and that has no equivalent
+    above: **the empty string means "no override"**, so a path can be cleared
+    as well as set. `None` cannot serve both purposes, and a picker the user
+    can only ever add to is a trap of its own.
+
     `providers`/`provider_roles` (SPEC-321 §2.3) follow the identical
     "None means leave unchanged, otherwise replace wholesale" contract --
     SPEC-208 §2.5's own rule that a role-binding update is always the
@@ -960,6 +984,21 @@ def configure_daemon(
         CONFIG["llm_provider"] = llm_provider
     if llm_model is not None:
         CONFIG["llm_model"] = llm_model
+    # CTX-336.1: applied to the live modules, not just recorded in CONFIG --
+    # `find_kicad_cli` and `find_freecadcmd` read their module globals, so
+    # storing this in CONFIG alone would change nothing observable.
+    if kicad_cli_path_override is not None and kicad_cli is not None:
+        kicad_cli.configure(
+            path_override=kicad_cli_path_override or None,
+            output_dir=kicad_cli._output_dir_override,
+        )
+        CONFIG["kicad_cli_path_override"] = kicad_cli_path_override or None
+    if freecadcmd_path_override is not None and freecad_bridge is not None:
+        freecad_bridge.configure(
+            path_override=freecadcmd_path_override or None,
+            output_dir=freecad_bridge._output_dir_override,
+        )
+        CONFIG["freecadcmd_path_override"] = freecadcmd_path_override or None
     normalized = None
     if providers is not None:
         # SPEC-209 §2.3: reduce each record to only what differs from its
@@ -2340,13 +2379,28 @@ def _detect_capabilities() -> dict:
     # a broken/missing kicad-cli shouldn't take down the rest of the app,
     # it should surface as an honest capability gap, same pattern
     # freecad_available already established for freecadcmd.
+    #
+    # CTX-336.1: also report *which* binary was resolved and how. Onboarding
+    # has to tell a user whether the KiCad it found is the one they meant --
+    # "found" alone cannot distinguish a configured override from a stale copy
+    # on PATH, and a path picker whose effect is invisible is untestable by
+    # the person using it.
     kicad_cli_available = False
+    kicad_cli_path_checked = None
+    kicad_cli_path_source = None
+    kicad_cli_error = None
     if kicad_cli is not None:
         try:
-            kicad_cli.find_kicad_cli()
+            kicad_cli_path_checked = kicad_cli.find_kicad_cli()
+            kicad_cli_path_source = kicad_cli.path_source()
             kicad_cli_available = True
-        except Exception:
+        except Exception as e:
             kicad_cli_available = False
+            kicad_cli_error = str(e)
+            # A configured override that does not exist is the single most
+            # likely misconfiguration once a picker exists, so say so rather
+            # than reporting a bare "not found".
+            kicad_cli_path_source = kicad_cli.path_source()
 
     configured_secrets = CONFIG.get("secrets", {})
 
@@ -2365,6 +2419,9 @@ def _detect_capabilities() -> dict:
         "freecad_path_checked": freecad_path_checked,
         "freecad_error": freecad_error,
         "kicad_cli_available": kicad_cli_available,
+        "kicad_cli_path_checked": kicad_cli_path_checked,
+        "kicad_cli_path_source": kicad_cli_path_source,
+        "kicad_cli_error": kicad_cli_error,
         # SPEC-303: reflects which providers actually have a key configured
         # right now, fixed from a hardcoded [] that predated any real
         # settings surface to populate it.

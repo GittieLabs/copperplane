@@ -70,6 +70,27 @@ def configure(path_override=None, output_dir=None):
     _output_dir_override = output_dir
 
 
+def path_source() -> str:
+    """Where `find_kicad_cli` would look first, as a stable token the UI can
+    explain: `override`, `path`, or `install`.
+
+    CTX-336.1: SPEC-336's path picker is only useful if its effect is
+    visible. `kicad_cli_available: true` says a binary was found; it cannot
+    say whether the configured one was used, which is exactly the question a
+    user has after pointing the app at their own install.
+    """
+    if _path_override:
+        return "override"
+    if shutil.which("kicad-cli"):
+        return "path"
+    for pattern in _CANDIDATE_GLOBS.get(platform.system(), []):
+        if glob.glob(pattern):
+            return "install"
+    # Not "install" -- nothing was found anywhere, and saying "install" here
+    # would report a location that does not hold a binary.
+    return "none"
+
+
 def find_kicad_cli() -> str:
     """Locates the `kicad-cli` executable: a configured override first,
     then PATH, then real per-OS install locations. Raises a clean error
