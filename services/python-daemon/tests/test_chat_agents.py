@@ -1312,16 +1312,16 @@ class TestAgentToolsWorkWithKicadClosed(unittest.TestCase):
         return [l.strip("- ").strip() for l in block.group(1).splitlines()] if block else []
 
     def test_001_the_pcb_agent_declares_no_kicad_ipc_tool(self):
-        self.assertNotIn("kicad.get_component_heights", self._tools_of("chat_pcb"))
+        self.assertNotIn("kicad_get_component_heights", self._tools_of("chat_pcb"))
 
     def test_002_the_enclosure_agent_declares_no_kicad_ipc_tool(self):
         """Its review panel is switched off, but its chat panel is still live."""
-        self.assertNotIn("kicad.get_component_heights", self._tools_of("chat_enclosure"))
+        self.assertNotIn("kicad_get_component_heights", self._tools_of("chat_enclosure"))
 
     def test_003_the_pcb_agent_keeps_the_tools_that_work_from_files(self):
         tools = self._tools_of("chat_pcb")
-        self.assertIn("context.search", tools)
-        self.assertIn("datasheet.read_pages", tools)
+        self.assertIn("context_search", tools)
+        self.assertIn("datasheet_read_pages", tools)
 
     def test_004_no_prompt_still_promises_the_removed_tool(self):
         for agent in ("chat_pcb", "chat_enclosure"):

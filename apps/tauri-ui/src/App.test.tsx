@@ -1150,6 +1150,20 @@ describe('App: launch, closing a project, and first run', () => {
     expect(loadProjectMock).not.toHaveBeenCalled()
   })
 
+  it('opens a project from the landing view itself, not only from the rail', async () => {
+    /** Reported from the built app: "I clicked open a project and nothing
+     *  happened." The button set a message that renders only inside the
+     *  project view. */
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: /Open a project/ }))
+    // Scoped to the main pane: the rail lists the same project, and clicking
+    // that one would prove nothing about this view.
+    const main = screen.getByRole('main')
+    fireEvent.click(within(main).getByRole('button', { name: 'zeta-project' }))
+
+    expect(await screen.findByPlaceholderText(/ask a question/)).toBeTruthy()
+  })
+
   it('still opens a project when the user picks one', async () => {
     render(<App />)
 
