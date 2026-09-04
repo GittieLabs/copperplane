@@ -50,7 +50,7 @@ kiutils==1.4.8
 # openai/google SDKs pulled in above) that would otherwise float to
 # whatever's newest. Real, direct-to-PyPI checking found cryptography
 # dropped macOS x86_64 wheels entirely as of 49.0.0 (only macosx_11_0_arm64
-# ships from there on) -- 48.0.0 is the newest release that still ships a
+# ships from there on) -- 48.0.1 is the newest release that still ships a
 # real macosx_10_9_universal2 wheel (both Apple Silicon and Intel in one
 # file) alongside win_amd64/manylinux wheels for every other platform this
 # repo's release pipeline builds for. Confirmed via a real, failed CI run
@@ -58,4 +58,11 @@ kiutils==1.4.8
 # the resulting build-from-source .so as arm64-only when a x86_64 freeze
 # needed it, since Rust's build backend doesn't respect the parent
 # process's `arch -x86_64` the way a prebuilt wheel install does.
-cryptography==48.0.0
+# Held on the 48.0.x line by the wheel-platform constraint above, NOT by
+# inattention. Dependabot proposes 49.0.0/50.0.0 for three real advisories;
+# taking either drops the Intel macOS wheel and breaks that release leg, so
+# those alerts stay open deliberately. 48.0.1 is reachable and is taken
+# here: it carries the "Vulnerable OpenSSL included in cryptography wheels"
+# fix and still ships macosx_10_9_universal2 -- confirmed against PyPI's own
+# release metadata, not inferred from a changelog.
+cryptography==48.0.1
