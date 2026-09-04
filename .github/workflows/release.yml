@@ -370,6 +370,15 @@ jobs:
   publish:
     needs: [build-macos, build-windows, build-linux]
     runs-on: macos-latest
+    # CTX-402.9: an explicit permissions block replaces this job's defaults
+    # entirely, so contents: write is restated here -- without it the release
+    # upload itself fails. id-token: write lets the runner mint a short-lived
+    # Sigstore signing certificate; attestations: write records the resulting
+    # provenance against this repository.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
       # CTX-402.7: fetch-depth: 0 (full history, every tag) -- the default
       # shallow checkout (depth 1) made generate_release_notes.py's own
@@ -442,6 +451,27 @@ jobs:
       # SHA256SUMS.txt can compare it against this run's log.
       - name: Show the checksums in the run log
         run: cat "$RUNNER_TEMP/SHA256SUMS.txt"
+
+      # CTX-402.9: this is the part that provides *authenticity*, which
+      # SHA256SUMS.txt deliberately does not. The runner signs a statement --
+      # "this exact digest was built by this workflow, from this repo, at this
+      # commit" -- with a short-lived Sigstore certificate, and records it in a
+      # public transparency log. `gh attestation verify` checks it against the
+      # log rather than against anything this repo hosts, so unlike a checksum
+      # published beside its file, rewriting the release page does not forge it.
+      #
+      # Deliberately placed before the publish step. If attestation fails, no
+      # release is published at all -- better than a published release the docs
+      # say is attested and is not.
+      - name: Attest build provenance for every published installer
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            artifacts/**/*.dmg
+            artifacts/**/*.msi
+            artifacts/**/*.exe
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
 
       - name: Publish the GitHub Release
         uses: softprops/action-gh-release@v3
