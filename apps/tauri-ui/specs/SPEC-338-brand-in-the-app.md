@@ -1,7 +1,7 @@
 ---
 id: SPEC-338
 title: "The Brand Inside the App: Logo and the Copperplane Green"
-status: In-Progress
+status: Completed
 type: Feature
 created: 2026-09-03
 last_updated: 2026-09-04
