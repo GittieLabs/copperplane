@@ -1,10 +1,10 @@
 ---
 id: SPEC-324
 title: "Model Identity Verification"
-status: In-Progress
+status: Completed
 type: Feature
 created: 2026-08-27
-last_updated: 2026-08-27
+last_updated: 2026-09-03
 target_version: v0.3.0
 location: "apps/tauri-ui/specs/SPEC-324-model-identity-verification.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"

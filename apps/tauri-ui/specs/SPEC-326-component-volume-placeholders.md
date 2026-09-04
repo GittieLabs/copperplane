@@ -4,7 +4,7 @@ title: "Component Volume Placeholders"
 status: In-Progress
 type: Feature
 created: 2026-09-01
-last_updated: 2026-09-01
+last_updated: 2026-09-03
 target_version: v0.4.0
 location: "apps/tauri-ui/specs/SPEC-326-component-volume-placeholders.md"
 parent_spec: "SPEC-311-enclosure-refinement-interactive-preview.md"
@@ -14,6 +14,8 @@ user_facing: true
 ---
 
 # SPEC-326: Component Volume Placeholders
+
+> **Still open, 2026-09-03:** the labelled bounding solid this spec's §1 promises — *"A footprint with no resolvable model gets a labelled bounding solid, a clearance proxy, never presented as a real model"* — is **not built**. `CTX-326.1` measures courtyards, `CTX-326.2` recommends an interior height and `CTX-326.3` made the board the source of truth, but nothing renders placeholder geometry in the 3D view. The source-of-truth question the roadmap also listed here *is* settled, by `CTX-326.3`.
 
 ## 1. Executive Summary & Goals
 

@@ -1,10 +1,10 @@
 ---
 id: SPEC-322
 title: "Model Role Legibility in Settings"
-status: In-Progress
+status: Completed
 type: Feature
 created: 2026-08-27
-last_updated: 2026-08-27
+last_updated: 2026-09-03
 target_version: v0.2.1
 location: "apps/tauri-ui/specs/SPEC-322-model-role-legibility.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"

@@ -14,6 +14,8 @@ user_facing: true
 
 # SPEC-332: ERC as a Teaching Surface
 
+> **Still open, 2026-09-03:** whether `kicadGlossary`'s flat list and `SPEC-334`'s compositional `packageGlossary` should share a module. Everything else in §2 is settled and delivered by `CTX-332.1`.
+
 ## 1. Executive Summary & Goals
 
 *   **High-Level Goal:** Close the three specific things the schematic check does not do that the
@@ -177,7 +179,9 @@ user_facing: true
     filter to one kind. On a board with 18 unconnected items and 1 violation, the violation is in
     the same list as everything else. If that becomes a real complaint, filtering the one list is
     the answer, not tabs.
-*   **Whether `included_severities` is worth surfacing.** The report says which severities it was
+*   ~~**Whether `included_severities` is worth surfacing.**~~ **Delivered in `CTX-332.1`:** `SeverityFilter` names what was left out and stays silent on a full run. Original reasoning below.
+
+*   **(Original wording, for the record)** Whether `included_severities` is worth surfacing. The report says which severities it was
     asked for; a result filtered to errors only, presented as "no problems", would be a lie of the
     same shape as the ignored-checks gap this spec exists to close.
 

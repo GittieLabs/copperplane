@@ -1,11 +1,11 @@
 ---
 id: SPEC-205
 title: "Datasheet-Driven Design Guidance"
-status: In-Progress
+status: Completed
 type: Module
 user_facing: true
 created: 2026-08-18
-last_updated: 2026-08-20
+last_updated: 2026-09-03
 target_version: v0.3.0
 location: "services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"

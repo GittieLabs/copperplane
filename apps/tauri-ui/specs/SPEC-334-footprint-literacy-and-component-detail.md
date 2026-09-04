@@ -14,6 +14,8 @@ user_facing: true
 
 # SPEC-334: Footprint Literacy & Component Detail
 
+> **Still open, 2026-09-03:** two questions, both about the component-search namespace — whether searching a footprint-shaped query should answer from KiCad's own libraries, and what *"which NE555P am I getting"* is answered with. The footprint-literacy half is delivered by `CTX-334.1` and `CTX-334.2`.
+
 ## 1. Executive Summary & Goals
 
 *   **High-Level Goal:** Let a user click a row in the board components table and understand *what
@@ -79,7 +81,9 @@ user_facing: true
 *   **What "which NE555P am I getting" is answered with.** Package, pin count and pin *layout*
     differ across a search's results. The footprint determines the physical part; the datasheet
     determines the pinout. Settle which of those the detail view leads with.
-*   **How this reaches the user.** Proposed: an action on each row of the board components table
+*   ~~**How this reaches the user.**~~ **Delivered in `CTX-334.1`:** an action on each row of the board components table, opening a detail view. Original wording below.
+
+*   **(Original wording, for the record)** How this reaches the user. Proposed: an action on each row of the board components table
     (`SchematicComponents`), opening a detail view for that component and its footprint.
 
 ## 3. Known Constraints & Risks
