@@ -1,10 +1,10 @@
 ---
 id: SPEC-338
 title: "The Brand Inside the App: Logo and the Copperplane Green"
-status: Draft
+status: In-Progress
 type: Feature
 created: 2026-09-03
-last_updated: 2026-09-03
+last_updated: 2026-09-04
 target_version: v0.4.0
 location: "apps/tauri-ui/specs/SPEC-338-brand-in-the-app.md"
 parent_spec: "SPEC-317-theme-system.md"
@@ -75,6 +75,31 @@ user_facing: true
 *   **How an SVG gets into the app at all.** Nothing in `apps/tauri-ui` imports one today. Vite can
     inline or serve it; a Tauri build must not reach outside its own bundle. Settle the mechanism
     once, because the docs site (`SPEC-408`) will need the same assets.
+
+### Decisions taken in CTX-338.1
+
+Each of the questions above was settled by computing the real WCAG ratio for the exact pairs this
+app uses, rather than by reading the brand table's "on white" and "on ink" figures, which describe
+different pairings.
+
+*   **Which green, for what.** Two tokens, not one, because no single green passes in both themes:
+    Copperplane green scores 3.39:1 on the app's dark ground and Bright scores 2.27:1 on white.
+    Dark uses Bright `#4FC17E`; light uses Copperplane green `#10743F`. This independently matches
+    what the kit already does — `mark.svg` and `mark-on-dark.svg` are identical files except for
+    exactly those two stroke colours.
+*   **What the green is for.** `--color-accent`, the primary button, plus a new `--color-brand` for
+    the mark. Accent text was repaired at the same time: `#0A1410` on Bright is 8.27:1, white on
+    Copperplane green is 5.85:1. Both clear AA for normal text.
+*   **`--color-success` stays emerald.** Making one of the semantic set the brand colour would mean
+    a green check and a green button carrying different meanings on the same screen.
+*   **Which lockup, where.** The bare mark, 44px, above the heading on both the welcome screen and
+    the launch view. Not a lockup: the heading beside it already says "Copperplane", and a wordmark
+    would say it twice.
+*   **How an SVG gets into the app.** Copied into `apps/tauri-ui/public/`, served at the app root,
+    bundled into `dist` by Vite and therefore into the Tauri build. Not imported across the module
+    boundary, and not inlined into a component — inlining would copy the mark's geometry somewhere
+    `brand/tools/build.py` cannot reach. `tests/brandAssets.test.ts` fails if a copy drifts from
+    the kit, which is the answer to §3's staleness risk.
 
 ## 3. Known Constraints & Risks
 
