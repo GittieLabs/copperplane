@@ -72,3 +72,5 @@ developer-key/
 # specific UI state, not part of the real fixture content, regenerated
 # identically on every run.
 *.kicad_prl
+# Raw walkthrough captures: reviewed, redacted, then cropped into docs/site/public/images/
+Walkthrough-Copperplane/
