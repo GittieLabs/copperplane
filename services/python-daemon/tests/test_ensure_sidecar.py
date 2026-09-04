@@ -455,7 +455,7 @@ class TestProbeRoutes(unittest.TestCase):
         with open(path, "w") as handle:
             handle.write(
                 "import sys, json\n"
-                "sys.stdin.read()\n"
+                "sys.stdin.readline()\n"
                 f"print(json.dumps({{'jsonrpc': '2.0', 'id': 1, 'result': {payload!r}}}))\n"
             )
         return [sys.executable, path]
@@ -507,7 +507,7 @@ class TestProbeRoutes(unittest.TestCase):
         launch becomes a reason to delete the check."""
         path = os.path.join(self.tmp.name, "silent.py")
         with open(path, "w") as handle:
-            handle.write("import sys\nsys.stdin.read()\n")
+            handle.write("import sys\nsys.stdin.readline()\n")
 
         ok, reason = es.probe_routes(path, command=[sys.executable, path])
 
