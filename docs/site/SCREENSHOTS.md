@@ -20,73 +20,76 @@ unusable, for two independent reasons:
 They also show a different project (`test 1`, an NFC reader) rather than the
 tutorial project.
 
+## Dark theme, everywhere
+
+Decided, not a per-shot preference: **the docs use the dark theme only.** The
+app is dark-first, the mark reads better on dark, and a page whose images
+alternate theme looks careless. Light captures exist in the first walkthrough
+and are deliberately unused.
+
+Set the theme explicitly in Settings rather than relying on the OS, so a
+capture taken next week matches one taken today.
+
 ## How to capture
 
-*   **Use the tutorial project**, `Copperplane_Blink_LEDs`, for everything except
-    the Settings and Library shots. A reader following the tutorial should see
-    what the tutorial shows.
-*   **Dark theme, for all of them.** The app is dark-first, the mark on dark is
-    the stronger of the two, and a docs page that alternates themes shot to shot
-    reads as carelessness. Set it explicitly in Settings rather than relying on
-    the OS, so a later capture matches.
-*   **One window size throughout.** Roughly 1400×900 is enough for the rail plus
-    a content area without the text becoming unreadable when scaled down.
-*   Save as PNG, ideally under 400 KB.
+*   **Use the tutorial project**, `Copperplane_Blink_LEDs`, for everything
+    except the Settings and Library shots.
+*   **One window size throughout.** Roughly 1400x900.
+*   Capture the **whole window**, title bar included. Several shots in the first
+    walkthrough were cropped mid-page, which reads as a fragment rather than a
+    screen.
+*   Watch the bottom edge: a card clipped halfway looks like a bug in the app
+    rather than the end of a screenshot.
+*   PNG, ideally under 400 KB.
 
-## Before saving, check every frame for
+## The file path no longer needs your attention
 
-*   API keys, including partially visible ones.
-*   **File paths containing your username.** `/Users/<you>/repos/PCBs/...` appears
-    in the project header and in Settings. Black it out, or move the project
-    somewhere neutral before shooting.
-*   Client or employer project names in the projects rail.
-*   Anything in a background window, if the capture is not window-cropped.
+`scripts/redact_screenshots.py` blurs it out afterwards:
 
-## Where to put raw captures
+```bash
+python scripts/redact_screenshots.py <capture-dir> --secret <username>
+```
 
-Drop unedited captures in `screenshots/raw/`. They are reviewed there, then the
-chosen ones are cropped, renamed and moved into `docs/site/public/images/`.
-Nothing in `screenshots/` is committed.
+It OCRs each capture, blurs every match, reads the result back, and fails if
+the string survived. It also reports any image it could barely read, so
+"nothing found" cannot quietly mean "could not look". **API keys it does not
+know about** -- check those yourself.
 
-## The list
+Raw captures are gitignored wherever they land. The chosen ones get cropped
+into `docs/site/public/images/`.
 
-`Page` names the page that will reference the image. A blank page means the
-image is wanted but its page is still being written.
+## Already placed
 
-### Onboarding — the two paths a new user can take
+From the first walkthrough: dark, redacted, in `public/images/`.
 
-| File | What must be visible | Page |
-| :--- | :--- | :--- |
-| `welcome.png` | The welcome screen: the Copperplane mark, and both paths offered | first-run |
-| `guided-provider.png` | Guided setup choosing an AI provider, before a key is entered | first-run |
-| `guided-tools.png` | Guided setup showing KiCad and FreeCAD detected, with their real paths | first-run |
-| `guided-done.png` | The final guided step, the point where setup is finished | first-run |
-| `settings.png` | The Settings screen, as the manual path reaches it. **Retake** | first-run |
+| File | What it shows |
+| :--- | :--- |
+| `settings.png` | The whole Settings surface, keys showing only as "configured" |
+| `component-search.png` | A real part search: five candidates with package and confidence |
+| `part-detail.png` | The RGB LED footprint card, including the plain-English abbreviations box |
+| `schematic-check.png` | The Schematic tab: board components, 3D-model status, the detected `.kicad_sch` |
+| `board-check-explained.png` | DRC rewritten in plain English, with the 0.085mm against 0.100mm annular numbers |
+| `enclosure.png` | The enclosure form, with the measured "14.1mm needed, set by D1" hint |
 
-### Getting a project in
+## Still needed, all dark
 
-| File | What must be visible | Page |
-| :--- | :--- | :--- |
-| `no-project.png` | The launch view with no project selected, showing the mark | first-run |
-| `new-project.png` | Creating a project, at the point of picking the KiCad project to link | tutorial |
-| `project-linked.png` | A project with `Copperplane_Blink_LEDs` linked and the link banner gone | tutorial |
+| File | What must be visible |
+| :--- | :--- |
+| `welcome.png` | The welcome screen: the mark, both paths. **The rail must be absent** -- that fix is in PR #393, so shoot this after it merges |
+| `guided-provider.png` | Guided setup step 1, choosing a provider, before a key is typed |
+| `guided-tools.png` | Guided setup showing KiCad and FreeCAD detected, with their real paths |
+| `guided-done.png` | The final guided step, where setup finishes |
+| `no-project.png` | The launch view with no project selected, showing the mark |
+| `new-project.png` | Creating a project, at the point of picking the KiCad project to link |
+| `project-linked.png` | `Copperplane_Blink_LEDs` linked, the link banner gone |
+| `board-check.png` | The PCB check result list itself: four annular width errors and the unconnected GND, severities visible |
+| `design-guidance.png` | Datasheet-derived guidance with its citations. The old one was deleted -- it showed the pre-rename product name |
+| `library.png` | The library with a few real parts. Deleted for the same reason |
+| `ask-the-agent.png` | The chat panel mid-answer about something on the board |
+| `hero.png` | Wide, project open, rail and an area tab visible -- the one image that has to look like a product rather than a screenshot |
 
-### The checks — the tutorial's core
-
-| File | What must be visible | Page |
-| :--- | :--- | :--- |
-| `board-check.png` | The PCB check on `Copperplane_Blink_LEDs`: the four annular width errors and the unconnected GND, with severities showing. **Retake** | board-checks, tutorial |
-| `board-check-explained.png` | One annular width violation with its explanation open — the "what does this actually mean" moment | board-checks, tutorial |
-| `schematic-check.png` | The schematic check after the two `PWR_FLAG` symbols are removed: `power_pin_not_driven` and `pin_not_connected` | board-checks, tutorial |
-
-### The rest of the features
-
-| File | What must be visible | Page |
-| :--- | :--- | :--- |
-| `component-search.png` | A part search with real results. **Retake** | find-a-part |
-| `part-detail.png` | A footprint's detail view, with the package glossary visible | footprints |
-| `design-guidance.png` | Datasheet-derived guidance with its citations. **Retake** | design-guidance |
-| `enclosure.png` | A generated enclosure in the 3D preview. **Retake** | enclosure |
-| `library.png` | The library with a few real parts in it. **Retake** | library / first-run |
-| `ask-the-agent.png` | The chat panel mid-answer about something on the board | ask-the-agent |
-| `hero.png` | Wide, project open, rail and an area tab visible — the one image that has to look like the product | index |
+Three captures from the first walkthrough were rejected, in case the same
+thing happens again: the glossary shot cut off mid-entry at `IDC` with other
+desktop windows visible behind it; a part search caught mid-request with an
+empty body; and an enclosure shot showing `Test Create Project 1` /
+`Hello_World_Blinky` instead of the tutorial project.
