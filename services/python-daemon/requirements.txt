@@ -3,7 +3,7 @@ pynng==0.9.0
 trimesh==5.1.0
 pyyaml==6.0.3
 certifi==2026.7.22
-gittielabs-agentflow[anthropic,openai,google]==0.11.1
+gittielabs-agentflow[anthropic,openai,google]==0.12.0
 # CTX-209.1: the three vendor SDKs AgentFlow's extras pull in, pinned
 # explicitly rather than left to float. They were the only unpinned direct
 # dependencies in this file, and the float shipped a real bug: v0.3.0's

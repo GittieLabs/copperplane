@@ -45,10 +45,11 @@ hardware engineer) -- see SPEC-205 §1's real audience correction.
 """
 import asyncio
 import json
+import logging
 import os
 import re
 
-from agentflow import ConfigLoader, NodeOutput, WorkflowExecutor
+from agentflow import ConfigLoader, JSONResponseError, NodeOutput, WorkflowExecutor, parse_json_response
 from agentflow.workflow.node import NodeRunner
 
 import llm_providers
@@ -63,31 +64,44 @@ class DatasheetGuidanceError(Exception):
     validation (dropped, not raised)."""
 
 
+logger = logging.getLogger(__name__)
+
 _AGENTFLOW_DIR = os.path.join(os.path.dirname(__file__), "agentflow")
 
 
-def _extract_json(text: str) -> object:
-    """Parses an extraction agent's response as JSON, tolerating a
-    markdown code fence the model wasn't supposed to add -- the same
-    real-world tolerance `component_pipeline._extract_json` already
-    applies, duplicated here (not imported) to keep this module
-    independent of SPEC-202's own pipeline module, matching this
-    repo's established per-feature-module convention (`kicad_bridge`/
-    `freecad_bridge`/`component_pipeline` don't cross-import each
-    other either)."""
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
+#: Kept as a prefix constant because `_run_category_workflow` matches on it
+#: to decide whether a failure is worth retrying, exactly as
+#: `component_pipeline` already does.
+_JSON_PARSE_ERROR_PREFIX = "Extraction did not return valid JSON"
 
+#: One retry. The failures this recovers from are a model briefly losing the
+#: output format, which does not repeat often; a longer ladder would mostly
+#: buy latency and tokens on responses that were never going to parse.
+_MAX_EXTRACTION_ATTEMPTS = 2
+
+
+def _extract_json(text: str) -> object:
+    """The extraction agent's response, as a list of items.
+
+    Was a local fence-stripper plus `json.loads`, duplicated from
+    `component_pipeline` to keep the modules independent. Both now call
+    AgentFlow's `parse_json_response` (0.12.0), which handles the shapes a
+    fence-stripper cannot -- prose around the value, and a model that
+    produces a malformed array, notices, and writes the correct one after
+    it. That last shape is why this changed: it was failing
+    `datasheet.generate_guidance` outright while the right answer sat in
+    the response.
+
+    Deliberately unconstrained by type, though this route's prompt does ask
+    for an array. The validate handler treats a non-list response as a real
+    empty result rather than a failure -- a category with nothing in it is a
+    valid outcome, and `test_014` pins that. Passing `expect=list` turns
+    that documented behaviour into an error, which is a different feature
+    wearing a bug fix's clothes."""
     try:
-        return json.loads(stripped)
-    except json.JSONDecodeError as e:
-        raise DatasheetGuidanceError(f"Extraction did not return valid JSON: {e}") from e
+        return parse_json_response(text)
+    except JSONResponseError as e:
+        raise DatasheetGuidanceError(f"{_JSON_PARSE_ERROR_PREFIX}: {e}") from e
 
 
 def _normalize_whitespace(text: str) -> str:
@@ -166,18 +180,41 @@ async def _run_category_workflow(
         return NodeRunner(node, executor)
 
     handler = _make_validate_handler(pages_by_number, category, page_numbers)
-    workflow_executor = WorkflowExecutor(
-        config=config, runner_factory=runner_factory,
-        handlers={"validate_datasheet_guidance": handler},
-    )
-
     initial_message = f"Category: {category}\n\n{_build_page_excerpt(pages_by_number, page_numbers)}"
-    outputs = await workflow_executor.run(initial_message=initial_message)
 
-    validate_output = outputs["validate"]
-    if validate_output.metadata.get("error"):
-        raise DatasheetGuidanceError(validate_output.text.removeprefix("Error: "))
-    return validate_output.artifacts["items"]
+    # Retry a malformed response once, and only a malformed one. This is
+    # `component_pipeline.generate_component`'s existing shape rather than a
+    # new invention -- that route has retried extraction since SPEC-202, and
+    # is the reason component generation mostly recovers from a bad response
+    # while this route, which never had it, failed the whole job. A citation
+    # that fails validation is not retried: that is the model being wrong
+    # about the datasheet, not about JSON, and asking again invites a
+    # plausible-looking second guess.
+    for attempt in range(1, _MAX_EXTRACTION_ATTEMPTS + 1):
+        # Built inside the loop, not once outside it: a second attempt gets a
+        # fresh executor rather than re-running one that has already
+        # completed a pass. `component_pipeline` does the same, and this
+        # module's own convention is that each attempt's provider clients are
+        # appended to the caller's accumulator and closed together.
+        workflow_executor = WorkflowExecutor(
+            config=config, runner_factory=runner_factory,
+            handlers={"validate_datasheet_guidance": handler},
+        )
+        outputs = await workflow_executor.run(initial_message=initial_message)
+
+        validate_output = outputs["validate"]
+        if not validate_output.metadata.get("error"):
+            return validate_output.artifacts["items"]
+
+        error_text = validate_output.text.removeprefix("Error: ")
+        if attempt < _MAX_EXTRACTION_ATTEMPTS and error_text.startswith(_JSON_PARSE_ERROR_PREFIX):
+            logger.warning(
+                "datasheet guidance (%s): attempt %d/%d got malformed JSON, retrying: %s",
+                category, attempt, _MAX_EXTRACTION_ATTEMPTS, error_text,
+            )
+            continue
+
+        raise DatasheetGuidanceError(error_text)
 
 
 async def _run_synthesis_workflow(
