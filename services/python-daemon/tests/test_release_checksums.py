@@ -64,7 +64,7 @@ class ChecksumManifestTests(unittest.TestCase):
         manifest = self.root / 'SHA256SUMS.txt'
         manifest.write_text(generate_checksums.render(
             generate_checksums.find_installers([self.root])
-        ), encoding='utf-8')
+        ), encoding='utf-8', newline='\n')
 
         # Run it the way a person would: from the directory holding the
         # downloaded files, with the manifest alongside them.
@@ -101,7 +101,7 @@ class ChecksumManifestTests(unittest.TestCase):
         flat = self.root / 'downloaded'
         flat.mkdir()
         shutil.copy2(artifact, flat / artifact.name)
-        (flat / 'SHA256SUMS.txt').write_text(manifest_text, encoding='utf-8')
+        (flat / 'SHA256SUMS.txt').write_text(manifest_text, encoding='utf-8', newline='\n')
 
         # A single flipped byte, the size unchanged -- the exact shape of
         # damage a length check would miss.
@@ -184,6 +184,27 @@ class ChecksumManifestTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, '')
         self.assertIn('no files matching', result.stderr)
+
+
+    def test_009_the_cli_emits_lf_line_endings_on_every_platform(self):
+        """A manifest is a wire format read by another program.
+
+        On Windows, text-mode stdout translates \\n to \\r\\n, and
+        `sha256sum -c` then hunts for a file whose name ends in a carriage
+        return -- reporting "No such file or directory" for every line of a
+        manifest whose hashes are all correct. The publish job runs on macOS,
+        so a real release never showed this; the windows-latest leg did.
+        """
+        self._artifact('windows/Copperplane_9.9.9_x64-setup.exe', b'E' * 100)
+
+        result = subprocess.run(
+            [sys.executable, str(SCRIPTS / 'generate_checksums.py'), str(self.root)],
+            capture_output=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertNotIn(b'\r', result.stdout, "manifest carries CRLF; sha256sum -c cannot read it")
+        self.assertTrue(result.stdout.endswith(b'\n'))
 
 
 class ReleaseWorkflowParityTests(unittest.TestCase):
@@ -292,7 +313,7 @@ class DocumentedVerifyCommandTests(unittest.TestCase):
         ]
         lines = [f"{generate_checksums.sha256_of(mine)}  {mine.name}\n"]
         lines += [f"{'0' * 64}  {name}\n" for name in others]
-        (self.dir / 'SHA256SUMS.txt').write_text(''.join(sorted(lines)), encoding='utf-8')
+        (self.dir / 'SHA256SUMS.txt').write_text(''.join(sorted(lines)), encoding='utf-8', newline='\n')
         return mine
 
     def _run_documented_command(self):
@@ -300,8 +321,10 @@ class DocumentedVerifyCommandTests(unittest.TestCase):
         if _PLATFORM == 'Windows':
             script = self.dir / 'verify.ps1'
             script.write_text(command, encoding='utf-8')
-            argv = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-                    '-File', str(script)]
+            exe = shutil.which('pwsh') or shutil.which('powershell')
+            if exe is None:
+                self.skipTest("no PowerShell on this machine")
+            argv = [exe, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script)]
             return subprocess.run(argv, cwd=self.dir, capture_output=True, text=True)
         return subprocess.run(command, cwd=self.dir, shell=True,
                               capture_output=True, text=True)

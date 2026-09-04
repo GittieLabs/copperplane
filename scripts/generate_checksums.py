@@ -33,7 +33,13 @@ import hashlib
 import sys
 from pathlib import Path
 
-sys.stdout.reconfigure(encoding='utf-8')
+# newline='\n' is not incidental. On Windows, text-mode output translates \n to
+# \r\n, and `sha256sum -c` then looks for a file whose name ends in a carriage
+# return -- it reports "No such file or directory" for every entry in a manifest
+# that is otherwise perfectly correct. The publish job runs on macOS today, so
+# this would not have shown up in a real release; the windows-latest test leg
+# found it. A checksum manifest is a wire format, and it gets LF everywhere.
+sys.stdout.reconfigure(encoding='utf-8', newline='\n')
 
 # Every installer format this repo's release workflow actually publishes
 # for a human to download. Kept in step with the `files:` list in
