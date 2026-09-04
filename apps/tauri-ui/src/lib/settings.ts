@@ -463,14 +463,14 @@ export function storageChangeMessage(leaving: ProjectsInRoot, arriving: Projects
   if (leaving.count > 0) {
     lines.push(
       `${leaving.count === 1 ? 'This project is' : `These ${leaving.count} projects are`} ` +
-        `stored in the current location and will no longer appear in Copperplane: ` +
+        `stored in ${leaving.root} and will no longer appear in Copperplane: ` +
         `${name(leaving.projects)}.`,
     )
   }
 
   lines.push(
     arriving.count > 0
-      ? `The new location already holds ${arriving.count} ` +
+      ? `${arriving.root} already holds ${arriving.count} ` +
         `${arriving.count === 1 ? 'project' : 'projects'}: ${name(arriving.projects)}. ` +
         `Those are what you will see instead.`
       : 'The new location holds no projects yet, so your project list will start empty.',

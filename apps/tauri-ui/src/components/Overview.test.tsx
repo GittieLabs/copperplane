@@ -250,10 +250,7 @@ describe('Overview: CTX-318.5 project intent editor', () => {
     const { rerender } = render(<Overview projectName="project-a" project={{ name: 'project-a', intent: null }} />)
     await waitFor(() => screen.getByText(/AgentChat stub/))
     fireEvent.click(screen.getByRole('button', { name: 'Add' }))
-    // waitFor's 1s default expired at 1014ms on a loaded CI runner while
-    // passing locally in 32ms. The assertion is unchanged -- the editor still
-    // has to appear -- only the patience is.
-    await screen.findByPlaceholderText(/I want to build/, {}, { timeout: 5000 })
+    await screen.findByPlaceholderText(/I want to build/)
     fireEvent.change(screen.getByPlaceholderText(/I want to build/), { target: { value: 'Half-typed' } })
 
     rerender(<Overview projectName="project-b" project={{ name: 'project-b', intent: null }} />)

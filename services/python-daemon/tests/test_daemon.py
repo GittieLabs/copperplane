@@ -3750,3 +3750,32 @@ class TestSchematicCheckMatchesTheBoardCheck(unittest.TestCase):
         # And the finding carries its component, which ERC already provided.
         located = [v for v in out["violations"] if v.get("items")]
         self.assertTrue(located, "an ERC finding should say where it is")
+
+
+class TestDaemonListRoutesRoute(unittest.TestCase):
+    """SPEC-407: the artifact's own account of what it can answer."""
+
+    def test_001_reports_every_registered_route(self):
+        out = daemon.daemon_list_routes()
+
+        self.assertEqual(set(out["routes"]), set(daemon.ROUTES))
+        self.assertIn("daemon.list_routes", out["routes"])
+
+    def test_002_async_routes_are_reported_as_a_subset_of_real_ones(self):
+        """ASYNC_ROUTES names routes that may not be registered on a machine
+        whose bridges failed to import; reporting one as available would be a
+        false claim about this daemon."""
+        out = daemon.daemon_list_routes()
+
+        self.assertTrue(set(out["async_routes"]) <= set(out["routes"]))
+
+    def test_003_degraded_modules_are_reported(self):
+        """The field ensure_sidecar fails the build on."""
+        with patch.object(daemon, "_DEGRADED_MODULES", {"chat_agents"}):
+            self.assertEqual(daemon.daemon_list_routes()["degraded_modules"], ["chat_agents"])
+
+    def test_004_the_route_is_registered_and_synchronous(self):
+        """It reads two in-memory sets. An async round trip would make the
+        build gate slower for nothing."""
+        self.assertIn("daemon.list_routes", daemon.ROUTES)
+        self.assertNotIn("daemon.list_routes", daemon.ASYNC_ROUTES)

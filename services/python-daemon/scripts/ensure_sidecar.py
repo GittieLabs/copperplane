@@ -22,6 +22,7 @@ is not usable. That is the mode a CI job wants when the freeze is a separate,
 explicit step.
 """
 import argparse
+import json
 import os
 import struct
 import subprocess
@@ -240,6 +241,79 @@ def resolve_triple(explicit=None) -> str:
     raise RuntimeError("could not determine a target triple")
 
 
+def probe_routes(path: str, timeout_s: float = 60.0, command: list = None):
+    """(ok, reason). Ask the frozen artifact what it can actually do.
+
+    SPEC-407 §1's costly failure was "a mis-frozen sidecar that starts, reports
+    `daemon.ready`, passes the heartbeat shield, and runs with the entire AI
+    surface disabled". `inspect()` above cannot catch that: exists, not a
+    placeholder, right architecture and newer than source are all properties of
+    the FILE. A binary can satisfy every one and still be missing half its
+    routes because a module failed to import inside the freeze.
+
+    So this runs it, asks `daemon.list_routes`, and compares against the routes
+    this checkout defines. `CTX-407.3` and `CTX-407.4` both shipped defects of
+    exactly this shape, and both were invisible to the whole test suite.
+
+    Fails open on anything that is not a real disagreement -- a probe that
+    cannot run must not block a build, or the first flaky launch turns into a
+    reason to delete the check.
+    """
+    if DAEMON_DIR not in sys.path:
+        sys.path.insert(0, DAEMON_DIR)
+    try:
+        import daemon as source_daemon
+    except Exception as exc:  # the source tree itself is broken; not our news
+        return True, f"skipped -- this checkout's daemon.py did not import ({exc})"
+
+    expected = set(source_daemon.ROUTES)
+    request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "daemon.list_routes",
+                          "params": {}}) + "\n"
+    # `command` exists so a test can stand a script in for the binary. A real
+    # caller never passes it -- and the alternative, a POSIX shell script as the
+    # fake sidecar, made these tests fail on Windows, which is precisely the
+    # platform SPEC-903's CI exists to speak for.
+    try:
+        proc = subprocess.run(command or [path], input=request, capture_output=True,
+                              text=True, timeout=timeout_s)
+    except Exception as exc:
+        return True, f"skipped -- could not run the sidecar to ask it ({exc})"
+
+    reported, degraded = None, []
+    for line in proc.stdout.splitlines():
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        result = message.get("result")
+        if isinstance(result, dict) and "routes" in result:
+            reported = set(result["routes"])
+            degraded = result.get("degraded_modules") or []
+            break
+        if message.get("method") == "daemon.ready":
+            degraded = (message.get("params") or {}).get("degraded_modules") or degraded
+
+    if reported is None:
+        # An older sidecar predates the route. Not a disagreement to fail on.
+        return True, "skipped -- this sidecar does not answer daemon.list_routes"
+
+    missing = sorted(expected - reported)
+    if missing:
+        shown = ", ".join(missing[:6]) + (f", and {len(missing) - 6} more" if len(missing) > 6 else "")
+        return False, (
+            f"the frozen sidecar is missing {len(missing)} route(s) this checkout defines: {shown}."
+            + (f" It reports degraded modules: {', '.join(degraded)}." if degraded else
+               " It reports no degraded modules, so a bundled data file or a hidden import is the"
+               " likely cause.")
+        )
+    if degraded:
+        return False, (
+            f"the frozen sidecar started with degraded modules: {', '.join(degraded)}. Every route"
+            " is present, but those modules failed to import inside the freeze."
+        )
+    return True, f"answers all {len(reported)} routes, no degraded modules"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target-triple", default=None)
@@ -258,6 +332,18 @@ def main() -> int:
     print(f"ensure_sidecar: {os.path.relpath(path, DAEMON_DIR)} -- {reason}")
 
     if ok:
+        # The static checks passed. Now ask the artifact itself -- SPEC-407 §1's
+        # worst failure looked exactly like this point in the script.
+        probe_ok, probe_reason = probe_routes(path)
+        print(f"ensure_sidecar: {probe_reason}")
+        if not probe_ok:
+            print(
+                "ensure_sidecar: FAILING -- the sidecar file looks right and cannot do its job.\n"
+                "                Re-freeze it: .build-venv/bin/python scripts/freeze_sidecar.py"
+                " --target-triple <triple>",
+                file=sys.stderr,
+            )
+            return 1
         if overwrites_tracked_placeholder(path):
             print(
                 "ensure_sidecar: NOTE -- this real sidecar sits on top of the tracked placeholder,\n"
@@ -294,6 +380,19 @@ def main() -> int:
         print(f"ensure_sidecar: freeze produced an unusable sidecar -- {reason}", file=sys.stderr)
         return 1
     print(f"ensure_sidecar: {os.path.relpath(path, DAEMON_DIR)} -- {reason}")
+
+    # Probe the freeze we just made, not only one we found. A bad freeze is
+    # precisely when this check earns its keep, and checking only the
+    # already-present case would skip the moment the artifact is created.
+    probe_ok, probe_reason = probe_routes(path)
+    print(f"ensure_sidecar: {probe_reason}")
+    if not probe_ok:
+        print(
+            "ensure_sidecar: FAILING -- the freeze completed and produced a sidecar that cannot"
+            " do its job.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

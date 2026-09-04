@@ -1090,6 +1090,29 @@ def configure_daemon(
     return {"configured": True, "providers": normalized}
 
 
+def daemon_list_routes() -> dict:
+    """The daemon.list_routes route (SPEC-407).
+
+    Every route this daemon can actually answer, asked of the daemon itself.
+
+    `ensure_sidecar` checks that a frozen binary exists, is not the placeholder,
+    is the right architecture, and is newer than its sources. All four are
+    properties of the *file*. None of them asks what it can do -- and SPEC-407
+    §1 exists because of a sidecar that passed every static check, reported
+    `daemon.ready`, and ran "with the entire AI surface disabled".
+
+    A route list from the running artifact, compared against the source's, is
+    the check those four cannot be: it fails when a module silently failed to
+    import in the frozen build, which is exactly how `CTX-407.3` and
+    `CTX-407.4` shipped.
+    """
+    return {
+        "routes": sorted(ROUTES),
+        "async_routes": sorted(ASYNC_ROUTES & set(ROUTES)),
+        "degraded_modules": sorted(_DEGRADED_MODULES),
+    }
+
+
 def get_daemon_capabilities() -> dict:
     """The daemon.get_capabilities route (SPEC-303): re-runs the same
     cheap, non-blocking checks daemon.ready reports once at boot, on
@@ -2099,6 +2122,7 @@ def _build_routes() -> dict:
         "job.cancel": cancel_job,
         "daemon.configure": configure_daemon,
         "daemon.get_capabilities": get_daemon_capabilities,
+        "daemon.list_routes": daemon_list_routes,
         "freecad.get_version": freecad_get_version,
         "kicad.resolve_project": kicad_resolve_project,
         "kicad.list_schematic_components": kicad_list_schematic_components,

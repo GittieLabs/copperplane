@@ -21,6 +21,9 @@ describe('storageChangeMessage', () => {
     )
 
     expect(message).toContain('Hello Blinky, test 1')
+    // Names the folder it is talking about, rather than "the current location"
+    // while holding the path.
+    expect(message).toContain('/Users/k/Desktop')
     expect(message).toContain('will no longer appear')
     expect(message).toContain('These 2 projects')
   })
@@ -43,7 +46,7 @@ describe('storageChangeMessage', () => {
      *  a loss of one -- and saying "your list will be empty" would be false. */
     const message = storageChangeMessage(at('/old', ['A']), at('/new', ['B', 'C']))
 
-    expect(message).toContain('already holds 2 projects')
+    expect(message).toContain('/new already holds 2 projects')
     expect(message).toContain('B, C')
     expect(message).not.toContain('start empty')
   })
@@ -72,6 +75,6 @@ describe('storageChangeMessage', () => {
     const message = storageChangeMessage(at('/old', []), at('/new', ['A']))
 
     expect(message).not.toContain('will no longer appear')
-    expect(message).toContain('already holds 1 project')
+    expect(message).toContain('/new already holds 1 project')
   })
 })
