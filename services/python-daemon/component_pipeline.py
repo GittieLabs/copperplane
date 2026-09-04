@@ -26,7 +26,7 @@ import json
 import logging
 import os
 
-from agentflow import AgentExecutor, ConfigLoader, NodeOutput, WorkflowExecutor
+from agentflow import AgentExecutor, ConfigLoader, JSONResponseError, NodeOutput, WorkflowExecutor, parse_json_response
 from agentflow.workflow.node import NodeRunner
 
 import agent_roles
@@ -98,24 +98,23 @@ _COURTYARD_MIN_CLEARANCE_MM = 0.1
 
 
 def _extract_json(text: str) -> dict:
-    """Parses the extraction agent's response as JSON, tolerating the
-    common case of a model wrapping its answer in a markdown code fence
-    despite being told not to -- real LLM output doesn't always follow
-    instructions exactly, and treating that as a validation error (rather
-    than a parse error) would be a confusing failure mode."""
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        stripped = "\n".join(lines).strip()
+    """The extraction agent's response, as a schema object.
 
+    Was a fence-stripper plus `json.loads`. Now AgentFlow's
+    `parse_json_response` (0.12.0), which also handles prose around the
+    value and a model that corrects itself mid-response -- shapes the
+    fence-stripper turned into a parse error, and which this route then
+    spent a whole retry attempt on.
+
+    Deliberately unconstrained by type. `expect=dict` looks right from the
+    annotation and is wrong: this helper is shared with `search_components`,
+    whose response is legitimately a JSON array of candidates. The `-> dict`
+    annotation was already describing only one of its two callers. Caught by
+    `TestRealSearchComponents`, not by reading."""
     try:
-        return json.loads(stripped)
-    except json.JSONDecodeError as e:
-        raise ComponentValidationError(f"Extraction did not return valid JSON: {e}") from e
+        return parse_json_response(text)
+    except JSONResponseError as e:
+        raise ComponentValidationError(f"{_JSON_PARSE_ERROR_PREFIX}: {e}") from e
 
 
 def validate_schema(schema: dict) -> None:
