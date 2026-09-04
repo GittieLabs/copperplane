@@ -105,6 +105,12 @@ export interface DaemonCapabilities {
    * entry; unauthenticated community-library search still works, just
    * at GitHub's lower unauthenticated rate limit. */
   github_token_configured: boolean
+  /** SPEC-407 §2.4: optional modules that failed to import in this build.
+   *  `daemon.py` guards every optional import so one missing module cannot
+   *  take the daemon down — correct, and invisible until something reads
+   *  this. A build with no `chat_agents` starts cleanly and presents a
+   *  healthy app whose AI features silently do nothing. */
+  degraded_modules?: string[]
   /** SPEC-321 §2.5: every secret ref the real keychain currently has a
    * value for -- vendor presets and custom `providers[].api_key_ref`
    * names alike (`daemon.py`'s `_detect_capabilities`, sourced from the

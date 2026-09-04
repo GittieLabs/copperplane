@@ -1,7 +1,7 @@
 ---
 id: SPEC-407
 title: "Sidecar Build Integrity & Fail-Loud Packaging"
-status: In-Progress
+status: Completed
 type: Feature
 created: 2026-08-27
 last_updated: 2026-09-03
@@ -14,7 +14,12 @@ user_facing: true
 
 # SPEC-407: Sidecar Build Integrity & Fail-Loud Packaging
 
-> **Still open, 2026-09-03:** §5's user-facing half is **not built**. The daemon reports degraded modules in `daemon.ready`, in `daemon.get_capabilities` and now in `daemon.list_routes`, and `ensure_sidecar` fails a build on them — but nothing in `apps/tauri-ui` reads any of it, so a user whose *installed* app has a degraded daemon still sees a healthy-looking app with missing features. That is the exact experience §1 exists to end, surviving on the one path the build gate cannot reach.
+> **Closed 2026-09-03 by `CTX-407.6`.** §5's user-facing half was the last unbuilt part: the
+> daemon reported degraded modules three ways and `ensure_sidecar` failed a build on them, while
+> nothing in `apps/tauri-ui` read any of it — so a user whose *installed* app had a degraded daemon
+> still saw a healthy-looking app with missing features, on the one path a build gate cannot reach.
+> The app now says its own build is at fault, names what is unavailable in the user's terms, and
+> points at the daemon log.
 
 ## 1. Executive Summary & Goals
 

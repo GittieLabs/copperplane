@@ -65,3 +65,44 @@ class TestEveryRouteTheUICallsExists(unittest.TestCase):
         missing = [r for r in called if r not in daemon.ROUTES]
 
         self.assertEqual(missing, ["project.definitely_not_a_route"])
+
+
+_DEGRADED_MAP = os.path.join(_UI_SRC, "lib", "degradedModules.ts")
+
+#: `_note_degraded("kicad_cli", ...)` — every module the daemon can report as
+#: having failed to import.
+_NOTE_DEGRADED = re.compile(r'_note_degraded\(\s*"([a-z_]+)"')
+
+
+@unittest.skipUnless(os.path.isfile(_DEGRADED_MAP), "the UI degraded-module map is not present")
+class TestEveryDegradableModuleIsDescribed(unittest.TestCase):
+    """SPEC-407 §5: the notice names what is lost in the user's terms.
+
+    The UI falls back to naming an unknown module as itself, so a gap here is
+    not a crash — it is a worse sentence at the worst moment. This keeps the
+    two lists together, the same way `test_001` keeps routes together.
+    """
+
+    def test_001_every_module_the_daemon_can_degrade_has_a_plain_description(self):
+        with open(os.path.join(os.path.dirname(__file__), "..", "daemon.py"), encoding="utf-8") as f:
+            modules = set(_NOTE_DEGRADED.findall(f.read()))
+        with open(_DEGRADED_MAP, encoding="utf-8") as f:
+            described = set(re.findall(r"^  ([a-z_]+):\s*['\"]", f.read(), re.M))
+
+        self.assertGreater(len(modules), 10, "the scan found suspiciously few modules")
+        self.assertEqual(
+            sorted(modules - described), [],
+            "these modules can fail to import and the app has no plain-language description for "
+            "them, so a user would be shown a bare module name at the moment they are most "
+            "confused",
+        )
+
+    def test_002_the_map_does_not_describe_modules_that_cannot_degrade(self):
+        """A description for a module the daemon never reports is dead copy
+        that reads as coverage."""
+        with open(os.path.join(os.path.dirname(__file__), "..", "daemon.py"), encoding="utf-8") as f:
+            modules = set(_NOTE_DEGRADED.findall(f.read()))
+        with open(_DEGRADED_MAP, encoding="utf-8") as f:
+            described = set(re.findall(r"^  ([a-z_]+):\s*['\"]", f.read(), re.M))
+
+        self.assertEqual(sorted(described - modules), [])

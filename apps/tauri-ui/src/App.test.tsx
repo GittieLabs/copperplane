@@ -1662,3 +1662,51 @@ describe('App: renaming a project', () => {
     expect(screen.queryByLabelText('Project name')).toBeNull()
   })
 })
+
+/** CTX-407.6: SPEC-407 §5's user-facing half, which the build gate could not
+ *  reach — an INSTALLED app whose daemon started degraded. */
+describe('App: a build that started with reduced capability', () => {
+  const caps = (degraded: string[]) => ({
+    kicad_available: true, kicad_socket_path_checked: '/s', freecad_available: true,
+    freecad_path_checked: '/f', freecad_error: null, kicad_cli_available: true,
+    kicad_cli_path_checked: '/k', kicad_cli_path_source: 'install', kicad_cli_error: null,
+    llm_providers: ['anthropic'], log_path: '/tmp/daemon.log', python_version: '3.11.9',
+    storage_root: '/s', github_token_configured: false, degraded_modules: degraded,
+    configured_secret_refs: [],
+  })
+
+  beforeEach(() => {
+    listProjectsMock.mockReset().mockResolvedValue([])
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+  })
+
+  it('tells the user the build is at fault, not the app', async () => {
+    getCapabilitiesMock.mockReset().mockResolvedValue(caps(['chat_agents']))
+
+    render(<App />)
+
+    expect(await screen.findByText(/started with reduced capability/)).toBeTruthy()
+    expect(screen.getByText(/The project chat and the AI reviews/)).toBeTruthy()
+  })
+
+  it('says nothing at all when the build is whole', async () => {
+    getCapabilitiesMock.mockReset().mockResolvedValue(caps([]))
+
+    render(<App />)
+
+    await screen.findByRole('button', { name: 'New project' })
+    expect(screen.queryByText(/reduced capability/)).toBeNull()
+  })
+
+  it('shows it on the first-run screen too, above onboarding', async () => {
+    /** A broken build is not a configuration problem a wizard can fix, and it
+     *  explains failures the wizard would otherwise present as its own. */
+    getConfigMock.mockResolvedValue({})
+    getCapabilitiesMock.mockReset().mockResolvedValue(caps(['llm_providers']))
+
+    render(<App />)
+
+    expect(await screen.findByText('Welcome to Copperplane')).toBeTruthy()
+    expect(screen.getByText(/started with reduced capability/)).toBeTruthy()
+  })
+})
