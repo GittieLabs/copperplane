@@ -371,6 +371,25 @@ def load_part(part_id: str) -> dict:
     )))
 
 
+def assert_part_can_be_saved(part: dict) -> None:
+    """Raise now what `save_part` would raise later.
+
+    A route that spends twenty seconds of LLM work and then fails the
+    part's provenance check has taken the user's time to tell them
+    something it knew before it started. This lets a caller ask the
+    question first. It runs the same checks in the same order, so it can
+    only be a false alarm if `save_part` itself would also refuse.
+
+    Deliberately a check and not a fix: it does not backfill anything,
+    because guessing where a measurement came from is exactly what the
+    provenance rule exists to prevent.
+    """
+    part_id = part.get("part_id")
+    if not part_id:
+        raise SchemaValidationError("Part.part_id is required.")
+    _validate_part_provenance(part)
+
+
 def save_part_design_guidance(
     part_id: str, content_hash: str, categories: dict, category_summaries: dict | None = None,
 ) -> dict:
