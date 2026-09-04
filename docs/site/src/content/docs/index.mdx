@@ -20,9 +20,10 @@ hero:
 import { Card, CardGrid, Aside } from '@astrojs/starlight/components'
 
 <Aside type="caution" title="Early, and honest about it">
-Releases publish **one macOS build, for Apple Silicon**. There is no published
-Intel macOS, Windows or Linux build yet — those are working CI targets that have
-not been attached to a release, and you can build from source today.
+Every release publishes a build for **macOS (both architectures), Windows and
+Linux**. The macOS builds are signed and notarized; the Windows and Linux ones
+are not signed yet, so each release also ships a `SHA256SUMS.txt` you can
+[check your download against](/copperplane/install/#verify-your-download).
 
 Every live test against real KiCad and FreeCAD has run on exactly one machine, a
 Mac. So if you are on **Windows or Linux**, you can find things nobody here can

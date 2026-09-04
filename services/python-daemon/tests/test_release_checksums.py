@@ -346,3 +346,68 @@ class DocumentedVerifyCommandTests(unittest.TestCase):
 
         noticed = 'FAILED' in output or result.returncode != 0
         self.assertTrue(noticed, f"a corrupted installer verified clean:\n{output}")
+
+
+class PublishedPlatformsAreDocumentedTests(unittest.TestCase):
+    """The install page must offer everything the release actually publishes.
+
+    This is the check that was missing. Windows and Linux installers shipped
+    from v0.2.0 on 2026-08-27; README.md, install.md and the docs home page
+    all went on saying there was no build and to compile from source. Eight
+    days, on the page whose entire job is getting someone installed, aimed
+    at the two platforms this project most needs people on.
+
+    Nothing could have noticed, because the claim was true when written.
+    A release-availability statement is a fact with an expiry date, the same
+    way a hardcoded version number is, and it needs the same kind of guard.
+    """
+
+    def setUp(self):
+        workflow = (REPO_ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+        self.publish_step = workflow.split('Publish the GitHub Release', 1)[1]
+        self.install_page = (REPO_ROOT / 'docs/site/src/content/docs/install.md').read_text(encoding='utf-8')
+
+    def test_301_install_page_names_every_installer_the_release_publishes(self):
+        """Structural: derived from the workflow, so a new artifact type
+        cannot be published without the install page gaining a mention."""
+        import re
+        published = {
+            m.group(1) for m in
+            re.finditer(r'artifacts/[^\s]*/\*\*/\*(\.[A-Za-z0-9]+)$', self.publish_step, re.M)
+        }
+        installers = published & set(generate_checksums.INSTALLER_EXTENSIONS)
+        self.assertTrue(installers, "found no installer globs in the publish step")
+
+        missing = sorted(ext for ext in installers if ext not in self.install_page)
+
+        self.assertEqual(
+            missing, [],
+            f"every release publishes {missing}, and the install page never mentions it -- "
+            f"someone on that platform is told to build from source for no reason"
+        )
+
+    def test_302_no_page_still_says_a_published_platform_is_unpublished(self):
+        """Supplement, not a substitute for the structural check above:
+        a fixed list of the exact phrasings that actually went stale here.
+        It cannot catch a new way of saying it -- 301 is what does that."""
+        expired_claims = [
+            "Not published. Build from source.",
+            "no published build",
+            "There is no published",
+            "not attached to a published release",
+            "not been attached to a release",
+        ]
+
+        pages = [REPO_ROOT / 'README.md']
+        docs_root = REPO_ROOT / 'docs/site/src/content/docs'
+        if docs_root.is_dir():
+            pages += sorted(docs_root.rglob('*.md')) + sorted(docs_root.rglob('*.mdx'))
+
+        offenders = []
+        for page in pages:
+            text = page.read_text(encoding='utf-8')
+            for claim in expired_claims:
+                if claim in text:
+                    offenders.append(f"{page.relative_to(REPO_ROOT)}: {claim!r}")
+
+        self.assertEqual(offenders, [], "\n".join(["stale availability claims:"] + offenders))
