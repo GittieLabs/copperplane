@@ -10,7 +10,7 @@ page and not finding what you expected:
 
 | Platform | Status |
 | :--- | :--- |
-| **macOS, Apple Silicon** | ✅ Published, signed and notarized (`v0.1.1`) |
+| **macOS, Apple Silicon** | ✅ Published, signed and notarized |
 | **macOS, Intel** | ❌ Not published. Build from source. |
 | **Windows** | ❌ Not published. Build from source. |
 | **Linux** | ❌ Not published. Build from source. |
@@ -36,17 +36,10 @@ The build is signed and notarized under a real GittieLabs, LLC Apple Developer
 identity, so there should be no Gatekeeper warning. If you get one, that is a
 bug worth [reporting](https://github.com/GittieLabs/copperplane/issues/new?template=bug_report.yml).
 
-:::note[If you are on v0.1.0]
-That release was deliberately unsigned. macOS will refuse a normal double-click.
-**Right-click** (or Control-click) the app and choose **Open**, then **Open**
-again in the dialog — macOS remembers the choice. If instead you get *"is
-damaged and can't be opened"*, run this once and retry:
-
-```bash
-xattr -cr /Applications/Hardware\ Agent\ Studio.app
-```
-
-Better: just download `v0.1.1`.
+:::note[Very early releases were unsigned]
+The first release was deliberately unsigned, and macOS refuses a normal
+double-click on it. If you have one of those, download the newest release
+instead — every recent one is signed and notarized, and opens normally.
 :::
 
 ## Build from source

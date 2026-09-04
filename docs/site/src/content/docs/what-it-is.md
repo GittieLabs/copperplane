@@ -3,8 +3,13 @@ title: What it is, and what it is not
 description: The scope boundary, stated plainly — what the app does, what it refuses to do, and what is simply not built yet.
 ---
 
-Two minutes here will save you an install if this is not the tool you are
-looking for.
+If you are hoping for something that draws the schematic for you, this is not
+it, and two minutes here will save you the install.
+
+What it is instead: something that sits beside KiCad and FreeCAD while you work,
+reads what you have made, and explains what it finds. You still design the
+board. It tells you what the checker meant, what a footprint name is saying, and
+how big the case needs to be.
 
 ## It is an advisor with hands
 

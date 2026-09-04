@@ -1,7 +1,27 @@
 ---
 title: Why this exists
-description: The problem this tool was built for — the hours lost between a datasheet, a schematic and a CAD model that do not talk to each other.
+description: What happens between a working breadboard and a board you can order — and which parts of it this tool takes off you.
 ---
+
+Your circuit works on the breadboard. The jumper wires are a mess, but it does
+what you wanted, and the obvious next step is to make it real: a board you can
+order, and a case you can print.
+
+That step is where a lot of projects stop. Not because it is beyond you — the
+tools are free and the tutorials exist — but because the amount you have to
+learn before your first board is *correct* is larger than it looks, and most of
+it is not the interesting part. A checker tells you `power_pin_not_driven` and
+means "add a marker KiCad wants". A footprint is called
+`PinHeader_1x04_P2.54mm_Vertical` and nobody tells you that is a sentence. Your
+case has to fit a board you would have to measure by hand.
+
+None of that is design work. It is translation, and it is where the afternoons
+go.
+
+## The afternoon this was built for
+
+Here is what that looks like a little further along, once you are past the first
+board and into a real part.
 
 You are putting a microcontroller on a board. You have its datasheet open — two
 hundred and thirty pages of it. Somewhere in there is the answer to what that
