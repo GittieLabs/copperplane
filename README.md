@@ -53,19 +53,32 @@ You bring your own AI provider — Anthropic, OpenAI, Google, Perplexity, or a l
 > polished install-and-go product. Things will be rough, and hearing about it is the most useful
 > thing you can do — see below.
 
-**macOS (Apple Silicon):** grab the newest `.dmg` from [Releases](../../releases), open it, and drag
-**Copperplane** into `/Applications`. Recent releases are signed and notarised, so it should open
-normally.
+Download the newest build for your machine from [Releases](../../releases). All four are published
+every release.
 
-**Windows and Linux:** there is no published build yet — you can [build from
-source](#build-from-source), and an issue saying you want one genuinely affects whether it gets
-built.
+| Your machine | Take the file ending in | What to expect |
+| :--- | :--- | :--- |
+| **macOS**, Apple Silicon | `_aarch64.dmg` | Signed and notarised — opens normally |
+| **macOS**, Intel | `_x64.dmg` | Signed and notarised — opens normally |
+| **Windows** | `_x64-setup.exe` | **Unsigned** — SmartScreen will warn you |
+| **Linux** | `.AppImage` or `.deb` | **Unsigned** |
+
+Not sure which Mac you have? **Apple menu → About This Mac** — an M-series chip is Apple Silicon.
+
+**On Windows, SmartScreen will say the publisher is unknown, and it is right to.** There is no
+code-signing certificate for this project yet. So every release also publishes a `SHA256SUMS.txt`,
+which lets you confirm the installer you downloaded is byte-for-byte the one CI built — worth doing,
+and [two commands](https://gittielabs.github.io/copperplane/install/#verify-your-download). Be clear
+on what that is worth: it catches a truncated or tampered-with *download*. It is not a signature,
+and it cannot vouch for the release itself the way signing would.
+
+Prefer to trust nothing at all? [Build it from source](#build-from-source) — that path is real, and
+it is the same one contributors use.
 
 To get the most out of it you will want **KiCad 9+** installed, and **FreeCAD 0.20+** if you want
 enclosures. The app will tell you if either is missing and what stops working without it.
 
-📚 **[Documentation](https://gittielabs.github.io/copperplane/)** — installing, first run, and a
-guide per feature.
+📚 **[Documentation](https://gittielabs.github.io/copperplane/)** — installing, first run, and a guide per feature.
 
 ## The most useful thing you can do
 

@@ -4,7 +4,7 @@ title: "Release, Signing & Auto-Update"
 status: Completed
 type: Module
 created: 2026-08-16
-last_updated: 2026-08-26
+last_updated: 2026-09-04
 target_version: v0.1.0
 location: "specs/SPEC-402-release-signing-and-auto-update.md"
 parent_spec: "SPEC-000-architecture-overview.md"
@@ -44,6 +44,17 @@ user_facing: true
         real builds exist and can be tried, but "pre-release, please help test" is the honest framing
         until `SPEC-403` (or equivalent real usage) closes that gap -- not a silent "it works" claim
         the original Non-Goal here was written to avoid making.
+
+        `CTX-402.8` narrows this gap without closing it: every release publishes a
+        `SHA256SUMS.txt` over the installers, so someone downloading an unsigned Windows or Linux
+        build can confirm the bytes are the ones CI produced. That is *integrity*, not
+        *authenticity* -- the manifest sits on the same release page as the files it describes, so
+        it cannot defend against anyone able to rewrite that page. It is deliberately not described
+        anywhere as a substitute for code signing, and this Non-Goal stands unchanged.
+        Build-provenance attestation (`actions/attest-build-provenance`, free on this public repo)
+        is the real next step and would provide authenticity; it is not done yet because it adds a
+        step that can fail inside a working release pipeline and cannot be proven without a real
+        tag push.
     *   **Not a semantic-versioning or release-branch policy.** The version bump and tag push that
         trigger a release remain a real, manual, human action in this first slice -- not
         `release-please`-style automation.
