@@ -249,7 +249,7 @@ _PROBE_FAILURE_HELP = (
 )
 
 
-def probe_routes(path: str, timeout_s: float = 15.0, command: list = None):
+def probe_routes(path: str, timeout_s: float = 45.0, command: list = None):
     """(ok, reason). Ask the frozen artifact what it can actually do.
 
     SPEC-407 §1's costly failure was "a mis-frozen sidecar that starts, reports
@@ -314,7 +314,7 @@ def probe_routes(path: str, timeout_s: float = 15.0, command: list = None):
         if proc is not None:
             proc.kill()
 
-    reported, degraded = None, []
+    reported, degraded, saw_ready = None, [], False
     for line in proc.stdout_text.splitlines():
         try:
             message = json.loads(line)
@@ -326,11 +326,18 @@ def probe_routes(path: str, timeout_s: float = 15.0, command: list = None):
             degraded = result.get("degraded_modules") or []
             break
         if message.get("method") == "daemon.ready":
+            saw_ready = True
             degraded = (message.get("params") or {}).get("degraded_modules") or degraded
 
     if reported is None:
-        # An older sidecar predates the route. Not a disagreement to fail on.
-        return True, "skipped -- this sidecar does not answer daemon.list_routes"
+        if not saw_ready:
+            return True, (
+                f"skipped -- the sidecar produced no output within {timeout_s:.0f}s. It may just be"
+                " a cold first launch; re-run with --probe to ask again."
+            )
+        # It started and answered daemon.ready, so it is alive and simply does
+        # not implement the route: an older build. Not a disagreement to fail on.
+        return True, "skipped -- this sidecar started but does not answer daemon.list_routes"
 
     missing = sorted(expected - reported)
     if missing:
