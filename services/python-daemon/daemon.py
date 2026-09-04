@@ -1709,8 +1709,9 @@ def kicad_generate_footprint_from_part(part_id: str) -> dict:
     if missing:
         raise library_store.SchemaValidationError(
             f"'{part_id}' does not have the {', '.join(missing)} needed to draw a footprint. "
-            f"Parts saved by older versions of Copperplane are missing these. Search for the "
-            f"part again and save it, and the measurements will come with it."
+            f"A part confirmed from a search result carries only what the search returned, which "
+            f"does not include measurements. Use \"Generate directly from a part number\" to "
+            f"read them out of the datasheet, and the footprint can be drawn from those."
         )
 
     pin_numbers = [pin["number"] for pin in part["pins"]]

@@ -187,9 +187,11 @@ def _validate_part_provenance(part: dict) -> None:
     missing = [f for f in PART_PROVENANCE_REQUIRED_FIELDS if f not in provenance]
     if missing:
         raise SchemaValidationError(
-            f"This part is missing where its {', '.join(missing)} came from, so Copperplane "
-            f"will not use it. Every measurement it acts on has to be traceable to a source. "
-            f"Re-running the part search and saving again usually fills this in."
+            f"Copperplane does not know where this part's {', '.join(missing)} came from, so it "
+            f"will not act on them -- every measurement it uses has to be traceable to a source. "
+            f"Parts added by confirming a search result carry only what the search returned. To "
+            f"get the measurements, use \"Generate directly from a part number\" instead, which "
+            f"reads them out of the datasheet."
         )
 
 
@@ -495,10 +497,10 @@ _KICAD_PIN_PITCH_MM = 2.54
 _KICAD_SYM_MIN_HALF_WIDTH_MM = 5.08
 
 #: Horizontal advance per character of a pin name, at KiCad's default 1.27mm
-#: symbol text size. The stroke font is not monospaced, so this is a
-#: deliberately generous estimate -- a symbol slightly wider than it needed
-#: to be is untidy, one slightly too narrow is the bug being fixed.
-_KICAD_SYM_NAME_CHAR_MM = 0.85
+#: symbol text size. Measured off a real rendered symbol, not estimated: the
+#: first attempt at this used 0.85mm and still overlapped, because KiCad's
+#: stroke font advances roughly one text-height per character.
+_KICAD_SYM_NAME_CHAR_MM = 1.27
 
 #: Clear space between the longest name and the centreline, so two full-width
 #: names on the same row still cannot touch.
@@ -535,17 +537,26 @@ def _layout_pins(pins: list) -> dict:
     left_ys = _side_positions(left_count)
     right_ys = _side_positions(right_count)
 
-    # Wide enough that each side's longest name fits inside its own half.
-    # Sizing on the longest name per side rather than per row means two
-    # names on the same row can never meet in the middle, whichever way the
-    # pin list is ordered.
-    def _widest(group: list) -> float:
-        return max((len(str(pin.get("name", ""))) for pin in group), default=0) * _KICAD_SYM_NAME_CHAR_MM
+    # The constraint is per ROW, not per side. KiCad draws a pin's name
+    # inward from the body edge, so on any given row the left name and the
+    # right name grow towards each other and it is their SUM that has to fit.
+    #
+    # Sizing each side independently was the first attempt and was wrong: a
+    # 17-character name opposite a 25-character one fits comfortably in
+    # "each side's longest fits its own half" and still collides in the
+    # middle, which is exactly what shipped.
+    def _chars(pin) -> int:
+        return len(str(pin.get("name", "")))
+
+    left, right = pins[:left_count], pins[left_count:]
+    widest_row = max(
+        (_chars(a) + _chars(b) for a, b in zip(left, right)),
+        default=max((_chars(p) for p in pins), default=0),
+    )
 
     half_width = max(
         _KICAD_SYM_MIN_HALF_WIDTH_MM,
-        _widest(pins[:left_count]) + _KICAD_SYM_NAME_MARGIN_MM,
-        _widest(pins[left_count:]) + _KICAD_SYM_NAME_MARGIN_MM,
+        (widest_row * _KICAD_SYM_NAME_CHAR_MM + _KICAD_SYM_NAME_MARGIN_MM) / 2,
     )
     # KiCad's own grid. A body edge off-grid is legal and looks wrong next
     # to every other symbol in a schematic.

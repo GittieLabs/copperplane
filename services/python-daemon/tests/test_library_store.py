@@ -2147,77 +2147,97 @@ class TestRenamingAProject(unittest.TestCase):
 
 
 class TestSymbolBodyFitsItsPinNames(unittest.TestCase):
-    """The symbol body used to be a fixed 5.08mm half-width whatever the
-    pins were called.
+    """The symbol body used to be a fixed 5.08mm half-width whatever the pins
+    were called, so a real ATTINY85's pin names ran across the centreline and
+    the preview was unreadable.
 
-    KiCad draws a pin's name inward from the body edge, so on a real
-    ATTINY85 the left column's "PB0/MOSI/DI/SDA/AIN0/OC0A" ran across the
-    centreline into "PB5/RESET/ADC0/dW" coming the other way. The preview
-    was unreadable and the exported .kicad_sym was too. Reported from the
-    running app, against a real saved part -- no test in the suite looked at
-    geometry, so nothing could have caught it."""
+    The first fix sized each side from its own longest name and **still
+    overlapped**, because KiCad draws a pin name inward from the body edge:
+    on any row the left and right names grow towards each other, so it is
+    their SUM that has to fit. A 17-character name opposite a 25-character
+    one satisfies "each side's longest fits its own half" and collides
+    anyway. That version shipped and was reported from the app.
 
-    #: Mirrors library_store's own estimate. Kept as a local number on
-    #: purpose: importing the constant would make this test agree with the
-    #: implementation by construction, including when both are wrong.
-    CHAR_MM = 0.85
+    The character advance was wrong too -- 0.85mm, where KiCad's stroke font
+    advances roughly one text-height (1.27mm) per character. Both numbers
+    here were taken from a symbol rendered by `kicad-cli`, not estimated.
+    """
 
-    def _names(self, *names):
+    #: Mirrors library_store's own constant deliberately rather than
+    #: importing it: a test that reads the implementation's number agrees
+    #: with the implementation by construction, including when both are wrong
+    #: -- which is precisely what happened the first time.
+    CHAR_MM = 1.27
+    GAP_MM = 2.54
+
+    ATTINY85 = [
+        "PB5/RESET/ADC0/dW", "PB3/ADC3/CLKI", "PB4/ADC2/CLKO", "GND",
+        "PB0/MOSI/DI/SDA/AIN0/OC0A", "PB1/MISO/DO/AIN1/OC0B",
+        "PB2/SCK/USCK/SCL/ADC1/T0", "VCC",
+    ]
+
+    def _pins(self, *names):
         return [{"name": n, "number": str(i + 1), "electrical_type": "bidirectional"}
                 for i, n in enumerate(names)]
 
-    def test_001_a_real_attiny85_pinout_does_not_overlap(self):
-        pins = self._names(
-            "PB5/RESET/ADC0/dW", "PB3/ADC3/CLKI", "PB4/ADC2/CLKO", "GND",
-            "PB0/MOSI/DI/SDA/AIN0/OC0A", "PB1/MISO/DO/AIN1/OC0B",
-            "PB2/SCK/USCK/SCL/ADC1/T0", "VCC",
-        )
-
+    def _rows_fit(self, names):
+        """Every row's two names, together, inside the body."""
+        pins = self._pins(*names)
         layout = store._layout_pins(pins)
-        half = layout["half_width"]
-
-        left = pins[: (len(pins) + 1) // 2]
-        right = pins[(len(pins) + 1) // 2 :]
-        for group in (left, right):
-            widest = max(len(p["name"]) for p in group) * self.CHAR_MM
-            self.assertLess(
-                widest, half,
-                f"a {max(len(p['name']) for p in group)}-character pin name needs more room "
-                f"than the {half}mm half-body gives it, so it crosses the centreline",
+        body = layout["half_width"] * 2
+        left_count = (len(pins) + 1) // 2
+        left, right = pins[:left_count], pins[left_count:]
+        for a, b in zip(left, right):
+            needed = (len(a["name"]) + len(b["name"])) * self.CHAR_MM
+            self.assertLessEqual(
+                needed, body,
+                f"row {a['name']!r} + {b['name']!r} needs {needed:.2f}mm of text "
+                f"and the body is {body:.2f}mm -- they meet in the middle",
             )
+        return layout
 
-    def test_002_the_two_sides_can_never_meet_in_the_middle(self):
-        """The property that actually matters, stated directly: the widest
-        name on the left plus the widest on the right must fit."""
-        pins = self._names(*(["VERY_LONG_PERIPHERAL_NAME_HERE"] * 6))
+    def test_001_a_real_attiny85_pinout_does_not_overlap(self):
+        """The exact pinout that was reported twice."""
+        self._rows_fit(self.ATTINY85)
 
-        layout = store._layout_pins(pins)
-
-        widest = 30 * self.CHAR_MM
-        self.assertLess(widest * 2, layout["half_width"] * 2)
+    def test_002_the_widest_row_drives_the_width_not_the_widest_side(self):
+        """The bug the first fix had. Both sides' longest names land on the
+        same row here, so per-side sizing would come out too narrow."""
+        layout = self._rows_fit([
+            "AAAAAAAAAAAAAAAAAAAAAAAAA", "B", "C", "D",
+            "EEEEEEEEEEEEEEEEEEEEEEEEE", "F", "G", "H",
+        ])
+        needed = 50 * self.CHAR_MM
+        self.assertGreaterEqual(layout["half_width"] * 2, needed)
 
     def test_003_short_names_keep_the_original_narrow_body(self):
-        """Widening is conditional. A symbol whose pins are all called GND
-        should look exactly as it did before."""
-        layout = store._layout_pins(self._names(*(["GND"] * 8)))
+        layout = store._layout_pins(self._pins(*(["GND"] * 8)))
 
         self.assertEqual(layout["half_width"], 5.08)
 
     def test_004_the_body_edge_stays_on_kicad_grid(self):
         """An off-grid body edge is legal and looks wrong beside every other
-        symbol in a schematic."""
+        symbol in a schematic.
+
+        Checked as distance-to-nearest-multiple rather than `% 2.54 == 0`:
+        the remainder of a float that is a hair under a multiple comes back
+        as almost the whole step, not almost zero."""
         for count in (2, 8, 20):
-            layout = store._layout_pins(self._names(*(["SOME_MEDIUM_NAME"] * count)))
-            remainder = round(layout["half_width"] % 2.54, 6)
-            self.assertEqual(remainder, 0.0, f"{layout['half_width']}mm is off-grid")
+            layout = store._layout_pins(self._pins(*(["SOME_MEDIUM_NAME"] * count)))
+            remainder = layout["half_width"] % store._KICAD_PIN_PITCH_MM
+            off_grid_by = min(remainder, store._KICAD_PIN_PITCH_MM - remainder)
+            self.assertLess(off_grid_by, 1e-6, f"{layout['half_width']}mm is off-grid")
 
-    def test_005_pins_hang_off_the_widened_body_not_the_old_one(self):
-        """The body grew; the pins have to move with it, or they float
-        detached in the middle of the symbol."""
-        pins = self._names(*(["PB0/MOSI/DI/SDA/AIN0/OC0A"] * 4))
-
-        layout = store._layout_pins(pins)
+    def test_005_pins_hang_off_the_widened_body(self):
+        layout = store._layout_pins(self._pins(*(["PB0/MOSI/DI/SDA/AIN0/OC0A"] * 4)))
         half = layout["half_width"]
 
         for placed in layout["pins"]:
             self.assertEqual(abs(placed["x"]), half + store._KICAD_PIN_LENGTH_MM)
+
+    def test_006_an_odd_pin_count_does_not_lose_the_unpaired_name(self):
+        """With an odd count the last left pin has no partner. Zipping rows
+        would silently ignore it."""
+        layout = store._layout_pins(self._pins("A" * 30, "B", "C"))
+
+        self.assertGreaterEqual(layout["half_width"] * 2, 30 * self.CHAR_MM)
