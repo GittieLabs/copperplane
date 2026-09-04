@@ -14,6 +14,13 @@ import unittest
 
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 _README = os.path.join(_ROOT, "README.md")
+#: Other authored markdown whose relative links have to resolve. Deliberately a
+#: list rather than a glob: docs/site has 16 pages with their own link rules,
+#: and docs/research is archived thinking that is allowed to rot.
+_ALSO_CHECKED = [
+    os.path.join(_ROOT, "docs", "video", "product-video-script.md"),
+    os.path.join(_ROOT, "docs", "video", "example-project.md"),
+]
 _TAURI_CONF = os.path.join(_ROOT, "core", "tauri-rust", "tauri.conf.json")
 
 #: Names this product has had. A superseded one in install instructions sends a
@@ -84,3 +91,25 @@ class TestReadmeStaysTrue(unittest.TestCase):
         self.assertEqual(_VERSION.findall(stale), ["v0.1.1"])
         self.assertEqual(_RELATIVE_LINK.findall(stale), ["nope/missing.md"])
         self.assertFalse(os.path.exists(os.path.join(_ROOT, "nope/missing.md")))
+
+
+class TestAuthoredDocsLinksResolve(unittest.TestCase):
+    """The same check, for documents a person follows while doing something --
+    a dead link in a recording script is discovered at the worst moment."""
+
+    def test_001_every_relative_link_resolves(self):
+        broken = []
+        for path in _ALSO_CHECKED:
+            if not os.path.isfile(path):
+                broken.append(f"{path} does not exist")
+                continue
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
+            for target in _RELATIVE_LINK.findall(text):
+                if target.startswith("../../"):
+                    continue
+                resolved = os.path.join(os.path.dirname(path), target.split("#")[0])
+                if not os.path.exists(resolved):
+                    broken.append(f"{os.path.basename(path)} -> {target}")
+
+        self.assertEqual(broken, [])
