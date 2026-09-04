@@ -1,109 +1,107 @@
-# 🛠️ Copperplane
+<p align="center">
+  <img src="brand/svg/lockup-horizontal.svg#gh-light-mode-only" alt="Copperplane" width="360">
+  <img src="brand/svg/lockup-horizontal-on-dark.svg#gh-dark-mode-only" alt="Copperplane" width="360">
+</p>
 
-**Copperplane** is an open-source, local-first AI assistant for hardware engineers — one
-workspace that bridges PCB design (**KiCad**) and mechanical CAD (**FreeCAD**), instead of a pile of
-disconnected plugins.
-
-It's a **Tauri** desktop app (Rust + React) driving a long-running **Python daemon** that talks to
-KiCad over its native IPC API and to FreeCAD headlessly, orchestrated by an LLM you choose —
-Anthropic, OpenAI, Google, Perplexity, or a fully local Ollama model. Everything it touches stays on
-your machine: your parts library, your API keys, your board files.
-
-> **Status: early, under active daily development.** The backend is real and genuinely useful today
-> (see below) — a real project/library workspace, real KiCad/FreeCAD bridges, real confirmation
-> gating before anything touches your board. It is not yet a polished, install-and-go product. If
-> you want to help shape it before it is, this is a good time to jump in — see
-> [Contributing](#-contributing).
-
-📚 **[Full documentation](https://gittielabs.github.io/copperplane/)** — install guide,
-architecture, and how every feature got built.
+<p align="center">
+  <strong>A co-pilot for your first real circuit board.</strong>
+</p>
 
 ---
 
-## ✨ What it does today
+Your breadboard works. The next step — a real PCB, and a case to put it in — is where a lot of
+projects stop.
 
-*   **A real project & parts library, not a chat transcript.** Projects, Parts, Symbols, and
-    Footprints are real objects — persisted as readable JSON files plus a rebuildable SQLite index,
-    not thrown away the moment you generate a second component. Every field records **where it came
-    from** (a datasheet, a supplier API, a model inference) so you can tell a verified value from an
-    LLM's guess.
-*   **Component discovery with real disambiguation.** Search a part number, get ranked candidates
-    with sources and confidence — never a silent substitution. Confirm one, and it's saved to your
-    library for reuse across every future project.
-*   **A live KiCad bridge.** Talks to a running KiCad 9+ instance over its own Protocol Buffer IPC
-    API — no GUI freezing, no file-format hacking. Component injection is real, transactional
-    (commit-or-rollback), and **gated behind an explicit confirmation step** before anything writes
-    to your open board.
-*   **Footprint search across every library you have.** Searches your installed KiCad libraries —
-    including the ~150 that ship built into KiCad itself — *and* the footprints you've already saved
-    in this app, merged into one ranked result set.
-*   **A headless FreeCAD bridge.** Generates a parametric 3D enclosure straight from your board's
-    real outline and mounting holes, viewable in-app via an interactive 3D viewer.
-*   **Bring your own model.** Configurable LLM provider and model in Settings, with API keys stored
-    in your OS keychain — never in a config file on disk.
-*   **No orphaned processes.** The Rust core owns the Python daemon's lifecycle at the OS level
-    (Windows Job Objects, `prctl` on Linux) — closing the app cleanly kills every background
-    process it spawned, CAD engines included.
-*   **Cross-platform CI from day one.** The daemon and frontend test suites run on macOS, Linux, and
-    Windows on every PR — including real, live integration tests that skip themselves cleanly when
-    the machine running them doesn't have KiCad or FreeCAD installed.
+Not because it is impossible. Because KiCad opens onto a blank schematic and a hundred menus,
+because the design-rule checker reports *"Pin not connected"* and *"power_pin_not_driven"* without
+saying what to do about it, and because measuring your own board so an enclosure actually fits is
+fiddly, error-prone work that has nothing to do with the thing you set out to build.
 
-## 🏗️ Architecture
+**Copperplane sits beside KiCad and FreeCAD and explains what they are telling you.** It reads the
+files you already have, checks them, says what each finding means in plain language, and sizes an
+enclosure from your board's real outline and mounting holes.
 
-```text
-copperplane/
-├── apps/tauri-ui/        React + TypeScript frontend — project shell, component discovery,
-│                          part detail, settings, 3D viewer.        → apps/tauri-ui/README.md
-├── core/tauri-rust/       Rust process supervisor — spawns and owns the Python daemon,
-│                          OS keychain access, crash-shield lifecycle management.
-│                                                                     → core/tauri-rust/README.md
-└── services/python-daemon/ The JSON-RPC sidecar — KiCad/FreeCAD bridges, the LLM provider
-                            layer, the project/library store.        → services/python-daemon/README.md
-```
+## What it does not do
 
-The three layers talk over a real, versioned contract: Tauri's own IPC between Rust and the
-frontend, and a line-delimited JSON-RPC protocol over `stdin`/`stdout` between Rust and the Python
-daemon. See [`specs/SPEC-000-architecture-overview.md`](specs/SPEC-000-architecture-overview.md)
-for the full architecture record, and [`ROADMAP.md`](ROADMAP.md) for how every piece of this got
-built — each real feature has a `SPEC-*.md` design doc and a `CTX-*.md` implementation log with real
-commit hashes, test results, and honestly-recorded mistakes.
+It **does not replace KiCad or FreeCAD**, and it does not draw your schematic for you. Those are
+good tools and you will still use them. Copperplane reads what you have made, tells you what it
+finds, and hands the decisions back to you.
 
-## 🚀 Getting Started
+If you are looking for something that designs the board itself, this is not that.
 
-### Download a prebuilt build (macOS)
+## What it does
 
-Grab the latest release from [Releases](../../releases). **`v0.1.1` is the current release, and it
-ships one macOS `.dmg`, for Apple Silicon (M-series Macs) only** — filename ends in `_aarch64.dmg`.
-This is almost certainly your Mac if you bought it 2020 or later; check via **Menu → About This
-Mac**. There is no Intel (`x86_64`) build published yet, and no Windows or Linux build published
-yet either — both are real, working CI targets (`SPEC-402`), just not yet attached to a published
-release. If you need one of those platforms today, see "Build from source" below, or open an issue
-so we know there's demand.
+*   **Explains the checks instead of just running them.** Real ERC and DRC through `kicad-cli`, then
+    a plain-language explanation of each finding, where it is on your board, and which tests were
+    switched off — so a clean result cannot quietly mean "we did not look".
+*   **Tells you what a footprint name means.** `PinHeader_1x04_P2.54mm_Vertical` is a sentence once
+    someone reads it to you: a single row of four pads, 2.54mm apart, standing up off the board so
+    its height counts against your enclosure. It also says whether a 3D model exists, which decides
+    whether the part can be measured at all.
+*   **Sizes an enclosure from your actual board.** Outline, mounting holes, and per-component
+    heights, read from the board file. No live KiCad connection needed.
+*   **Looks up parts and cites where the answer came from.** Every field records its source — a
+    datasheet page, a model inference — so you can tell a verified value from a guess.
+*   **Keeps everything on your machine.** Your parts library, your board files, your API keys
+    (stored in your OS keychain, never in a file).
 
-As of `v0.1.1`, the macOS build is **signed and notarized** under a real GittieLabs, LLC Apple
-Developer identity — open the `.dmg` and drag **Hardware Agent Studio** into `/Applications`; it
-should launch normally with no Gatekeeper warning.
+You bring your own AI provider — Anthropic, OpenAI, Google, Perplexity, or a local Ollama model.
 
-**`v0.1.0` was unsigned** (see `SPEC-402` for the reasoning that shipped it that way first). If
-you're on that specific release, macOS will refuse to open it with a normal double-click:
+## Try it
 
-1. Open the `.dmg` and drag **Hardware Agent Studio** into `/Applications`.
-2. **Right-click** (or Control-click) the app in Finder and choose **Open**.
-3. In the dialog that appears, click **Open** again. macOS remembers this choice — future launches
-   work normally.
+> **This is early software, under daily development.** It is genuinely useful today and it is not a
+> polished install-and-go product. Things will be rough, and hearing about it is the most useful
+> thing you can do — see below.
 
-If macOS still blocks it with an "is damaged and can't be opened" message instead (a stricter,
-newer-macOS variant of the same unsigned-app warning), run this once in Terminal, then retry the
-right-click-Open steps above:
+**macOS (Apple Silicon):** grab the newest `.dmg` from [Releases](../../releases), open it, and drag
+**Copperplane** into `/Applications`. Recent releases are signed and notarised, so it should open
+normally.
 
-```bash
-xattr -cr /Applications/Hardware\ Agent\ Studio.app
-```
+**Windows and Linux:** there is no published build yet — you can [build from
+source](#build-from-source), and an issue saying you want one genuinely affects whether it gets
+built.
+
+To get the most out of it you will want **KiCad 9+** installed, and **FreeCAD 0.20+** if you want
+enclosures. The app will tell you if either is missing and what stops working without it.
+
+📚 **[Documentation](https://gittielabs.github.io/copperplane/)** — installing, first run, and a
+guide per feature.
+
+## The most useful thing you can do
+
+**Tell us what broke.** Especially on **Windows or Linux**.
+
+Every automated test suite runs on macOS, Linux and Windows. But the parts that talk to KiCad and
+FreeCAD have only ever been verified end-to-end on one machine — a Mac — because that is the only
+machine the maintainer has. Nearly every design document in this repo ends with a line admitting it.
+
+So if you run Windows or Linux, **you can find things nobody here can find**, and an issue that says
+"I clicked this and it did nothing" is worth more to this project right now than a pull request.
+`SPEC-403` tracks turning that gap from a hope into a checked fact.
+
+Contributions are welcome too, and there is a real workflow for them below — but users come first,
+and users become contributors.
+
+## Under the hood
+
+A [Tauri](https://tauri.app/) desktop app (Rust + React) driving a long-running Python daemon over
+JSON-RPC. The daemon talks to KiCad through `kicad-cli` against files on disk — no running KiCad
+required for most features — and to FreeCAD headlessly. An LLM you choose does the explaining, and
+every AI-assisted write to your board is gated behind an explicit confirmation.
+
+*   Projects, Parts, Symbols and Footprints are real objects on disk — readable JSON plus a
+    rebuildable SQLite index — not a chat transcript.
+*   A live KiCad IPC bridge exists as well, for the operations that genuinely need a running
+    instance; component injection is transactional and confirmation-gated.
+*   The Rust core owns the Python daemon's lifecycle at the OS level (Job Objects on Windows,
+    `prctl` on Linux), so closing the app kills everything it started, CAD engines included.
+*   The daemon and frontend suites run on macOS, Linux and Windows on every PR, including live
+    integration tests that skip themselves cleanly when the machine has no KiCad or FreeCAD.
 
 ### Build from source
 
-You'll need [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) 18+, and
-[uv](https://github.com/astral-sh/uv) for the Python daemon.
+You will need [Rust](https://rustup.rs/), [Node.js](https://nodejs.org/) 18+, and
+[uv](https://github.com/astral-sh/uv).
 
 ```bash
 # 1. Python daemon dependencies
@@ -116,64 +114,38 @@ cd apps/tauri-ui
 npm install
 cd ..
 
-# 3. Run the app in dev mode (spawns the frontend dev server and the daemon for you)
+# 3. Run the app in dev mode (starts the frontend dev server and the daemon for you)
 cd core/tauri-rust
 npx @tauri-apps/cli@2 dev
 ```
 
-KiCad and FreeCAD are optional for exploring the UI, but real live verification (and most of the
-interesting features) needs a real, running **KiCad 9+** install; FreeCAD 0.20+ is needed for
-enclosure generation. See [`services/python-daemon/README.md`](services/python-daemon/README.md)
-for daemon-only setup and test details.
+See [`services/python-daemon/README.md`](services/python-daemon/README.md) for daemon-only setup and
+test details.
 
-## 🗺️ Where this is heading
+## Where this is heading
 
-The near-term product model (see [`PRODUCT-PLAN.md`](PRODUCT-PLAN.md) for the full reasoning) is a
-straightforward one: real **Projects**, each holding real **Parts** with symbols and footprints
-pulled from a shared, reusable **Library** — with every AI-assisted step confirmable, never silent.
+The product model is in [`PRODUCT-PLAN.md`](PRODUCT-PLAN.md); `ROADMAP.md` has the detail, and
+`/spec-status` prints what is specced, in progress, or still an idea.
 
-*   ✅ **M1 — Capability proof.** Live KiCad/FreeCAD bridges, LLM-driven component extraction,
-    parametric enclosures. Done — this is the backend the rest of the product stands on.
-*   ✅ **M2 — Shell, Projects, Components.** A real project/library workspace replacing the original
-    single-text-box demo: search, disambiguate, save to library, reuse across projects. Done.
-*   ✅ **M3 — Schematic stage.** Footprints as first-class, searchable, reusable objects: search
-    across installed and saved libraries, generate from datasheet dimensions, export to a real
-    `.pretty` library, plus per-pin connection guidance (decoupling, protection, power) via a real
-    LLM call. Done.
-*   ✅ **M4 — Advisors.** Real ERC/DRC via `kicad-cli`, explained in plain language with suggested
-    fixes via a real LLM call. DRC auto-targets whatever board is open in KiCad; ERC takes an
-    explicit, user-picked file (schematic documents have no live-resolution path — a real,
-    confirmed KiCad IPC limitation, not a shortcut). Done.
-*   ✅ **M5 — Enclosure from geometry, then ambition.** Import a real `.kicad_pcb` file, no live
-    KiCad connection required, and generate a starter enclosure body from its actual outline and
-    mounting holes via `kicad-cli`'s own DXF/drill export. Auto-layout and assisted routing stay
-    explicitly out of scope. Done.
+The read-only half is built: reading your project, checking it, explaining the results, and
+generating an enclosure from real geometry. What is deliberately still ahead is the part where the
+app helps you *change* things — assisted authoring — kept last on purpose, because a tool that
+writes to your board before it has earned your trust is a tool you stop using.
 
-Distribution work — code signing, auto-update, verified Windows/Linux builds — is tracked
-separately and is real but intentionally *after* the product model, not before it. A macOS
-`.app` build already exists (`SPEC-401`); it's just not the current priority.
+## Contributing
 
-## 🤝 Contributing
+This repo runs a **spec → context → implement → verify** workflow: every feature has a `SPEC-*.md`
+saying what and why, and a `CTX-*.md` recording how it was built, what was tested, and what went
+wrong — the honest mistakes included. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first; it is short,
+and CI enforces it.
 
-This repo runs on a **spec → context → implement → verify** workflow: every real feature has a
-`SPEC-*.md` explaining what and why, and a `CTX-*.md` recording exactly how it was built, tested,
-and what went wrong along the way — including the honest mistakes, not just the wins. Read
-[`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a PR; it's short, and CI enforces it.
+Where help is most useful, in order:
 
-**Where help is genuinely useful right now:**
-1.  **Hardware engineers** to pressure-test the KiCad/FreeCAD bridges against real boards and real
-    footprint libraries — the fastest way to find where a "should work" assumption doesn't.
-2.  **Windows and Linux users** — the daemon and frontend both run cross-platform in CI, but the
-    live CAD-integration paths have only ever been verified end-to-end on macOS. `SPEC-403` tracks
-    turning that from a hope into a checked fact.
-3.  **React/Three.js developers** to keep building out the project shell and 3D viewer as the
-    product model in `PRODUCT-PLAN.md` fills in.
-4.  **Python developers** interested in the LLM tool-calling layer (`SPEC-204`). (Supplier-API
-    integration, `SPEC-203`, was explored and retired 2026-08-18 — see its tombstone for why.)
+1.  **Anyone on Windows or Linux**, telling us what breaks.
+2.  **Anyone with a real board**, telling us where the checks or the enclosure got it wrong.
+3.  **Developers** — the project shell and 3D viewer (React/Three.js), and the LLM tool-calling
+    layer (`SPEC-204`, Python).
 
-Run [`/spec-status`](CONTRIBUTING.md) (or read `ROADMAP.md` directly) to see exactly what's
-specced, what's mid-implementation, and what's still an open idea before picking something up.
-
-## 📄 License
+## License
 
 Apache License 2.0 — see [`LICENSE`](LICENSE).

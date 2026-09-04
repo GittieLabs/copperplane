@@ -85,10 +85,14 @@ user_facing: true
     grows technical, or separate tracks? The maintainer's framing — *"very approachable with depth
     there as they can read as they learn the app"* — suggests one page per task that begins with
     the outcome.
-*   **The docs site does not exist.** `SPEC-336` §3 already records this as a live constraint:
-    *"The only external URL in the app today is `GITHUB_REPO_URL`"*, and guided setup links to
-    provider docs precisely because a Copperplane docs page would 404. Settle where it is hosted
-    and how it is built before writing pages for it.
+*   ~~**The docs site does not exist.**~~ **Wrong, and corrected 2026-09-03 by `CTX-408.1`.**
+    `docs/site` is a real Astro Starlight project with **16 authored pages**, deployed by
+    `.github/workflows/docs.yml`, and the README already links it. `SPEC-336` §3 states the
+    opposite and this spec inherited it. The work here is therefore **editing an existing site**,
+    not standing one up — a materially smaller job. Its current voice has the same problem as the
+    README's: `why.md` opens on a reader who already has a microcontroller on a board and a
+    230-page datasheet open. **Still open:** which pages get the approachable opening, and whether
+    new pages are needed or existing ones re-led.
 *   **What the 60-90 second video shows, in order.** Ninety seconds is roughly 200 spoken words and
     perhaps five screens. Decide the single story before writing the script; the failure mode is a
     feature tour that shows eight things and lands none.
