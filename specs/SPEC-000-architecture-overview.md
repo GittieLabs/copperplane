@@ -32,6 +32,7 @@ child_specs:
   - "../services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md"
   - "../specs/SPEC-404-managed-hosted-access.md"
   - "../specs/SPEC-405-product-rename-copperplane.md"
+  - "SPEC-408-messaging-for-the-maker-who-is-leveling-up.md"
 user_facing: false
 ---
 
