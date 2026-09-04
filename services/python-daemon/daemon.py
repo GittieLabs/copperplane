@@ -1708,9 +1708,9 @@ def kicad_generate_footprint_from_part(part_id: str) -> dict:
     missing = [f for f in ("package", "pins", "package_dimensions", "courtyard") if not part.get(f)]
     if missing:
         raise library_store.SchemaValidationError(
-            f"Part '{part_id}' is missing {', '.join(missing)} -- cannot generate a footprint "
-            f"without the datasheet dimensions the extraction step returns. Parts saved before "
-            f"CTX-308.5 don't have these; re-run generate + save to pick them up."
+            f"'{part_id}' does not have the {', '.join(missing)} needed to draw a footprint. "
+            f"Parts saved by older versions of Copperplane are missing these. Search for the "
+            f"part again and save it, and the measurements will come with it."
         )
 
     pin_numbers = [pin["number"] for pin in part["pins"]]
