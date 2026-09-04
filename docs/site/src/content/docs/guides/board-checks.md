@@ -1,18 +1,28 @@
 ---
 title: Check a schematic or board
-description: Run ERC and DRC through KiCad's own tooling and get the results explained in plain language.
+description: Find out what is wrong with your board or schematic, in words that say what to do about it.
 sidebar:
   order: 4
 ---
 
-The app does not implement its own rule checker. It runs **KiCad's** — via
-`kicad-cli`, the command-line tool inside your KiCad installation — and then
-explains what came back.
+KiCad already tells you what is wrong with your board. The problem is that it
+says things like `power_pin_not_driven` and `Net-(U2-THRES)`, which are precise,
+correct, and no help at all if nobody has explained them to you.
+
+This runs those same checks and then translates the answer: which part, which
+pin, what it means, and whether it is a real electrical problem or a convention
+you have not satisfied yet.
+
+It does not implement its own rule checker. It runs **KiCad's**, via
+`kicad-cli` — the command-line tool inside your KiCad installation — so the
+findings are the same ones KiCad would give you.
 
 ## DRC, on a board
 
-Open the **PCB** tab. If you have a board open in KiCad, the app finds it
-automatically. Otherwise pick a `.kicad_pcb` file.
+Open the **PCB** tab. If your project has a KiCad project linked, the app uses
+that project's board — **KiCad does not need to be running**. If nothing is
+linked, it falls back to asking a running KiCad what it has open, or you can
+pick a `.kicad_pcb` file yourself.
 
 You get KiCad's real violations, each with a plain-language explanation of what
 the rule means, why it fired on your board, and what would typically fix it.

@@ -35,6 +35,17 @@ _VERSION = re.compile(r"\bv\d+\.\d+\.\d+\b")
 _RELATIVE_LINK = re.compile(r"\[[^\]]*\]\((?!https?://|#|mailto:)([^)]+)\)")
 
 
+def _plain(text: str) -> str:
+    """Shell-escaped paths hide a name from a literal search.
+
+    `xattr -cr /Applications/Hardware\\ Agent\\ Studio.app` contains the old
+    product name and does not contain the string "Hardware Agent Studio". The
+    docs carried exactly that for weeks, and the first version of this check
+    walked straight past it.
+    """
+    return text.replace("\\ ", " ")
+
+
 def _readme() -> str:
     with open(_README, encoding="utf-8") as handle:
         return handle.read()
@@ -49,7 +60,7 @@ class TestReadmeStaysTrue(unittest.TestCase):
         self.assertIn(product, _readme(), "the README never names the product")
 
     def test_002_names_no_superseded_product_name(self):
-        readme = _readme()
+        readme = _plain(_readme())
         found = [name for name in _SUPERSEDED_NAMES if name in readme]
 
         self.assertEqual(
@@ -113,3 +124,45 @@ class TestAuthoredDocsLinksResolve(unittest.TestCase):
                     broken.append(f"{os.path.basename(path)} -> {target}")
 
         self.assertEqual(broken, [])
+
+
+_DOCS_PAGES = os.path.join(_ROOT, "docs", "site", "src", "content", "docs")
+
+
+@unittest.skipUnless(os.path.isdir(_DOCS_PAGES), "the docs site is not present")
+class TestDocsPagesStayTrue(unittest.TestCase):
+    """The docs site had the same stale version the README did -- its index
+    announced `v0.1.1` through v0.2.0, v0.3.0 and v0.3.1. Same failure, same
+    check, one directory over."""
+
+    def _pages(self):
+        for root, _, files in os.walk(_DOCS_PAGES):
+            for name in files:
+                if name.endswith((".md", ".mdx")):
+                    yield os.path.join(root, name)
+
+    def test_001_no_page_names_a_superseded_product_name(self):
+        offenders = []
+        for path in self._pages():
+            with open(path, encoding="utf-8") as handle:
+                text = handle.read()
+            for name in _SUPERSEDED_NAMES:
+                if name in _plain(text):
+                    offenders.append(f"{os.path.relpath(path, _DOCS_PAGES)}: {name}")
+
+        self.assertEqual(offenders, [])
+
+    def test_002_no_page_hardcodes_a_release_version(self):
+        """A version in prose is a fact with an expiry date. Requirements like
+        "KiCad 9+" are not release claims and use no `v` prefix."""
+        offenders = []
+        for path in self._pages():
+            with open(path, encoding="utf-8") as handle:
+                found = _VERSION.findall(handle.read())
+            if found:
+                offenders.append(f"{os.path.relpath(path, _DOCS_PAGES)}: {sorted(set(found))}")
+
+        self.assertEqual(
+            offenders, [],
+            "link the releases page instead of naming a version that will be wrong within weeks",
+        )

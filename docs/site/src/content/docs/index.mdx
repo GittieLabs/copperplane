@@ -1,9 +1,9 @@
 ---
 title: Copperplane
-description: A local-first desktop assistant that bridges KiCad and FreeCAD. It reads the datasheet and shows you the page it got that from.
+description: A co-pilot for your first real circuit board. It reads your KiCad project, explains what the checks are telling you, and sizes a case that fits.
 template: splash
 hero:
-  tagline: One workspace across KiCad and FreeCAD, with an AI layer that cites its sources. Your parts, your keys, your board files — all on your machine.
+  tagline: Your breadboard works. Copperplane helps with the next part — a real board, checks you can actually read, and a case that fits it. It works alongside KiCad and FreeCAD, not instead of them.
   actions:
     - text: Why this exists
       link: /copperplane/why/
@@ -20,12 +20,15 @@ hero:
 import { Card, CardGrid, Aside } from '@astrojs/starlight/components'
 
 <Aside type="caution" title="Early, and honest about it">
-The current release is **v0.1.1**, and it publishes **one macOS build, for Apple
-Silicon only**. There is no published Intel macOS, Windows or Linux build yet —
-those are working CI targets that have not been attached to a release. Every
-live test against real KiCad and FreeCAD has run on exactly one machine. If you
-try it on Windows or Linux, [telling us what happened](https://github.com/GittieLabs/copperplane/issues/new?template=platform_report.yml)
-is the single most useful thing you can do for this project right now.
+Releases publish **one macOS build, for Apple Silicon**. There is no published
+Intel macOS, Windows or Linux build yet — those are working CI targets that have
+not been attached to a release, and you can build from source today.
+
+Every live test against real KiCad and FreeCAD has run on exactly one machine, a
+Mac. So if you are on **Windows or Linux**, you can find things nobody here can
+find, and [telling us what happened](https://github.com/GittieLabs/copperplane/issues/new?template=platform_report.yml)
+is the single most useful thing you can do for this project right now — more
+useful than a pull request.
 </Aside>
 
 ## What it does
