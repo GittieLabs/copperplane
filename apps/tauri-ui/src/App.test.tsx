@@ -1224,6 +1224,32 @@ describe('App: launch, closing a project, and first run', () => {
     expect(screen.queryByRole('button', { name: 'New project' })).toBeNull()
   })
 
+  /* Reported from the built app: the first launch showed the projects rail,
+     the library count and Settings alongside "Welcome to Copperplane". That
+     offers a way around the question the screen is asking, and tells someone
+     who has never opened the app that they are already inside it. The
+     RequirementsBanner had this condition from the start; the Rail did not,
+     and nothing looked. */
+  it('hides the rail on the welcome screen', async () => {
+    getConfigMock.mockResolvedValue({})
+
+    render(<App />)
+
+    expect(await screen.findByText('Welcome to Copperplane')).toBeTruthy()
+    expect(screen.queryByText('Projects')).toBeNull()
+    expect(screen.queryByText('Library')).toBeNull()
+  })
+
+  it('brings the rail back once onboarding is left', async () => {
+    render(<App />)
+
+    // Onboarding already done in this default mock: the rail is the norm,
+    // so the assertion above is about the welcome screen and not about the
+    // rail being broken generally.
+    expect(await screen.findByRole('button', { name: 'New project' })).toBeTruthy()
+    expect(screen.queryByText('Projects')).toBeTruthy()
+  })
+
   it('does not show the welcome screen again once it has been dismissed', async () => {
     render(<App />)
 

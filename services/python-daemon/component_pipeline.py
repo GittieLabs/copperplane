@@ -70,6 +70,18 @@ PACKAGE_REFERENCE = {
     # plausibly the same real characteristic, but not verified against a
     # real datasheet, so left as a named, deliberate non-change rather
     # than a guess.
+    # Third time this table has been the thing that failed a real part:
+    # PDIP-8 (an alias miss), QFN-56 (CTX-202.2), and now QFN-32 -- hit
+    # live while preparing the tutorial project, on an ATmega16U2-MU.
+    # 0.5mm pitch on a 5x5mm body is the standard geometry for this part,
+    # which sits inside the same 0.40-0.60 range every other QFN entry
+    # here uses. NOT marked exposed_pad: the ATmega16U2's own datasheet
+    # was not consulted, and QFN-16/QFN-24 are left unmarked for exactly
+    # that reason -- a guess here widens a safety check.
+    "QFN-32": {"pin_count": 32, "pitch_range_mm": (0.40, 0.60)},
+    # QFN-48, hit live on an ESP32-D0WDQ6 minutes after QFN-32 -- the
+    # third and fourth entries this table has been missing in one session.
+    "QFN-48": {"pin_count": 48, "pitch_range_mm": (0.40, 0.60)},
     "QFN-56": {"pin_count": 56, "pitch_range_mm": (0.40, 0.60), "exposed_pad": True},
     "DIP-8": {"pin_count": 8, "pitch_range_mm": (2.44, 2.64)},
     "DIP-14": {"pin_count": 14, "pitch_range_mm": (2.44, 2.64)},
@@ -114,7 +126,26 @@ def _extract_json(text: str) -> dict:
     try:
         return parse_json_response(text)
     except JSONResponseError as e:
-        raise ComponentValidationError(f"{_JSON_PARSE_ERROR_PREFIX}: {e}") from e
+        # The response goes to the log, not to the person. Before this, a
+        # truncated extraction put 500 characters of raw JSON into a red box
+        # in the app -- accurate, and useless to anyone who is not holding
+        # this file open.
+        logger.warning("extraction returned unusable output: %s", e)
+
+        # An unclosed brace or bracket means the model stopped mid-answer
+        # rather than answering badly, and the two deserve different
+        # sentences. Found live on an ESP32-D0WDQ6: 48 pins, cut off at pin
+        # 31, against a max_tokens that could not hold the list.
+        truncated = text.count("{") > text.count("}") or text.count("[") > text.count("]")
+        detail = (
+            "the model's answer was cut off before it finished"
+            if truncated
+            else "the model's answer was not readable as data"
+        )
+        raise ComponentValidationError(
+            f"{_JSON_PARSE_ERROR_PREFIX}: {detail}. This usually means the part has an unusually "
+            f"long pin list. Trying again often works, and the details are in the log."
+        ) from e
 
 
 def validate_schema(schema: dict) -> None:
@@ -124,9 +155,16 @@ def validate_schema(schema: dict) -> None:
     package = schema.get("package")
     reference = PACKAGE_REFERENCE.get(package)
     if reference is None:
+        # The old wording of this told the user to "add it to
+        # PACKAGE_REFERENCE" -- the name of a Python constant they cannot
+        # see, in red text, in a desktop app. That is a developer's note
+        # rendered as a user-facing error. What a person needs here is what
+        # was not checked and what still works.
         raise ComponentValidationError(
-            f"Package '{package}' is not in the known reference table -- cannot verify pin "
-            f"count or pitch. Add it to PACKAGE_REFERENCE or provide package data manually."
+            f"Copperplane does not have reference dimensions for the '{package}' package, so it "
+            f"could not check this part's pin count or spacing. Everything else about the part is "
+            f"unaffected -- the datasheet, its details and the library entry are all still good. "
+            f"Reporting the package name helps: it is how this list grows."
         )
 
     pins = schema.get("pins", [])
