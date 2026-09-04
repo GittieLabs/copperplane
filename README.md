@@ -66,11 +66,18 @@ every release.
 Not sure which Mac you have? **Apple menu → About This Mac** — an M-series chip is Apple Silicon.
 
 **On Windows, SmartScreen will say the publisher is unknown, and it is right to.** There is no
-code-signing certificate for this project yet. So every release also publishes a `SHA256SUMS.txt`,
-which lets you confirm the installer you downloaded is byte-for-byte the one CI built — worth doing,
-and [two commands](https://gittielabs.github.io/copperplane/install/#verify-your-download). Be clear
-on what that is worth: it catches a truncated or tampered-with *download*. It is not a signature,
-and it cannot vouch for the release itself the way signing would.
+code-signing certificate for this project yet. What there is instead: every installer carries a
+**build provenance attestation**, so you can confirm the file genuinely came from this repository's
+release pipeline before you run it —
+
+```
+gh attestation verify Copperplane_*_x64-setup.exe --repo GittieLabs/copperplane
+```
+
+That is checked against a public transparency log, not against anything hosted on the releases page.
+Every release also publishes a `SHA256SUMS.txt` if you would rather not install the GitHub CLI,
+though a checksum is the weaker of the two — it proves your download is intact, not who built it.
+[Both are two commands](https://gittielabs.github.io/copperplane/install/#verify-your-download).
 
 Prefer to trust nothing at all? [Build it from source](#build-from-source) — that path is real, and
 it is the same one contributors use.

@@ -83,10 +83,35 @@ that report is worth a great deal here.
 
 ## Verify your download
 
-Every release publishes `SHA256SUMS.txt` alongside the installers. It lets you
-confirm the file you have is byte-for-byte the one our build server produced.
+The Windows and Linux installers are not code-signed, so it is worth confirming
+what you downloaded before you run it. There are two ways, and the first is much
+stronger.
 
-Download it into the same folder as your installer, then:
+### Check the build provenance
+
+Every installer is signed at build time with a statement that this exact file was
+produced by this repository's release workflow, from a specific commit — and that
+statement is recorded in a public transparency log.
+
+With the [GitHub CLI](https://cli.github.com/):
+
+```bash
+gh attestation verify Copperplane_*_x64-setup.exe --repo GittieLabs/copperplane
+```
+
+A pass means the file genuinely came from our build pipeline. This does not rely
+on anything hosted on the releases page: the signature is checked against a public
+log, so someone who replaced both the installer *and* the checksums still could
+not forge it. That is the real answer to an unsigned build, and it is stronger
+than the checksum below.
+
+Older releases were published before this was added — for those, `gh` reports
+that no attestation was found, which is expected rather than alarming.
+
+### Compare a checksum
+
+If you would rather not install anything, every release also publishes
+`SHA256SUMS.txt`. Download it into the same folder as your installer, then:
 
 **macOS**
 
@@ -119,24 +144,22 @@ You want to see `OK` next to the file you downloaded. `--ignore-missing`
 matters: without it, every one of the five installers you *did not* download is
 reported as `FAILED`, which looks alarming and means nothing.
 
-:::caution[What this does and does not prove]
+:::note[Why the checksum is the weaker of the two]
 A checksum published next to the file it describes proves **integrity**: your
-download is complete, uncorrupted, and identical to what the build produced. It
-does not prove **authenticity** — anyone who could replace the installer on the
-releases page could replace the checksum too. It is a useful check, not a
-replacement for code signing, and we would rather say so than let it look like
-more than it is.
+download is complete, uncorrupted, and identical to what the build produced. On
+its own it does not prove **authenticity**, because anyone who could replace the
+installer on the releases page could replace the checksum too. The provenance
+check above is what closes that gap, which is why it is listed first.
 
 The same run's hashes are also printed into the
 [build log](https://github.com/GittieLabs/copperplane/actions) for the release
 tag, which is a separate record that editing a release asset does not reach.
 :::
 
-Automatic updates are a different matter, and stronger: the updater verifies an
-Ed25519 signature over every update on all platforms, including Windows and
-Linux, and refuses anything that does not match. That check is cryptographic and
-it is not optional. It is only this very first download that has no signature
-behind it.
+Automatic updates are a different matter again, and are verified on every
+platform: the updater checks an Ed25519 signature over each update and refuses
+anything that does not match. That check is cryptographic and it is not optional.
+It is only this very first download that needs anything from you.
 
 ## Build from source
 

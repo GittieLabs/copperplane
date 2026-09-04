@@ -51,10 +51,15 @@ user_facing: true
         *authenticity* -- the manifest sits on the same release page as the files it describes, so
         it cannot defend against anyone able to rewrite that page. It is deliberately not described
         anywhere as a substitute for code signing, and this Non-Goal stands unchanged.
-        Build-provenance attestation (`actions/attest-build-provenance`, free on this public repo)
-        is the real next step and would provide authenticity; it is not done yet because it adds a
-        step that can fail inside a working release pipeline and cannot be proven without a real
-        tag push.
+        `CTX-402.9` then added build-provenance attestation
+        (`actions/attest-build-provenance`, free on this public repo), which does provide real
+        authenticity: the runner signs a statement that a given digest was built by this workflow
+        at this commit, recorded in a public transparency log and checked by `gh attestation
+        verify` against that log rather than against anything this project hosts. Rewriting a
+        release asset and its checksum cannot forge it. This still is not Windows code signing --
+        SmartScreen has no knowledge of it and will warn exactly as before, so the Non-Goal above
+        stands -- but a person who wants to check a download now has a real cryptographic answer
+        rather than a hash sitting beside the file it describes.
     *   **Not a semantic-versioning or release-branch policy.** The version bump and tag push that
         trigger a release remain a real, manual, human action in this first slice -- not
         `release-please`-style automation.

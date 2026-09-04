@@ -371,6 +371,61 @@ class DocumentedVerifyCommandTests(unittest.TestCase):
         self.assertTrue(noticed, f"a corrupted installer verified clean:\n{output}")
 
 
+class BuildProvenanceAttestationTests(unittest.TestCase):
+    """CTX-402.9: every installer that gets published must also get attested.
+
+    The attestation step lists its subjects as its own set of globs, separate
+    from the publish step's. Two hand-maintained lists of the same thing drift,
+    and the failure is silent in the worst way: the release publishes fine, and
+    one platform's installer simply has no provenance while the docs say it
+    does.
+    """
+
+    def setUp(self):
+        self.workflow = (REPO_ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+
+    def _attested_extensions(self):
+        import re
+        block = re.search(
+            r'subject-path:\s*\|\n((?:\s+\S+\n)+)', self.workflow
+        )
+        self.assertIsNotNone(block, "no subject-path block in the attestation step")
+        return {
+            line.strip().rsplit('*', 1)[-1]
+            for line in block.group(1).splitlines() if line.strip()
+        }
+
+    def test_401_the_workflow_attests_before_it_publishes(self):
+        """Order matters. If attestation runs after the release is already
+        published, a failure leaves a published release the docs describe as
+        attested and which is not."""
+        self.assertIn('actions/attest-build-provenance', self.workflow)
+        self.assertLess(
+            self.workflow.index('attest-build-provenance'),
+            self.workflow.index('Publish the GitHub Release'),
+            "attestation must run before the release is published, so a failure blocks it"
+        )
+
+    def test_402_every_installer_that_is_published_is_also_attested(self):
+        self.assertEqual(
+            self._attested_extensions(), set(generate_checksums.INSTALLER_EXTENSIONS),
+            "the attestation step's subjects and the set of installers this project "
+            "publishes have drifted -- something ships with no provenance"
+        )
+
+    def test_403_the_job_holds_the_three_permissions_attestation_needs(self):
+        """An explicit permissions block replaces the job's defaults outright,
+        so contents: write has to be restated or the release upload itself
+        fails -- a failure that only appears during a real tagged release."""
+        import re
+        publish = self.workflow.split('  publish:', 1)[1].split('    steps:', 1)[0]
+        for permission in ('contents: write', 'id-token: write', 'attestations: write'):
+            self.assertIsNotNone(
+                re.search(rf'^\s+{re.escape(permission)}\s*$', publish, re.M),
+                f"the publish job is missing '{permission}'"
+            )
+
+
 class PublishedPlatformsAreDocumentedTests(unittest.TestCase):
     """The install page must offer everything the release actually publishes.
 
