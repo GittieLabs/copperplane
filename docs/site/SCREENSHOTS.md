@@ -73,23 +73,48 @@ From the first walkthrough: dark, redacted, in `public/images/`.
 
 ## Still needed, all dark
 
-| File | What must be visible |
-| :--- | :--- |
-| `welcome.png` | The welcome screen: the mark, both paths. **The rail must be absent** -- that fix is in PR #393, so shoot this after it merges |
-| `guided-provider.png` | Guided setup step 1, choosing a provider, before a key is typed |
-| `guided-tools.png` | Guided setup showing KiCad and FreeCAD detected, with their real paths |
-| `guided-done.png` | The final guided step, where setup finishes |
-| `no-project.png` | The launch view with no project selected, showing the mark |
-| `new-project.png` | Creating a project, at the point of picking the KiCad project to link |
-| `project-linked.png` | `Copperplane_Blink_LEDs` linked, the link banner gone |
-| `board-check.png` | The PCB check result list itself: four annular width errors and the unconnected GND, severities visible |
-| `design-guidance.png` | Datasheet-derived guidance with its citations. The old one was deleted -- it showed the pre-rename product name |
-| `library.png` | The library with a few real parts. Deleted for the same reason |
-| `ask-the-agent.png` | The chat panel mid-answer about something on the board |
-| `hero.png` | Wide, project open, rail and an area tab visible -- the one image that has to look like a product rather than a screenshot |
+Revised after the tutorial was written, which is what the list was waiting on.
+Three changes worth noting: the ERC-results shot needed a new name, because
+`schematic-check.png` turned out to be the tab view; `board-check.png` is a
+genuinely separate image from `board-check-explained.png` and the tutorial uses
+both; and `guided-done.png` was dropped, because nothing in the docs needs a
+picture of a finished wizard.
 
-Three captures from the first walkthrough were rejected, in case the same
-thing happens again: the glossary shot cut off mid-entry at `IDC` with other
-desktop windows visible behind it; a part search caught mid-request with an
-empty body; and an enclosure shot showing `Test Create Project 1` /
-`Hello_World_Blinky` instead of the tutorial project.
+**Shoot these in tutorial order.** Walking the tutorial while capturing is the
+cheapest review it will ever get — anywhere the prose does not match what you
+see is a bug in the prose.
+
+| File | What must be visible | Used by |
+| :--- | :--- | :--- |
+| `new-project.png` | Creating a project, at the moment of picking the `.kicad_pro` to link | tutorial, first-run |
+| `board-check.png` | The PCB check **result list**: four annular width errors and the unconnected GND, severities visible. Not the explained view -- that one is already placed | tutorial, board-checks |
+| `schematic-erc.png` | The schematic check **after** the two `PWR_FLAG` symbols are deleted: `power_pin_not_driven` x2 and `pin_not_connected` x2 | tutorial |
+| `ask-the-agent.png` | The chat panel answering *"why does D1 have pads with no net?"* -- the tutorial quotes that exact question | tutorial, ask-the-agent |
+| `welcome.png` | The welcome screen: the mark, both paths. **Rebuild first** -- the rail was visible here until PR #393 | first-run |
+| `guided-provider.png` | Guided setup step 1, choosing a provider, before a key is typed | first-run |
+| `guided-tools.png` | Guided setup showing KiCad and FreeCAD detected, with their real paths | first-run |
+| `no-project.png` | The launch view with no project selected, showing the mark | first-run |
+| `design-guidance.png` | Datasheet-derived guidance with its citations. The old one was deleted -- it showed the pre-rename product name | design-guidance |
+| `library.png` | The library with a few real parts. Deleted for the same reason | library |
+| `hero.png` | Wide, project open, rail and an area tab visible -- the one image that has to look like a product rather than a screenshot | index |
+
+Dropped from the earlier list: `guided-done.png` (no page needs it) and
+`project-linked.png` (the tutorial covers linking in prose, and a screenshot of
+an absent banner shows nothing).
+
+## Before you shoot
+
+1. **Rebuild.** PR #393 fixed five things that would otherwise land in the
+   documentation: overlapping pin names in the symbol preview, error messages
+   citing spec numbers and Python constants, and the rail appearing on the
+   welcome screen.
+2. **Delete the two `PWR_FLAG` symbols** in the tutorial schematic and save.
+   Without that the schematic check has nothing to report -- the board ships
+   with zero ERC violations. Put them back afterwards.
+
+## Rejected from the first walkthrough
+
+Recorded so the same thing does not happen twice: the glossary shot cut off
+mid-entry at `IDC` with other desktop windows visible behind it; a part search
+caught mid-request with an empty body; and an enclosure shot showing
+`Test Create Project 1` / `Hello_World_Blinky` instead of the tutorial project.
