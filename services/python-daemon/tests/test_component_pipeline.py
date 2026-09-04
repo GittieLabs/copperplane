@@ -104,7 +104,7 @@ class TestValidateSchema(unittest.TestCase):
         schema["package"] = "MADE-UP-PACKAGE-999"
         with self.assertRaises(cp.ComponentValidationError) as ctx:
             cp.validate_schema(schema)
-        self.assertIn("not in the known reference table", str(ctx.exception))
+        self.assertIn("reference dimensions", str(ctx.exception))
 
     def test_006_a_package_with_no_meaningful_pitch_skips_that_check(self):
         """TEST-002: a 2-pin passive (e.g. 0603) has no adjacent-pin
@@ -221,7 +221,7 @@ class TestGenerateComponentRetry(unittest.TestCase):
         with self.assertRaises(cp.ComponentValidationError) as ctx:
             cp.generate_component("TEST123")
 
-        self.assertIn("not in the known reference table", str(ctx.exception))
+        self.assertIn("reference dimensions", str(ctx.exception))
         self.assertEqual(mock_build.call_count, 1)
 
     @patch('component_pipeline._build_agent_executor')

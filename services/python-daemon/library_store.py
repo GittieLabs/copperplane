@@ -26,6 +26,7 @@ module never reaches into a daemon-owned global itself.
 """
 import hashlib
 import json
+import math
 import os
 import re
 import ssl
@@ -186,8 +187,9 @@ def _validate_part_provenance(part: dict) -> None:
     missing = [f for f in PART_PROVENANCE_REQUIRED_FIELDS if f not in provenance]
     if missing:
         raise SchemaValidationError(
-            f"Part is missing provenance for required field(s): {', '.join(missing)}. "
-            "SPEC-300 §2.2: every inferred field must record its source, not just carry a value."
+            f"This part is missing where its {', '.join(missing)} came from, so Copperplane "
+            f"will not use it. Every measurement it acts on has to be traceable to a source. "
+            f"Re-running the part search and saving again usually fills this in."
         )
 
 
@@ -484,7 +486,23 @@ def list_symbols(library_id: str | None = None) -> list:
 _KICAD_SYM_VERSION = 20251024
 _KICAD_PIN_LENGTH_MM = 2.54
 _KICAD_PIN_PITCH_MM = 2.54
-_KICAD_SYM_HALF_WIDTH_MM = 5.08
+#: The narrowest a symbol body is allowed to get. Was the *only* width: a
+#: fixed 5.08mm half-width regardless of what the pins were called. KiCad
+#: draws a pin's name inward from the body edge, so on an ATTINY85 the left
+#: column's "PB0/MOSI/DI/SDA/AIN0/OC0A" ran straight across the centreline
+#: into "PB5/RESET/ADC0/dW" coming back the other way, and the preview was
+#: unreadable. Reported from a real part, visible in the app.
+_KICAD_SYM_MIN_HALF_WIDTH_MM = 5.08
+
+#: Horizontal advance per character of a pin name, at KiCad's default 1.27mm
+#: symbol text size. The stroke font is not monospaced, so this is a
+#: deliberately generous estimate -- a symbol slightly wider than it needed
+#: to be is untidy, one slightly too narrow is the bug being fixed.
+_KICAD_SYM_NAME_CHAR_MM = 0.85
+
+#: Clear space between the longest name and the centreline, so two full-width
+#: names on the same row still cannot touch.
+_KICAD_SYM_NAME_MARGIN_MM = 1.27
 
 # SPEC-202's electrical_type enum -> KiCad's own real pin-type vocabulary
 # (confirmed present across KiCad's bundled symbol libraries). "power" and
@@ -517,18 +535,34 @@ def _layout_pins(pins: list) -> dict:
     left_ys = _side_positions(left_count)
     right_ys = _side_positions(right_count)
 
+    # Wide enough that each side's longest name fits inside its own half.
+    # Sizing on the longest name per side rather than per row means two
+    # names on the same row can never meet in the middle, whichever way the
+    # pin list is ordered.
+    def _widest(group: list) -> float:
+        return max((len(str(pin.get("name", ""))) for pin in group), default=0) * _KICAD_SYM_NAME_CHAR_MM
+
+    half_width = max(
+        _KICAD_SYM_MIN_HALF_WIDTH_MM,
+        _widest(pins[:left_count]) + _KICAD_SYM_NAME_MARGIN_MM,
+        _widest(pins[left_count:]) + _KICAD_SYM_NAME_MARGIN_MM,
+    )
+    # KiCad's own grid. A body edge off-grid is legal and looks wrong next
+    # to every other symbol in a schematic.
+    half_width = math.ceil(half_width / _KICAD_PIN_PITCH_MM) * _KICAD_PIN_PITCH_MM
+
     placed = []
     for pin, y in zip(pins[:left_count], left_ys):
-        x = -(_KICAD_SYM_HALF_WIDTH_MM + _KICAD_PIN_LENGTH_MM)
+        x = -(half_width + _KICAD_PIN_LENGTH_MM)
         placed.append({**pin, "x": x, "y": y, "angle": 0})
     for pin, y in zip(pins[left_count:], right_ys):
-        x = _KICAD_SYM_HALF_WIDTH_MM + _KICAD_PIN_LENGTH_MM
+        x = half_width + _KICAD_PIN_LENGTH_MM
         placed.append({**pin, "x": x, "y": y, "angle": 180})
 
     max_count = max(left_count, right_count, 1)
     half_height = (max_count - 1) / 2 * _KICAD_PIN_PITCH_MM + _KICAD_PIN_PITCH_MM
 
-    return {"pins": placed, "half_width": _KICAD_SYM_HALF_WIDTH_MM, "half_height": half_height}
+    return {"pins": placed, "half_width": half_width, "half_height": half_height}
 
 
 def _sexpr_str(value: str) -> str:
@@ -1403,9 +1437,12 @@ def save_artifact(project_name: str, artifact: dict) -> dict:
         raise SchemaValidationError("Artifact.artifact_id is required.")
     if artifact.get("kind") == "enclosure" and not artifact.get("board_revision"):
         raise SchemaValidationError(
-            "An enclosure Artifact must record board_revision -- the requirement carried forward "
-            "from the SPEC-304 ID-collision resolution (ROADMAP.md §3.3), not present in "
-            "PRODUCT-PLAN.md's own storage section."
+            # Why this is required, for a reader of the code rather than a
+            # reader of the app: it carries forward the SPEC-304 ID-collision
+            # resolution (ROADMAP.md 3.3), which PRODUCT-PLAN.md's storage
+            # section does not mention.
+            "An enclosure has to record which version of the board it was built for, "
+            "so a later board change can be matched against it."
         )
     record = {**artifact, "schema_version": 1}
     _write_json(os.path.join(_artifacts_dir(project_name), f"{artifact_id}.json"), record)

@@ -595,8 +595,20 @@ function App() {
     }
   }
 
+  const onOnboardingSurface = view?.kind === 'welcome' || view?.kind === 'guidedSetup'
+
   return (
     <div className="flex min-h-screen bg-base text-fg">
+      {/* SPEC-336: no rail until onboarding is behind you. Showing the
+          projects, the library and Settings beside a screen that is still
+          asking whether you have an AI provider offers a way around the
+          question it is asking, and tells someone who has never opened the
+          app that they are already inside it. Reappears the moment any of
+          the three exits are taken -- "Skip for now", "I'll set it up
+          myself", or finishing the guided path -- because each of those
+          moves `view` off these two surfaces. Same condition the
+          RequirementsBanner below already uses, for the same reason. */}
+      {!onOnboardingSurface && (
       <Rail
         projects={projects}
         selectedProject={view?.kind === 'project' ? view.name : null}
@@ -609,6 +621,7 @@ function App() {
         settingsSelected={view?.kind === 'settings'}
         onSelectSettings={() => setView({ kind: 'settings' })}
       />
+      )}
       <main className="flex flex-1 flex-col overflow-auto">
         {/* SPEC-407 §5: above everything, including the onboarding surfaces.
             A broken build is not a configuration problem the user can walk
@@ -619,7 +632,7 @@ function App() {
         {/* SPEC-336: the only thing standing between an unconfigured app and
             "watching features fail one at a time". Not shown on the onboarding
             surfaces themselves, which are already about exactly this. */}
-        {view?.kind !== 'welcome' && view?.kind !== 'guidedSetup' && (
+        {!onOnboardingSurface && (
           <RequirementsBanner
             capabilities={capabilities}
             onOpenSetup={handleOpenSetup}

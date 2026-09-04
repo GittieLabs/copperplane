@@ -722,7 +722,10 @@ class TestArtifact(LibraryStoreTestCase):
         carried forward (ROADMAP.md §3.3) -- enforced, not just named."""
         with self.assertRaises(store.SchemaValidationError) as ctx:
             store.save_artifact("weather-pcb", {"artifact_id": "enc-1", "kind": "enclosure"})
-        self.assertIn("board_revision", str(ctx.exception))
+        # Asserts the rejection, not the wording. The message used to name
+        # board_revision, SPEC-304 and ROADMAP.md §3.3 -- a developer's note
+        # rendered to a user; see tests/test_user_facing_errors.py.
+        self.assertIn("version of the board", str(ctx.exception))
 
     def test_003_enclosure_artifact_with_board_revision_succeeds(self):
         store.save_artifact(
@@ -2141,3 +2144,80 @@ class TestRenamingAProject(unittest.TestCase):
         store.rename_project("Old", "New")
 
         self.assertEqual(sorted(os.listdir(os.path.join(self.tmp.name, "projects"))), ["New"])
+
+
+class TestSymbolBodyFitsItsPinNames(unittest.TestCase):
+    """The symbol body used to be a fixed 5.08mm half-width whatever the
+    pins were called.
+
+    KiCad draws a pin's name inward from the body edge, so on a real
+    ATTINY85 the left column's "PB0/MOSI/DI/SDA/AIN0/OC0A" ran across the
+    centreline into "PB5/RESET/ADC0/dW" coming the other way. The preview
+    was unreadable and the exported .kicad_sym was too. Reported from the
+    running app, against a real saved part -- no test in the suite looked at
+    geometry, so nothing could have caught it."""
+
+    #: Mirrors library_store's own estimate. Kept as a local number on
+    #: purpose: importing the constant would make this test agree with the
+    #: implementation by construction, including when both are wrong.
+    CHAR_MM = 0.85
+
+    def _names(self, *names):
+        return [{"name": n, "number": str(i + 1), "electrical_type": "bidirectional"}
+                for i, n in enumerate(names)]
+
+    def test_001_a_real_attiny85_pinout_does_not_overlap(self):
+        pins = self._names(
+            "PB5/RESET/ADC0/dW", "PB3/ADC3/CLKI", "PB4/ADC2/CLKO", "GND",
+            "PB0/MOSI/DI/SDA/AIN0/OC0A", "PB1/MISO/DO/AIN1/OC0B",
+            "PB2/SCK/USCK/SCL/ADC1/T0", "VCC",
+        )
+
+        layout = store._layout_pins(pins)
+        half = layout["half_width"]
+
+        left = pins[: (len(pins) + 1) // 2]
+        right = pins[(len(pins) + 1) // 2 :]
+        for group in (left, right):
+            widest = max(len(p["name"]) for p in group) * self.CHAR_MM
+            self.assertLess(
+                widest, half,
+                f"a {max(len(p['name']) for p in group)}-character pin name needs more room "
+                f"than the {half}mm half-body gives it, so it crosses the centreline",
+            )
+
+    def test_002_the_two_sides_can_never_meet_in_the_middle(self):
+        """The property that actually matters, stated directly: the widest
+        name on the left plus the widest on the right must fit."""
+        pins = self._names(*(["VERY_LONG_PERIPHERAL_NAME_HERE"] * 6))
+
+        layout = store._layout_pins(pins)
+
+        widest = 30 * self.CHAR_MM
+        self.assertLess(widest * 2, layout["half_width"] * 2)
+
+    def test_003_short_names_keep_the_original_narrow_body(self):
+        """Widening is conditional. A symbol whose pins are all called GND
+        should look exactly as it did before."""
+        layout = store._layout_pins(self._names(*(["GND"] * 8)))
+
+        self.assertEqual(layout["half_width"], 5.08)
+
+    def test_004_the_body_edge_stays_on_kicad_grid(self):
+        """An off-grid body edge is legal and looks wrong beside every other
+        symbol in a schematic."""
+        for count in (2, 8, 20):
+            layout = store._layout_pins(self._names(*(["SOME_MEDIUM_NAME"] * count)))
+            remainder = round(layout["half_width"] % 2.54, 6)
+            self.assertEqual(remainder, 0.0, f"{layout['half_width']}mm is off-grid")
+
+    def test_005_pins_hang_off_the_widened_body_not_the_old_one(self):
+        """The body grew; the pins have to move with it, or they float
+        detached in the middle of the symbol."""
+        pins = self._names(*(["PB0/MOSI/DI/SDA/AIN0/OC0A"] * 4))
+
+        layout = store._layout_pins(pins)
+        half = layout["half_width"]
+
+        for placed in layout["pins"]:
+            self.assertEqual(abs(placed["x"]), half + store._KICAD_PIN_LENGTH_MM)

@@ -4,7 +4,7 @@ description: Extracts a structured component schema from a part number or datash
 model_role: reasoning
 requires: [strict_json]
 temperature: 0.2
-max_tokens: 2048
+max_tokens: 8192
 ---
 You are a hardware component data-extraction assistant. Given a part number or a datasheet
 excerpt, respond with ONLY a single JSON object -- no markdown code fences, no commentary before
