@@ -509,10 +509,31 @@ class TestProbeRoutes(unittest.TestCase):
         with open(path, "w") as handle:
             handle.write("import sys\nsys.stdin.readline()\n")
 
-        ok, reason = es.probe_routes(path, command=[sys.executable, path])
+        ok, reason = es.probe_routes(path, command=[sys.executable, path], timeout_s=3)
 
         self.assertTrue(ok)
-        self.assertIn("does not answer", reason)
+        # Silent from the start: we gave up waiting, which is not the same
+        # claim as "this build lacks the route".
+        self.assertIn("no output within", reason)
+
+    def test_005b_a_sidecar_that_starts_but_lacks_the_route_says_exactly_that(self):
+        """The distinction that matters: a cold launch we gave up on, versus an
+        older build that is alive and simply does not implement it. Saying
+        "does not answer" about the first sent me looking at a stale freeze
+        that was not stale."""
+        path = os.path.join(self.tmp.name, "old_build.py")
+        with open(path, "w") as handle:
+            handle.write(
+                "import sys, json\n"
+                "sys.stdin.readline()\n"
+                "print(json.dumps({'jsonrpc': '2.0', 'method': 'daemon.ready',"
+                " 'params': {'degraded_modules': []}}))\n"
+            )
+
+        ok, reason = es.probe_routes(path, command=[sys.executable, path], timeout_s=3)
+
+        self.assertTrue(ok)
+        self.assertIn("started but does not answer", reason)
 
     def test_006_a_binary_that_will_not_run_is_skipped_not_failed(self):
         ok, reason = es.probe_routes(os.path.join(self.tmp.name, "does-not-exist"))
