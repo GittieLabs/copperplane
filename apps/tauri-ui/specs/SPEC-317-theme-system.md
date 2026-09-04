@@ -8,7 +8,7 @@ last_updated: 2026-08-24
 target_version: v0.3.0
 location: "apps/tauri-ui/specs/SPEC-317-theme-system.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
-child_specs: []
+child_specs: ["SPEC-338-brand-in-the-app.md"]
 user_facing: true
 ---
 

@@ -1131,6 +1131,42 @@ that is true about the less important one.
 *   **Whether the banner should say which link is missing**, given it fires on
     `kicad_project_path` alone while a folder may well be set.
 
+#### [SPEC-408](specs/SPEC-408-messaging-for-the-maker-who-is-leveling-up.md) — Messaging, Onboarding Content & the Product Video — written 2026-09-03
+
+*Module:* repo-wide · *Depends on:* SPEC-336, SPEC-338 · *Feeds:* SPEC-403
+
+The README opens *"an open-source, local-first AI assistant for **hardware engineers**"* and then
+lists Tauri, Rust, React, a Python daemon and native IPC. Every word true, and aimed at someone who
+already knows what a plugin pile feels like. The actual audience is a maker moving from Arduino
+sketches and breadboards to a first custom PCB and enclosure, who may be intimidated by schematics,
+by PCB layout, or by making even a simple case.
+
+Carries five deliverables that share an audience: the README, a downloadable quick-start project
+(strongest if it has real, mild problems, because a clean project makes the app look like it does
+nothing), tutorial projects that show the app **aiding** rather than replacing KiCad and FreeCAD, a
+docs site that opens with the outcome and keeps the depth underneath, and a 60-90 second product
+video with a written script.
+
+**The reason it matters more than it looks.** Nearly every context in this repo ends with "this ran
+on exactly one machine, macOS on Apple silicon", and the maintainer has no Windows or Linux
+hardware. Users on those platforms are the only available source of the verification `SPEC-403`
+needs: *"While I do want contributors, I need users and validators more. And users can become
+contributors."* This spec is that acquisition channel.
+
+#### [SPEC-338](apps/tauri-ui/specs/SPEC-338-brand-in-the-app.md) — The Brand Inside the App — written 2026-09-03
+
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-317, SPEC-336
+
+`brand/` ships a complete Rev A kit — generated lockups, app icons, a favicon, and a palette
+documented down to contrast ratios — and **the application uses none of it**. Nothing under
+`apps/tauri-ui/src` references a lockup or a mark, so the identity the Dock icon establishes
+disappears the moment the window opens. And the one green a user does see, `--color-success:
+#34d399`, is Tailwind's emerald, not any of the brand's four greens: a palette nobody chose.
+
+Partly unbuilt `SPEC-336`, not new scope — that spec's §1 and §5 both say the welcome screen carries
+the app logo, and `CTX-336.1` shipped a text heading, which satisfied every test anyone would have
+written about it.
+
 #### SPEC-327 — Design Advice: Layout & Clearance Warnings — not yet written
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-325, SPEC-326
