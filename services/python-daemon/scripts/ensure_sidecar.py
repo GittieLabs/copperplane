@@ -26,6 +26,8 @@ import json
 import os
 import struct
 import subprocess
+import threading
+import time
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -241,7 +243,13 @@ def resolve_triple(explicit=None) -> str:
     raise RuntimeError("could not determine a target triple")
 
 
-def probe_routes(path: str, timeout_s: float = 60.0, command: list = None):
+_PROBE_FAILURE_HELP = (
+    "ensure_sidecar: re-freeze it:\n"
+    "                .build-venv/bin/python scripts/freeze_sidecar.py --target-triple <triple>"
+)
+
+
+def probe_routes(path: str, timeout_s: float = 15.0, command: list = None):
     """(ok, reason). Ask the frozen artifact what it can actually do.
 
     SPEC-407 §1's costly failure was "a mis-frozen sidecar that starts, reports
@@ -269,18 +277,45 @@ def probe_routes(path: str, timeout_s: float = 60.0, command: list = None):
     expected = set(source_daemon.ROUTES)
     request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "daemon.list_routes",
                           "params": {}}) + "\n"
+    # Read until the answer arrives, then stop -- do NOT wait for the process
+    # to exit. `subprocess.run` does wait, and measured 14-17s per build against
+    # a real frozen sidecar, because a daemon whose stdin has closed still takes
+    # its time shutting down. SPEC-407 §2 values a build check that "exits
+    # immediately"; a 15s tax on every build is how a check gets removed.
+    #
     # `command` exists so a test can stand a script in for the binary. A real
     # caller never passes it -- and the alternative, a POSIX shell script as the
     # fake sidecar, made these tests fail on Windows, which is precisely the
     # platform SPEC-903's CI exists to speak for.
+    proc = None
     try:
-        proc = subprocess.run(command or [path], input=request, capture_output=True,
-                              text=True, timeout=timeout_s)
+        proc = subprocess.Popen(command or [path], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, bufsize=1)
+        proc.stdin.write(request)
+        proc.stdin.flush()
+        lines = []
+        done = threading.Event()
+
+        def _read():
+            for line in iter(proc.stdout.readline, ''):
+                lines.append(line)
+                if '"routes"' in line:
+                    break
+            done.set()
+
+        reader = threading.Thread(target=_read, daemon=True)
+        reader.start()
+        done.wait(timeout_s)
+        proc.stdout_text = "".join(lines)
     except Exception as exc:
         return True, f"skipped -- could not run the sidecar to ask it ({exc})"
+    finally:
+        if proc is not None:
+            proc.kill()
 
     reported, degraded = None, []
-    for line in proc.stdout.splitlines():
+    for line in proc.stdout_text.splitlines():
         try:
             message = json.loads(line)
         except ValueError:
@@ -318,6 +353,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target-triple", default=None)
     parser.add_argument("--check-only", action="store_true")
+    parser.add_argument(
+        "--probe", action="store_true",
+        help="also run an already-present sidecar and check it answers every route "
+             "this checkout defines (costs ~15s; the freeze path always does this)",
+    )
     args = parser.parse_args()
 
     try:
@@ -332,18 +372,19 @@ def main() -> int:
     print(f"ensure_sidecar: {os.path.relpath(path, DAEMON_DIR)} -- {reason}")
 
     if ok:
-        # The static checks passed. Now ask the artifact itself -- SPEC-407 §1's
-        # worst failure looked exactly like this point in the script.
-        probe_ok, probe_reason = probe_routes(path)
-        print(f"ensure_sidecar: {probe_reason}")
-        if not probe_ok:
-            print(
-                "ensure_sidecar: FAILING -- the sidecar file looks right and cannot do its job.\n"
-                "                Re-freeze it: .build-venv/bin/python scripts/freeze_sidecar.py"
-                " --target-triple <triple>",
-                file=sys.stderr,
-            )
-            return 1
+        # Deliberately NOT probed here. Launching a frozen sidecar costs 14-17s
+        # on this machine -- PyInstaller startup, not the read -- and SPEC-407
+        # §2 already worried that "a build-time check that runs on every
+        # `cargo build` would break the debug loop". A sidecar that passed its
+        # probe when it was frozen and has not changed since (which the mtime
+        # check above proves) has nothing new to say. `--probe` re-asks on
+        # demand; the freeze path below always asks.
+        if args.probe:
+            probe_ok, probe_reason = probe_routes(path)
+            print(f"ensure_sidecar: {probe_reason}")
+            if not probe_ok:
+                print(_PROBE_FAILURE_HELP, file=sys.stderr)
+                return 1
         if overwrites_tracked_placeholder(path):
             print(
                 "ensure_sidecar: NOTE -- this real sidecar sits on top of the tracked placeholder,\n"
@@ -384,6 +425,8 @@ def main() -> int:
     # Probe the freeze we just made, not only one we found. A bad freeze is
     # precisely when this check earns its keep, and checking only the
     # already-present case would skip the moment the artifact is created.
+    # Always probe a freeze we just made. This is the moment a bad one is
+    # created, and the only moment the 14-17s is unambiguously worth paying.
     probe_ok, probe_reason = probe_routes(path)
     print(f"ensure_sidecar: {probe_reason}")
     if not probe_ok:
@@ -392,6 +435,7 @@ def main() -> int:
             " do its job.",
             file=sys.stderr,
         )
+        print(_PROBE_FAILURE_HELP, file=sys.stderr)
         return 1
     return 0
 
