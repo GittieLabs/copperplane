@@ -126,7 +126,11 @@ user_facing: true
 
 ## 3. Known Constraints & Risks
 
-*   **The docs site does not exist.** The only external URL in the app today is
+*   ~~**The docs site does not exist.**~~ **Wrong, corrected 2026-09-03.** `docs/site` is a real
+    Astro Starlight project with 16 pages, deployed by `.github/workflows/docs.yml`. The decision
+    this claim justified — guided setup linking each provider's own key page rather than a
+    Copperplane page — remains right for a different and better reason: the provider's own page is
+    where a key is actually created. The only external URL in the app today is
     `GITHUB_REPO_URL` (`core/tauri-rust/src/menu.rs:85`). Every link this spec describes needs a
     placeholder that is honest about not being written yet, and its own context to create the pages
     — a link that 404s on first run is worse than no link.
