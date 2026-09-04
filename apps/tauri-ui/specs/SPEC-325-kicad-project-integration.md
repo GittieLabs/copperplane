@@ -1,10 +1,10 @@
 ---
 id: SPEC-325
 title: "KiCad Project Integration & Schematic Component Table"
-status: In-Progress
+status: Completed
 type: Feature
 created: 2026-09-01
-last_updated: 2026-09-01
+last_updated: 2026-09-03
 target_version: v0.4.0
 location: "apps/tauri-ui/specs/SPEC-325-kicad-project-integration.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"

@@ -1053,7 +1053,7 @@ hobbyists. The diagnosis: the app can observe but not participate, so every insi
 do that in KiCad yourself" — and each handoff is a place a novice gives up. Stages 1-3 are entirely
 read-only and carry most of the value.
 
-#### [SPEC-326](apps/tauri-ui/specs/SPEC-326-component-volume-placeholders.md) — Component Volume Placeholders — Draft
+#### [SPEC-326](apps/tauri-ui/specs/SPEC-326-component-volume-placeholders.md) — Component Volume Placeholders — In-Progress; the labelled bounding solid is still unbuilt
 
 *Module:* `services/python-daemon` · *Depends on:* SPEC-325, SPEC-311, SPEC-202
 

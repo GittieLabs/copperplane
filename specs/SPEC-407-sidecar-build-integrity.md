@@ -4,7 +4,7 @@ title: "Sidecar Build Integrity & Fail-Loud Packaging"
 status: In-Progress
 type: Feature
 created: 2026-08-27
-last_updated: 2026-08-27
+last_updated: 2026-09-03
 target_version: v0.2.1
 location: "specs/SPEC-407-sidecar-build-integrity.md"
 parent_spec: "SPEC-401-python-sidecar-packaging.md"
@@ -13,6 +13,8 @@ user_facing: true
 ---
 
 # SPEC-407: Sidecar Build Integrity & Fail-Loud Packaging
+
+> **Still open, 2026-09-03:** §5's user-facing half is **not built**. The daemon reports degraded modules in `daemon.ready`, in `daemon.get_capabilities` and now in `daemon.list_routes`, and `ensure_sidecar` fails a build on them — but nothing in `apps/tauri-ui` reads any of it, so a user whose *installed* app has a degraded daemon still sees a healthy-looking app with missing features. That is the exact experience §1 exists to end, surviving on the one path the build gate cannot reach.
 
 ## 1. Executive Summary & Goals
 
