@@ -425,6 +425,24 @@ jobs:
               "https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/${LINUX_ARTIFACT}" \
             > "$RUNNER_TEMP/latest.json"
 
+      # CTX-402.8: the Windows and Linux installers are unsigned -- still a
+      # real Non-Goal in SPEC-402 §1 -- so someone downloading
+      # Copperplane_x64-setup.exe has nothing to check the bytes against, and
+      # SmartScreen will correctly tell them the publisher is unknown. This
+      # publishes a SHA-256 for every installer in the exact format
+      # `sha256sum -c` / `shasum -a 256 -c` read back. It proves integrity, not
+      # authenticity -- generate_checksums.py's own docstring states that limit
+      # plainly, and the docs must not overstate it either.
+      - name: Checksum every published installer
+        run: python3 scripts/generate_checksums.py artifacts/ > "$RUNNER_TEMP/SHA256SUMS.txt"
+
+      # Echoed into the workflow log deliberately: the Actions log for a tag is
+      # a second, independent record of these hashes that editing a release
+      # asset cannot reach. Someone with a real reason to doubt the published
+      # SHA256SUMS.txt can compare it against this run's log.
+      - name: Show the checksums in the run log
+        run: cat "$RUNNER_TEMP/SHA256SUMS.txt"
+
       - name: Publish the GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -443,3 +461,4 @@ jobs:
             artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage
             artifacts/linux-x86_64-unknown-linux-gnu/**/*.AppImage.sig
             ${{ runner.temp }}/latest.json
+            ${{ runner.temp }}/SHA256SUMS.txt
