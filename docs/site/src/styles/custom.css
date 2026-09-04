@@ -1,15 +1,30 @@
-/* Accent drawn from the project's own world -- the deep green of a PCB
-   soldermask, desaturated so it works as UI rather than as decoration.
-   Starlight derives its dark-mode ramp from these automatically. */
+/* The brand's own greens, from brand/README.md.
+
+   These used to be a soldermask green picked by eye. The kit has a soldermask
+   green by name -- #0B5C34, "Solder mask" -- and the two were not the same
+   colour: the old accent leaned teal against the brand's warmer green. A site
+   whose accent is almost the product's colour is worse than one with no colour
+   at all, the same way Tailwind's emerald was in the app (SPEC-338).
+
+   Roles follow what the kit says each green is for. Bright is specified for
+   "mark and links on dark surfaces", which is exactly Starlight's accent-high
+   in dark mode; Copperplane green is the primary for "mark, links, buttons,
+   focus"; Solder mask is for "rules, pressed states".
+
+   Checked rather than assumed -- link text against the page ground:
+   #4FC17E on dark is 8.48:1, #0B5C34 on white is 8.09:1. Both clear AA. */
 :root {
-  --sl-color-accent-low: #12332c;
-  --sl-color-accent: #1c6a5b;
-  --sl-color-accent-high: #b9ded3;
+  --sl-color-accent-low: #0b5c34; /* Solder mask */
+  --sl-color-accent: #178f4e; /* Signal */
+  --sl-color-accent-high: #4fc17e; /* Bright */
 }
 :root[data-theme='light'] {
-  --sl-color-accent-low: #d8eae4;
-  --sl-color-accent: #17594c;
-  --sl-color-accent-high: #0d332b;
+  /* Derived, not from the kit: Starlight needs a pale step for tinted
+     backgrounds and the palette has none. Copperplane green at 12% into
+     Paper (#F4F7F3). Named here so nobody mistakes it for a brand colour. */
+  --sl-color-accent-low: #d9e7dd;
+  --sl-color-accent: #10743f; /* Copperplane green */
+  --sl-color-accent-high: #0b5c34; /* Solder mask */
 }
 
 /* Screenshots of a desktop app need a visible edge or they bleed into the

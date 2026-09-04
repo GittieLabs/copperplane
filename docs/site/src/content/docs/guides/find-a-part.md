@@ -9,6 +9,8 @@ Open a project, go to the **Components** tab, and type a part number.
 
 ## What you get back
 
+![A real part search, with five candidates](/copperplane/images/component-search.png)
+
 Ranked candidates, each with its manufacturer, a datasheet link and a confidence
 signal. **Nothing is chosen for you.** Open a datasheet link before confirming
 if the match is not obvious — that is what it is there for.

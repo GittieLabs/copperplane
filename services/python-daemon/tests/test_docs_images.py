@@ -68,3 +68,64 @@ class DocsImagesTests(unittest.TestCase):
         unused = sorted(on_disk - referenced)
         if unused:
             print(f"\n  note: {len(unused)} image(s) not referenced by any page yet: {', '.join(unused)}")
+
+
+_BRAND = os.path.join(_ROOT, "brand")
+_SITE = os.path.join(_ROOT, "docs", "site")
+
+#: The pale step Starlight needs for tinted backgrounds. The kit has no light
+#: tint, so this one is derived (Copperplane green at 12% into Paper) and is
+#: documented as such in custom.css. Everything else must be a kit colour.
+_DERIVED_TINTS = {"#d9e7dd"}
+
+
+@unittest.skipUnless(os.path.isdir(_BRAND), "the brand kit is not present")
+class DocsBrandAssetsTests(unittest.TestCase):
+    """The site's copies of the mark are copies, not forks.
+
+    `brand/README.md` states the kit is generated and never hand-edited, and
+    `brand/` sits outside the Astro project, so Starlight cannot reference it
+    directly. Copying is the mechanism; this is what stops a copy going stale
+    when the kit is regenerated. Same reasoning as the app's own
+    `brandAssets.test.ts`, applied to the second consumer.
+    """
+
+    COPIES = {
+        os.path.join("src", "assets", "copperplane-mark.svg"): "mark.svg",
+        os.path.join("src", "assets", "copperplane-mark-on-dark.svg"): "mark-on-dark.svg",
+        os.path.join("public", "favicon.svg"): "favicon.svg",
+    }
+
+    def test_101_each_copy_is_byte_identical_to_the_generated_original(self):
+        for served, generated in self.COPIES.items():
+            with self.subTest(served):
+                with open(os.path.join(_SITE, served), "rb") as a, \
+                     open(os.path.join(_BRAND, "svg", generated), "rb") as b:
+                    self.assertEqual(a.read(), b.read())
+
+    def test_102_the_accents_are_brand_colours_not_approximations(self):
+        """The site's accent used to be a soldermask green picked by eye, while
+        the kit had one by name. They were not the same colour."""
+        with open(os.path.join(_BRAND, "README.md"), encoding="utf-8") as handle:
+            palette = {m.lower() for m in re.findall(r"`(#[0-9A-Fa-f]{6})`", handle.read())}
+        self.assertGreater(len(palette), 3, "could not read the brand palette")
+
+        with open(os.path.join(_SITE, "src", "styles", "custom.css"), encoding="utf-8") as handle:
+            css = handle.read()
+        accents = {m.lower() for m in re.findall(r"--sl-color-accent[a-z-]*:\s*(#[0-9a-fA-F]{6})", css)}
+        self.assertTrue(accents, "no accent colours found in custom.css")
+
+        stray = sorted(accents - palette - _DERIVED_TINTS)
+        self.assertEqual(
+            stray, [],
+            f"accent colours that are neither in the brand palette nor a documented "
+            f"derived tint: {stray}",
+        )
+
+    def test_103_the_logo_is_actually_wired_up(self):
+        """A copied asset nobody references is just a file."""
+        with open(os.path.join(_SITE, "astro.config.mjs"), encoding="utf-8") as handle:
+            config = handle.read()
+
+        self.assertIn("copperplane-mark.svg", config)
+        self.assertIn("copperplane-mark-on-dark.svg", config)

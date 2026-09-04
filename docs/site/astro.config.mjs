@@ -12,6 +12,17 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Copperplane',
+      // SPEC-338 put the mark in the app; this is the same mark on the site,
+      // from the same generated files. Starlight swaps the two variants by
+      // theme itself, which is the one place a light/dark pair is worth
+      // carrying -- unlike the screenshots, where mixing themes just looks
+      // careless. `replacesTitle: false` keeps the wordmark as text, so the
+      // site title stays selectable and searchable.
+      logo: {
+        light: './src/assets/copperplane-mark.svg',
+        dark: './src/assets/copperplane-mark-on-dark.svg',
+        replacesTitle: false,
+      },
       description:
         'A local-first desktop assistant that bridges KiCad and FreeCAD. It reads the datasheet and shows you the page it got that from.',
       social: [
