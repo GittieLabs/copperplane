@@ -46,6 +46,7 @@ import { Welcome } from './components/Welcome'
 import { GuidedSetup } from './components/GuidedSetup'
 import { NoProjectLanding } from './components/NoProjectLanding'
 import { RequirementsBanner } from './components/RequirementsBanner'
+import { DegradedBuildNotice } from './components/DegradedBuildNotice'
 import type { Requirement } from './lib/requirements'
 import {
   confirmRemoveProject,
@@ -609,6 +610,12 @@ function App() {
         onSelectSettings={() => setView({ kind: 'settings' })}
       />
       <main className="flex flex-1 flex-col overflow-auto">
+        {/* SPEC-407 §5: above everything, including the onboarding surfaces.
+            A broken build is not a configuration problem the user can walk
+            into a wizard and fix, and it explains failures the rest of the app
+            would otherwise present as its own. */}
+        <DegradedBuildNotice capabilities={capabilities} />
+
         {/* SPEC-336: the only thing standing between an unconfigured app and
             "watching features fail one at a time". Not shown on the onboarding
             surfaces themselves, which are already about exactly this. */}
