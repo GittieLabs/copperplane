@@ -1,3 +1,5 @@
+import { BrandMark } from './BrandMark'
+
 /** SPEC-336 step 1-3: the first screen, and the two paths off it.
  *
  *  Managed is *shown and disabled*. `SPEC-320` and `SPEC-404` are both still
@@ -22,6 +24,7 @@ export function Welcome({
   return (
     <div className="flex h-full flex-col items-start justify-center gap-6 p-10">
       <div className="flex flex-col gap-2">
+        <BrandMark />
         <h1 className="text-2xl font-medium text-fg-bright">Welcome to Copperplane</h1>
         <p className="max-w-xl text-sm text-fg-secondary">
           Copperplane reads your KiCad schematic and board, checks them, explains what the checks
