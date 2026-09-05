@@ -31,8 +31,14 @@ export interface SavedPart {
    * (`kicad_bridge.inject_component` reads `schema["package_dimensions"]`/
    * `schema["courtyard"]` directly). Shape not otherwise interpreted by
    * the frontend -- passed through verbatim. */
-  package_dimensions: Record<string, number>
-  courtyard: Record<string, number>
+  /** Nullable because a real saved Part can genuinely lack these. Parts
+   * saved before CTX-308.5 have neither: the confirm path received them
+   * from the extraction and dropped them on the floor. Declaring them
+   * non-nullable asserted something false about the library's own data,
+   * and the first fixture written to represent a real legacy part was
+   * rejected by the compiler for being accurate. */
+  package_dimensions: Record<string, number> | null
+  courtyard: Record<string, number> | null
   /** SPEC-300 §2.2's provenance record, keyed by field name. Real,
    * already returned by library.save_confirmed_part/library.save_part
    * (verified directly against library_store.py -- save_part's own
