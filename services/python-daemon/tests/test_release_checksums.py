@@ -523,13 +523,63 @@ class InstallerBrandAssetsTests(unittest.TestCase):
         self.assertEqual(dmg["appPosition"], {"x": 180, "y": 170})
         self.assertEqual(dmg["applicationFolderPosition"], {"x": 480, "y": 170})
 
-    @unittest.skipUnless(os.path.exists(SOURCE), "the brand kit is not present")
-    def test_503_the_background_is_drawn_at_twice_the_window_size(self):
-        """Tauri takes one image, not a multi-representation TIFF, so retina
-        crispness comes from rendering at 2x and letting Finder scale down."""
-        with open(self.SOURCE, "rb") as handle:
-            header = handle.read(33)
-        width = int.from_bytes(header[16:20], "big")
-        height = int.from_bytes(header[20:24], "big")
+    @staticmethod
+    def _measure(path):
+        """Return the PNG's size in pixels and in points, the way Finder reads it.
 
-        self.assertEqual((width, height), (1320, 800))
+        Finder sizes a DMG background from the image's DPI, not from the
+        window: points = pixels / (dpi / 72). A PNG with no `pHYs` chunk is 72
+        DPI, so its pixel count *is* its point count.
+        """
+        with open(path, "rb") as handle:
+            data = handle.read()
+        width = int.from_bytes(data[16:20], "big")
+        height = int.from_bytes(data[20:24], "big")
+
+        dpi_x = dpi_y = 72.0
+        pos = 8
+        while pos < len(data):
+            length = int.from_bytes(data[pos:pos + 4], "big")
+            kind = data[pos + 4:pos + 8]
+            if kind == b"pHYs":
+                body = data[pos + 8:pos + 8 + length]
+                unit = body[8]
+                if unit == 1:  # pixels per metre
+                    dpi_x = int.from_bytes(body[0:4], "big") * 0.0254
+                    dpi_y = int.from_bytes(body[4:8], "big") * 0.0254
+                break
+            if kind == b"IDAT":
+                break
+            pos += 12 + length
+
+        return (width, height), (round(width * 72 / dpi_x), round(height * 72 / dpi_y))
+
+    @unittest.skipUnless(os.path.exists(SOURCE), "the brand kit is not present")
+    def test_503_the_background_measures_exactly_the_window_in_points(self):
+        """This is the one that was wrong in the shipped v0.4.0 DMG.
+
+        The background was 1320x800 pixels at the default 72 DPI, on the belief
+        that Tauri or Finder would scale it down to the 660x400 window. Neither
+        does. Finder measured it as 1320x800 *points*, so the volume opened with
+        a horizontal scroll bar and every drawn element sat at twice its
+        intended distance from the icons it was pointing at.
+
+        Nothing failed. The file existed, matched its source, and was exactly
+        the pixel size the test then asserted. What was missing was the only
+        measurement that decides how it looks.
+        """
+        import json
+        with open(os.path.join(REPO_ROOT, "core", "tauri-rust", "tauri.conf.json"), encoding="utf-8") as handle:
+            window = json.load(handle)["bundle"]["macOS"]["dmg"]["windowSize"]
+
+        _, points = self._measure(self.SOURCE)
+
+        self.assertEqual(points, (window["width"], window["height"]))
+
+    @unittest.skipUnless(os.path.exists(SOURCE), "the brand kit is not present")
+    def test_504_the_background_carries_two_pixels_per_point(self):
+        """Correct point size alone is satisfied by a soft 1x image. The DPI
+        chunk exists so the same file can be 2x and crisp on a retina display."""
+        pixels, points = self._measure(self.SOURCE)
+
+        self.assertEqual(pixels, (points[0] * 2, points[1] * 2))

@@ -103,26 +103,42 @@ Apple's icon grid; Windows and Linux assets are full bleed.
 ## The installer window
 
 `tools/dmg_background.py` draws the background for the macOS DMG. Unlike the other tools it needs
-neither fontTools nor playwright -- it imports `geometry.py` and writes SVG directly -- so it runs
-on a bare Python.
-
-Render it with `rsvg-convert`, not ImageMagick:
+neither fontTools nor playwright -- it reads the already-outlined wordmark straight out of
+`svg/wordmark-on-dark.svg` -- so it runs on a bare Python. One command does everything:
 
 ```sh
-rsvg-convert -w 1320 -h 800 svg/dmg-background.svg -o png/dmg-background.png
-cp png/dmg-background.png ../core/tauri-rust/dmg/background.png
+python3 tools/dmg_background.py
 ```
 
-ImageMagick's SVG renderer honours `fill` and silently ignores `stroke`. The mark and the trace are
-stroke-only, so it produces a background with the artwork missing and no error. This is also why
-the drawing punches its via holes by overdrawing in the ground colour rather than using an SVG
-`mask` the way the other marks do.
+It writes the SVG, renders the PNG, sets the DPI, and copies the result to
+`core/tauri-rust/dmg/background.png`.
 
-The cue is a routed trace, not a generic arrow: it leaves a via under the app icon, breaks at 45
-degrees, and ends in an arrowhead under the Applications folder. Both icon positions are held clear
-by 74px. It is drawn at 660x400 and rendered at 2x, because Tauri takes a single image rather than
-a multi-representation TIFF and the crispness on a retina display comes from Finder scaling down.
+**Finder sizes the background from the image's DPI, not from the window.** This is the whole trick
+and getting it wrong is invisible until someone opens the disk image. A 1320x800 PNG at the default
+72 DPI is 1320x800 *points* -- twice the 660x400 window -- so the volume opens with a horizontal
+scroll bar and every drawn element sits at twice its intended distance from the icon it points at.
+That shipped in v0.4.0. The script now writes a `pHYs` chunk declaring 144 DPI, so the same pixels
+measure 660x400 points and stay crisp on a retina display, and
+`services/python-daemon/tests/test_release_checksums.py` fails if the point size ever stops matching
+`windowSize`.
+
+**Render with `rsvg-convert`, never ImageMagick.** ImageMagick's SVG renderer honours `fill` and
+silently ignores `stroke`. The mark and the trace are stroke-only, so it produces a background with
+the artwork missing and no error at all. This is also why the drawing punches its via holes by
+overdrawing in the ground colour rather than using an SVG `mask` the way the other marks do.
+
+The cue is a routed trace, not a generic arrow: it leaves a via beside the app icon, runs straight,
+and ends in an arrowhead under the Applications folder. Both icon positions are held clear by 74px.
+The lockup sits above them and the instruction line below, so nothing decorative can land under an
+icon or its filename.
+
+The instruction sentence is body copy set in the system sans, not the wordmark -- the wordmark is
+always outlines. If you regenerate this on a machine with different fonts the sentence will shift
+slightly; the committed PNG is the reference.
 
 The window size and both icon positions live in `core/tauri-rust/tauri.conf.json` under
-`bundle.macOS.dmg`. They must match the drawing, and
-`services/python-daemon/tests/test_release_checksums.py` fails if they drift.
+`bundle.macOS.dmg`. They must match the drawing, and the same test file fails if they drift.
+
+One thing the app does not control: if you have Finder set to show hidden files, the volume also
+shows `.background` and `.VolumeIcon.icns`, unpositioned and overlapping. Tauri's bundler does not
+place them and there is no configuration for it. Most people never see them.
