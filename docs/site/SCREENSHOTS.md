@@ -91,10 +91,6 @@ ranked candidates, is kept instead.
 
 ## Known and deliberate
 
-`guided-provider.png` reads "A provider is already configured (anthropic, google, perplexity)",
-which a genuinely fresh install would never show. The key field is empty and nothing is exposed.
-Reshoot only if the wording bothers you; the screen itself is the one a new user sees.
-
 The enclosure 3D preview does not draw the Arduino or the switch. Both *reference* a KiCad 3D
 model and neither `.step` file is in KiCad's macOS package, so there is nothing to draw. The
 tutorial and the enclosure guide both say so rather than leaving a reader to wonder -- and it is
