@@ -1,6 +1,6 @@
 [package]
 name = "copperplane-core"
-version = "0.3.1"
+version = "0.4.0"
 description = "Rust process manager and OS-level lifecycle supervisor for Copperplane"
 authors = ["Copperplane contributors"]
 license = "Apache-2.0"
