@@ -21,6 +21,7 @@ context file rather than inferred:
 """
 import os
 import shutil
+import time
 import subprocess
 import sys
 
@@ -75,6 +76,31 @@ def _arch_prefix(triple: str) -> list:
     return []
 
 
+def _remove_tree(path):
+    """Remove a directory, tolerating macOS putting files back underneath us.
+
+    `shutil.rmtree` walks a directory and then removes it. On macOS, Finder or
+    Spotlight can write a `.DS_Store` into a directory between those two
+    steps, and the removal fails with ENOTEMPTY -- reported as
+    "[Errno 66] Directory not empty: 'python3.11'", which reads like a
+    permissions or concurrency problem and is neither.
+
+    This blocked a real build twice, and was misdiagnosed the first time as a
+    race with another process. Retrying is the fix: the file that reappeared
+    is a few hundred bytes of Finder metadata, and the second pass gets it.
+    """
+    if not os.path.isdir(path):
+        return
+    for attempt in range(4):
+        try:
+            shutil.rmtree(path)
+            return
+        except OSError:
+            if attempt == 3:
+                raise
+            time.sleep(0.4)
+
+
 def freeze(triple: str, daemon_dir: str, dist_dir: str, final_name: str) -> None:
     """Freeze the daemon and leave it at `dist/<final_name>`."""
     python = find_freeze_python()
@@ -85,8 +111,7 @@ def freeze(triple: str, daemon_dir: str, dist_dir: str, final_name: str) -> None
     # PyInstaller's cache can silently reuse a binary processed for the other
     # architecture, turning a build-time error into a runtime dlopen failure.
     for stale in (venv, build_cache):
-        if os.path.isdir(stale):
-            shutil.rmtree(stale)
+        _remove_tree(stale)
 
     def run(cmd, why):
         result = subprocess.run(prefix + cmd, cwd=daemon_dir)

@@ -25,7 +25,9 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/generated/**"]
+        "scope": [
+          "$APPDATA/generated/**"
+        ]
       }
     }
   },
@@ -54,6 +56,23 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "macOS": {
+      "dmg": {
+        "background": "dmg/background.png",
+        "windowSize": {
+          "width": 660,
+          "height": 400
+        },
+        "appPosition": {
+          "x": 180,
+          "y": 170
+        },
+        "applicationFolderPosition": {
+          "x": 480,
+          "y": 170
+        }
+      }
     }
   }
 }

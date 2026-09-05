@@ -4,7 +4,12 @@ import os
 import re
 from playwright.sync_api import sync_playwright
 
-BRAND = "/home/claude/copperplane/brand"
+# Resolved from this file's own location, so the generator runs wherever the
+# repository is checked out. It was hardcoded to /home/claude/copperplane/brand
+# -- the machine it was written on -- which meant brand/README.md documented two
+# commands that could not run anywhere else, and the kit could not be
+# regenerated at all.
+BRAND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SVG = os.path.join(BRAND, "svg")
 PNG = os.path.join(BRAND, "png")
 os.makedirs(PNG, exist_ok=True)

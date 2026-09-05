@@ -7,7 +7,12 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 from text2path import build as t2p
 
-OUT = "/home/claude/copperplane/brand"
+# Resolved from this file's own location, so the generator runs wherever the
+# repository is checked out. It was hardcoded to /home/claude/copperplane/brand
+# -- the machine it was written on -- which meant brand/README.md documented two
+# commands that could not run anywhere else, and the kit could not be
+# regenerated at all.
+OUT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 F = "/tmp/cp/node_modules/@fontsource"
 PLEX600 = f"{F}/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2"
 PLEX400 = f"{F}/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2"
