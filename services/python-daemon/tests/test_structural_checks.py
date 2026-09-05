@@ -20,12 +20,22 @@ EXAMPLE = os.path.abspath(os.path.join(
 EXAMPLE_SCH = os.path.join(EXAMPLE, "Copperplane_Blink_LEDs.kicad_sch")
 
 
-def _kicad_available():
+def _stock_libraries_installed():
+    """Whether this machine can resolve the example project's footprints.
+
+    CI cannot: no KiCad, so every footprint fails and the check correctly
+    collapses to one finding about the machine. Every test that asserts
+    something about the comparison itself has to stand down there, and two of
+    them originally did not -- CI caught it on all three runners.
+    """
+    if not os.path.exists(EXAMPLE_SCH):
+        return False
     try:
-        import kicad_bridge
-        return bool(kicad_bridge.resolve_footprint_model("Device:R").get("footprint_path")) or True
+        import kicad_bridge  # noqa: F401
+        findings = structural_checks.check_pin_counts(EXAMPLE_SCH)
     except Exception:  # noqa: BLE001
         return False
+    return not any(f["type"] == structural_checks.FOOTPRINT_UNRESOLVED for f in findings)
 
 
 @unittest.skipUnless(os.path.exists(EXAMPLE_SCH), "the example project is not present")
@@ -133,23 +143,17 @@ class TheRealProjectTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        try:
-            import kicad_bridge  # noqa: F401
-        except Exception:  # noqa: BLE001
-            raise unittest.SkipTest("kicad_bridge is unavailable")
+        if not _stock_libraries_installed():
+            raise unittest.SkipTest("KiCad's stock footprint libraries are not installed")
         cls.findings = structural_checks.check_pin_counts(EXAMPLE_SCH)
         cls.refs = sorted(
             f["items"][0]["description"].split()[1] for f in cls.findings
         )
 
     def test_201_exactly_d1_and_sw1(self):
-        if any(f["type"] == structural_checks.FOOTPRINT_UNRESOLVED for f in self.findings):
-            self.skipTest("KiCad's stock footprint libraries are not installed")
         self.assertEqual(self.refs, ["D1", "SW1"])
 
     def test_202_the_documented_case_names_both_counts(self):
-        if any(f["type"] == structural_checks.FOOTPRINT_UNRESOLVED for f in self.findings):
-            self.skipTest("KiCad's stock footprint libraries are not installed")
         d1 = next(f for f in self.findings if f["items"][0]["description"].startswith("Symbol D1"))
         self.assertIn("has 2", d1["description"])
         self.assertIn("has 4 numbered pads", d1["description"])
@@ -172,16 +176,38 @@ class UnresolvableFootprintTests(unittest.TestCase):
     """Silence would read as a clean part. It has to say it could not compare."""
 
     @unittest.skipUnless(os.path.exists(EXAMPLE_SCH), "the example project is not present")
-    def test_301_an_uninstalled_footprint_is_reported_not_skipped(self):
+    def test_301_no_footprints_at_all_is_one_finding_about_the_machine(self):
+        """CI caught this. With no KiCad installed every footprint fails to
+        resolve, and one finding per part meant eight warnings about eight
+        perfectly correct parts -- noise of exactly the kind that spends the
+        credibility this check depends on."""
         findings = structural_checks.check_pin_counts(
             EXAMPLE_SCH, resolve_footprint=lambda _fp: {"footprint_path": None}
         )
 
-        self.assertTrue(findings)
-        self.assertTrue(all(
-            f["type"] == structural_checks.FOOTPRINT_UNRESOLVED for f in findings
-        ))
-        self.assertIn("could not be compared", findings[0]["description"])
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["type"], structural_checks.FOOTPRINT_UNRESOLVED)
+        self.assertIn("No footprint in this project could be found", findings[0]["description"])
+        self.assertIn("NOT a clean result", findings[0]["description"])
+
+    @unittest.skipUnless(_stock_libraries_installed(),
+                         "KiCad's stock footprint libraries are not installed")
+    def test_303_one_missing_footprint_among_working_ones_names_that_part(self):
+        """A part that fails while its neighbours resolve really is about that
+        part -- a custom library the user has not registered."""
+        import kicad_bridge
+
+        def resolve(footprint_id):
+            if "LED" in footprint_id:
+                return {"footprint_path": None}
+            return kicad_bridge.resolve_footprint_model(footprint_id)
+
+        findings = structural_checks.check_pin_counts(EXAMPLE_SCH, resolve_footprint=resolve)
+        unresolved = [f for f in findings
+                      if f["type"] == structural_checks.FOOTPRINT_UNRESOLVED]
+
+        self.assertEqual(len(unresolved), 1)
+        self.assertIn("D1's footprint", unresolved[0]["description"])
 
     @unittest.skipUnless(os.path.exists(EXAMPLE_SCH), "the example project is not present")
     def test_302_a_resolver_that_raises_does_not_take_the_check_down(self):
@@ -190,9 +216,8 @@ class UnresolvableFootprintTests(unittest.TestCase):
 
         findings = structural_checks.check_pin_counts(EXAMPLE_SCH, resolve_footprint=boom)
 
-        self.assertTrue(all(
-            f["type"] == structural_checks.FOOTPRINT_UNRESOLVED for f in findings
-        ))
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["type"], structural_checks.FOOTPRINT_UNRESOLVED)
 
 
 if __name__ == "__main__":

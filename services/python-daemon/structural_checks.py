@@ -159,12 +159,15 @@ def check_pin_counts(sch_path: str, resolve_footprint=None) -> list:
         resolve_footprint = kicad_bridge.resolve_footprint_model
 
     findings = []
+    unresolved = []
+    comparable = 0
     for symbol in read_schematic_symbols(sch_path):
         footprint_id = symbol.get("footprint")
         reference = symbol.get("reference")
         pins = symbol.get("pin_count")
         if not footprint_id or pins is None:
             continue
+        comparable += 1
 
         try:
             path = (resolve_footprint(footprint_id) or {}).get("footprint_path")
@@ -173,15 +176,7 @@ def check_pin_counts(sch_path: str, resolve_footprint=None) -> list:
             path = None
 
         if not path or not os.path.exists(path):
-            findings.append({
-                "severity": "warning",
-                "type": FOOTPRINT_UNRESOLVED,
-                "description": (
-                    f"{reference}'s footprint {footprint_id} is not installed, so its pad "
-                    f"count could not be compared against the symbol's {pins} pins."
-                ),
-                "items": [{"description": f"Symbol {reference} [{symbol.get('lib_id')}]"}],
-            })
+            unresolved.append((reference, footprint_id, pins, symbol.get("lib_id")))
             continue
 
         try:
@@ -208,4 +203,44 @@ def check_pin_counts(sch_path: str, resolve_footprint=None) -> list:
                 ),
             }],
         })
+
+    findings.extend(_unresolved_findings(unresolved, comparable))
     return findings
+
+
+def _unresolved_findings(unresolved: list, comparable: int) -> list:
+    """One finding when nothing resolved, one per part when something did.
+
+    CI caught this. With no KiCad installed, every footprint in a project fails
+    to resolve, and reporting each one produced eight warnings about eight
+    perfectly correct parts -- noise of exactly the kind that spends the
+    credibility this check depends on. Nothing resolving is a single fact about
+    the machine, not a fact about the design.
+
+    A part that fails while its neighbours resolve is genuinely about that part:
+    a custom library the user has not registered, which is worth naming.
+    """
+    if not unresolved:
+        return []
+
+    if len(unresolved) == comparable:
+        return [{
+            "severity": "warning",
+            "type": FOOTPRINT_UNRESOLVED,
+            "description": (
+                "No footprint in this project could be found on this machine, so no symbol "
+                "was compared against its footprint. KiCad's footprint libraries are "
+                "probably not installed or not configured. This is NOT a clean result."
+            ),
+            "items": [{"description": f"{comparable} symbols, none comparable"}],
+        }]
+
+    return [{
+        "severity": "warning",
+        "type": FOOTPRINT_UNRESOLVED,
+        "description": (
+            f"{reference}'s footprint {footprint_id} is not installed, so its pad count "
+            f"could not be compared against the symbol's {pins} pins."
+        ),
+        "items": [{"description": f"Symbol {reference} [{lib_id}]"}],
+    } for reference, footprint_id, pins, lib_id in unresolved]
