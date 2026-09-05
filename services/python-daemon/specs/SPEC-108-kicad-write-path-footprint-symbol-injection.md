@@ -4,11 +4,11 @@ title: "KiCad Write Path: Footprint & Symbol Injection"
 status: Completed
 type: Feature
 created: 2026-08-09
-last_updated: 2026-08-14
+last_updated: 2026-09-04
 target_version: v0.1.0
 location: "services/python-daemon/specs/SPEC-108-kicad-write-path-footprint-symbol-injection.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
-child_specs: []
+child_specs: ["SPEC-112-placing-a-part-through-kicads-own-libraries.md"]
 user_facing: true
 ---
 
