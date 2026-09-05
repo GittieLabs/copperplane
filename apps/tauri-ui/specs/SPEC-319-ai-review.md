@@ -8,7 +8,9 @@ last_updated: 2026-08-25
 target_version: v0.3.0
 location: "apps/tauri-ui/specs/SPEC-319-ai-review.md"
 parent_spec: "SPEC-318-in-context-agent-chat-and-review.md"
-child_specs: ["SPEC-332-erc-as-a-teaching-surface.md"]
+child_specs:
+  - "SPEC-332-erc-as-a-teaching-surface.md"
+  - "SPEC-339-review-persistence-and-staleness.md"
 user_facing: true
 ---
 

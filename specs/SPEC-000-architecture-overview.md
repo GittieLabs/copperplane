@@ -34,6 +34,7 @@ child_specs:
   - "../specs/SPEC-404-managed-hosted-access.md"
   - "../specs/SPEC-405-product-rename-copperplane.md"
   - "SPEC-408-messaging-for-the-maker-who-is-leveling-up.md"
+  - "../services/python-daemon/specs/SPEC-113-structural-consistency-checks.md"
 user_facing: false
 ---
 
