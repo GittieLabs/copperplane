@@ -6,7 +6,7 @@ description: What Copperplane asks you on first launch, the three ways past it, 
 The first time you open Copperplane it asks for one thing: an AI provider. Nothing
 else is required to get going, and you can decline even that and look around.
 
-<!-- screenshot pending: welcome.png -- see docs/site/SCREENSHOTS.md -->
+![The welcome screen](/copperplane/images/welcome.png)
 
 Three ways forward, and none of them is wrong.
 
@@ -16,7 +16,7 @@ Two steps, about a minute.
 
 **Step 1 — an AI provider.** Pick one from the list, paste a key, and continue.
 
-<!-- screenshot pending: guided-provider.png -- see docs/site/SCREENSHOTS.md -->
+![Choosing a provider](/copperplane/images/guided-provider.png)
 
 You are paying the provider directly, not us. The key goes into your operating
 system's keychain, never into a config file — see [Privacy and your
@@ -31,7 +31,7 @@ oddly.
 **Step 2 — KiCad and FreeCAD.** Copperplane looks for both and shows you what it
 found, with the real paths.
 
-<!-- screenshot pending: guided-tools.png -- see docs/site/SCREENSHOTS.md -->
+![KiCad and FreeCAD detected](/copperplane/images/guided-tools.png)
 
 Finding neither is not an error here. The button reads **Done** when both are
 present and **Continue anyway** when they are not, which is the honest thing for
@@ -60,6 +60,8 @@ or it will keep using the old value and look like it ignored you.
 Dismisses the question and drops you on the launch view. Nothing is configured
 and nothing is broken — you can open a project, read its components, and see what
 the app is before deciding whether to give it a key.
+
+![The launch view with nothing selected](/copperplane/images/no-project.png)
 
 The setup question does not come back. When you do want it, Settings has
 everything.

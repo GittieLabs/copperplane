@@ -28,6 +28,12 @@ In Copperplane, make a new project and point it at the `.kicad_pro` file.
 
 ![Linking a KiCad project to a new Copperplane project](/copperplane/images/new-project.png)
 
+The last step of the wizard checks the project as it links it — schematic and board
+agreeing, the component count, and what ERC and DRC already have to say. You have not
+asked for anything yet and it has already read the design.
+
+![The wizard's own check pass, before you have asked for anything](/copperplane/images/new-project-review.png)
+
 The rail on the left holds your projects, your parts library, and Settings.
 Across the top of a project sit five tabs — **Overview**, **Components**,
 **Schematic**, **PCB**, **Enclosure** — which is roughly the order you would work
@@ -145,6 +151,19 @@ taller. Generate, and you get a box sized to your actual board outline with the
 PCB seated inside it for a visual fit check.
 
 The mounting holes are the reason this is worth doing before you order anything.
+
+![The generated enclosure, with the board seated inside it](/copperplane/images/enclosure-3d.png)
+
+:::note[Why the Arduino is not in the picture]
+The preview draws the parts KiCad has 3D models for. On this board that is the RGB LED
+and the resistor — the switch and the Arduino module both *reference* a model in KiCad's
+library, and those two `.step` files are not in KiCad's macOS package, so there is nothing
+to draw.
+
+That is also why the height reads "6 still unknown". The 14.1 mm floor comes from D1,
+the tallest part Copperplane could actually measure, and the app says plainly that the
+real minimum may be taller rather than quietly treating an unmeasurable part as flat.
+:::
 
 ## What you have learned
 

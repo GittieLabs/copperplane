@@ -58,49 +58,44 @@ know about** -- check those yourself.
 Raw captures are gitignored wherever they land. The chosen ones get cropped
 into `docs/site/public/images/`.
 
-## Already placed
+## All slots are filled
 
-| File | Source | Notes |
-| :--- | :--- | :--- |
-| `hero.png` | tutorial capture | The Schematic tab on the real project, full window |
-| `board-check.png` | tutorial capture | The DRC result list with its findings |
-| `schematic-erc.png` | tutorial capture | ERC after the two `PWR_FLAG` symbols were removed |
-| `ask-the-agent.png` | tutorial capture | The agent answering the tutorial's own D1 question, sources visible |
-| `design-guidance.png` | tutorial capture | Guidance with expandable citations |
-| `new-project.png` | tutorial capture | Linking a KiCad project |
-| `component-search.png` | tutorial capture | Ranked candidates with confidence |
-| `settings.png` | first walkthrough | Whole Settings surface, keys only as "configured" |
-| `part-detail.png` | first walkthrough | RGB LED footprint card with the abbreviations box |
-| `schematic-check.png` | first walkthrough | Schematic tab, board components, detected `.kicad_sch` |
-| `board-check-explained.png` | first walkthrough | DRC rewritten in plain English |
-| `enclosure.png` | first walkthrough | Enclosure form with the measured 14.1mm hint |
+Fifteen images, every one dark, every one from the tutorial project with a clean rail.
 
-## Two things to fix before these are final
-
-**Scratch projects are in the rail on 9 of 24 captures**, `hero.png` included: `Test`,
-`Test Create Project 1`, `Test No Project`, and a second `Blink LED Tutorial` beside the real
-`Copperplane Blink LEDs`. It reads as a developer's machine rather than a product. Removing them
-("Remove from list") and re-shooting the affected screens is the fix; nothing else can reach it,
-because the rail is in the pixels.
-
-**One project is named inconsistently.** `board-check.png` shows `Blink LED Tutorial` while the
-tutorial prose and every other shot say `Copperplane Blink LEDs`. A reader following along will
-notice.
-
-Both are cosmetic and neither blocks publishing. They are the difference between "screenshots of
-the app" and "screenshots of the product".
-
-## Still needed, all dark
-
-Five slots remain, all of them onboarding, which needs `onboarding_completed` reset to reach:
-
-| File | What must be visible |
+| File | Shows |
 | :--- | :--- |
-| `welcome.png` | The welcome screen: the mark, both paths, **no rail** |
-| `guided-provider.png` | Guided setup step 1, choosing a provider, before a key is typed |
-| `guided-tools.png` | Guided setup showing KiCad and FreeCAD detected, with their real paths |
-| `no-project.png` | The launch view with no project selected, showing the mark |
-| `library.png` | The library with a few real parts |
+| `hero.png` | The Overview tab: the KiCad link, the plain-English build description, the ask box |
+| `welcome.png` | First launch: the mark, both paths, no rail |
+| `guided-provider.png` | Guided setup step 1, provider chosen, key field empty |
+| `guided-tools.png` | Guided setup step 2, KiCad and FreeCAD found with their real paths |
+| `no-project.png` | The launch view with nothing selected |
+| `new-project.png` | The wizard linking a `.kicad_pro` |
+| `new-project-review.png` | The wizard's own check pass -- parity, component count, ERC and DRC counts |
+| `schematic-check.png` | Board components with per-part 3D-model status |
+| `schematic-erc.png` | ERC after the two `PWR_FLAG` symbols were removed |
+| `board-check.png` | The DRC result list |
+| `board-check-explained.png` | DRC rewritten in plain English |
+| `ask-the-agent.png` | The agent answering the tutorial's own D1 question, sources visible |
+| `component-search.png` | Ranked candidates with confidence |
+| `part-detail.png` | A footprint card with the abbreviations box |
+| `design-guidance.png` | Guidance with expandable citations |
+| `enclosure.png` | The generation form with the measured height hint |
+| `enclosure-3d.png` | The generated enclosure with the board seated inside |
 
-`first-run.md` carries `<!-- screenshot pending -->` markers where the first three go, so the
-guard stays green and the gap stays visible.
+## One capture was rejected
+
+The Components tab shot (23:11:19) shows an empty search field, no results, and a leftover
+NE555 as the only project part -- which contradicts the eight components the wizard had just
+counted. It demonstrates nothing about searching. The earlier `component-search.png`, with five
+ranked candidates, is kept instead.
+
+## Known and deliberate
+
+`guided-provider.png` reads "A provider is already configured (anthropic, google, perplexity)",
+which a genuinely fresh install would never show. The key field is empty and nothing is exposed.
+Reshoot only if the wording bothers you; the screen itself is the one a new user sees.
+
+The enclosure 3D preview does not draw the Arduino or the switch. Both *reference* a KiCad 3D
+model and neither `.step` file is in KiCad's macOS package, so there is nothing to draw. The
+tutorial and the enclosure guide both say so rather than leaving a reader to wonder -- and it is
+the same reason the height summary reads "6 still unknown".
