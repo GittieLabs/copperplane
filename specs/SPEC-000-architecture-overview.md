@@ -28,6 +28,7 @@ child_specs:
   - "../specs/SPEC-401-python-sidecar-packaging.md"
   - "../services/python-daemon/specs/SPEC-204-agent-tool-registry.md"
   - "../services/python-daemon/specs/SPEC-203-supplier-api-integration.md"
+  - "../specs/SPEC-403-cross-platform-verification.md"
   - "../specs/SPEC-402-release-signing-and-auto-update.md"
   - "../services/python-daemon/specs/SPEC-205-datasheet-design-guidance.md"
   - "../specs/SPEC-404-managed-hosted-access.md"

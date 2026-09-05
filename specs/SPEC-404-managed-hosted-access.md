@@ -4,7 +4,7 @@ title: "Managed Hosted Access"
 status: Draft
 type: System
 created: 2026-08-25
-last_updated: 2026-08-25
+last_updated: 2026-09-05
 target_version: v0.4.0
 location: "specs/SPEC-404-managed-hosted-access.md"
 parent_spec: "SPEC-000-architecture-overview.md"
@@ -15,6 +15,26 @@ user_facing: false
 ---
 
 # SPEC-404: Managed Hosted Access
+
+## 0. Why this is not being built yet
+
+**Recorded 2026-09-05, in the maintainer's own terms.** Two reasons, neither of them technical:
+
+1.  **There is no SaaS application to sign in to.** The gateway, the accounts, the metering and the
+    billing do not exist. This spec describes a client for a service that has not been built.
+
+2.  **Charging for work that only one person has validated would be wrong.** Every live CAD path in
+    this project has been verified on exactly one machine, macOS on Apple silicon
+    (`SPEC-403`). Taking money for a hosted tier before users other than the maintainer have
+    confirmed the product works on their platform puts the charge before the evidence.
+
+The consequence for the product today: the welcome screen shows **Managed by Copperplane** as a
+card marked *COMING SOON*, with its **Sign in** button visibly disabled. That is deliberate and
+honest — the option is real, it is not available, and nothing pretends otherwise.
+
+**What would change this.** Not a decision to build a gateway. Evidence from `SPEC-403` that the
+app works for people who are not the maintainer, followed by those people wanting a version they
+do not have to bring a key to. In that order.
 
 ## 1. Executive Summary & Goals
 
