@@ -219,7 +219,14 @@ def generate_pad_layout(package: str, pin_numbers: list[str], package_dimensions
 # footprint's LibraryIdentifier -- metadata only (never saved into
 # KiCad's own footprint-library-table), so a human reviewing the board
 # can see at a glance which footprints this pipeline generated.
-_LIBRARY_NAME = "HardwareAgentStudio"
+#
+# Was "HardwareAgentStudio" until CTX-202.5: the superseded product name,
+# written into every board this pipeline ever touched, and found in a real
+# user board as "HardwareAgentStudio:NE555". test_readme_claims guards the
+# spaced form in documentation prose and could not see the concatenated form
+# in source. Footprints already injected keep the old label -- they are
+# embedded in the board and still render; only the metadata reads wrong.
+_LIBRARY_NAME = "Copperplane"
 
 
 def build_footprint_instance(schema: dict, pads: list[dict], courtyard: dict) -> FootprintInstance:
