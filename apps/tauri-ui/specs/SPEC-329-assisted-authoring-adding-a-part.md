@@ -108,3 +108,21 @@ user_facing: true
     that produced the `REF**` finding.
 *   `services/python-daemon/kicad_write.py`, `kicad_bridge.py` — the existing write path.
 *   `apps/tauri-ui/specs/SPEC-325-kicad-project-integration.md` — the read this builds on.
+
+## 5. User & Interaction
+
+*   **Product Stage:** Authoring — the only stage in the product that writes to the user's files,
+    reached from the library or the part detail view once a part has been chosen.
+
+*   **What the user is trying to accomplish:** Getting a part they have already found into their
+    design without hand-copying a symbol and a footprint into KiCad, and without discovering later
+    that it arrived somewhere KiCad does not really know about it. The failure this exists to
+    prevent is the one already observed: a part that is on the board, carries `REF**`, has no nets,
+    and is invisible to the schematic.
+
+*   **What the user sees and does:** The user asks for a specific part to be added and is shown,
+    before anything is written, exactly what will change and where — which file, which library,
+    and what they will need to do in KiCad afterwards. They authorise that one action; there is no
+    setting that grants it standing. If the route taken is `SPEC-112`'s library, what they see
+    afterwards is an instruction to place the part from KiCad's own symbol chooser, not a claim
+    that the design has been edited.

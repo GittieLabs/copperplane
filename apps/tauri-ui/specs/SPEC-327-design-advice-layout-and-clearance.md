@@ -87,3 +87,21 @@ user_facing: true
 *   `services/python-daemon/agentflow/agents/board_advisor.prompt.md` — the existing board review,
     including the courtyard suggestion that is this spec's precedent.
 *   `docs/site/src/content/docs/tutorials/blink-leds.md` — the third finding, explained.
+
+## 5. User & Interaction
+
+*   **Product Stage:** Board layout — after a `.kicad_pro` is open and `SPEC-325` has read the
+    board, alongside the existing DRC results rather than in place of them.
+
+*   **What the user is trying to accomplish:** Finding out what is wrong with a board they cannot
+    yet evaluate themselves. Someone on their first PCB does not know that two parts 0.4mm apart
+    are a soldering problem, or that one through-hole part on an otherwise SMD board adds a whole
+    assembly step. They are not looking for rule violations; they are looking for the judgement
+    they do not have yet.
+
+*   **What the user sees and does:** On the PCB tab, a short list of plain-sentence findings, each
+    naming the components involved and the number and source behind the threshold, visually
+    distinct from KiCad's DRC output so the two are never mistaken for each other. Every finding
+    that rests on data the app does not have says so in the finding itself — "these may collide; I
+    have no 3D model for U1" — rather than being silently omitted. Nothing here is clickable in the
+    sense of applying a change; the user reads, decides, and fixes it in KiCad.

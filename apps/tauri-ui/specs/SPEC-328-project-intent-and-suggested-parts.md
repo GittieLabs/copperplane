@@ -91,3 +91,20 @@ user_facing: true
     read by nothing.
 *   `apps/tauri-ui/specs/SPEC-335-new-project-wizard.md` — the existing four-step flow this must
     not duplicate.
+
+## 5. User & Interaction
+
+*   **Product Stage:** Before there is a project at all — the Overview tab, and the entry point for
+    someone with an idea and no files, ahead of every other surface in the app.
+
+*   **What the user is trying to accomplish:** Working out what parts a thing they have described
+    in a sentence will actually need, when they do not yet know the category names to search for.
+    "I want a battery-powered temperature logger" has to become "you need a microcontroller, a
+    temperature sensor, a LiPo charger, a regulator" before any existing search in this app is
+    usable to them.
+
+*   **What the user sees and does:** The user types what they are building in plain language, is
+    asked a small number of clarifying questions on the surface the app already uses for
+    conversation, and gets back a list of part categories with a one-line reason for each. Each
+    entry can be carried straight into the existing part search. What they wrote is stored as the
+    project's intent and remains visible and editable, because later stages read it.
