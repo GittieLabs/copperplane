@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import {
   createLibrary,
   listFootprints,
@@ -107,9 +107,19 @@ export function LibraryArea({
     }
   }, [view])
 
+  const nameInputRef = useRef<HTMLInputElement>(null)
+
   async function handleCreateLibrary() {
     const name = newLibraryName.trim()
-    if (!name) return
+    // Reported as "new library button does not work". It was disabled, because
+    // the name field was empty -- and a disabled button at 50% opacity, on a
+    // dark surface, beside a field showing only placeholder text, is not a
+    // sentence. Clicking now says what is needed and puts the cursor there.
+    if (!name) {
+      setError('Give the library a name first.')
+      nameInputRef.current?.focus()
+      return
+    }
     setCreating(true)
     setError(null)
     try {
@@ -210,10 +220,14 @@ export function LibraryArea({
         <h2 className="text-lg font-medium">Libraries</h2>
         <div className="flex items-center gap-2">
           <input
+            ref={nameInputRef}
             className="rounded border border-line bg-surface px-2 py-1 text-xs"
             placeholder="new library name"
             value={newLibraryName}
-            onChange={(e) => setNewLibraryName(e.target.value)}
+            onChange={(e) => {
+              setNewLibraryName(e.target.value)
+              if (error) setError(null)
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') void handleCreateLibrary()
             }}
@@ -222,7 +236,7 @@ export function LibraryArea({
             type="button"
             className="rounded border border-line px-3 py-1 text-xs font-medium disabled:opacity-50"
             onClick={() => void handleCreateLibrary()}
-            disabled={!newLibraryName.trim() || creating}
+            disabled={creating}
           >
             {creating ? 'Creating…' : '+ New library'}
           </button>

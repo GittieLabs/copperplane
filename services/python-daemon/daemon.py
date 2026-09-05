@@ -1709,8 +1709,9 @@ def kicad_generate_footprint_from_part(part_id: str) -> dict:
     if missing:
         raise library_store.SchemaValidationError(
             f"'{part_id}' does not have the {', '.join(missing)} needed to draw a footprint. "
-            f"Parts saved by older versions of Copperplane are missing these. Search for the "
-            f"part again and save it, and the measurements will come with it."
+            f"A part confirmed from a search result carries only what the search returned, which "
+            f"does not include measurements. Use \"Generate directly from a part number\" to "
+            f"read them out of the datasheet, and the footprint can be drawn from those."
         )
 
     pin_numbers = [pin["number"] for pin in part["pins"]]
@@ -1805,7 +1806,26 @@ def datasheet_generate_guidance(part_id: str, cancel_event=None) -> dict:
     `summaries` dict (SPEC-205 §2.1.1's plain-language layer) alongside
     `categories` -- both are threaded through to storage."""
     part = library_store.load_part(part_id)
+
+    # Check first, generate second. This route used to load the part, fetch
+    # the PDF, run the whole multi-category pipeline, and only then hit
+    # save_part's provenance check -- so a part that was never eligible cost
+    # twenty to forty seconds and a pile of tokens before saying so, and every
+    # bit of that work was discarded. Reported from the app, on a part saved
+    # before package_dimensions were persisted at all.
+    library_store.assert_part_can_be_saved(part)
+
     pdf_path = library_store.ensure_datasheet_cached(part["part_id"], part["datasheet_url"])
+
+    # Guidance already generated from these exact bytes is reusable, and
+    # regenerating it costs the same twenty to forty seconds for an identical
+    # answer. content_hash was being stored and never read; this is what it
+    # was stored for. A changed datasheet changes the hash and regenerates.
+    existing = part.get("design_guidance") or {}
+    if existing.get("categories") and existing.get("content_hash") == library_store.content_hash_of_file(pdf_path):
+        logger.info("datasheet guidance for %s is current for this datasheet; reusing it", part_id)
+        return part
+
     guidance = datasheet_guidance.generate_datasheet_guidance(
         pdf_path,
         secrets=CONFIG.get("secrets", {}),

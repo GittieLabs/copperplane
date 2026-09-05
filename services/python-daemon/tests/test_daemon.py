@@ -3779,3 +3779,101 @@ class TestDaemonListRoutesRoute(unittest.TestCase):
         build gate slower for nothing."""
         self.assertIn("daemon.list_routes", daemon.ROUTES)
         self.assertNotIn("daemon.list_routes", daemon.ASYNC_ROUTES)
+
+
+class TestDesignGuidanceDoesNotWasteYourTime(unittest.TestCase):
+    """CTX-202.5: the route used to charge for the answer before checking
+    whether it could deliver one.
+
+    Reported from the app: "it took a long time in the generation step just
+    to return the error." `datasheet.generate_guidance` loaded the part,
+    fetched the PDF, ran the whole multi-category pipeline -- twenty to forty
+    seconds -- and only then reached `save_part`, whose provenance check
+    refused a part that had been ineligible since before the first token.
+    All of that work was discarded.
+
+    It also stored a `content_hash` of the datasheet it generated from and
+    never compared it, so asking twice for the same answer cost twice.
+    """
+
+    def _part(self, **overrides):
+        part = {
+            "part_id": "TEST-GUIDANCE",
+            "datasheet_url": "https://example.invalid/ds.pdf",
+            "provenance": {f: {"source": "test"} for f in daemon.library_store.PART_PROVENANCE_REQUIRED_FIELDS},
+        }
+        part.update(overrides)
+        return part
+
+    @patch("daemon.datasheet_guidance.generate_datasheet_guidance")
+    @patch("daemon.library_store.ensure_datasheet_cached")
+    @patch("daemon.library_store.load_part")
+    def test_001_an_ineligible_part_fails_before_any_generation(
+        self, load_part, ensure_cached, generate,
+    ):
+        """The point of the change: no PDF fetch, no LLM call."""
+        load_part.return_value = self._part(provenance={"package": {"source": "test"}})
+
+        with self.assertRaises(daemon.library_store.SchemaValidationError):
+            daemon.datasheet_generate_guidance("TEST-GUIDANCE")
+
+        ensure_cached.assert_not_called()
+        generate.assert_not_called()
+
+    @patch("daemon.library_store.content_hash_of_file")
+    @patch("daemon.datasheet_guidance.generate_datasheet_guidance")
+    @patch("daemon.library_store.ensure_datasheet_cached")
+    @patch("daemon.library_store.load_part")
+    def test_002_guidance_for_the_same_datasheet_is_reused(
+        self, load_part, ensure_cached, generate, content_hash,
+    ):
+        load_part.return_value = self._part(design_guidance={
+            "content_hash": "abc123", "categories": {"reset": [{"quote": "x", "page": 1}]},
+        })
+        ensure_cached.return_value = "/tmp/ds.pdf"
+        content_hash.return_value = "abc123"
+
+        result = daemon.datasheet_generate_guidance("TEST-GUIDANCE")
+
+        generate.assert_not_called()
+        self.assertEqual(result["design_guidance"]["content_hash"], "abc123")
+
+    @patch("daemon.library_store.save_part_design_guidance")
+    @patch("daemon.library_store.content_hash_of_file")
+    @patch("daemon.datasheet_guidance.generate_datasheet_guidance")
+    @patch("daemon.library_store.ensure_datasheet_cached")
+    @patch("daemon.library_store.load_part")
+    def test_003_a_changed_datasheet_regenerates(
+        self, load_part, ensure_cached, generate, content_hash, save,
+    ):
+        """Reuse is keyed on the bytes. A revised datasheet must not serve
+        citations that pointed into the old one."""
+        load_part.return_value = self._part(design_guidance={
+            "content_hash": "old", "categories": {"reset": [{"quote": "x", "page": 1}]},
+        })
+        ensure_cached.return_value = "/tmp/ds.pdf"
+        content_hash.return_value = "new"
+        generate.return_value = {"categories": {}, "summaries": {}}
+
+        daemon.datasheet_generate_guidance("TEST-GUIDANCE")
+
+        generate.assert_called_once()
+
+    @patch("daemon.library_store.save_part_design_guidance")
+    @patch("daemon.library_store.content_hash_of_file")
+    @patch("daemon.datasheet_guidance.generate_datasheet_guidance")
+    @patch("daemon.library_store.ensure_datasheet_cached")
+    @patch("daemon.library_store.load_part")
+    def test_004_an_empty_previous_result_is_not_treated_as_cached(
+        self, load_part, ensure_cached, generate, content_hash, save,
+    ):
+        """A stored record with no categories is not an answer, and serving
+        it back would make a failed run permanent."""
+        load_part.return_value = self._part(design_guidance={"content_hash": "abc123", "categories": {}})
+        ensure_cached.return_value = "/tmp/ds.pdf"
+        content_hash.return_value = "abc123"
+        generate.return_value = {"categories": {}, "summaries": {}}
+
+        daemon.datasheet_generate_guidance("TEST-GUIDANCE")
+
+        generate.assert_called_once()

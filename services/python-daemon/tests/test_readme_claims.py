@@ -25,7 +25,11 @@ _TAURI_CONF = os.path.join(_ROOT, "core", "tauri-rust", "tauri.conf.json")
 
 #: Names this product has had. A superseded one in install instructions sends a
 #: user looking for an app that is not there.
-_SUPERSEDED_NAMES = ["Hardware Agent Studio"]
+#: Both spellings. The spaced form appears in prose; the concatenated form
+#: appears in code, and was stamped into every footprint this app wrote into a
+#: user's board for the entire life of the rename -- invisible to a guard that
+#: only knew the spaced one.
+_SUPERSEDED_NAMES = ["Hardware Agent Studio", "HardwareAgentStudio"]
 
 #: `v1.2.3` in prose. A version in the README is a fact with an expiry date,
 #: and this one expired three times before anyone noticed.
@@ -165,4 +169,38 @@ class TestDocsPagesStayTrue(unittest.TestCase):
         self.assertEqual(
             offenders, [],
             "link the releases page instead of naming a version that will be wrong within weeks",
+        )
+
+
+class SupersededNameInShippedStringsTests(unittest.TestCase):
+    """The product name a user can end up holding.
+
+    `HardwareAgentStudio` was the library nickname stamped onto every
+    footprint injected into a KiCad board. It survived the rename because the
+    documentation guard reads for "Hardware Agent Studio" -- with spaces, in
+    prose -- and this is the concatenated form, in Python.
+
+    Found in a real board file: `HardwareAgentStudio:NE555`.
+    """
+
+    #: Modules whose strings can reach a user's files or screen.
+    _MODULES = ("kicad_write.py", "library_store.py", "daemon.py", "component_pipeline.py")
+
+    def test_001_no_module_writes_a_superseded_name_into_user_data(self):
+        offenders = []
+        for name in self._MODULES:
+            path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), name)
+            if not os.path.exists(path):
+                continue
+            with open(path, encoding="utf-8") as handle:
+                for number, line in enumerate(handle, 1):
+                    if line.lstrip().startswith("#"):
+                        continue  # a comment explaining the history is fine
+                    for superseded in _SUPERSEDED_NAMES:
+                        if superseded in line:
+                            offenders.append(f"{name}:{number}: {line.strip()[:80]}")
+
+        self.assertEqual(
+            offenders, [],
+            "these put a superseded product name where a user can see it:\n  " + "\n  ".join(offenders),
         )

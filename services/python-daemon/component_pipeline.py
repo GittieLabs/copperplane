@@ -160,11 +160,18 @@ def validate_schema(schema: dict) -> None:
         # see, in red text, in a desktop app. That is a developer's note
         # rendered as a user-facing error. What a person needs here is what
         # was not checked and what still works.
+        # This message previously said "the library entry is still good".
+        # There is no library entry: this raises, the extraction aborts, and
+        # nothing is saved. Reassurance about a record that does not exist is
+        # worse than the developer-facing text it replaced, and the guard in
+        # tests/test_user_facing_errors.py could not catch it -- that check
+        # reads for spec numbers and identifiers, not for truth.
         raise ComponentValidationError(
-            f"Copperplane does not have reference dimensions for the '{package}' package, so it "
-            f"could not check this part's pin count or spacing. Everything else about the part is "
-            f"unaffected -- the datasheet, its details and the library entry are all still good. "
-            f"Reporting the package name helps: it is how this list grows."
+            f"Copperplane has no reference dimensions for the '{package}' package, so it cannot "
+            f"check this part's pin count or spacing -- and it will not save a part it could not "
+            f"check. Nothing has been added to your library. Modules and development boards hit "
+            f"this most often, because their packages are descriptions rather than standard "
+            f"package names."
         )
 
     pins = schema.get("pins", [])
