@@ -37,6 +37,11 @@ from agentflow.types import Message, Role
 import agent_roles
 import kicad_cli
 import kicad_project
+try:  # optional the same way daemon.py treats it -- a board reader that
+    # fails to import must not take the whole chat surface down with it.
+    import kicad_board
+except Exception:  # noqa: BLE001
+    kicad_board = None
 import library_store
 import llm_providers
 import tool_registry
@@ -297,7 +302,31 @@ _CHECK_AREA_LABELS = {"schematic": "ERC", "pcb": "DRC"}
 _MAX_LIVE_FINDINGS = 25
 
 
-def _finding_for_agent(finding: dict) -> dict:
+#: How many components of a real design go into the agent's context. A big
+#: board has hundreds; the point is to make every reference designator the
+#: check block mentions resolvable, not to ship the whole BOM.
+_MAX_CONTEXT_COMPONENTS = 80
+
+#: The two shapes KiCad writes a reference designator in, inside a finding's
+#: own item description. Schematic: `Symbol A1 Pin 8 [VIN, Power input, Line]`.
+#: Board: `PTH pad 2 [Net-(U2-THRES)] of U2`. Anything else (a bare track, a
+#: board-edge violation) legitimately names no component and must stay unnamed.
+_SYMBOL_REF_PATTERN = re.compile(r"^Symbol (\S+) ")
+_OF_REF_PATTERN = re.compile(r" of (\S+)$")
+
+
+def reference_designator_in(description: str) -> str | None:
+    """The component a finding's location names, or None when it names none."""
+    if not description:
+        return None
+    for pattern in (_SYMBOL_REF_PATTERN, _OF_REF_PATTERN):
+        match = pattern.search(description)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _finding_for_agent(finding: dict, components: dict | None = None) -> dict:
     """One check finding, keeping WHERE it is.
 
     `items` used to be dropped here on the grounds that it carried "KiCad's
@@ -318,11 +347,76 @@ def _finding_for_agent(finding: dict) -> dict:
         "type": finding.get("type"),
         "description": finding.get("description"),
         "locations": [
-            {"description": i.get("description"), "pos_mm": i.get("pos")}
+            _location_for_agent(i, components or {})
             for i in (finding.get("items") or [])
             if isinstance(i, dict) and i.get("description")
         ],
     }
+
+
+def _location_for_agent(item: dict, components: dict) -> dict:
+    """One flagged item, with the real component it names attached.
+
+    Without this the agent is told `Symbol A1 Pin 8 [VIN, Power input, Line]`
+    and nothing whatsoever about what A1 is -- so it fills the gap from the
+    only other thing in its context with pins, which on the maintainer's own
+    tutorial project was an unrelated NE555 sitting in the library. The
+    reported explanation opened "this is the power supply input pin on the
+    NE555 timer chip" on a board whose A1 is an Arduino UNO. Every other
+    detail in that sentence was correctly grounded; only the part's identity
+    was invented, because it was the only fact not supplied.
+    """
+    location = {"description": item.get("description"), "pos_mm": item.get("pos")}
+    reference = reference_designator_in(item.get("description") or "")
+    if reference:
+        location["reference"] = reference
+        component = components.get(reference)
+        location["component"] = component if component else (
+            f"{reference} is not in this design's component list -- say so rather "
+            "than guessing what it is."
+        )
+    return location
+
+
+def _by_reference(components: list | None) -> dict:
+    """Components keyed by reference designator, for finding annotation."""
+    return {
+        c["reference"]: c
+        for c in (components or [])
+        if c.get("reference")
+    }
+
+
+def _design_components(path: str, area: str) -> list:
+    """Every component in the linked schematic or board, from the file.
+
+    `SPEC-325` built this and the chat prompts were never told. Until now the
+    review agent was handed ERC findings that name reference designators and
+    no way at all to resolve them.
+
+    Best-effort by design: a component list that cannot be read must not cost
+    the user the check that can. The caller reports the absence rather than
+    silently sending an empty design.
+    """
+    if area == "schematic":
+        return [
+            {
+                "reference": c.get("reference"),
+                "value": c.get("value"),
+                "footprint": c.get("footprint"),
+            }
+            for c in kicad_cli.export_schematic_bom(path)
+        ]
+    if kicad_board is None:
+        raise RuntimeError("reading a board requires kicad_board, which failed to import")
+    return [
+        {
+            "reference": f.get("reference"),
+            "value": f.get("value"),
+            "footprint": f.get("footprint"),
+        }
+        for f in kicad_board.read_board_footprints(path)
+    ]
 
 
 def _check_status_note(project: dict, area: str) -> str:
@@ -369,6 +463,12 @@ def _check_status_note(project: dict, area: str) -> str:
                 "This is NOT a clean result."
             )
 
+        try:
+            components = _design_components(path, area)
+        except Exception as exc:  # noqa: BLE001 -- reported, never fatal to the check
+            logger.warning("component list unavailable for %s: %s", path, exc)
+            components = None
+
         if area == "schematic":
             report = kicad_cli.run_erc(path)
             findings = [v for sheet in report["sheets"] for v in sheet["violations"]]
@@ -402,7 +502,19 @@ def _check_status_note(project: dict, area: str) -> str:
                 "the file on disk -- an editor holding unsaved changes will differ"
             ),
             **counts,
-            "findings": [_finding_for_agent(f) for f in findings[:_MAX_LIVE_FINDINGS]],
+            "components": (
+                [c for c in components[:_MAX_CONTEXT_COMPONENTS]]
+                if components is not None
+                else "The component list could not be read. Do not guess what any "
+                     "reference designator refers to."
+            ),
+            "components_omitted": (
+                max(0, len(components) - _MAX_CONTEXT_COMPONENTS) if components is not None else 0
+            ),
+            "findings": [
+                _finding_for_agent(f, _by_reference(components))
+                for f in findings[:_MAX_LIVE_FINDINGS]
+            ],
             "findings_omitted": max(0, len(findings) - _MAX_LIVE_FINDINGS),
             # Which checks KiCad did not run at all. A disabled check makes a
             # board look clean for a reason that is invisible everywhere else,
@@ -522,7 +634,23 @@ def _assemble_context(area: str, scope: str, scope_id: str, project_name: str | 
         context = {
             "project_intent": project.get("intent"),
             "check_status": _check_status_note(project, area),
-            "parts": [_part_guidance_summary(p) for p in _load_referenced_parts(project)],
+            # Named for what it actually is. As a bare `parts` key next to a
+            # check block full of reference designators, this read as "the
+            # components in this design" -- and the agent explained an ERC
+            # finding about an Arduino's A1 as an NE555's pin 8, because an
+            # NE555 was the only thing here with pins. These are Copperplane
+            # library records the user attached to the project; some are on
+            # the board, some are only being considered.
+            "library_parts_attached_to_this_project": [
+                _part_guidance_summary(p) for p in _load_referenced_parts(project)
+            ],
+            "library_parts_note": (
+                "These are Copperplane library records the user attached to this "
+                "project. A part appearing here is NOT evidence it is in the "
+                "schematic or on the board. The design's real components are in "
+                "check_status.components -- resolve every reference designator "
+                "against that list and nothing else."
+            ),
         }
     else:  # enclosure
         context = {
