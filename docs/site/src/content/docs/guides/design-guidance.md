@@ -33,7 +33,7 @@ with no valid items.
 Click a page citation and your cached copy of the datasheet opens at that page.
 That round trip — claim to source in about five seconds — is the point.
 
-![Design requirements on Part Detail](/copperplane/images/design-guidance.png)
+![Design requirements, each claim backed by datasheet citations](/copperplane/images/design-guidance.png)
 
 ## How to actually use it
 

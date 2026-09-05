@@ -12,6 +12,8 @@ part with pins and a datasheet is useful before any footprint exists.
 
 ## Three sources, ranked
 
+![A footprint's detail view, with the abbreviations explained](/copperplane/images/part-detail.png)
+
 **Your installed KiCad libraries** — everything configured on your machine,
 including the ~150 that ship inside KiCad itself. This is the first place to
 look and usually the last. Requires KiCad installed and its API enabled.

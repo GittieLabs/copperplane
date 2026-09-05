@@ -1,91 +1,90 @@
 ---
 title: First run
-description: From a fresh install to your first saved part — provider, keys, KiCad connection, and one part end to end.
+description: What Copperplane asks you on first launch, the three ways past it, and what to do next.
 ---
 
-Five minutes, assuming KiCad is installed. If it is not, you can still do steps
-1–4 and everything except the footprint search.
+The first time you open Copperplane it asks for one thing: an AI provider. Nothing
+else is required to get going, and you can decline even that and look around.
 
-## 1. Open Settings
+![The welcome screen](/copperplane/images/welcome.png)
 
-Settings lives at the bottom of the left rail, and in the app menu under
-**Copperplane → Settings…** (`Cmd+,`).
+Three ways forward, and none of them is wrong.
 
-![The Settings screen](/copperplane/images/settings.png)
+## "Guide me through it"
 
-## 2. Choose a provider and add a key
+Two steps, about a minute.
 
-The app ships with no model and no key. Pick one of **Anthropic**, **OpenAI**,
-**Google**, **Perplexity** or **Ollama**, then paste your API key. It goes into
-your operating system keychain, not a file on disk.
+**Step 1 — an AI provider.** Pick one from the list, paste a key, and continue.
 
-Choose **Ollama** if you would rather nothing left your machine — see
-[Privacy and your data](/copperplane/privacy/) for the trade-offs.
+![Choosing a provider](/copperplane/images/guided-provider.png)
 
-The key takes effect immediately. No restart.
+You are paying the provider directly, not us. The key goes into your operating
+system's keychain, never into a config file — see [Privacy and your
+data](/copperplane/privacy/) for what actually leaves your machine under each
+provider.
 
-## 3. Check that KiCad is reachable
+If you have no key yet, the **Where do I get a key?** link opens the right console
+for whichever provider you picked. **Skip this step** moves on without one; the
+app still runs, and the features that need a model say so rather than failing
+oddly.
 
-Still in Settings, the diagnostics section reports whether KiCad and FreeCAD
-were found and whether KiCad's IPC server is responding.
+**Step 2 — KiCad and FreeCAD.** Copperplane looks for both and shows you what it
+found, with the real paths.
 
-If KiCad is installed but not reachable, its API is almost certainly switched
-off — it is not on by default. In KiCad: **Preferences → Plugins → Enable KiCad
-API**, then re-check here.
+![KiCad and FreeCAD detected](/copperplane/images/guided-tools.png)
 
-If it was not found at all, point the app at it with the path override in the
-same section.
+Finding neither is not an error here. The button reads **Done** when both are
+present and **Continue anyway** when they are not, which is the honest thing for
+it to say: you can go on, and the parts that need a missing tool will tell you.
 
-:::tip
-**Copy Diagnostics** is right here, and it is the thing to click before filing
-any bug — it bundles versions, capability flags and your log path to the
-clipboard. Every bug report asks for it.
+## "I'll set it up myself"
+
+Opens Settings directly. Same destination, no hand-holding.
+
+![Settings](/copperplane/images/settings.png)
+
+Everything the wizard would have asked is here, plus the things it does not
+cover: which provider answers the *reasoning* role versus the *fast* one, an
+optional GitHub token that raises community-library search from 60 requests an
+hour to 5,000, override paths if KiCad or FreeCAD live somewhere unusual, and the
+storage folder that decides which projects appear in the rail.
+
+:::caution[Four fields are only read at startup]
+The KiCad socket path, the KiCad timeout, the `freecadcmd` override and the
+storage location are read when the daemon starts. Change one and restart the app,
+or it will keep using the old value and look like it ignored you.
 :::
 
-## 4. Create a project and say what you are building
+## "Skip for now and look around"
 
-Projects live in the left rail. Create one, and give it a sentence describing
-what you are actually making — *"a macropad with an RP2040 and twelve keys"*.
+Dismisses the question and drops you on the launch view. Nothing is configured
+and nothing is broken — you can open a project, read its components, and see what
+the app is before deciding whether to give it a key.
 
-That sentence is optional and you can add or change it later. It is worth
-writing: it is passed to the assistant as context, so answers are about your
-board rather than about parts in general.
+![The launch view with nothing selected](/copperplane/images/no-project.png)
 
-## 5. Find a part
+The setup question does not come back. When you do want it, Settings has
+everything.
 
-Open the **Components** tab and search a real part number — `ATtiny85` is a good
-first try because its datasheet is thorough.
+## What you need, and when
 
-You will get ranked candidates with a confidence signal and a link to each
-datasheet. Nothing is chosen for you. If you typed something slightly wrong, you
-get a *did you mean* card rather than a silent correction.
+Copperplane bundles neither KiCad nor FreeCAD. Both are separate programs you
+install yourself, and it is explicit about which features need which:
 
-![Component search results](/copperplane/images/component-search.png)
+| You want to | You need |
+| :--- | :--- |
+| Read a board, run ERC or DRC, search footprints | **KiCad 9+** |
+| Have check results explained, look up parts, ask questions | An **AI provider** key |
+| Generate an enclosure | **FreeCAD 0.20+** |
+| Browse the app, read your library, change settings | Nothing |
 
-Confirm the one you want.
+KiCad also needs its IPC server switched on for the live-connection features,
+which it is not by default: **Preferences → Plugins → Enable KiCad API**. Without
+it Copperplane can see KiCad is installed but cannot talk to it. Most features
+read files on disk and do not care.
 
-## 6. Look at what came back
+## Then start here
 
-Part Detail shows the pin table — numbers, names, electrical types — extracted
-from the datasheet, with a record of which model produced it.
-
-Then click **Generate design requirements**. This is the feature worth
-understanding: the app locates the relevant sections of the real datasheet,
-extracts what the part needs around it, and shows a plain-language summary per
-concern with the underlying quotes collapsed beneath. Click a page citation and
-the cached PDF opens at that page.
-
-On a long datasheet this takes a little while. It is reading the document.
-
-## 7. Save it
-
-**Save to Library** makes it a real object you own. It is now available in every
-project, with its pins, package, datasheet and provenance intact — and its
-footprint, once you attach one, is shared rather than duplicated.
-
-That is the loop. From here:
-
-- [Find or make a footprint](/copperplane/guides/footprints/)
-- [Understand design guidance properly](/copperplane/guides/design-guidance/)
-- [Check a board](/copperplane/guides/board-checks/)
-- [Generate an enclosure](/copperplane/guides/enclosure/)
+[Your first board check](/copperplane/tutorials/blink-leds/) walks a real Arduino
+shield end to end — five genuine errors, one mistake that no checker reports, and
+an enclosure sized to fit. It is the fastest way to see what the app is for.

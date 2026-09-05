@@ -72,5 +72,12 @@ developer-key/
 # specific UI state, not part of the real fixture content, regenerated
 # identically on every run.
 *.kicad_prl
-# Raw walkthrough captures: reviewed, redacted, then cropped into docs/site/public/images/
+# Raw screen captures. Reviewed, redacted with scripts/redact_screenshots.py,
+# then cropped into docs/site/public/images/ -- the originals are never committed.
+screenshots/
 Walkthrough-Copperplane/
+
+# Tutorial captures, redacted then cropped into docs/site/public/images/
+copperplane-tutorial/
+
+copperplane-blink-tutorial/

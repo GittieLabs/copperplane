@@ -34,6 +34,8 @@ other chat is scoped to the project.
 
 ## Every answer carries its sources, or says it does not
 
+![Asking why D1 has pads with no net, answered with its sources](/copperplane/images/ask-the-agent.png)
+
 The same contract [design guidance](/copperplane/guides/design-guidance/)
 already makes: an answer renders clickable source chips beneath it. A datasheet
 chip opens your cached PDF at the exact page. Content the model is offering as

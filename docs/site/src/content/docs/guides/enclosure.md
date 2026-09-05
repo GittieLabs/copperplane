@@ -29,7 +29,13 @@ Adjustable: wall thickness, clearance around the board, standoff height. Change
 a value and regenerate against the same board; you are not starting over each
 time.
 
-![The generated enclosure in the 3D preview](/copperplane/images/enclosure.png)
+![Setting up an enclosure from the board](/copperplane/images/enclosure.png)
+
+![The generated enclosure with the board seated inside](/copperplane/images/enclosure-3d.png)
+
+The preview draws only the parts KiCad ships a 3D model for. A part with no model is
+still counted as present and still gets clearance — it just cannot be drawn, and the
+height summary says how many are in that state rather than assuming they are flat.
 
 Preview it in the 3D viewer with free orbit or camera presets, then export
 **STEP** for CAD or **GLB** for a mesh viewer.
