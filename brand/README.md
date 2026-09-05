@@ -51,6 +51,7 @@ the font to render them.
 | `svg/icon-small.svg`                 | App icon tuned for 16-20px                                |
 | `svg/favicon.svg`                    | Favicon, mark on transparent                              |
 | `svg/wordmark*.svg`                  | Wordmark alone, plus `-on-dark` and `-green`              |
+| `svg/dmg-background.svg`             | macOS installer window background                         |
 | `png/*`                              | Rasterised 16 through 1024, transparent                   |
 | `favicon.ico`                        | Multi-resolution 16 / 32 / 64                             |
 
@@ -75,10 +76,16 @@ Don't:
 ## Rebuilding
 
 ```sh
-python3 tools/build.py    # SVG sources
-python3 tools/render.py   # PNG renders (needs playwright + chromium)
-python3 tools/sheet.py    # the identity sheet
+python3 tools/build.py           # SVG sources
+python3 tools/render.py          # PNG renders (needs playwright + chromium)
+python3 tools/sheet.py           # the identity sheet
+python3 tools/dmg_background.py  # the macOS installer background
 ```
+
+Every path in these scripts resolves from the script's own location, so they run from a fresh
+clone anywhere. Until 2026-09-05 they hardcoded the absolute path of the machine they were written
+on and this section documented two commands that could not execute; if you are reading an older
+checkout, that is why.
 
 `build.py` reads IBM Plex from `@fontsource/ibm-plex-sans` and converts the wordmark to outlines
 with fontTools, so a rebuild needs `npm install @fontsource/ibm-plex-sans` plus `fonttools` and
@@ -92,3 +99,30 @@ with fontTools, so a rebuild needs `npm install @fontsource/ibm-plex-sans` plus 
 Assets at or below 48px are rendered from `svg/icon-small.svg`, the small-size drawing, not
 downscaled from the full mark. The macOS `.icns` insets the tile to 80.5% of its canvas per
 Apple's icon grid; Windows and Linux assets are full bleed.
+
+## The installer window
+
+`tools/dmg_background.py` draws the background for the macOS DMG. Unlike the other tools it needs
+neither fontTools nor playwright -- it imports `geometry.py` and writes SVG directly -- so it runs
+on a bare Python.
+
+Render it with `rsvg-convert`, not ImageMagick:
+
+```sh
+rsvg-convert -w 1320 -h 800 svg/dmg-background.svg -o png/dmg-background.png
+cp png/dmg-background.png ../core/tauri-rust/dmg/background.png
+```
+
+ImageMagick's SVG renderer honours `fill` and silently ignores `stroke`. The mark and the trace are
+stroke-only, so it produces a background with the artwork missing and no error. This is also why
+the drawing punches its via holes by overdrawing in the ground colour rather than using an SVG
+`mask` the way the other marks do.
+
+The cue is a routed trace, not a generic arrow: it leaves a via under the app icon, breaks at 45
+degrees, and ends in an arrowhead under the Applications folder. Both icon positions are held clear
+by 74px. It is drawn at 660x400 and rendered at 2x, because Tauri takes a single image rather than
+a multi-representation TIFF and the crispness on a retina display comes from Finder scaling down.
+
+The window size and both icon positions live in `core/tauri-rust/tauri.conf.json` under
+`bundle.macOS.dmg`. They must match the drawing, and
+`services/python-daemon/tests/test_release_checksums.py` fails if they drift.
