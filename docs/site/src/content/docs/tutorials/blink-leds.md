@@ -18,9 +18,15 @@ board somebody else drew, which is most of what a checking tool is for.
 
 ## Get the project
 
-Download `Copperplane_Blink_LEDs` and open it in KiCad first. Look at the
-schematic and the board for a minute before Copperplane sees them — it is worth
-having your own impression to compare against.
+**[Download Copperplane_Blink_LEDs.zip](https://github.com/GittieLabs/copperplane/raw/develop/examples/Copperplane_Blink_LEDs.zip)**
+— about 35 KB, three files. Unzip it anywhere and open the `.kicad_pro` in KiCad.
+
+(The same files live in
+[`examples/Copperplane_Blink_LEDs/`](https://github.com/GittieLabs/copperplane/tree/develop/examples/Copperplane_Blink_LEDs)
+if you would rather browse them or already have the repository.)
+
+Look at the schematic and the board for a minute before Copperplane sees them —
+it is worth having your own impression to compare against.
 
 ## Link it
 
@@ -63,32 +69,45 @@ Open the **PCB** tab and run the check.
 
 ![The board check result list](/copperplane/images/board-check.png)
 
-KiCad's own DRC reports five errors on this board. Here is one of them, as KiCad
-puts it:
+**Three findings.** KiCad's own DRC counts five violations here; you are shown
+three, and the difference is the point.
+
+**One — four pads, one problem.** KiCad reports the same violation four times,
+once per pad of D1. It reads like this:
 
 > Annular width (board setup constraints min annular width 0.1000 mm; actual
 > 0.0850 mm)
 
-That sentence is completely accurate and tells a beginner almost nothing.
+Four times over, that is accurate and tells a beginner almost nothing. They are
+one problem with one cause and one fix, so they arrive as one finding.
 
-![A DRC finding, explained](/copperplane/images/board-check-explained.png)
+![A finding, explained](/copperplane/images/board-check-explained.png)
 
 What it means: a plated through-hole pad is a ring of copper around a drilled
-hole. The *annular ring* is the copper left between the hole edge and the pad
-edge. Yours is 0.085 mm where the board's own rules ask for 0.1 mm. Drill
-placement varies by a few thousandths of a millimetre in manufacturing, so a ring
-this thin can be **broken through** by the drill — leaving a pad connected to
-nothing, on a board that looked fine in CAD.
+hole. The *annular ring* is the copper between the hole edge and the pad edge.
+Yours is 0.085 mm where the board's own rules ask for 0.100 mm. Drill placement
+varies by thousandths of a millimetre in manufacturing, so a ring this thin can
+be **broken through** by the drill — leaving a pad connected to nothing, on a
+board that looked fine in CAD.
 
-All four of these are on D1, the RGB LED. Same footprint, four pads, same
-shortfall.
-
-The fifth error is different, and it is the one every beginner makes:
+**Two — the mistake every beginner makes.**
 
 > Missing connection between items: Track [GND] on F.Cu — PTH pad 7 [GND] of A1
 
-A ground connection that was drawn but never finished. On a board this small you
-would probably catch it by eye. On a board with two hundred nets you would not.
+A ground connection drawn but never finished. On a board this small you would
+probably catch it by eye. On a board with two hundred nets you would not.
+
+**Three — something KiCad never said.** The last finding is a *suggestion*, not
+a violation: this project has the "footprint has no courtyard defined" check
+switched off. A courtyard is the keep-out outline marking the space a component
+physically occupies, and the Enclosure tab measures board-to-case fit directly
+from those outlines. With the check disabled, a part could be missing its
+courtyard and DRC would never mention it — which means the enclosure you
+generate later could be quietly wrong.
+
+That one is worth dwelling on. Nothing was violated, so no checker would raise
+it. It is a consequence of a setting, noticed because something else in the app
+depends on it.
 
 ## The mistake nothing flags
 
@@ -116,26 +135,30 @@ mention the symbol and the footprint disagreeing. If it doesn't, that is worth
 — it is exactly the case this feature is for.
 :::
 
-## Break the schematic on purpose
+## Check the schematic
 
-The schematic passes ERC cleanly as shipped. To see the schematic check do
-something, give it something to find.
+Run the schematic check. Two errors, both the same kind:
 
-In KiCad, delete the two **PWR_FLAG** symbols and save. Then run the schematic
-check in Copperplane. You should get four errors of two kinds:
+```
+ERROR  power_pin_not_driven — Input Power pin not driven by any Output Power pins
+ERROR  power_pin_not_driven — Input Power pin not driven by any Output Power pins
+```
 
-| What ERC says | What it means |
-| :--- | :--- |
-| `power_pin_not_driven` ×2 | Nothing in the schematic tells KiCad this power net is actually fed from somewhere |
-| `pin_not_connected` ×2 | The pins those flags were sitting on are now dangling |
+This is the single most confusing error in KiCad for anyone starting out,
+because **the board is fine**. The 5 V rail really does come from the Arduino.
 
-`power_pin_not_driven` is the single most confusing error in KiCad for anyone
-starting out, because **the board is fine**. Your 5 V rail really does come from
-the Arduino. KiCad simply cannot tell the difference between "power arrives here
-from off-sheet" and "you forgot to connect this", so it asks you to say which,
-and `PWR_FLAG` is how you say it.
+KiCad cannot tell the difference between "power arrives here from off the sheet"
+and "you forgot to connect this". Both look identical to it: a power input with
+no power output feeding it. So it asks you to say which, and a **PWR_FLAG** is
+how you say it — a symbol whose entire job is to tell ERC "power genuinely
+enters the design at this point, stop asking".
 
-Put the flags back when you are done and the errors go away.
+The project ships without them so the check has something real to report. To fix
+it the way you would on your own board: in KiCad, place a `PWR_FLAG` on the +5V
+net and another on GND, save, and run the check again. Both errors go.
+
+That is the whole lesson. The error was never about a broken circuit — it was
+KiCad asking a question, and the fix is answering it.
 
 ![The schematic check, with the power flags removed](/copperplane/images/schematic-erc.png)
 

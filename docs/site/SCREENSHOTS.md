@@ -72,7 +72,7 @@ Fifteen images, every one dark, every one from the tutorial project with a clean
 | `new-project.png` | The wizard linking a `.kicad_pro` |
 | `new-project-review.png` | The wizard's own check pass -- parity, component count, ERC and DRC counts |
 | `schematic-check.png` | Board components with per-part 3D-model status |
-| `schematic-erc.png` | ERC after the two `PWR_FLAG` symbols were removed |
+| `schematic-erc.png` | The schematic check reporting power_pin_not_driven, which the example project ships with |
 | `board-check.png` | The DRC result list |
 | `board-check-explained.png` | DRC rewritten in plain English |
 | `ask-the-agent.png` | The agent answering the tutorial's own D1 question, sources visible |
