@@ -20,6 +20,7 @@ const tagObjectMock = vi.fn()
 const generateDesignGuidanceMock = vi.fn()
 const cacheDatasheetMock = vi.fn()
 const loadPartMock = vi.fn()
+const refreshPartMeasurementsMock = vi.fn()
 const addProjectPartReferenceMock = vi.fn()
 const listProjectsMock = vi.fn()
 const setProjectFootprintOverrideMock = vi.fn()
@@ -51,6 +52,20 @@ vi.mock('../lib/partDetail', () => ({
   getConnectionGuidance: (...args: unknown[]) => getConnectionGuidanceMock(...args),
   generateDesignGuidance: (...args: unknown[]) => generateDesignGuidanceMock(...args),
   loadPart: (...args: unknown[]) => loadPartMock(...args),
+  refreshPartMeasurements: (...args: unknown[]) => refreshPartMeasurementsMock(...args),
+  // Pure helpers with no I/O: mocking them would only let the component
+  // disagree with the real ones. These are the real implementations.
+  missingMeasurements: (part: { provenance?: Record<string, unknown> } | null) => {
+    if (!part) return []
+    const provenance = part.provenance ?? {}
+    return ['manufacturer', 'package', 'pins', 'datasheet_url', 'package_dimensions', 'courtyard']
+      .filter((f) => !provenance[f] || (part as Record<string, unknown>)[f] == null)
+  },
+  formatFieldList: (fields: string[]) => {
+    const readable = fields.map((f) => f.replace(/_/g, ' '))
+    if (readable.length <= 1) return readable[0] ?? ''
+    return `${readable.slice(0, -1).join(', ')} and ${readable[readable.length - 1]}`
+  },
 }))
 
 vi.mock('../lib/components', () => ({
@@ -1550,5 +1565,90 @@ describe('PartDetail: CTX-318.6 Inject into open board', () => {
 
     await waitFor(() => screen.getByText(/Lost connection to KiCad/))
     screen.getByRole('button', { name: 'Try again' })
+  })
+})
+
+describe('PartDetail: CTX-202.5 measurements missing from an older part', () => {
+  /* Reported from the app: "Generate Design Requirements" failed on a part
+     whose datasheet was cached and open, after a long wait, citing fields the
+     user was never asked about. That part was saved 2026-08-12, before
+     CTX-308.5 persisted package_dimensions and courtyard at all.
+
+     Checking is free -- field presence, no round trip -- so it belongs on the
+     part screen, not behind a feature that has already spent forty seconds. */
+  const COMPLETE_PART = {
+    part_id: 'ATtiny85',
+    manufacturer: 'Microchip',
+    package: 'SOIC-8',
+    pins: [],
+    datasheet_url: 'https://example.com/attiny85.pdf',
+    symbol_id: 'SOIC-8_0pin',
+    footprint_id: null,
+    package_dimensions: { length_mm: 4.9, width_mm: 3.9 },
+    courtyard: { length_mm: 5.9, width_mm: 4.9 },
+    design_guidance: null,
+    provenance: {
+      manufacturer: { source: 'search' },
+      datasheet_url: { source: 'search' },
+      package: { source: 'llm_extraction' },
+      pins: { source: 'llm_extraction' },
+      package_dimensions: { source: 'llm_extraction' },
+      courtyard: { source: 'llm_extraction' },
+    },
+  }
+
+  const LEGACY_PART = {
+    ...COMPLETE_PART,
+    package_dimensions: null,
+    courtyard: null,
+    provenance: {
+      manufacturer: { source: 'search' },
+      datasheet_url: { source: 'search' },
+      package: { source: 'llm_extraction' },
+      pins: { source: 'llm_extraction' },
+    },
+  }
+
+  beforeEach(() => {
+    refreshPartMeasurementsMock.mockReset().mockResolvedValue(COMPLETE_PART)
+  })
+
+  it('says so on the part screen, naming the fields in plain words', async () => {
+    render(<PartDetail initialPart={LEGACY_PART} />)
+
+    expect(await screen.findByText(/missing its package dimensions and courtyard/i)).toBeTruthy()
+    // Not the raw identifiers the daemon uses.
+    expect(screen.queryByText(/package_dimensions/)).toBeNull()
+  })
+
+  it('says what still works, so the part does not read as broken', async () => {
+    render(<PartDetail initialPart={LEGACY_PART} />)
+
+    expect(await screen.findByText(/Everything else about the part works/i)).toBeTruthy()
+  })
+
+  it('offers the repair rather than performing it, and says what it costs', async () => {
+    render(<PartDetail initialPart={LEGACY_PART} />)
+
+    expect(await screen.findByRole('button', { name: /Read them from the datasheet/i })).toBeTruthy()
+    expect(screen.getByText(/about 10 seconds/i)).toBeTruthy()
+    // Nothing has been spent just by opening the part.
+    expect(refreshPartMeasurementsMock).not.toHaveBeenCalled()
+  })
+
+  it('fills the measurements in and the notice goes away', async () => {
+    render(<PartDetail initialPart={LEGACY_PART} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Read them from the datasheet/i }))
+
+    await waitFor(() => expect(refreshPartMeasurementsMock).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.queryByText(/missing its package dimensions/i)).toBeNull())
+  })
+
+  it('is absent for a part that already has its measurements', async () => {
+    render(<PartDetail initialPart={COMPLETE_PART} />)
+
+    expect(screen.queryByText(/missing its/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /Read them from the datasheet/i })).toBeNull()
   })
 })

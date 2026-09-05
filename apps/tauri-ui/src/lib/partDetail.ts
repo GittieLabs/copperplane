@@ -94,6 +94,64 @@ function unwrap<T>(response: { error?: { message: string }; result?: unknown }):
   return response.result as T
 }
 
+/** The fields `library_store.PART_PROVENANCE_REQUIRED_FIELDS` insists on.
+ * Mirrored here so Part Detail can answer "will this part be refused?"
+ * without a round trip, and without waiting until a feature fails. */
+const PROVENANCE_REQUIRED_FIELDS = [
+  'manufacturer', 'package', 'pins', 'datasheet_url', 'package_dimensions', 'courtyard',
+] as const
+
+/** Which required measurements this Part cannot account for.
+ *
+ * Parts saved before CTX-308.5 never carried `package_dimensions` or
+ * `courtyard` at all -- the confirm path had them from the extraction and
+ * dropped them. Those parts look complete until you ask for a footprint or
+ * design requirements, and then fail with a message about a field nobody
+ * mentioned when the part was saved.
+ *
+ * Checking is free: it is field presence, no network. So it happens when the
+ * part is opened rather than when a feature is invoked. */
+export function missingMeasurements(part: SavedPart | null): string[] {
+  if (!part) return []
+  const provenance = (part.provenance ?? {}) as Record<string, unknown>
+  return PROVENANCE_REQUIRED_FIELDS.filter(
+    (field) => !provenance[field] || (part as unknown as Record<string, unknown>)[field] == null,
+  )
+}
+
+/** "package dimensions and courtyard" -- field names as a person would say
+ * them. The raw identifiers are what the daemon calls them, and putting
+ * `package_dimensions` in a sentence is how the old error messages read. */
+export function formatFieldList(fields: string[]): string {
+  const readable = fields.map((f) => f.replace(/_/g, ' '))
+  if (readable.length <= 1) return readable[0] ?? ''
+  return `${readable.slice(0, -1).join(', ')} and ${readable[readable.length - 1]}`
+}
+
+/** Re-reads the datasheet and saves the measurements onto an existing Part.
+ *
+ * Exactly what confirming a search result does -- extraction, then save --
+ * which is why a part confirmed today already has these. This is the repair
+ * for the ones that predate that, and it is offered rather than performed:
+ * it costs about eight seconds, and a person glancing at a part should not
+ * pay that without asking for it. */
+export async function refreshPartMeasurements(part: SavedPart): Promise<SavedPart> {
+  const extraction = await extractPartDetail(part.part_id)
+  const candidate: ComponentCandidate = {
+    part_number: part.part_id,
+    manufacturer: part.manufacturer,
+    package: extraction.package ?? part.package,
+    datasheet_url: part.datasheet_url,
+    // The part is already in the library: a person confirmed it once.
+    // Recording that as a fresh high-confidence search result would be a
+    // lie about where it came from.
+    confidence: 'high',
+    rationale: 'Measurements re-read from the datasheet for an existing library part.',
+  }
+  const { part: updated } = await saveConfirmedPart(candidate, extraction)
+  return updated
+}
+
 /** kicad.generate_component is a real, async-registered LLM call (SPEC-202)
  * -- this is a second, real re-run for pin data, not a reuse of
  * Discovery's own ranking call. */

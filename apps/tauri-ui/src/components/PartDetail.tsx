@@ -37,6 +37,9 @@ import {
   type ExtractedSchema,
   type SavedPart,
   type SavedSymbol,
+  formatFieldList,
+  missingMeasurements,
+  refreshPartMeasurements,
 } from '../lib/partDetail'
 
 /** SPEC-205 §2.2's own real structure-pass category keys
@@ -155,6 +158,8 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
   const [projectTagMessage, setProjectTagMessage] = useState<string | null>(null)
   const [addingToCurrentProject, setAddingToCurrentProject] = useState(false)
   const [justAddedToCurrentProject, setJustAddedToCurrentProject] = useState(false)
+  const [refreshingMeasurements, setRefreshingMeasurements] = useState(false)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
   const [exportedPath, setExportedPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -976,6 +981,24 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
    * footprint the way Connection Guidance is -- design requirements
    * (decoupling, reset, layout…) are useful before any footprint
    * exists. */
+  const missingFields = missingMeasurements(savedPart)
+
+  /** Reads the measurements out of the datasheet and saves them onto the
+   *  existing part -- the same extraction the confirm path already runs,
+   *  which is why a part confirmed today does not need this. */
+  async function handleRefreshMeasurements() {
+    if (!savedPart) return
+    setRefreshingMeasurements(true)
+    setRefreshError(null)
+    try {
+      setSavedPart(await refreshPartMeasurements(savedPart))
+    } catch (err) {
+      setRefreshError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRefreshingMeasurements(false)
+    }
+  }
+
   async function handleGenerateDesignGuidance() {
     if (!savedPart) return
     setGeneratingDesignGuidance(true)
@@ -1110,6 +1133,43 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
             </div>
           )}
           {exportError && <p className="text-sm text-danger">{exportError}</p>}
+        </div>
+      )}
+
+      {/* CTX-202.5: said here, at the top of the part, rather than by a
+          feature failing three screens later.
+
+          Parts saved before CTX-308.5 have no package_dimensions and no
+          courtyard -- the confirm path had them from the extraction and
+          dropped them. Nothing indicated that until someone asked for a
+          footprint or design requirements and waited for an error.
+
+          Checking costs nothing: it is field presence, no round trip. The
+          repair costs about eight seconds, so it is offered rather than
+          performed -- somebody glancing at a part should not pay for a
+          re-read they did not ask for. */}
+      {savedPart && missingFields.length > 0 && (
+        <div className="flex flex-col gap-2 rounded border border-warning/40 bg-warning/5 p-3">
+          <p className="text-sm text-fg-bright">
+            {`This part is missing its ${formatFieldList(missingFields)}.`}
+          </p>
+          <p className="text-xs text-fg-secondary">
+            It was saved before Copperplane recorded those. Footprint generation and design
+            requirements both need them, and will refuse until they are filled in. Everything
+            else about the part works.
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              className="self-start rounded bg-accent px-3 py-1 text-sm font-medium text-accent-fg disabled:opacity-50"
+              onClick={() => void handleRefreshMeasurements()}
+              disabled={refreshingMeasurements}
+            >
+              {refreshingMeasurements ? 'Reading the datasheet…' : 'Read them from the datasheet'}
+            </button>
+            <span className="text-xs text-fg-muted">about 10 seconds</span>
+          </div>
+          {refreshError && <p className="text-sm text-danger">{refreshError}</p>}
         </div>
       )}
 
