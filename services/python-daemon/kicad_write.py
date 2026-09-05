@@ -47,8 +47,29 @@ class UnsupportedPackageError(Exception):
 
 
 TWO_PIN_PACKAGES = frozenset({"0603", "0805"})
-DUAL_ROW_PACKAGES = frozenset({"SOIC-8", "SOIC-14", "SOIC-16", "TSSOP-8", "DIP-8", "DIP-14"})
-THROUGH_HOLE_PACKAGES = frozenset({"DIP-8", "DIP-14"})
+_DUAL_ROW_BASE = frozenset({"SOIC-8", "SOIC-14", "SOIC-16", "TSSOP-8", "DIP-8", "DIP-14"})
+_THROUGH_HOLE_BASE = frozenset({"DIP-8", "DIP-14"})
+
+
+def _with_pdip_aliases(packages: frozenset) -> frozenset:
+    """`PDIP-N` alongside every `DIP-N`.
+
+    An extraction that returns "PDIP-8" was being refused here while
+    "DIP-8" was accepted, for a package this module's own comments cite
+    the ATtiny85's PDIP-8 mechanical drawing to justify. The geometry is
+    identical -- `component_pipeline.PACKAGE_REFERENCE` has aliased them
+    since a live test found the same mismatch on the same family.
+
+    Generated from the base set rather than written out, for the reason
+    that module gives: a second hand-maintained list is a list that
+    disagrees. Found by asking whether "Inject into open board" works for
+    the tutorial's own ATtiny85; it did not, and the package was why.
+    """
+    return frozenset(packages | {f"P{p}" for p in packages if p.startswith("DIP-")})
+
+
+DUAL_ROW_PACKAGES = _with_pdip_aliases(_DUAL_ROW_BASE)
+THROUGH_HOLE_PACKAGES = _with_pdip_aliases(_THROUGH_HOLE_BASE)
 
 SUPPORTED_PACKAGES = TWO_PIN_PACKAGES | DUAL_ROW_PACKAGES
 
@@ -198,7 +219,14 @@ def generate_pad_layout(package: str, pin_numbers: list[str], package_dimensions
 # footprint's LibraryIdentifier -- metadata only (never saved into
 # KiCad's own footprint-library-table), so a human reviewing the board
 # can see at a glance which footprints this pipeline generated.
-_LIBRARY_NAME = "HardwareAgentStudio"
+#
+# Was "HardwareAgentStudio" until CTX-202.5: the superseded product name,
+# written into every board this pipeline ever touched, and found in a real
+# user board as "HardwareAgentStudio:NE555". test_readme_claims guards the
+# spaced form in documentation prose and could not see the concatenated form
+# in source. Footprints already injected keep the old label -- they are
+# embedded in the board and still render; only the metadata reads wrong.
+_LIBRARY_NAME = "Copperplane"
 
 
 def build_footprint_instance(schema: dict, pads: list[dict], courtyard: dict) -> FootprintInstance:

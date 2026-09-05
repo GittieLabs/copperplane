@@ -264,3 +264,69 @@ class TestRealKicadWrite(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestPdipIsTheSamePackageAsDip(unittest.TestCase):
+    """CTX-202.5: "Inject into open board" refused the tutorial's own ATtiny85.
+
+    Not because KiCad was closed, and not because the part lacked
+    measurements -- because its package is called PDIP-8, and this module
+    accepted only DIP-8. The geometry is identical, and this module's own
+    comments cite the ATtiny85's PDIP-8 mechanical drawing to justify the
+    DIP row spacing.
+
+    `component_pipeline.PACKAGE_REFERENCE` has aliased PDIP-N to DIP-N since
+    a live test hit the same mismatch on the same family. This was the second
+    list, disagreeing.
+    """
+
+    DIMS = {"length_mm": 9.81, "width_mm": 6.35, "pitch_mm": 2.54}
+
+    def _pins(self, n):
+        return [str(i) for i in range(1, n + 1)]
+
+    def test_001_pdip8_produces_exactly_the_dip8_layout(self):
+        """A true alias, not merely an accepted spelling: same pads, same
+        positions, same drills."""
+        self.assertEqual(
+            kw.generate_pad_layout("PDIP-8", self._pins(8), self.DIMS),
+            kw.generate_pad_layout("DIP-8", self._pins(8), self.DIMS),
+        )
+
+    def test_002_pdip14_too(self):
+        self.assertEqual(
+            kw.generate_pad_layout("PDIP-14", self._pins(14), self.DIMS),
+            kw.generate_pad_layout("DIP-14", self._pins(14), self.DIMS),
+        )
+
+    def test_003_pdip_stays_through_hole(self):
+        """A PDIP whose pads came out surface-mount would be a footprint you
+        cannot solder the part into."""
+        pads = kw.generate_pad_layout("PDIP-8", self._pins(8), self.DIMS)
+
+        self.assertTrue(all(pad["drill_mm"] for pad in pads))
+        self.assertIn("PDIP-8", kw.THROUGH_HOLE_PACKAGES)
+
+    def test_004_the_aliases_are_generated_not_listed(self):
+        """Every DIP this module supports has its PDIP spelling, now and
+        after the next one is added. A hand-written second list is what
+        produced this bug."""
+        for package in kw.SUPPORTED_PACKAGES:
+            if package.startswith("DIP-"):
+                self.assertIn(f"P{package}", kw.SUPPORTED_PACKAGES)
+
+    def test_005_extraction_and_injection_agree_about_dip_family_names(self):
+        """The parity that was missing. Anything the extraction pipeline can
+        name and this module can build must be spelled the same way in both."""
+        import component_pipeline
+
+        for package in component_pipeline.PACKAGE_REFERENCE:
+            if not package.startswith(("DIP-", "PDIP-")):
+                continue
+            base = package[1:] if package.startswith("PDIP-") else package
+            if base in kw.SUPPORTED_PACKAGES:
+                self.assertIn(
+                    package, kw.SUPPORTED_PACKAGES,
+                    f"{package} is a known package whose geometry this module can build, "
+                    f"but injection refuses the name",
+                )

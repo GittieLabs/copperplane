@@ -236,3 +236,45 @@ describe('LibraryArea: SPEC-316 native menu sync', () => {
     await waitFor(() => expect(syncLibraryMenuMock).toHaveBeenCalledWith(updatedList))
   })
 })
+
+describe('LibraryArea: CTX-202.5 the New library button explains itself', () => {
+  /* Reported as "new library button does not work". It was disabled, because
+     the name field was empty. A disabled button at 50% opacity, on a dark
+     surface, next to a field showing only placeholder text, is not a sentence
+     -- the click just did nothing. */
+  beforeEach(() => {
+    listLibrariesMock.mockResolvedValue([{ id: 'default', name: 'Default', parts: 1, symbols: 1, footprints: 0 }])
+  })
+
+  it('says what is needed instead of silently doing nothing', async () => {
+    render(<LibraryArea />)
+    await screen.findByText('Default')
+
+    fireEvent.click(screen.getByRole('button', { name: '+ New library' }))
+
+    expect(await screen.findByText(/Give the library a name first/i)).toBeTruthy()
+    expect(createLibraryMock).not.toHaveBeenCalled()
+  })
+
+  it('clears the complaint as soon as you start typing', async () => {
+    render(<LibraryArea />)
+    await screen.findByText('Default')
+    fireEvent.click(screen.getByRole('button', { name: '+ New library' }))
+    await screen.findByText(/Give the library a name first/i)
+
+    fireEvent.change(screen.getByPlaceholderText('new library name'), { target: { value: 'P' } })
+
+    expect(screen.queryByText(/Give the library a name first/i)).toBeNull()
+  })
+
+  it('still creates the library when a name is given', async () => {
+    createLibraryMock.mockResolvedValue({ id: 'rf', name: 'RF parts' })
+    render(<LibraryArea />)
+    await screen.findByText('Default')
+
+    fireEvent.change(screen.getByPlaceholderText('new library name'), { target: { value: 'RF parts' } })
+    fireEvent.click(screen.getByRole('button', { name: '+ New library' }))
+
+    await waitFor(() => expect(createLibraryMock).toHaveBeenCalledWith('RF parts'))
+  })
+})
