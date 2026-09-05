@@ -137,7 +137,20 @@ export function Overview({
   return (
     <div className="flex w-full max-w-4xl flex-col gap-3">
       {loadError && <p className="text-sm text-danger">{loadError}</p>}
-      <IntentEditor projectName={projectName} project={project} onProjectUpdated={onProjectUpdated} />
+      {/* Keyed, not reset by an effect. `key` is React's own answer to
+          "reset state when a prop changes", and the difference is not
+          stylistic: an effect writes state AFTER the commit that put the
+          editor on screen, so a click landing in that window is silently
+          undone and the editor can never open. That raced in CI and
+          reproduced locally in roughly one full-suite run in eight --
+          probe output at the failure read "startEditing clicked" and then
+          "reset effect ran". A remount has no such window. */}
+      <IntentEditor
+        key={projectName}
+        projectName={projectName}
+        project={project}
+        onProjectUpdated={onProjectUpdated}
+      />
       {/* The four per-area status cards were removed. They said "Not yet
           checked this session" for PCB and Schematic -- which the on-demand
           checks make irrelevant, since a check runs when asked and its result
@@ -194,9 +207,9 @@ export function Overview({
 /** SPEC-318 §2.4: the project intent editor -- optional free text,
  * editable any time from Overview, injected into every agent's context
  * verbatim as the user's stated goal. Its own local `draft`/`editing`
- * state resets on a real project switch (keyed on `projectName`, same
- * pattern as `Overview`'s own chat-history effect) so a half-edited
- * draft for one project never bleeds into the next. */
+ * state resets on a real project switch so a half-edited draft for one
+ * project never bleeds into the next -- by remounting on a `key`, never
+ * by an effect. See the mount site for what the effect version cost. */
 function IntentEditor({
   projectName,
   project,
@@ -210,13 +223,6 @@ function IntentEditor({
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    setEditing(false)
-    setDraft('')
-    setSaving(false)
-    setError(null)
-  }, [projectName])
 
   const intent = project?.intent ?? null
 
