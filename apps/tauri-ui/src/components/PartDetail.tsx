@@ -981,6 +981,14 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
    * footprint the way Connection Guidance is -- design requirements
    * (decoupling, reset, layout…) are useful before any footprint
    * exists. */
+  /** The `.kicad_sch` beside the linked `.kicad_pro`, named so the inject
+   *  warning can point at the actual file. Derived rather than looked up:
+   *  it is a sibling by KiCad's own convention, and a round trip to say
+   *  "your schematic" more precisely is not worth a failure mode. */
+  const schematicNotUpdated = currentProject?.kicad_project_path
+    ? `${currentProject.kicad_project_path.split('/').pop()?.replace(/\.kicad_pro$/, '')}.kicad_sch`
+    : null
+
   const missingFields = missingMeasurements(savedPart)
 
   /** Reads the measurements out of the datasheet and saves them onto the
@@ -1322,6 +1330,23 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
             <div className="flex flex-col gap-2 rounded border border-warning-line bg-surface p-3">
               <p className="text-sm text-warning">
                 This will write into the board KiCad currently has open. Confirm?
+              </p>
+              {/* CTX-202.5: reported after injecting an NE555 into a real
+                  project. It landed on the PCB correctly and the schematic
+                  knew nothing about it -- the footprint has KiCad's REF**
+                  placeholder for a reference, no nets, and DRC gains a
+                  "configuration does not include the footprint library"
+                  warning. All of that is what this route does; none of it
+                  was said anywhere. KiCad's IPC API has no schematic
+                  writing, so this cannot be fixed by doing more -- only by
+                  saying what happens. */}
+              <p className="text-xs text-fg-secondary">
+                This adds a footprint to the <strong>board only</strong>.
+                {schematicNotUpdated
+                  ? ` ${schematicNotUpdated} will not know about it,`
+                  : ' Your schematic will not know about it,'}{' '}
+                the part gets no reference designator and no connections, and KiCad will report
+                its library as missing. You can delete it in KiCad if that is not what you wanted.
               </p>
               <div className="flex gap-2">
                 <button

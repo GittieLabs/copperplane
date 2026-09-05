@@ -1652,3 +1652,73 @@ describe('PartDetail: CTX-202.5 measurements missing from an older part', () => 
     expect(screen.queryByRole('button', { name: /Read them from the datasheet/i })).toBeNull()
   })
 })
+
+describe('PartDetail: CTX-202.5 the inject confirmation says what injecting does', () => {
+  /* Reported: an NE555 injected into a real project landed on the PCB and the
+     schematic knew nothing about it. Verified against the board file
+     afterwards -- the footprint carries KiCad's REF** placeholder, no nets,
+     and DRC gained a "configuration does not include the footprint library"
+     warning that was not there before.
+
+     Every one of those is what this route does. None of it was said. KiCad's
+     IPC API exposes no schematic writing at all (kicad-python 0.8.0's
+     schematic module does not even import), so this cannot be fixed by doing
+     more -- only by being honest about the scope. */
+  const PART = {
+    part_id: 'NE555',
+    manufacturer: 'Texas Instruments',
+    package: 'DIP-8',
+    pins: [{ number: '1', name: 'GND', electrical_type: 'ground' }],
+    datasheet_url: 'https://example.com/ne555.pdf',
+    symbol_id: 'DIP-8_8pin',
+    footprint_id: null,
+    package_dimensions: { length_mm: 9.81, width_mm: 6.35 },
+    courtyard: { length_mm: 10.5, width_mm: 7.1 },
+    design_guidance: null,
+    provenance: {
+      manufacturer: { source: 'search' }, datasheet_url: { source: 'search' },
+      package: { source: 'llm_extraction' }, pins: { source: 'llm_extraction' },
+      package_dimensions: { source: 'llm_extraction' }, courtyard: { source: 'llm_extraction' },
+    },
+  }
+
+  async function reachConfirmation(project?: Record<string, unknown>) {
+    render(<PartDetail initialPart={PART} currentProject={project as never} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Inject into open board' }))
+    return screen.findByText(/This will write into the board KiCad currently has open/i)
+  }
+
+  it('says the board only, before anything is written', async () => {
+    dispatchToolMock.mockResolvedValue({ kind: 'pending_confirmation' })
+    await reachConfirmation()
+
+    expect(screen.getByText(/board only/i)).toBeTruthy()
+    expect(screen.getByText(/no reference designator and no connections/i)).toBeTruthy()
+  })
+
+  it('names the schematic that will not know about it', async () => {
+    dispatchToolMock.mockResolvedValue({ kind: 'pending_confirmation' })
+    await reachConfirmation({
+      name: 'Copperplane Blink LEDs',
+      kicad_project_path: '/somewhere/Copperplane_Blink_LEDs/Copperplane_Blink_LEDs.kicad_pro',
+    })
+
+    expect(screen.getByText(/Copperplane_Blink_LEDs\.kicad_sch will not know about it/i)).toBeTruthy()
+  })
+
+  it('still warns with no project open, because the risk is the same', async () => {
+    /* Injecting from the Library targets whatever board KiCad has open, and
+       that board may well have a schematic Copperplane cannot see. */
+    dispatchToolMock.mockResolvedValue({ kind: 'pending_confirmation' })
+    await reachConfirmation()
+
+    expect(screen.getByText(/Your schematic will not know about it/i)).toBeTruthy()
+  })
+
+  it('tells you it is undoable rather than leaving you to wonder', async () => {
+    dispatchToolMock.mockResolvedValue({ kind: 'pending_confirmation' })
+    await reachConfirmation()
+
+    expect(screen.getByText(/delete it in KiCad/i)).toBeTruthy()
+  })
+})
