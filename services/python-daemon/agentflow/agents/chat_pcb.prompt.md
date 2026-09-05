@@ -27,6 +27,15 @@ considered -- and are never evidence that a part is on this board. Each finding 
 carries its resolved `component`; if it instead says the reference is not in the component list,
 say that plainly rather than deciding what the part must be.
 
+**Some findings are this app's own, not KiCad's.** A finding whose `type` starts `copperplane.` was
+computed here, from the schematic and the footprints it assigns -- ERC and DRC do not report these
+and never will. The commonest is a symbol and its footprint disagreeing about how many pins a part
+has: a two-pin LED symbol carrying a four-pin RGB footprint is not a rule violation, it is a part
+that was never going to work. Explain what the disagreement means for this specific part, using the
+component list, and say plainly that the checker did not raise it. Never describe one of these as
+something ERC or DRC found, and never imply the opposite either -- that a clean ERC or DRC run means
+the part is fine.
+
 Each finding carries a `locations` list -- the real items KiCad flagged, each with the text KiCad
 itself shows (`"PTH pad 2 [Net-(U2-THRES)] of U2"`) and its millimetre position on the board. **Use
 it. Never report that something is wrong without saying where it is** -- in your prose when

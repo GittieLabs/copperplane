@@ -1284,6 +1284,146 @@ class TestAFindingNamesTheRealComponent(unittest.TestCase):
         self.assertIn("Do not guess", note["components"])
 
 
+class TestStructuralFindingsReachTheReview(unittest.TestCase):
+    """SPEC-113's findings enter where ERC and DRC already do.
+
+    The point of the whole check is that the user does not have to ask. If it
+    computes a real finding and the review never sees it, nothing has changed
+    from the behaviour that prompted the spec: on the maintainer's own project
+    the mismatch was only ever visible by typing a question at the agent.
+    """
+
+    _PROJECT = {"kicad_project_path": os.path.join(
+        _EXAMPLE_PROJECT, "Copperplane_Blink_LEDs.kicad_pro")}
+
+    def _note(self, area):
+        return json.loads(chat_agents._check_status_note(self._PROJECT, area))
+
+    @unittest.skipUnless(os.path.exists(_EXAMPLE_SCH), "the example project is not present")
+    @unittest.skipUnless(_kicad_cli_available(), "kicad-cli is not installed")
+    def test_101_they_appear_on_the_schematic_tab(self):
+        note = self._note("schematic")
+
+        structural = [f for f in note["findings"]
+                      if str(f.get("type", "")).startswith("copperplane.")]
+        self.assertEqual(len(structural), note["structural_count"])
+        self.assertTrue(structural)
+
+    @unittest.skipUnless(os.path.exists(_EXAMPLE_SCH), "the example project is not present")
+    @unittest.skipUnless(_kicad_cli_available(), "kicad-cli is not installed")
+    def test_102_they_appear_on_the_pcb_tab_too(self):
+        """The person who runs only the board check before ordering is exactly
+        the person this exists for."""
+        note = self._note("pcb")
+
+        self.assertTrue([f for f in note["findings"]
+                         if str(f.get("type", "")).startswith("copperplane.")])
+
+    @unittest.skipUnless(os.path.exists(_EXAMPLE_SCH), "the example project is not present")
+    @unittest.skipUnless(_kicad_cli_available(), "kicad-cli is not installed")
+    def test_103_each_one_cites_the_schematic_it_was_read_from(self):
+        """On the PCB tab the area's own source_path is the board. A finding
+        computed from the schematic must not cite the wrong file."""
+        note = self._note("pcb")
+
+        structural = [f for f in note["findings"]
+                      if str(f.get("type", "")).startswith("copperplane.")]
+        for finding in structural:
+            self.assertTrue(finding["source_path"].endswith(".kicad_sch"))
+
+    @unittest.skipUnless(os.path.exists(_EXAMPLE_SCH), "the example project is not present")
+    @unittest.skipUnless(_kicad_cli_available(), "kicad-cli is not installed")
+    def test_104_the_note_says_they_are_not_kicads(self):
+        note = self._note("schematic")
+
+        self.assertIn("copperplane.", note["structural_note"])
+        self.assertIn("ERC and DRC do not report them", note["structural_note"])
+
+    def test_105_a_schematic_that_cannot_be_parsed_costs_nothing(self):
+        """Additive means additive: a structural check that blows up must not
+        take the user's real ERC results with it."""
+        with patch.object(chat_agents.structural_checks, "check_pin_counts",
+                          side_effect=RuntimeError("unparseable")), \
+             patch.object(chat_agents.kicad_project, "resolve_project",
+                          return_value={"pcb_path": None, "schematic_path": "/p/a.kicad_sch"}), \
+             patch.object(chat_agents, "_design_components", return_value=[]), \
+             patch.object(chat_agents.kicad_cli, "run_erc", return_value={
+                 "sheets": [{"violations": [{"description": "real erc finding", "items": []}]}],
+                 "ignored_checks": [],
+             }):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "schematic")
+            )
+
+        self.assertEqual(note["structural_count"], 0)
+        self.assertEqual(note["findings"][0]["description"], "real erc finding")
+
+    def test_106_they_survive_the_cap_on_kicads_own_findings(self):
+        """A board with hundreds of DRC violations must not push out the
+        findings nothing else in the toolchain reports."""
+        flood = [{"description": f"violation {i}", "items": []} for i in range(200)]
+        with patch.object(chat_agents, "_structural_findings", return_value=[
+                 {"severity": "warning", "type": "copperplane.pin_count_mismatch",
+                  "description": "D1 disagrees", "items": [], "source_path": "/p/a.kicad_sch"}]), \
+             patch.object(chat_agents.kicad_project, "resolve_project",
+                          return_value={"pcb_path": "/p/b.kicad_pcb", "schematic_path": "/p/a.kicad_sch"}), \
+             patch.object(chat_agents, "_design_components", return_value=[]), \
+             patch.object(chat_agents.kicad_cli, "run_drc", return_value={
+                 "violations": flood, "unconnected_items": [], "schematic_parity": [],
+                 "ignored_checks": [],
+             }):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "pcb")
+            )
+
+        self.assertEqual(note["findings"][-1]["type"], "copperplane.pin_count_mismatch")
+
+
+class TestTheFallbackDoesNotCreditKicad(ChatAgentsTestCase):
+    """A finding KiCad never made must not arrive labelled as KiCad's.
+
+    The deterministic fallback prefixes every finding "Reported by KiCad's own
+    check". Carrying SPEC-113's findings through it unchanged would attribute
+    them to a checker that does not report them -- the exact confusion the spec
+    exists to prevent, arriving through the back door.
+    """
+
+    def _fallback(self, findings):
+        store.save_project({"name": "P", "kicad_project_path": "/p/p.kicad_pro"})
+        note = json.dumps({
+            "check": "DRC", "source_path": "/p/b.kicad_pcb", "findings": findings,
+        })
+        with patch.object(chat_agents, "_check_status_note", return_value=note):
+            return chat_agents._findings_from_check_alone("pcb", "P:pcb", "P")
+
+    def test_001_a_kicad_finding_still_credits_kicad(self):
+        out = self._fallback([{"description": "Annular width", "type": "annular_width"}])
+
+        self.assertIn("Reported by KiCad's own check", out[0]["detail"])
+
+    def test_002_a_structural_finding_says_it_was_not_kicad(self):
+        out = self._fallback([{
+            "description": "D1's symbol and footprint disagree",
+            "type": "copperplane.pin_count_mismatch",
+        }])
+
+        self.assertIn("Found by Copperplane, not by KiCad", out[0]["detail"])
+        self.assertNotIn("Reported by KiCad's own check", out[0]["detail"])
+
+    @unittest.skipUnless(os.path.exists(_EXAMPLE_SCH), "the example project is not present")
+    def test_003_a_structural_finding_cites_its_own_file(self):
+        """The area's source_path here is the board; the finding came from the
+        schematic beside it. A real path, because `validate_source_refs` drops
+        a ref that does not resolve -- which is how this test first failed."""
+        out = self._fallback([{
+            "description": "D1's symbol and footprint disagree",
+            "type": "copperplane.pin_count_mismatch",
+            "source_path": _EXAMPLE_SCH,
+        }])
+
+        self.assertEqual(out[0]["sources"][0]["source_path"], _EXAMPLE_SCH)
+
+
 class TestLibraryPartsAreNotTheDesign(ChatAgentsTestCase):
     """A key name was doing real damage.
 

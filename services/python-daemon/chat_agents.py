@@ -42,6 +42,10 @@ try:  # optional the same way daemon.py treats it -- a board reader that
     import kicad_board
 except Exception:  # noqa: BLE001
     kicad_board = None
+try:  # same treatment: SPEC-113's checks are additive to every area
+    import structural_checks
+except Exception:  # noqa: BLE001
+    structural_checks = None
 import library_store
 import llm_providers
 import tool_registry
@@ -342,7 +346,7 @@ def _finding_for_agent(finding: dict, components: dict | None = None) -> dict:
     reported exactly that: "we didn't even tell the user where to find the
     problems on the board."
     """
-    return {
+    shaped = {
         "severity": finding.get("severity"),
         "type": finding.get("type"),
         "description": finding.get("description"),
@@ -352,6 +356,12 @@ def _finding_for_agent(finding: dict, components: dict | None = None) -> dict:
             if isinstance(i, dict) and i.get("description")
         ],
     }
+    # A finding computed from a different file than the area's own says so.
+    # SPEC-113's checks read the schematic and are reported on the PCB tab too,
+    # so a citation naming the board would be pointing at the wrong file.
+    if finding.get("source_path"):
+        shaped["source_path"] = finding["source_path"]
+    return shaped
 
 
 def _location_for_agent(item: dict, components: dict) -> dict:
@@ -419,6 +429,30 @@ def _design_components(path: str, area: str) -> list:
     ]
 
 
+def _structural_findings(schematic_path: str | None) -> list:
+    """SPEC-113's checks, as findings, or [] when they cannot run.
+
+    Reported on the PCB tab as well as the Schematic tab. A symbol and its
+    footprint disagreeing is a fact about the design, and the person who runs
+    only the board check before ordering is exactly the person this exists for.
+    Each finding carries its own `source_path`, because it was read from the
+    schematic whichever tab asked for it.
+
+    Never fatal: a schematic this cannot parse must not cost the user their
+    ERC or DRC results.
+    """
+    if structural_checks is None or not schematic_path:
+        return []
+    try:
+        findings = structural_checks.check_pin_counts(schematic_path)
+    except Exception as exc:  # noqa: BLE001 -- additive; never breaks the check
+        logger.warning("structural checks failed for %s: %s", schematic_path, exc)
+        return []
+    for finding in findings:
+        finding["source_path"] = schematic_path
+    return findings
+
+
 def _check_status_note(project: dict, area: str) -> str:
     """Runs the real ERC/DRC now, rather than reporting a stored one.
 
@@ -469,6 +503,8 @@ def _check_status_note(project: dict, area: str) -> str:
             logger.warning("component list unavailable for %s: %s", path, exc)
             components = None
 
+        structural = _structural_findings(files.get("schematic_path"))
+
         if area == "schematic":
             report = kicad_cli.run_erc(path)
             findings = [v for sheet in report["sheets"] for v in sheet["violations"]]
@@ -511,9 +547,21 @@ def _check_status_note(project: dict, area: str) -> str:
             "components_omitted": (
                 max(0, len(components) - _MAX_CONTEXT_COMPONENTS) if components is not None else 0
             ),
+            "structural_count": len(structural),
+            "structural_note": (
+                "Findings of type copperplane.* are this app's own, computed from the "
+                "schematic and its footprints. KiCad's ERC and DRC do not report them and "
+                "never will -- say where a finding came from rather than implying KiCad "
+                "raised it."
+            ),
+            # Structural findings are appended after the cap, not merged before
+            # it: a board with hundreds of DRC violations must not push out the
+            # findings nothing else in the toolchain reports.
             "findings": [
                 _finding_for_agent(f, _by_reference(components))
                 for f in findings[:_MAX_LIVE_FINDINGS]
+            ] + [
+                _finding_for_agent(f, _by_reference(components)) for f in structural
             ],
             "findings_omitted": max(0, len(findings) - _MAX_LIVE_FINDINGS),
             # Which checks KiCad did not run at all. A disabled check makes a
@@ -1029,6 +1077,19 @@ _UNEXPLAINED_PREFIX = (
     "generated this time, so this is the raw finding: "
 )
 
+#: SPEC-113's findings are not KiCad's, and the fallback used to say they were.
+#: Attributing them to a checker that does not report them is the exact
+#: confusion the spec exists to prevent, arriving through the back door.
+_UNEXPLAINED_STRUCTURAL_PREFIX = (
+    "Found by Copperplane, not by KiCad -- ERC and DRC do not report this. The "
+    "plain-language explanation could not be generated this time, so this is the "
+    "raw finding: "
+)
+
+#: Findings this app computed itself. Their `type` is namespaced so the source
+#: is unambiguous without matching on wording.
+_STRUCTURAL_TYPE_PREFIX = "copperplane."
+
 
 def _findings_from_fit_alone(scope_id: str, project_name: str | None) -> list | None:
     """The enclosure's measured fit, as a finding, with no model prose.
@@ -1153,12 +1214,19 @@ def _findings_from_check_alone(area: str, scope_id: str, project_name: str | Non
             # invented into a finer grade we did not measure.
             "severity": "warning",
             "title": raw.get("description") or f"{label} finding",
-            "detail": _UNEXPLAINED_PREFIX + (
+            "detail": (
+                _UNEXPLAINED_STRUCTURAL_PREFIX
+                if str(raw.get("type") or "").startswith(_STRUCTURAL_TYPE_PREFIX)
+                else _UNEXPLAINED_PREFIX
+            ) + (
                 f"{raw.get('description')}. Where: {where}." if where
                 else f"{raw.get('description')}."
             ),
             "sources": validate_source_refs(
-                [{"kind": "check_finding", "source_path": parsed.get("source_path")}]
+                [{
+                    "kind": "check_finding",
+                    "source_path": raw.get("source_path") or parsed.get("source_path"),
+                }]
             )[0],
             # Straight from the check, so not general practice at all.
             "general_practice": False,
