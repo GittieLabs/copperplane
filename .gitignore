@@ -76,3 +76,6 @@ developer-key/
 # then cropped into docs/site/public/images/ -- the originals are never committed.
 screenshots/
 Walkthrough-Copperplane/
+
+# Tutorial captures, redacted then cropped into docs/site/public/images/
+copperplane-tutorial/

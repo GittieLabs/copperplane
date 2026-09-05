@@ -33,6 +33,8 @@ with no valid items.
 Click a page citation and your cached copy of the datasheet opens at that page.
 That round trip — claim to source in about five seconds — is the point.
 
+![Design requirements, each claim backed by datasheet citations](/copperplane/images/design-guidance.png)
+
 ## How to actually use it
 
 Read the summary. For anything you are going to act on, **open the citation**.

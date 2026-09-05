@@ -60,61 +60,47 @@ into `docs/site/public/images/`.
 
 ## Already placed
 
-From the first walkthrough: dark, redacted, in `public/images/`.
+| File | Source | Notes |
+| :--- | :--- | :--- |
+| `hero.png` | tutorial capture | The Schematic tab on the real project, full window |
+| `board-check.png` | tutorial capture | The DRC result list with its findings |
+| `schematic-erc.png` | tutorial capture | ERC after the two `PWR_FLAG` symbols were removed |
+| `ask-the-agent.png` | tutorial capture | The agent answering the tutorial's own D1 question, sources visible |
+| `design-guidance.png` | tutorial capture | Guidance with expandable citations |
+| `new-project.png` | tutorial capture | Linking a KiCad project |
+| `component-search.png` | tutorial capture | Ranked candidates with confidence |
+| `settings.png` | first walkthrough | Whole Settings surface, keys only as "configured" |
+| `part-detail.png` | first walkthrough | RGB LED footprint card with the abbreviations box |
+| `schematic-check.png` | first walkthrough | Schematic tab, board components, detected `.kicad_sch` |
+| `board-check-explained.png` | first walkthrough | DRC rewritten in plain English |
+| `enclosure.png` | first walkthrough | Enclosure form with the measured 14.1mm hint |
 
-| File | What it shows |
-| :--- | :--- |
-| `settings.png` | The whole Settings surface, keys showing only as "configured" |
-| `component-search.png` | A real part search: five candidates with package and confidence |
-| `part-detail.png` | The RGB LED footprint card, including the plain-English abbreviations box |
-| `schematic-check.png` | The Schematic tab: board components, 3D-model status, the detected `.kicad_sch` |
-| `board-check-explained.png` | DRC rewritten in plain English, with the 0.085mm against 0.100mm annular numbers |
-| `enclosure.png` | The enclosure form, with the measured "14.1mm needed, set by D1" hint |
+## Two things to fix before these are final
+
+**Scratch projects are in the rail on 9 of 24 captures**, `hero.png` included: `Test`,
+`Test Create Project 1`, `Test No Project`, and a second `Blink LED Tutorial` beside the real
+`Copperplane Blink LEDs`. It reads as a developer's machine rather than a product. Removing them
+("Remove from list") and re-shooting the affected screens is the fix; nothing else can reach it,
+because the rail is in the pixels.
+
+**One project is named inconsistently.** `board-check.png` shows `Blink LED Tutorial` while the
+tutorial prose and every other shot say `Copperplane Blink LEDs`. A reader following along will
+notice.
+
+Both are cosmetic and neither blocks publishing. They are the difference between "screenshots of
+the app" and "screenshots of the product".
 
 ## Still needed, all dark
 
-Revised after the tutorial was written, which is what the list was waiting on.
-Three changes worth noting: the ERC-results shot needed a new name, because
-`schematic-check.png` turned out to be the tab view; `board-check.png` is a
-genuinely separate image from `board-check-explained.png` and the tutorial uses
-both; and `guided-done.png` was dropped, because nothing in the docs needs a
-picture of a finished wizard.
+Five slots remain, all of them onboarding, which needs `onboarding_completed` reset to reach:
 
-**Shoot these in tutorial order.** Walking the tutorial while capturing is the
-cheapest review it will ever get — anywhere the prose does not match what you
-see is a bug in the prose.
+| File | What must be visible |
+| :--- | :--- |
+| `welcome.png` | The welcome screen: the mark, both paths, **no rail** |
+| `guided-provider.png` | Guided setup step 1, choosing a provider, before a key is typed |
+| `guided-tools.png` | Guided setup showing KiCad and FreeCAD detected, with their real paths |
+| `no-project.png` | The launch view with no project selected, showing the mark |
+| `library.png` | The library with a few real parts |
 
-| File | What must be visible | Used by |
-| :--- | :--- | :--- |
-| `new-project.png` | Creating a project, at the moment of picking the `.kicad_pro` to link | tutorial, first-run |
-| `board-check.png` | The PCB check **result list**: four annular width errors and the unconnected GND, severities visible. Not the explained view -- that one is already placed | tutorial, board-checks |
-| `schematic-erc.png` | The schematic check **after** the two `PWR_FLAG` symbols are deleted: `power_pin_not_driven` x2 and `pin_not_connected` x2 | tutorial |
-| `ask-the-agent.png` | The chat panel answering *"why does D1 have pads with no net?"* -- the tutorial quotes that exact question | tutorial, ask-the-agent |
-| `welcome.png` | The welcome screen: the mark, both paths. **Rebuild first** -- the rail was visible here until PR #393 | first-run |
-| `guided-provider.png` | Guided setup step 1, choosing a provider, before a key is typed | first-run |
-| `guided-tools.png` | Guided setup showing KiCad and FreeCAD detected, with their real paths | first-run |
-| `no-project.png` | The launch view with no project selected, showing the mark | first-run |
-| `design-guidance.png` | Datasheet-derived guidance with its citations. The old one was deleted -- it showed the pre-rename product name | design-guidance |
-| `library.png` | The library with a few real parts. Deleted for the same reason | library |
-| `hero.png` | Wide, project open, rail and an area tab visible -- the one image that has to look like a product rather than a screenshot | index |
-
-Dropped from the earlier list: `guided-done.png` (no page needs it) and
-`project-linked.png` (the tutorial covers linking in prose, and a screenshot of
-an absent banner shows nothing).
-
-## Before you shoot
-
-1. **Rebuild.** PR #393 fixed five things that would otherwise land in the
-   documentation: overlapping pin names in the symbol preview, error messages
-   citing spec numbers and Python constants, and the rail appearing on the
-   welcome screen.
-2. **Delete the two `PWR_FLAG` symbols** in the tutorial schematic and save.
-   Without that the schematic check has nothing to report -- the board ships
-   with zero ERC violations. Put them back afterwards.
-
-## Rejected from the first walkthrough
-
-Recorded so the same thing does not happen twice: the glossary shot cut off
-mid-entry at `IDC` with other desktop windows visible behind it; a part search
-caught mid-request with an empty body; and an enclosure shot showing
-`Test Create Project 1` / `Hello_World_Blinky` instead of the tutorial project.
+`first-run.md` carries `<!-- screenshot pending -->` markers where the first three go, so the
+guard stays green and the gap stays visible.

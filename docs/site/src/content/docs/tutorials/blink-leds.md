@@ -26,6 +26,8 @@ having your own impression to compare against.
 
 In Copperplane, make a new project and point it at the `.kicad_pro` file.
 
+![Linking a KiCad project to a new Copperplane project](/copperplane/images/new-project.png)
+
 The rail on the left holds your projects, your parts library, and Settings.
 Across the top of a project sit five tabs — **Overview**, **Components**,
 **Schematic**, **PCB**, **Enclosure** — which is roughly the order you would work
@@ -52,6 +54,8 @@ does not cover.
 ## Check the PCB
 
 Open the **PCB** tab and run the check.
+
+![The board check result list](/copperplane/images/board-check.png)
 
 KiCad's own DRC reports five errors on this board. Here is one of them, as KiCad
 puts it:
@@ -126,6 +130,8 @@ from off-sheet" and "you forgot to connect this", so it asks you to say which,
 and `PWR_FLAG` is how you say it.
 
 Put the flags back when you are done and the errors go away.
+
+![The schematic check, with the power flags removed](/copperplane/images/schematic-erc.png)
 
 ## Fit an enclosure
 
