@@ -1167,7 +1167,7 @@ Partly unbuilt `SPEC-336`, not new scope — that spec's §1 and §5 both say th
 the app logo, and `CTX-336.1` shipped a text heading, which satisfied every test anyone would have
 written about it.
 
-#### SPEC-327 — Design Advice: Layout & Clearance Warnings — not yet written
+#### [SPEC-327](apps/tauri-ui/specs/SPEC-327-design-advice-layout-and-clearance.md) — Design Advice: Layout & Clearance Warnings — Draft, written 2026-09-05
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-325, SPEC-326
 
@@ -1177,7 +1177,7 @@ width questions. Advises; never edits. The PCB tab becomes a table of components
 models or placeholder volumes, a board view, and warnings — the same shape as SPEC-325's schematic
 table.
 
-#### SPEC-328 — Project Intent & Suggested Parts — not yet written
+#### [SPEC-328](apps/tauri-ui/specs/SPEC-328-project-intent-and-suggested-parts.md) — Project Intent & Suggested Parts — Draft, written 2026-09-05
 
 *Module:* `apps/tauri-ui` · *Depends on:* SPEC-325, SPEC-206
 
@@ -1366,7 +1366,7 @@ itself.
 Also worth settling here: the standoff diameter currently comes from the hole's own
 `diameter_mm`, which makes the post exactly as wide as the hole it is meant to sit under.
 
-#### SPEC-329 — Assisted Authoring: Adding a Part on Request — not yet written, deliberately last
+#### [SPEC-329](apps/tauri-ui/specs/SPEC-329-assisted-authoring-adding-a-part.md) — Assisted Authoring: Adding a Part on Request — Draft, written 2026-09-05, deliberately last
 
 *Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-325, SPEC-308
 
@@ -1429,7 +1429,7 @@ compiled artifacts, not the same thing as `SPEC-403`'s still-open question below
 live-tested the actual KiCad/FreeCAD bridges on those platforms yet, only that the app itself
 builds and launches there.
 
-#### SPEC-403 — Cross-Platform Verification Matrix
+#### [SPEC-403](specs/SPEC-403-cross-platform-verification.md) — Cross-Platform Verification — Draft, written 2026-09-05
 *Module:* repo-wide · *Depends on:* SPEC-903
 
 Every live CAD test to date has run on exactly one machine: Keith's Mac, with KiCad 10.0.3 and

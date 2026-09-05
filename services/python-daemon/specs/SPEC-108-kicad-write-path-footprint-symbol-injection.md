@@ -8,7 +8,9 @@ last_updated: 2026-09-04
 target_version: v0.1.0
 location: "services/python-daemon/specs/SPEC-108-kicad-write-path-footprint-symbol-injection.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
-child_specs: ["SPEC-112-placing-a-part-through-kicads-own-libraries.md"]
+child_specs:
+  - "SPEC-112-placing-a-part-through-kicads-own-libraries.md"
+  - "../../../apps/tauri-ui/specs/SPEC-329-assisted-authoring-adding-a-part.md"
 user_facing: true
 ---
 
