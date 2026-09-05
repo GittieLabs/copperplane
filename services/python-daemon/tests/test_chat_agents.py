@@ -547,7 +547,11 @@ class TestAssembleContext(ChatAgentsTestCase):
 
         context = json.loads(chat_agents._assemble_context("pcb", "project", "weather-pcb:pcb", None))
 
-        self.assertEqual(context["parts"][0]["connection_guidance"]["pin_guidance"][0]["pin_number"], "8")
+        self.assertEqual(
+            context["library_parts_attached_to_this_project"][0]
+            ["connection_guidance"]["pin_guidance"][0]["pin_number"],
+            "8",
+        )
 
     def test_006_enclosure_area_includes_generated_parameters_when_present(self):
         store.save_project({
@@ -1162,6 +1166,152 @@ class TestFindingLocations(unittest.TestCase):
             )
 
         self.assertEqual(note["ignored_checks"][0]["key"], "missing_courtyard")
+
+
+_EXAMPLE_PROJECT = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "examples", "Copperplane_Blink_LEDs"
+))
+_EXAMPLE_SCH = os.path.join(_EXAMPLE_PROJECT, "Copperplane_Blink_LEDs.kicad_sch")
+
+
+def _kicad_cli_available():
+    try:
+        return bool(chat_agents.kicad_cli.find_kicad_cli())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+class TestAFindingNamesTheRealComponent(unittest.TestCase):
+    """The agent invented a part because it was given every fact but that one.
+
+    Reported 2026-09-05 against the maintainer's own tutorial project. The
+    review explained an ERC error as "pin 8 on the part labeled 'A1' -- this is
+    the power supply input pin (VCC/VIN) on the NE555 timer chip". Everything in
+    that sentence was correctly grounded except the part: A1 is an Arduino UNO.
+
+    The cause was reproducible and specific. `_assemble_context` handed the
+    agent a bare `parts` key holding the Copperplane library records attached to
+    the project -- which on that project was one NE555, injected into the board
+    in an earlier session and never in the schematic at all -- alongside a check
+    block whose finding read `Symbol A1 Pin 8 [VIN, Power input, Line]`. No
+    component list was supplied. The only pin-8 guidance anywhere in the context
+    was the NE555's, and pin 8 is an NE555's most famous pin.
+
+    `kicad.list_schematic_components` had existed since SPEC-325 the whole time.
+    The schematic agent's own prompt still said "nothing in this app reads a
+    `.kicad_sch`'s component list".
+    """
+
+    def test_001_a_reference_designator_is_read_from_both_kicad_shapes(self):
+        self.assertEqual(
+            chat_agents.reference_designator_in("Symbol A1 Pin 8 [VIN, Power input, Line]"), "A1"
+        )
+        self.assertEqual(
+            chat_agents.reference_designator_in("PTH pad 2 [Net-(U2-THRES)] of U2"), "U2"
+        )
+
+    def test_002_an_item_that_names_no_component_stays_unnamed(self):
+        """A bare track is a real finding location and belongs to nothing."""
+        self.assertIsNone(chat_agents.reference_designator_in(
+            "Track [Net-(U2-THRES)] on F.Cu, length 1.5556 mm"
+        ))
+
+    def test_003_the_component_travels_with_the_finding(self):
+        finding = {
+            "description": "Input Power pin not driven by any Output Power pins",
+            "severity": "error",
+            "type": "power_pin_not_driven",
+            "items": [{"description": "Symbol A1 Pin 8 [VIN, Power input, Line]",
+                       "pos": {"x": 1.13, "y": 0.55}}],
+        }
+        components = {"A1": {"reference": "A1", "value": "Arduino_UNO_R3",
+                             "footprint": "Module:Arduino_UNO_R3_WithMountingHoles"}}
+
+        out = chat_agents._finding_for_agent(finding, components)
+
+        self.assertEqual(out["locations"][0]["reference"], "A1")
+        self.assertEqual(out["locations"][0]["component"]["value"], "Arduino_UNO_R3")
+
+    def test_004_an_unresolvable_reference_says_so_instead_of_going_quiet(self):
+        """Silence here is what produced the NE555. An absent fact must be
+        stated, because the model will otherwise supply one."""
+        finding = {"description": "x", "items": [{"description": "Symbol Q9 Pin 1 [B, Input]"}]}
+
+        out = chat_agents._finding_for_agent(finding, {"A1": {"reference": "A1"}})
+
+        self.assertIn("not in this design's component list", out["locations"][0]["component"])
+
+    @unittest.skipUnless(os.path.exists(_EXAMPLE_SCH), "the example project is not present")
+    @unittest.skipUnless(_kicad_cli_available(), "kicad-cli is not installed")
+    def test_005_the_real_board_resolves_a1_to_an_arduino_not_an_ne555(self):
+        """The reported bug, end to end, against the real tutorial schematic.
+
+        This is the assertion that fails without the fix: the finding arrives
+        naming A1 and nothing else, and `components` does not exist at all.
+        """
+        note = json.loads(chat_agents._check_status_note(
+            {"kicad_project_path": os.path.join(
+                _EXAMPLE_PROJECT, "Copperplane_Blink_LEDs.kicad_pro")},
+            "schematic",
+        ))
+
+        by_ref = {c["reference"]: c for c in note["components"]}
+        self.assertEqual(by_ref["A1"]["value"], "Arduino_UNO_R3")
+
+        a1_findings = [
+            f for f in note["findings"]
+            for loc in f["locations"] if loc.get("reference") == "A1"
+        ]
+        self.assertTrue(a1_findings, "the real ERC finding about A1 was not present")
+        for finding in a1_findings:
+            for loc in finding["locations"]:
+                if loc.get("reference") == "A1":
+                    self.assertEqual(loc["component"]["value"], "Arduino_UNO_R3")
+
+    def test_006_a_component_list_that_cannot_be_read_is_reported_not_faked(self):
+        """An empty design and an unreadable one must never look the same."""
+        with patch.object(chat_agents.kicad_project, "resolve_project",
+                          return_value={"pcb_path": None, "schematic_path": "/p/a.kicad_sch"}), \
+             patch.object(chat_agents.kicad_cli, "run_erc",
+                          return_value={"sheets": [{"violations": []}], "ignored_checks": []}), \
+             patch.object(chat_agents, "_design_components",
+                          side_effect=RuntimeError("no kicad-cli")):
+            note = json.loads(
+                chat_agents._check_status_note({"kicad_project_path": "/p/p.kicad_pro"}, "schematic")
+            )
+
+        self.assertIn("could not be read", note["components"])
+        self.assertIn("Do not guess", note["components"])
+
+
+class TestLibraryPartsAreNotTheDesign(ChatAgentsTestCase):
+    """A key name was doing real damage.
+
+    `parts`, sitting next to a check block full of reference designators, reads
+    as "the components in this design". It is not: it is the Copperplane library
+    records the user attached to the project, some of which are merely being
+    considered. Renaming it is most of the fix; saying so explicitly is the rest.
+    """
+
+    def _context(self):
+        store.save_project({
+            "name": "P",
+            "kicad_project_path": None,
+            "parts": [],
+        })
+        return json.loads(chat_agents._assemble_context("schematic", "project", "P", "P"))
+
+    def test_001_the_bare_parts_key_is_gone(self):
+        self.assertNotIn("parts", self._context())
+
+    def test_002_the_key_says_what_it_holds(self):
+        self.assertIn("library_parts_attached_to_this_project", self._context())
+
+    def test_003_the_note_says_where_to_resolve_designators(self):
+        note = self._context()["library_parts_note"]
+
+        self.assertIn("NOT evidence", note)
+        self.assertIn("check_status.components", note)
 
 
 class TestAnUnreadableReviewIsNotACleanBoard(unittest.TestCase):
