@@ -20,6 +20,11 @@ Everything below serves that. If a shot does not, cut it.
 competitor can copy by adding a feature: the part that is wired correctly, passes
 every check, and was never going to work. Do not rush it.
 
+It also got materially easier to shoot. Until `SPEC-113` the app only surfaced
+that mismatch if the viewer thought to ask for it, so the segment needed a
+question typed on camera. Now it is a finding in the list the previous segment
+already ran, and the beat is a scroll.
+
 ---
 
 ## Before you record
@@ -69,12 +74,17 @@ The discomfort is the point. Do not cut away early to be kind.
 | | |
 | :--- | :--- |
 | **Capture** | Cut to Copperplane, project already linked, **PCB** tab. Click **Run Review**. Let the findings appear. |
-| **Must be legible** | `3 findings`, and the first finding's heading: *Four pads on D1 have too little copper ring around their drill holes*. |
+| **Must be legible** | The first finding's heading: *Four pads on D1 have too little copper ring around their drill holes*. |
 | **On screen** | `Same files. Same checks.` |
 | **Voiceover** | "Copperplane reads the same files. Runs the same checks. Then tells you what they mean." |
 
-KiCad reported that violation four times. Copperplane shows it once. If the count
-`3 findings` is not readable, the segment has not landed.
+KiCad reported that violation four times. Copperplane shows it once — that
+compression is what this segment has to land, and the first finding's heading is
+what carries it.
+
+**Do not put a findings count on screen.** The list is five findings now: three
+that explain DRC and two the next segment is about. Naming a number here sets up
+"three findings from five violations", which segment 5 then contradicts.
 
 ### 4 — What it means (0:24–0:36)
 
@@ -88,18 +98,31 @@ KiCad reported that violation four times. Copperplane shows it once. If the coun
 This is the segment that earns trust: it is specific, it names the part, and it
 says what physically goes wrong.
 
-### 5 — The thing no checker catches (0:36–0:50)
+### 5 — The thing KiCad cannot see (0:36–0:50)
 
 | | |
 | :--- | :--- |
-| **Capture** | The Components or Schematic view showing **D1**. Then, if the answer is good, the agent panel answering *"why does D1 have pads with no net?"* |
-| **Must be legible** | That D1's symbol is a two-pin `Device:LED` and its footprint is a four-pin `LED_THT:LED_D5.0mm-4_RGB`. |
+| **Capture** | Stay on the same findings list and scroll to the bottom two. No typing, no chat panel — they are already there. |
+| **Must be legible** | The D1 finding: the symbol `Device:LED` has 2 pins, the footprint `LED_THT:LED_D5.0mm-4_RGB` has 4 numbered pads. |
 | **On screen** | `ERC passes.` `DRC passes.` `This part was never going to work.` |
 | **Voiceover** | "And then there is this. A two-pin LED symbol, on a four-pin RGB footprint. Two pads connected to nothing, one resistor where three belong. Every check passes. It is not a rule violation — it is a part that was never going to work." |
 
 **The three on-screen lines should land as three separate beats.** This is the
 whole argument for the product in fourteen seconds: a checker tells you which
 rules you broke; knowing what you actually built is a different question.
+
+**This segment used to require typing a question on camera**, because the app
+only surfaced the mismatch if you asked for it. It does not any more — the
+finding is in the list you already ran. Shoot it as a scroll, not as a demo of
+the chat. Someone who has to know the question in advance is not the person this
+argument is for.
+
+There is a **second** mismatch in the list, SW1, and it is deliberately not in the
+script. It is the milder case — a tactile switch whose extra legs are internally
+paired — and explaining why one is fatal and the other probably is not costs more
+seconds than the segment has. Do not crop it out of frame; just do not narrate
+it. A viewer noticing a second finding they were not told about reads as
+thoroughness.
 
 ### 6 — The case (0:50–1:02)
 
@@ -136,7 +159,7 @@ with a board order and one you cannot.
 ## The 60-second cut
 
 Drop segments 6 and 7. The arc still works: hook → wall → same files read
-differently → what it means → the thing no checker catches → close. You lose the
+differently → what it means → the thing KiCad cannot see → close. You lose the
 enclosure, which is a feature; you keep the argument.
 
 Do not shorten segment 5 to save time. Shorten segment 4.
