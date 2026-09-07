@@ -1606,6 +1606,60 @@ favour of `pdfplumber` (MIT).
 
 ---
 
+#### [SPEC-210](services/python-daemon/specs/SPEC-210-design-considerations-model.md) — Design Considerations: Model & Discipline — Draft
+
+*Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-113, SPEC-319, SPEC-328
+
+The generalisation of `SPEC-113`'s principle: compute the finding, let the model explain it, never
+let it notice. Names the three claim classes the repo already splits on without naming them
+(computed, cited, judgement — `SPEC-113` is the first, `SPEC-327` is the third), and the initiative
+rule that follows: a computed or cited claim may be raised unprompted, a judgement waits to be
+asked.
+
+Introduces the second output shape the product does not have yet. A **question**, raised by a
+trigger and answered by the user, whose answer becomes project intent and unlocks computation that
+was not possible before. That is how the app comes to know enough about a board to say something
+specific, without ever modelling the user.
+
+Scope is chosen by the user's own declared goal for the board (for me / for others / being sold),
+never by an assessment of their skill. Explicitly not a curriculum: no lesson ordering, no progress
+tracking, no quizzing, and no tutor tab.
+
+#### [SPEC-114](services/python-daemon/specs/SPEC-114-fabrication-capability-profiles.md) — Fabrication Capability Profiles & Design Rules — Draft
+
+*Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-210, SPEC-309
+
+The first pack, and the lowest-bar proof in the product for a novice. Today a board is checked
+against nobody's process: on a first board, DRC enforces KiCad's permissive defaults, so a clean
+result means "you did not violate a rule you never set".
+
+The value is not the rejection — JLCPCB and PCBWay both run their own DFM on upload — it is the
+class a fab **accepts without comment**: silkscreen clipped off a pad, text below minimum height
+returned as a smudge, a mask sliver not printed so two pads share an opening, an annular ring at the
+edge of tolerance that yields an intermittent connection. Those come back looking like real boards.
+
+Gated on one unmeasured question that decides the whole shape: does `kicad-cli pcb drc` honour a
+`.kicad_dru` sidecar, and for which constraint classes? If yes, v1 never writes the user's board at
+all, only a file the app owns — the safest first write path in a product that has kept writes last.
+
+#### [SPEC-211](services/python-daemon/specs/SPEC-211-power-path-review.md) — The Power Path Review — Draft
+
+*Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-210, SPEC-205, SPEC-328
+
+The second pack, and the one carrying the "this would have cooked" story. Lead case is linear
+regulator dissipation: `(Vin - Vout) x I`, so 12V to 3.3V at half an amp is 4.35W inside a SOT-223,
+which is arithmetic a maker can follow in one line and which explains something they have physically
+experienced. Input protection was the obvious candidate and lost on hit rate — a first board is
+usually fed from a keyed devkit or USB connector, so reverse polarity does not fire often enough to
+carry the proof, and survives as one consideration inside this pack instead.
+
+Everything hangs off two questions (what feeds this board, roughly how much current), which makes
+`SPEC-210`'s question mechanism prove itself on a real feature. Nothing needs connectivity, which
+keeps netlist reading off the critical path — at the cost, stated honestly in the spec, that several
+items degrade from findings to questions because the app cannot prove the input reaches the part.
+
+---
+
 ## 4. Milestones
 
 ### M0 — Framework repair *(days, do first)* — ✅ complete as of 2026-08-08
