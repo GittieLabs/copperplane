@@ -219,6 +219,19 @@ except Exception:
     logger.exception("chat_agents failed to import -- chat.send will be unavailable")
     _note_degraded("chat_agents", "chat.send")
     chat_agents = None
+else:
+    # SPEC-113's checks are an optional import INSIDE chat_agents, so a freeze
+    # that missed the module leaves chat.review working and quietly stops
+    # finding anything KiCad does not. `ensure_sidecar` would report "no
+    # degraded modules" while the whole added value was absent -- a check that
+    # cannot fail for the defect it is meant to catch. Surfaced here so the
+    # frozen artifact can be asked, which is the only thing CTX-407.3 and
+    # CTX-407.4 both showed actually works.
+    if getattr(chat_agents, "structural_checks", None) is None:
+        logger.warning(
+            "structural_checks failed to import -- the review will report only ERC/DRC findings"
+        )
+        _note_degraded("structural_checks", "symbol/footprint checks in chat.review")
 
 try:
     import context_index

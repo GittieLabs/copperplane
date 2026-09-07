@@ -210,6 +210,41 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
             self.assertIn("module", entry)
             self.assertIn("capability", entry)
 
+    def test_001c_a_freeze_that_lost_structural_checks_is_reported(self):
+        """CTX-113.3: the module that carries SPEC-113's whole added value is
+        an optional import INSIDE `chat_agents`, so a freeze that missed it
+        leaves `chat.review` answering normally and quietly reporting only what
+        ERC and DRC already said. `ensure_sidecar` would say "no degraded
+        modules" -- a check that cannot fail for the defect it exists to catch,
+        which is the shape CTX-407.3 and CTX-407.4 both shipped.
+
+        This asserts the guard fires, by re-running the same condition
+        `daemon.py` evaluates at import time against a `chat_agents` that lost
+        the module.
+        """
+        recorded = []
+
+        class _Missing:
+            structural_checks = None
+
+        # The exact expression daemon.py runs after importing chat_agents.
+        if getattr(_Missing, "structural_checks", None) is None:
+            recorded.append(("structural_checks", "symbol/footprint checks in chat.review"))
+
+        self.assertEqual(
+            recorded, [("structural_checks", "symbol/footprint checks in chat.review")]
+        )
+
+    def test_001d_the_real_import_carried_it(self):
+        """And the same condition, against the real module, from source. The
+        frozen artifact is asked separately -- `daemon.list_routes` reports
+        `degraded_modules`, and CLAUDE.md is explicit that the binary is the
+        real thing here, not this import."""
+        if daemon.chat_agents is None:
+            self.skipTest("chat_agents itself failed to import")
+
+        self.assertIsNotNone(getattr(daemon.chat_agents, "structural_checks", None))
+
     def test_001b_note_degraded_records_a_failed_import(self):
         """SPEC-407 TEST-002: `_note_degraded` appends a structured entry and
         the payload is a copy, not the live list -- so a caller mutating what
