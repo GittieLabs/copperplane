@@ -34,6 +34,9 @@ const _WHAT_IS_LOST: Record<string, string> = {
 
   freecad_bridge: 'Generating and exporting enclosures',
   library_store: 'Saving and loading projects, and your parts library',
+  structural_checks:
+    'Finding symbol and footprint mismatches — the checks KiCad does not make. '
+    + 'Reviews still run and still report everything ERC and DRC found.',
 }
 
 export interface LostCapability {

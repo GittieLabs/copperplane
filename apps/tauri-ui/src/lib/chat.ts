@@ -14,7 +14,7 @@ export interface SourceRef {
   part_id?: string
   page?: number
   content_hash?: string
-  /** `check_finding`: the .kicad_sch/.kicad_pcb the ERC/DRC run read. */
+  /** `check_finding`: the .kicad_sch/.kicad_pcb the check read. */
   source_path?: string
   category?: string
   quote?: string
@@ -72,6 +72,12 @@ export interface ReviewFinding {
   sources: SourceRef[]
   general_practice: boolean
   area: string
+  /** SPEC-113: which check produced this. Read server-side off a
+   *  `finding_id` the daemon generated and the model copied back, never
+   *  inferred from wording -- `'copperplane'` means ERC and DRC did not
+   *  report it and never would. `null` means the finding cited nothing
+   *  identifiable, which is a third state, not a synonym for KiCad. */
+  origin?: 'copperplane' | 'kicad' | null
 }
 
 export interface ContextSearchResult {

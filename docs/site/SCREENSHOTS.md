@@ -73,7 +73,7 @@ Fifteen images, every one dark, every one from the tutorial project with a clean
 | `new-project-review.png` | The wizard's own check pass -- parity, component count, ERC and DRC counts |
 | `schematic-check.png` | Board components with per-part 3D-model status |
 | `schematic-erc.png` | The schematic check reporting power_pin_not_driven, which the example project ships with |
-| `board-check.png` | The DRC result list |
+| `board-check.png` | The board check result list -- **five** findings, three explaining DRC and two symbol/footprint mismatches |
 | `board-check-explained.png` | DRC rewritten in plain English |
 | `ask-the-agent.png` | The agent answering the tutorial's own D1 question, sources visible |
 | `component-search.png` | Ranked candidates with confidence |
@@ -81,6 +81,19 @@ Fifteen images, every one dark, every one from the tutorial project with a clean
 | `design-guidance.png` | Guidance with expandable citations |
 | `enclosure.png` | The generation form with the measured height hint |
 | `enclosure-3d.png` | The generated enclosure with the board seated inside |
+
+## Two shots are stale as of SPEC-113
+
+`board-check.png` and `board-check-explained.png` were taken before the
+symbol/footprint check existed, so they show **three** findings where the tutorial
+now describes **five**. The two new ones are at the bottom of the list:
+
+*   D1 -- `Device:LED` has 2 pins, `LED_THT:LED_D5.0mm-4_RGB` has 4 numbered pads
+*   SW1 -- `Switch:SW_Push` has 2 pins, `KSA_Tactile_SPST` has 5 numbered pads
+
+Retake both against `Copperplane_Blink_LEDs` with the PCB check run. Make sure
+the frame includes the last two findings; they are the point of the section they
+illustrate. Nothing else about those shots needs to change.
 
 ## One capture was rejected
 

@@ -46,6 +46,15 @@
   --color-warning: #fbbf24; /* amber-400 */
   --color-warning-line: #b45309; /* amber-700 */
   --color-warning-accent: #f59e0b; /* amber-500 */
+  /* CTX-113.4: a review card's ground says how much attention it wants.
+     Severity used to live only in a five-character label, so three tiers of
+     finding read as one undifferentiated wall and the maintainer nearly
+     missed two of them. Warm and raised for a warning, cool and level for a
+     suggestion, recessed for info -- a luminance ramp first, a hue second,
+     so the ordering survives on a monitor that renders the tints poorly. */
+  --color-surface-warning: #2b2114;
+  --color-surface-suggestion: #1d2025;
+  --color-surface-info: #101010;
 }
 
 @media (prefers-color-scheme: light) {
@@ -70,6 +79,9 @@
     --color-warning: #d97706; /* amber-600 */
     --color-warning-line: #f59e0b; /* amber-500 */
     --color-warning-accent: #b45309; /* amber-700 */
+    --color-surface-warning: #faeacb;
+    --color-surface-suggestion: #e4ebf5;
+    --color-surface-info: #f7f7f7;
   }
 }
 
@@ -94,6 +106,9 @@
   --color-warning: #d97706;
   --color-warning-line: #f59e0b;
   --color-warning-accent: #b45309;
+  --color-surface-warning: #faeacb;
+  --color-surface-suggestion: #e4ebf5;
+  --color-surface-info: #f7f7f7;
 }
 
 /* SPEC-338: which mark is shown, following exactly the same three-case

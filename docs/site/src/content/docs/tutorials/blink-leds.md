@@ -5,8 +5,8 @@ description: Walk a real Arduino shield through Copperplane — find what is wro
 
 This is a real board with real problems. Not a toy: an Arduino UNO shield with an
 RGB LED, a resistor, a tactile switch and four mounting holes. It has five errors
-on the PCB, and one mistake that **neither KiCad nor Copperplane will flag as an
-error** — which turns out to be the most interesting thing in it.
+on the PCB, two on the schematic, and two mistakes that **no KiCad check will
+ever report** — which turn out to be the most interesting things in it.
 
 You will need KiCad 9 or newer, and about twenty minutes.
 
@@ -69,8 +69,11 @@ Open the **PCB** tab and run the check.
 
 ![The board check result list](/copperplane/images/board-check.png)
 
-**Three findings.** KiCad's own DRC counts five violations here; you are shown
-three, and the difference is the point.
+**Five findings, from two different places.** Three of them explain KiCad's own
+DRC, which counts five violations here. The other two are Copperplane's own, and
+KiCad reports neither of them at all.
+
+Start with the three.
 
 **One — four pads, one problem.** KiCad reports the same violation four times,
 once per pad of D1. It reads like this:
@@ -97,9 +100,8 @@ board that looked fine in CAD.
 A ground connection drawn but never finished. On a board this small you would
 probably catch it by eye. On a board with two hundred nets you would not.
 
-**Three — something KiCad never said.** The last finding is a *suggestion*, not
-a violation: this project has the "footprint has no courtyard defined" check
-switched off. A courtyard is the keep-out outline marking the space a component
+**Three — a setting, not a violation.** The third finding is a *suggestion*:
+this project has the "footprint has no courtyard defined" check switched off. A courtyard is the keep-out outline marking the space a component
 physically occupies, and the Enclosure tab measures board-to-case fit directly
 from those outlines. With the check disabled, a part could be missing its
 courtyard and DRC would never mention it — which means the enclosure you
@@ -109,30 +111,48 @@ That one is worth dwelling on. Nothing was violated, so no checker would raise
 it. It is a consequence of a setting, noticed because something else in the app
 depends on it.
 
-## The mistake nothing flags
+The remaining two findings are a different thing again.
 
-Look at D1 again.
+## The two findings KiCad never makes
 
-The **symbol** in the schematic is `Device:LED` — a plain two-pin LED. The
-**footprint** on the board is `LED_THT:LED_D5.0mm-4_RGB` — a four-pin RGB LED.
+The last two findings on that list did not come from DRC. They read like this:
 
-Two pins driving a four-pin part. Pads 3 and 4 have no net at all, and there is a
-single resistor where an RGB LED wants three, one per colour channel.
+> D1's symbol and footprint disagree about how many pins this part has. The
+> symbol `Device:LED` has 2; the footprint `LED_THT:LED_D5.0mm-4_RGB` has 4
+> numbered pads.
 
-**ERC does not catch this. DRC does not report it as an error.** KiCad mentions
-it only obliquely, as pads with no net, buried among other information. It is not
-a rule violation — it is a part that was never going to work, described perfectly
-consistently.
+> SW1's symbol and footprint disagree about how many pins this part has. The
+> symbol `Switch:SW_Push` has 2; the footprint
+> `Button_Switch_THT:KSA_Tactile_SPST` has 5 numbered pads.
 
-This is the gap the tool exists for. A checker tells you which rules you broke.
-Understanding what you *built* is a different question, and it is the one that
-costs you a board order.
+**D1 is the one that matters.** The symbol is a plain two-pin LED; the footprint
+is a four-pin RGB LED. Two pins driving a four-pin part: pads 3 and 4 have no net
+at all, and there is a single resistor where an RGB LED wants three, one per
+colour channel. It was never going to work.
 
-:::tip[Try it]
-Ask about the board: *"why does D1 have pads with no net?"* The answer should
-mention the symbol and the footprint disagreeing. If it doesn't, that is worth
-[telling us](https://github.com/GittieLabs/copperplane/issues/new?template=bug_report.yml)
-— it is exactly the case this feature is for.
+**SW1 is milder, and worth understanding for that reason.** A tactile switch has
+four legs, internally paired, plus a shield pin. Two legs are wired and the rest
+sit in holes connected to nothing. It will probably work. The app does not tell
+you which of the two is fatal, because nothing it can measure says so — it tells
+you the counts disagree and lets the explanation, and you, take it from there.
+
+**Neither is a rule violation.** ERC does not catch them. DRC does not report
+them. Even `--schematic-parity`, KiCad's own comparison of a board against its
+schematic, reports zero issues on this project. There is nothing in the
+toolchain that says a two-pin symbol on a four-pad footprint is a problem,
+because in KiCad's terms it isn't one — it is a part described perfectly
+consistently that happens not to exist.
+
+That is the gap this tool exists for. A checker tells you which rules you broke.
+Understanding what you actually *built* is a different question, and it is the
+one that costs you a board order.
+
+:::tip[Ask for more]
+The finding gives you the counts. If you want the consequence — what happens
+when you power an RGB LED through one resistor — ask about the board:
+*"what happens if I build D1 as it is?"* The answer should mention the two dead
+pads and the missing per-channel resistors. If it doesn't, that is worth
+[telling us](https://github.com/GittieLabs/copperplane/issues/new?template=bug_report.yml).
 :::
 
 ## Check the schematic

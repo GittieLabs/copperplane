@@ -60,7 +60,15 @@ def _tokenize(text: str):
             yield ('atom', text[start:i])
 
 
-def _parse(text: str) -> list:
+def parse(text: str) -> list:
+    """A KiCad s-expression file as nested lists.
+
+    Public because `.kicad_pcb`, `.kicad_sch` and `.kicad_mod` are the same
+    format and this repo should not grow a second parser for them --
+    `structural_checks` reads schematics and footprints with this one. The
+    error type still says "board file"; it is the message a user sees when any
+    of the three is malformed and renaming it is a separate change.
+    """
     stack = [[]]
     for tok in _tokenize(text):
         if tok == "(":
@@ -77,14 +85,14 @@ def _parse(text: str) -> list:
     return stack[0]
 
 
-def _sym(node) -> str:
+def sym(node) -> str:
     """The leading symbol of an s-expression node, or '' if it has none."""
     if node and isinstance(node[0], tuple):
         return node[0][1]
     return ""
 
 
-def _value(node):
+def value(node):
     """A node's first non-symbol payload, unquoted."""
     for item in node[1:]:
         if isinstance(item, tuple):
@@ -111,26 +119,26 @@ def read_board_footprints(pcb_path: str) -> list:
     with open(pcb_path, encoding="utf-8") as f:
         text = f.read()
 
-    top = _parse(text)
-    if not top or _sym(top[0]) != "kicad_pcb":
+    top = parse(text)
+    if not top or sym(top[0]) != "kicad_pcb":
         raise BoardReadError(f"Not a KiCad board file: {pcb_path}")
 
     found = []
     for node in top[0]:
-        if not isinstance(node, list) or _sym(node) != "footprint":
+        if not isinstance(node, list) or sym(node) != "footprint":
             continue
         entry = {
             "reference": None,
-            "footprint": _value(node),
+            "footprint": value(node),
             "value": None,
             "layer": None,
         }
         for child in node:
             if not isinstance(child, list):
                 continue
-            kind = _sym(child)
+            kind = sym(child)
             if kind == "layer" and entry["layer"] is None:
-                entry["layer"] = _value(child)
+                entry["layer"] = value(child)
             elif kind in ("property", "fp_text"):
                 # Two spellings, both live. Modern boards carry
                 # `(property "Reference" "BT1" ...)`; boards written before
