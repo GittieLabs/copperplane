@@ -1,7 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Markdown } from './Markdown'
 import type { Area, MenuCommand } from '../lib/areas'
-import { runReview, type ChatScope, type ReviewFinding, type SourceRef } from '../lib/chat'
+import {
+  loadStoredReview,
+  runReview,
+  type ChatScope,
+  type ReviewFinding,
+  type SourceRef,
+  type StoredReview,
+} from '../lib/chat'
 import { isOpenableSource, openSource, sourceChipLabel } from '../lib/sourceRefs'
 
 /** SPEC-319 §2.4: a **Run Review** action beside each area's existing
@@ -40,6 +47,39 @@ const SEVERITY_SURFACE: Record<ReviewFinding['severity'], string> = {
   info: 'bg-surface-info',
 }
 
+/** When a kept review ran, in a reader's words rather than an ISO string. */
+function whenItRan(iso: string): string {
+  const then = new Date(iso)
+  if (Number.isNaN(then.getTime())) return 'earlier'
+  const minutes = Math.round((Date.now() - then.getTime()) / 60000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`
+  const sameDay = then.toDateString() === new Date().toDateString()
+  const time = then.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return sameDay ? `at ${time}` : `on ${then.toLocaleDateString()} at ${time}`
+}
+
+/** What to say about a kept review, and never "re-run this now".
+ *
+ *  SPEC-339: a stale review is shown, labelled, and left alone. Re-running
+ *  costs the user real money and a real minute, and that decision is theirs --
+ *  which is also why each of these names what actually changed rather than
+ *  saying "stale". */
+function stalenessNote(review: StoredReview): string | null {
+  const file = review.source?.path?.split('/').pop()
+  const ran = whenItRan(review.ran_at)
+  switch (review.stale_reason) {
+    case 'source_changed':
+      return `${file ?? 'The file'} has been saved since this review ran ${ran}. What it says may no longer match your design.`
+    case 'source_missing':
+      return `This review ran ${ran}, and ${file ?? 'the file'} it read is no longer where it was.`
+    case 'checks_changed':
+      return `This review ran ${ran}, before some of the checks this app makes existed. Nothing in your design changed -- there is simply more to look for now.`
+    default:
+      return null
+  }
+}
+
 export interface ReviewPanelProps {
   area: Area
   scope: ChatScope
@@ -55,26 +95,54 @@ export interface ReviewPanelProps {
 
 export function ReviewPanel({ area, scope, scopeId, title, projectName, menuCommand }: ReviewPanelProps) {
   const [findings, setFindings] = useState<ReviewFinding[] | null>(null)
+  const [stored, setStored] = useState<StoredReview | null>(null)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [openingSourceKey, setOpeningSourceKey] = useState<string | null>(null)
   const [openSourceError, setOpenSourceError] = useState<string | null>(null)
 
-  // A stale review from a different part/project must never linger once
-  // the real scope moves on -- matches AgentChat's own identity-reset
-  // convention for the same reason (SPEC-318 §2.2's mount-always pattern
-  // means the same mounted instance's scope can genuinely change).
-  useEffect(() => {
-    setFindings(null)
-    setRunning(false)
-    setError(null)
-    setOpenSourceError(null)
-  }, [scope, scopeId])
+  /* SPEC-339: a review that already ran is loaded back, not thrown away.
+     This component used to reset its state to null on every scope change,
+     so opening Settings and returning destroyed a review and the next look
+     cost another ERC or DRC run plus another real LLM call for a file
+     nobody had touched.
 
-  // SPEC-316: a Design > <Area> > "Run Review" menu click -- the same
-  // real handler the in-area button already calls, matching every other
-  // area component's own established menuCommand convention exactly.
+     There is no reset here at all now. The panel is keyed on its scope at
+     every mount site, so a scope change is a remount with fresh state --
+     `CTX-318.7`'s lesson, where an effect that reset state after the commit
+     silently undid a click that landed in the same window. This effect only
+     ever fetches. */
   useEffect(() => {
+    let cancelled = false
+    loadStoredReview(area, projectName, scopeId)
+      .then((review) => {
+        // A run started while this was in flight owns the panel. The stored
+        // copy is by definition older than the run the user just asked for.
+        if (cancelled || !review) return
+        setStored(review)
+        setFindings(review.findings)
+      })
+      .catch(() => {
+        // A kept review that cannot be read is not an error worth showing:
+        // the button still works and says so. Failing loudly here would put
+        // a red line under an area that is simply not reviewed yet.
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /* SPEC-316: a Design > <Area> > "Run Review" menu click.
+     The last nonce is held in a ref initialised to whatever arrived with the
+     mount, so mounting never counts as a click. Without that, keying this
+     component would make a project switch re-fire a stale menu command and
+     spend a real LLM call nobody asked for -- which `SPEC-339` says must
+     never happen. */
+  const handledNonce = useRef(menuCommand?.nonce)
+  useEffect(() => {
+    if (menuCommand?.nonce === handledNonce.current) return
+    handledNonce.current = menuCommand?.nonce
     if (menuCommand?.area !== area) return
     if (menuCommand.command === 'run_review') void handleRunReview()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -86,6 +154,9 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
     try {
       const result = await runReview(scope, scopeId, area, projectName)
       setFindings(result)
+      // Just run, so current by definition. Re-read rather than assumed:
+      // the daemon is what decides freshness and it has just stored this one.
+      setStored(await loadStoredReview(area, projectName, scopeId).catch(() => null))
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -109,6 +180,7 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
 
   function handleDismiss() {
     setFindings(null)
+    setStored(null)
     setError(null)
   }
 
@@ -150,6 +222,15 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
               Dismiss
             </button>
           </div>
+
+          {/* SPEC-339: when it ran, and what has moved since -- never a
+              prompt to re-run. The button is right there; the app volunteering
+              "re-run this" would be volunteering the user's money. */}
+          {stored && !running && (
+            <p className={`text-xs ${stored.stale_reason ? 'text-warning' : 'text-fg-muted'}`}>
+              {stalenessNote(stored) ?? `Reviewed ${whenItRan(stored.ran_at)}.`}
+            </p>
+          )}
 
           {/* SPEC-113 §5: a finding this app computed must never be mistaken
               for one KiCad reported. The maintainer's own first look at a real

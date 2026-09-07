@@ -2,12 +2,14 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const runReviewMock = vi.fn()
+const loadStoredReviewMock = vi.fn()
 const isOpenableSourceMock = vi.fn()
 const openSourceMock = vi.fn()
 const sourceChipLabelMock = vi.fn()
 
 vi.mock('../lib/chat', () => ({
   runReview: (...args: unknown[]) => runReviewMock(...args),
+  loadStoredReview: (...args: unknown[]) => loadStoredReviewMock(...args),
 }))
 
 // CTX-319.2: openSource's own real resolution logic has its own
@@ -26,6 +28,9 @@ const { ReviewPanel } = await import('./ReviewPanel')
 
 beforeEach(() => {
   runReviewMock.mockReset()
+  // SPEC-339: the panel asks for a kept review on mount. "Nothing kept" is the
+  // default here so every pre-existing test still describes a fresh area.
+  loadStoredReviewMock.mockReset().mockResolvedValue(null)
   isOpenableSourceMock.mockReset().mockReturnValue(false)
   openSourceMock.mockReset()
   sourceChipLabelMock.mockReset().mockImplementation((ref: { kind: string }) => `Source: ${ref.kind}`)
@@ -110,17 +115,28 @@ describe('ReviewPanel', () => {
     expect(runReviewMock).toHaveBeenCalledTimes(1)
   })
 
-  it('TEST-007: switching scope/scopeId resets a stale prior review -- no leaking findings across parts/projects', async () => {
+  it('TEST-007: a different scope gets fresh state, because the caller keys it', async () => {
+    /* CTX-339.1 moved this guarantee from an effect inside the component to a
+       `key` at every mount site. The effect version reset state AFTER the
+       commit, which CTX-318.7 showed silently undoes a click landing in the
+       same window -- and it now has a second job, loading a kept review, that
+       must not be a reset at all.
+
+       Rendering with a key is what a real caller does; TEST-007b asserts every
+       caller actually does it, because this contract is only as good as the
+       mount sites honouring it. */
     runReviewMock.mockResolvedValueOnce([
       { severity: 'info', title: 'A', detail: 'a detail', sources: [], general_practice: false, area: 'components' },
     ])
     const { rerender } = render(
-      <ReviewPanel area="components" scope="part" scopeId="ATtiny85" title="Review this part" />,
+      <ReviewPanel key="ATtiny85" area="components" scope="part" scopeId="ATtiny85" title="Review this part" />,
     )
     fireEvent.click(screen.getByRole('button', { name: 'Run Review' }))
     await waitFor(() => screen.getByText('A'))
 
-    rerender(<ReviewPanel area="components" scope="part" scopeId="ESP32-S3" title="Review this part" />)
+    rerender(
+      <ReviewPanel key="ESP32-S3" area="components" scope="part" scopeId="ESP32-S3" title="Review this part" />,
+    )
 
     expect(screen.queryByText('A')).toBeNull()
   })
@@ -152,18 +168,38 @@ describe('ReviewPanel', () => {
 describe('ReviewPanel: CTX-319.6 menuCommand wiring', () => {
   it('TEST-009: a matching run_review menuCommand runs the real review, same as clicking the button', async () => {
     runReviewMock.mockResolvedValueOnce([])
+    const props = {
+      area: 'schematic' as const,
+      scope: 'project' as const,
+      scopeId: 'weather-pcb:schematic',
+      title: 'Review the schematic',
+    }
+    const { rerender } = render(<ReviewPanel {...props} menuCommand={null} />)
 
+    rerender(
+      <ReviewPanel {...props} menuCommand={{ area: 'schematic', command: 'run_review', nonce: 1 }} />,
+    )
+
+    await waitFor(() => expect(runReviewMock).toHaveBeenCalledWith('project', 'weather-pcb:schematic', 'schematic', undefined))
+  })
+
+  it('TEST-009b: mounting with a menuCommand already set does NOT run a review', async () => {
+    /* The reason this component is keyed now is that a remount would otherwise
+       replay whatever menuCommand was last set -- so switching project would
+       fire a real, billed LLM call nobody asked for. SPEC-339 is explicit that
+       nothing re-runs on its own. */
     render(
       <ReviewPanel
         area="schematic"
         scope="project"
         scopeId="weather-pcb:schematic"
         title="Review the schematic"
-        menuCommand={{ area: 'schematic', command: 'run_review', nonce: 0 }}
+        menuCommand={{ area: 'schematic', command: 'run_review', nonce: 7 }}
       />,
     )
 
-    await waitFor(() => expect(runReviewMock).toHaveBeenCalledWith('project', 'weather-pcb:schematic', 'schematic', undefined))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(runReviewMock).not.toHaveBeenCalled()
   })
 
   it('TEST-010: a menuCommand for a different area is ignored', async () => {
@@ -183,27 +219,100 @@ describe('ReviewPanel: CTX-319.6 menuCommand wiring', () => {
 
   it('TEST-011: the same command fired twice (nonce bumped) re-triggers the review both times', async () => {
     runReviewMock.mockResolvedValue([])
-    const { rerender } = render(
-      <ReviewPanel
-        area="pcb"
-        scope="project"
-        scopeId="weather-pcb:pcb"
-        title="Review the board"
-        menuCommand={{ area: 'pcb', command: 'run_review', nonce: 0 }}
-      />,
-    )
+    const props = {
+      area: 'pcb' as const,
+      scope: 'project' as const,
+      scopeId: 'weather-pcb:pcb',
+      title: 'Review the board',
+    }
+    const { rerender } = render(<ReviewPanel {...props} menuCommand={null} />)
+
+    rerender(<ReviewPanel {...props} menuCommand={{ area: 'pcb', command: 'run_review', nonce: 1 }} />)
     await waitFor(() => expect(runReviewMock).toHaveBeenCalledTimes(1))
 
-    rerender(
-      <ReviewPanel
-        area="pcb"
-        scope="project"
-        scopeId="weather-pcb:pcb"
-        title="Review the board"
-        menuCommand={{ area: 'pcb', command: 'run_review', nonce: 1 }}
-      />,
-    )
+    rerender(<ReviewPanel {...props} menuCommand={{ area: 'pcb', command: 'run_review', nonce: 2 }} />)
     await waitFor(() => expect(runReviewMock).toHaveBeenCalledTimes(2))
+  })
+})
+
+describe('ReviewPanel: a review that already ran (SPEC-339)', () => {
+  const KEPT = {
+    findings: [{
+      severity: 'warning' as const, title: 'Kept finding', detail: 'from last time',
+      sources: [], general_practice: false, area: 'schematic', origin: 'kicad' as const,
+    }],
+    ran_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+    stale_reason: null as null,
+    source: { path: '/p/Blink.kicad_sch' },
+  }
+
+  function renderPanel() {
+    render(
+      <ReviewPanel area="schematic" scope="project" scopeId="p:schematic" title="Review the schematic" />,
+    )
+  }
+
+  it('TEST-201: shows what the last review found, without re-running it', async () => {
+    /* The whole point. Opening Settings and coming back used to destroy the
+       review and cost another ERC run plus another real LLM call for a file
+       nobody had touched. */
+    loadStoredReviewMock.mockResolvedValueOnce(KEPT)
+    renderPanel()
+
+    await waitFor(() => screen.getByText('Kept finding'))
+    expect(runReviewMock).not.toHaveBeenCalled()
+  })
+
+  it('TEST-202: says when it ran', async () => {
+    loadStoredReviewMock.mockResolvedValueOnce(KEPT)
+    renderPanel()
+
+    await waitFor(() => screen.getByText('Reviewed 5 minutes ago.'))
+  })
+
+  it('TEST-203: a changed file is named, with when the review ran', async () => {
+    loadStoredReviewMock.mockResolvedValueOnce({ ...KEPT, stale_reason: 'source_changed' })
+    renderPanel()
+
+    const note = await screen.findByText(/Blink\.kicad_sch has been saved since this review ran/)
+    expect(note.textContent).toContain('5 minutes ago')
+  })
+
+  it('TEST-204: never tells the user to re-run -- that costs their money', async () => {
+    loadStoredReviewMock.mockResolvedValueOnce({ ...KEPT, stale_reason: 'source_changed' })
+    renderPanel()
+
+    await screen.findByText(/has been saved since this review ran/)
+    expect(screen.queryByText(/re-run/i)).toBeNull()
+  })
+
+  it('TEST-205: a checks-changed review says nothing in the design moved', async () => {
+    /* Nothing on disk changed; the app simply knows more checks than it did.
+       Saying "your file changed" there would be a lie the user cannot verify. */
+    loadStoredReviewMock.mockResolvedValueOnce({ ...KEPT, stale_reason: 'checks_changed' })
+    renderPanel()
+
+    await screen.findByText(/before some of the checks this app makes existed/)
+  })
+
+  it('TEST-206: an area never reviewed shows no findings and no timestamp', async () => {
+    /* "Nothing here" and "here is what we found, and the file has moved" are
+       different sentences. The old UI said neither. */
+    loadStoredReviewMock.mockResolvedValueOnce(null)
+    renderPanel()
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByText(/Reviewed/)).toBeNull()
+    expect(screen.queryByText(/finding/)).toBeNull()
+  })
+
+  it('TEST-207: a kept review that cannot be read is not shown as an error', async () => {
+    loadStoredReviewMock.mockRejectedValueOnce(new Error('daemon is not up'))
+    renderPanel()
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByText('daemon is not up')).toBeNull()
+    screen.getByRole('button', { name: 'Run Review' })
   })
 })
 

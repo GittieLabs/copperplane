@@ -960,14 +960,78 @@ def chat_review(scope: str, scope_id: str, area: str, project_name: str = None) 
     """The chat.review route (CTX-319.1, SPEC-319 §2.1): the seam
     SPEC-318 §2.5 defined but did not build. Real LLM call (reuses
     chat_agents._dispatch(), same as chat.send), so registered in
-    ASYNC_ROUTES below."""
-    return chat_agents.review(
+    ASYNC_ROUTES below.
+
+    CTX-339.1: the result is kept, against the file it was judged on, so
+    returning to the area does not cost another check plus another real LLM
+    call for a file nobody touched. Persisting is best-effort -- a review the
+    user already paid for is returned whether or not it could be saved."""
+    findings = chat_agents.review(
         scope, scope_id, area, project_name=project_name,
         secrets=CONFIG.get("secrets", {}),
         provider=CONFIG.get("llm_provider"),
         model=CONFIG.get("llm_model"),
         config=CONFIG,
     )
+    _remember_review(scope_id, area, findings, project_name)
+    return findings
+
+
+#: Which file each area's freshness is judged against. The enclosure is
+#: measured from the board, so a board edit is what makes an enclosure review
+#: stale -- not a schematic edit that has not been pushed across yet.
+_REVIEW_SOURCE_FILE = {
+    "schematic": "schematic_path",
+    "pcb": "pcb_path",
+    "enclosure": "pcb_path",
+}
+
+
+def _remember_review(scope_id: str, area: str, findings: list, project_name: str = None) -> None:
+    """Store a review with the identity of the file it was judged on."""
+    if area not in _REVIEW_SOURCE_FILE or library_store is None:
+        return
+    real_project_name, _, _ = scope_id.partition(":")
+    name = project_name or real_project_name
+    try:
+        project = library_store.load_project(name)
+        source_path = None
+        pro_path = project.get("kicad_project_path")
+        if pro_path and kicad_project is not None:
+            source_path = kicad_project.resolve_project(pro_path).get(_REVIEW_SOURCE_FILE[area])
+        library_store.set_project_review_result(
+            name, area,
+            {
+                "findings": findings,
+                "ran_at": datetime.now(timezone.utc).isoformat(),
+                "provider": CONFIG.get("llm_provider"),
+                "model": CONFIG.get("llm_model"),
+            },
+            source_path=source_path,
+        )
+    except Exception as exc:  # noqa: BLE001 -- never costs the user the review
+        logger.warning("could not store the %s review for %s: %s", area, name, exc)
+
+
+def chat_stored_review(area: str, project_name: str, scope_id: str = None) -> dict:
+    """The chat.stored_review route (SPEC-339 §2).
+
+    What the last review found, when it ran, and whether the file it was judged
+    on has moved since. Never re-runs anything: a stale review is shown,
+    labelled, and left alone, because re-running costs the user real money and
+    that decision is theirs.
+
+    Returns `{"review": None}` when no review has ever been run for this area.
+    A never-run area and a stale one must not look the same, and until now both
+    showed nothing at all.
+
+    Synchronous: a stat, and a hash only when the stat disagrees."""
+    if library_store is None:
+        raise RuntimeError("Reading a stored review requires library_store, which failed to import.")
+    real_project_name, _, _ = (scope_id or "").partition(":")
+    return {"review": library_store.get_project_review_result(
+        project_name or real_project_name, area
+    )}
 
 
 def context_search(query: str, part_id: str = None, project_name: str = None, limit: int = 8) -> list:
@@ -2223,6 +2287,11 @@ def _build_routes() -> dict:
         routes["project.set_footprint_override"] = project_set_footprint_override
         routes["chat.load_thread"] = chat_load_thread
         routes["chat.list_threads"] = chat_list_threads
+        # SPEC-339: reading a kept review needs the store and nothing else --
+        # deliberately not behind chat_agents, so a build that lost the agent
+        # layer can still show what the last review found rather than silently
+        # having nothing.
+        routes["chat.stored_review"] = chat_stored_review
     if chat_agents is not None and library_store is not None and tool_registry is not None:
         routes["chat.send"] = chat_send
         routes["chat.review"] = chat_review

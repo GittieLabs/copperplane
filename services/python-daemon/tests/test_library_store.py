@@ -1,6 +1,7 @@
 import hashlib
 import http.server
 import json
+import time
 import os
 import shutil
 import subprocess
@@ -2241,3 +2242,105 @@ class TestSymbolBodyFitsItsPinNames(unittest.TestCase):
         layout = store._layout_pins(self._pins("A" * 30, "B", "C"))
 
         self.assertGreaterEqual(layout["half_width"] * 2, 30 * self.CHAR_MM)
+
+
+class ReviewPersistenceTests(LibraryStoreTestCase):
+    """SPEC-339: keep a review that has already been paid for.
+
+    Reported after a real session: switching to Settings to change the theme
+    and coming back destroyed both the schematic and the PCB review, so the
+    next look cost another ERC or DRC run plus another real LLM call for files
+    nobody had touched.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.source = os.path.join(self._tmpdir.name, "board.kicad_sch")
+        with open(self.source, "w", encoding="utf-8") as handle:
+            handle.write("(kicad_sch)")
+        store.save_project({"name": "P"})
+
+    def _remember(self, findings=None):
+        return store.set_project_review_result(
+            "P", "schematic",
+            {"findings": findings if findings is not None else [{"title": "t"}], "ran_at": "2026-09-06T00:00:00Z"},
+            source_path=self.source,
+        )
+
+    def test_001_an_area_never_reviewed_returns_none(self):
+        """Distinct from a stale one. The old UI showed nothing for both."""
+        self.assertIsNone(store.get_project_review_result("P", "schematic"))
+
+    def test_002_a_kept_review_comes_back_current(self):
+        self._remember()
+
+        result = store.get_project_review_result("P", "schematic")
+
+        self.assertIsNone(result["stale_reason"])
+        self.assertEqual(result["findings"], [{"title": "t"}])
+
+    def test_003_a_rewrite_that_changed_nothing_is_not_stale(self):
+        """The reason identity is stat-then-hash rather than the timestamp
+        alone: KiCad rewriting a file it did not alter would otherwise throw
+        away a perfectly good review and bill the user for another."""
+        self._remember()
+        with open(self.source, "rb") as handle:
+            same = handle.read()
+        time.sleep(0.01)
+        with open(self.source, "wb") as handle:
+            handle.write(same)
+
+        self.assertIsNone(store.get_project_review_result("P", "schematic")["stale_reason"])
+
+    def test_004_a_real_edit_is_stale(self):
+        self._remember()
+        with open(self.source, "a", encoding="utf-8") as handle:
+            handle.write("\n(edited)")
+
+        self.assertEqual(
+            store.get_project_review_result("P", "schematic")["stale_reason"], "source_changed"
+        )
+
+    def test_005_a_missing_source_says_so_rather_than_claiming_current(self):
+        self._remember()
+        os.remove(self.source)
+
+        self.assertEqual(
+            store.get_project_review_result("P", "schematic")["stale_reason"], "source_missing"
+        )
+
+    def test_006_a_new_check_makes_an_old_review_stale_with_nothing_on_disk_moved(self):
+        """SPEC-113 landing is exactly this case. Without a version there is no
+        way to notice that the app now looks for things the stored review never
+        had a chance to find."""
+        self._remember()
+        original = store.REVIEW_CHECKS_VERSION
+        try:
+            store.REVIEW_CHECKS_VERSION = original + 1
+            self.assertEqual(
+                store.get_project_review_result("P", "schematic")["stale_reason"], "checks_changed"
+            )
+        finally:
+            store.REVIEW_CHECKS_VERSION = original
+
+    def test_007_an_unreal_area_is_refused(self):
+        with self.assertRaises(store.SchemaValidationError):
+            store.set_project_review_result("P", "components", {"findings": []})
+
+    def test_008_a_very_long_review_is_capped_and_says_so(self):
+        self._remember([{"title": str(i)} for i in range(80)])
+
+        result = store.get_project_review_result("P", "schematic")
+
+        self.assertEqual(len(result["findings"]), 60)
+        self.assertEqual(result["findings_omitted"], 20)
+
+    def test_009_the_check_result_store_is_untouched(self):
+        """`last_results` feeds the agent's context and `last_reviews` is what
+        the user reads. Two different lifetimes, deliberately two keys."""
+        store.set_project_check_result("P", "schematic", {"findings": [{"description": "erc"}]})
+        self._remember()
+
+        project = store.load_project("P")
+        self.assertIn("schematic", project["last_results"])
+        self.assertIn("schematic", project["last_reviews"])

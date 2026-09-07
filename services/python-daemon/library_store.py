@@ -1189,6 +1189,108 @@ def set_project_check_result(name: str, area: str, result: dict) -> dict:
     return save_project(project)
 
 
+#: Bumped when the set of checks that feed a review changes, so a stored
+#: review from before a new check existed is reported stale rather than shown
+#: as current. Nothing on disk changed and the file identity still matches --
+#: only what the app would find changed. `SPEC-113` landing is exactly this
+#: case, and without a version there is no way to notice it.
+REVIEW_CHECKS_VERSION = 2
+
+#: A review is read by a person, so truncating it changes what they are shown,
+#: not just what a model sees. Higher than the check-result cap for that reason.
+_MAX_PERSISTED_REVIEW_FINDINGS = 60
+
+
+def _file_identity(path: str) -> dict:
+    """Enough to say later whether a file is the same file.
+
+    Size and mtime first, hash second. Stat is cheap and is checked on every
+    return to an area; the hash is computed once when the review is stored and
+    only re-computed when the stat disagrees. That ordering matters both ways:
+    KiCad rewriting a file unchanged would otherwise mark a good review stale,
+    and a restored backup moves mtime backwards.
+    """
+    stat = os.stat(path)
+    return {
+        "path": path,
+        "size": stat.st_size,
+        "mtime": stat.st_mtime,
+        "content_hash": content_hash_of_file(path),
+    }
+
+
+def set_project_review_result(name: str, area: str, result: dict, source_path: str = None) -> dict:
+    """Keep a review that has already been paid for (SPEC-339).
+
+    `ReviewPanel` held findings in React state and dropped them on every scope
+    change, so opening Settings and coming back destroyed a review and the next
+    look cost another ERC or DRC run plus another real LLM call for a file that
+    had not changed. The reset was correct; it was implemented as forget.
+
+    `source_path` is the file the review's freshness is judged against -- the
+    schematic for the schematic area, the board for the PCB and the enclosure,
+    since an enclosure is measured from the board. Stored with the file's
+    identity at the moment the review ran, never re-derived later.
+    """
+    if area not in _CHECK_RESULT_AREAS:
+        raise SchemaValidationError(
+            f"'{area}' is not a real review area. Expected one of {', '.join(_CHECK_RESULT_AREAS)}."
+        )
+
+    findings = result.get("findings") or []
+    stored = {
+        **{k: v for k, v in result.items() if k != "findings"},
+        "findings": findings[:_MAX_PERSISTED_REVIEW_FINDINGS],
+        "checks_version": REVIEW_CHECKS_VERSION,
+    }
+    if len(findings) > _MAX_PERSISTED_REVIEW_FINDINGS:
+        stored["findings_omitted"] = len(findings) - _MAX_PERSISTED_REVIEW_FINDINGS
+    if source_path and os.path.exists(source_path):
+        stored["source"] = _file_identity(source_path)
+
+    project = load_project(name)
+    project["last_reviews"] = {**(project.get("last_reviews") or {}), area: stored}
+    return save_project(project)
+
+
+def get_project_review_result(name: str, area: str) -> dict | None:
+    """A stored review, with whether it is still current, decided now.
+
+    Returns `None` when no review has ever been run for this area -- which the
+    caller must render differently from a stale one. "Nothing here" and "here is
+    what we found, and the file has moved since" are different sentences and
+    the old UI said neither.
+
+    Never re-runs anything. A stale review is shown, labelled, and left alone,
+    because re-running costs the user real money and is theirs to decide.
+    """
+    stored = (load_project(name).get("last_reviews") or {}).get(area)
+    if not stored:
+        return None
+
+    stale_reason = None
+    source = stored.get("source") or {}
+    path = source.get("path")
+
+    if stored.get("checks_version") != REVIEW_CHECKS_VERSION:
+        # Nothing on disk moved. What the app would find did.
+        stale_reason = "checks_changed"
+    elif not path:
+        stale_reason = None
+    elif not os.path.exists(path):
+        stale_reason = "source_missing"
+    else:
+        stat = os.stat(path)
+        if stat.st_size != source.get("size") or stat.st_mtime != source.get("mtime"):
+            # Only now is the hash worth computing. A save that changed nothing
+            # -- KiCad rewriting a file it did not alter -- must not cost the
+            # user a re-run, so the stat disagreeing is a question, not a verdict.
+            if content_hash_of_file(path) != source.get("content_hash"):
+                stale_reason = "source_changed"
+
+    return {**stored, "stale_reason": stale_reason}
+
+
 def add_project_part_reference(project_name: str, part_id: str) -> dict:
     """CTX-304.3 (SPEC-304 §2): a Project holds real *references* to
     Library Parts, not copies -- `SPEC-304`'s own directory diagram

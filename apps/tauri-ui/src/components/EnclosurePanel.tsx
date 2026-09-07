@@ -807,6 +807,7 @@ export function EnclosurePanel({
         footprints per request -- better data than that tool ever had, and
         never stale. */}
     <ReviewPanel
+      key={`${projectName}:enclosure`}
       area="enclosure"
       scope="project"
       scopeId={`${projectName}:enclosure`}

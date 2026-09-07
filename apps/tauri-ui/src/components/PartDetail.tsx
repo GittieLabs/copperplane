@@ -1841,6 +1841,7 @@ export function PartDetail({ candidate, initialPart, currentProject }: PartDetai
           conversational turn. */}
       {savedPart && (
         <ReviewPanel
+          key={savedPart.part_id}
           area="components"
           scope="part"
           scopeId={savedPart.part_id}

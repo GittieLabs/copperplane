@@ -245,6 +245,14 @@ class TestStartupHandshakeAndDiagnostics(unittest.TestCase):
 
         self.assertIsNotNone(getattr(daemon.chat_agents, "structural_checks", None))
 
+    def test_001e_chat_stored_review_is_registered_and_needs_only_the_store(self):
+        """SPEC-339. Deliberately not behind `chat_agents`: a build that lost
+        the agent layer can still show what the last review found, rather than
+        silently having nothing to show."""
+        routes = daemon.build_routes() if hasattr(daemon, "build_routes") else daemon.ROUTES
+
+        self.assertIn("chat.stored_review", routes)
+
     def test_001b_note_degraded_records_a_failed_import(self):
         """SPEC-407 TEST-002: `_note_degraded` appends a structured entry and
         the payload is a copy, not the live list -- so a caller mutating what

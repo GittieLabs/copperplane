@@ -293,6 +293,7 @@ export function SchematicAdvisor({
       {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
           is a flow step with a typed result, not a conversational turn. */}
       <ReviewPanel
+        key={`${projectName}:schematic`}
         area="schematic"
         scope="project"
         scopeId={`${projectName}:schematic`}

@@ -161,6 +161,36 @@ export async function sendChatMessage(
   return handle.result
 }
 
+/** SPEC-339: a review that already ran, kept against the file it judged.
+ *
+ *  `stale_reason` is computed server-side at read time, never stored:
+ *  `source_changed` (the file's bytes differ), `source_missing`,
+ *  `checks_changed` (nothing on disk moved -- the set of checks did), or
+ *  `null` for still-current. A `review` of `null` means no review has ever
+ *  been run here, which must never look like a stale one. */
+export interface StoredReview {
+  findings: ReviewFinding[]
+  ran_at: string
+  stale_reason: 'source_changed' | 'source_missing' | 'checks_changed' | null
+  source?: { path: string }
+  provider?: string | null
+  model?: string | null
+  findings_omitted?: number
+}
+
+export async function loadStoredReview(
+  area: string,
+  projectName: string | undefined,
+  scopeId: string,
+): Promise<StoredReview | null> {
+  const result = unwrap(await dispatch('chat.stored_review', {
+    area,
+    project_name: projectName ?? null,
+    scope_id: scopeId,
+  })) as { review: StoredReview | null }
+  return result.review
+}
+
 /** chat.review (CTX-319.1, SPEC-319 §2.1): the seam SPEC-318 §2.5 named
  * but did not build. A real LLM call like chat.send, so submitJob --
  * same shape, minus `message` (a review's own prompt is fixed
