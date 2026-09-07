@@ -31,21 +31,6 @@ const SEVERITY_CLASS: Record<ReviewFinding['severity'], string> = {
   info: 'text-fg-muted',
 }
 
-/** CTX-113.4: the card's own ground, per severity.
- *
- *  Severity used to be carried by a five-character label and nothing else, so
- *  a warning, a suggestion and an info sat on the identical surface and read as
- *  one undifferentiated wall -- the maintainer's own words on a real review
- *  were that they almost missed two of them.
- *
- *  A luminance ramp first and a hue second: warm and raised for a warning,
- *  cool and level for a suggestion, recessed for info. The ordering survives
- *  even where the tints render poorly, which a hue-only scheme would not. */
-const SEVERITY_SURFACE: Record<ReviewFinding['severity'], string> = {
-  warning: 'bg-surface-warning',
-  suggestion: 'bg-surface-suggestion',
-  info: 'bg-surface-info',
-}
 
 /** When a kept review ran, in a reader's words rather than an ISO string. */
 function whenItRan(iso: string): string {
@@ -250,9 +235,7 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
           {findings.map((finding, i) => (
             <div
               key={i}
-              className={`flex flex-col gap-1 rounded border p-2 ${
-                SEVERITY_SURFACE[finding.severity]
-              } ${
+              className={`flex flex-col gap-1 rounded border bg-surface p-2 ${
                 finding.origin === 'copperplane'
                   ? 'border-l-2 border-l-accent border-y-line-subtle border-r-line-subtle'
                   : 'border-line-subtle'
