@@ -52,6 +52,12 @@ export function sourceChipLabel(ref: SourceRef): string {
       // Naming the check is the point: "DRC finding" tells a user this came
       // from KiCad's own run on their board, which is exactly what the
       // general-practice note used to deny.
+      //
+      // SPEC-113's own findings read from the .kicad_sch too, so the file
+      // extension alone labelled a symbol/footprint mismatch "ERC finding" --
+      // crediting a check that had reported nothing of the kind. The id says
+      // which check ran; the extension only says which file it opened.
+      if (ref.finding_id?.startsWith('copperplane-')) return 'Copperplane check'
       return ref.source_path?.endsWith('.kicad_sch') ? 'ERC finding' : 'DRC finding'
     default:
       return 'Source'

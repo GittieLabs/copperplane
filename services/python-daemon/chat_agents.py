@@ -330,7 +330,15 @@ def reference_designator_in(description: str) -> str | None:
     return None
 
 
-def _finding_for_agent(finding: dict, components: dict | None = None) -> dict:
+#: Prefixes for the ids the model copies back. Self-describing on purpose: the
+#: id alone answers "did KiCad report this", with no second field to keep in
+#: sync and no model judgement involved.
+KICAD_FINDING_PREFIX = "kicad-"
+OUR_FINDING_PREFIX = "copperplane-"
+
+
+def _finding_for_agent(finding: dict, components: dict | None = None,
+                       finding_id: str | None = None) -> dict:
     """One check finding, keeping WHERE it is.
 
     `items` used to be dropped here on the grounds that it carried "KiCad's
@@ -361,6 +369,8 @@ def _finding_for_agent(finding: dict, components: dict | None = None) -> dict:
     # so a citation naming the board would be pointing at the wrong file.
     if finding.get("source_path"):
         shaped["source_path"] = finding["source_path"]
+    if finding_id:
+        shaped["finding_id"] = finding_id
     return shaped
 
 
@@ -557,11 +567,18 @@ def _check_status_note(project: dict, area: str) -> str:
             # Structural findings are appended after the cap, not merged before
             # it: a board with hundreds of DRC violations must not push out the
             # findings nothing else in the toolchain reports.
+            #
+            # Every finding carries a `finding_id` the model is told to copy
+            # back. The id itself says where the finding came from, so nothing
+            # downstream has to ask the model to classify anything -- which is
+            # how the UI ended up labelling a symbol/footprint mismatch "ERC
+            # finding" on a board where ERC had said no such thing.
             "findings": [
-                _finding_for_agent(f, _by_reference(components))
-                for f in findings[:_MAX_LIVE_FINDINGS]
+                _finding_for_agent(f, _by_reference(components), f"{KICAD_FINDING_PREFIX}{i}")
+                for i, f in enumerate(findings[:_MAX_LIVE_FINDINGS], start=1)
             ] + [
-                _finding_for_agent(f, _by_reference(components)) for f in structural
+                _finding_for_agent(f, _by_reference(components), f"{OUR_FINDING_PREFIX}{i}")
+                for i, f in enumerate(structural, start=1)
             ],
             "findings_omitted": max(0, len(findings) - _MAX_LIVE_FINDINGS),
             # Which checks KiCad did not run at all. A disabled check makes a
@@ -1226,11 +1243,17 @@ def _findings_from_check_alone(area: str, scope_id: str, project_name: str | Non
                 [{
                     "kind": "check_finding",
                     "source_path": raw.get("source_path") or parsed.get("source_path"),
+                    "finding_id": raw.get("finding_id"),
                 }]
             )[0],
             # Straight from the check, so not general practice at all.
             "general_practice": False,
             "area": area,
+            "origin": (
+                "copperplane"
+                if str(raw.get("finding_id") or "").startswith(OUR_FINDING_PREFIX)
+                else "kicad"
+            ),
         })
     return findings
 
@@ -1326,6 +1349,12 @@ def review(
         )
 
     findings = []
+    # Collected from what the model SELF-REPORTED, not from the resolved
+    # sources: a ref is dropped when the file it names cannot be found, and a
+    # citation this app cannot resolve is still a citation. Reading identity
+    # off the resolved list printed the same finding twice the moment a path
+    # went stale.
+    cited_ids = set()
     for raw in _extract_findings(result["text"]):
         severity = raw.get("severity")
         title = raw.get("title")
@@ -1341,6 +1370,7 @@ def review(
         self_reported = raw.get("sources")
         if not isinstance(self_reported, list):
             self_reported = []
+        cited_ids |= _cited_finding_ids(self_reported)
         enriched = [_enrich_source_ref(ref) for ref in self_reported]
         resolved, _dropped = validate_source_refs(
             _mechanical_source_refs(result["tool_calls_raw"]) + enriched
@@ -1353,8 +1383,100 @@ def review(
             "sources": resolved,
             "general_practice": bool(raw.get("general_practice", True)),
             "area": area,
+            # Read off the ids the model copied back, never inferred from its
+            # prose. `None` means it cited nothing identifiable, which is an
+            # honest third state and not a guess.
+            "origin": _origin_of(self_reported),
         })
 
+    return _with_uncited_checks_of_our_own(findings, area, scope_id, project_name, cited_ids)
+
+
+def _cited_finding_ids(refs: list) -> set:
+    return {
+        ref.get("finding_id")
+        for ref in refs
+        if isinstance(ref, dict) and ref.get("kind") == "check_finding" and ref.get("finding_id")
+    }
+
+
+def _origin_of(refs: list) -> str | None:
+    """Where a finding came from, decided by the id the model copied back.
+
+    `SPEC-113` requires that a finding this app computed is never mistaken for
+    one KiCad reported. Asking the model to say which would put the answer back
+    in the place the whole check exists to take it out of, so it is read from
+    an id this process generated instead.
+    """
+    ids = _cited_finding_ids(refs)
+    if any(str(i).startswith(OUR_FINDING_PREFIX) for i in ids):
+        return "copperplane"
+    if any(str(i).startswith(KICAD_FINDING_PREFIX) for i in ids):
+        return "kicad"
+    return None
+
+
+#: `Library:Footprint_Name` as it appears in a finding's own text. Specific
+#: enough that a model repeating it is repeating our finding, not coincidence.
+_FOOTPRINT_ID = re.compile(r"\b[A-Za-z0-9_.+-]+:[A-Za-z0-9_.+-]{4,}\b")
+
+
+def _already_reported(raw: dict, reported_text: str) -> bool:
+    """Whether the model already covered one of our findings without its id.
+
+    Used ONLY to avoid printing the same thing twice, never to decide where a
+    finding came from -- that stays on the id, because a guess about origin is
+    exactly what this whole check exists to remove. The consequence of getting
+    this wrong is a duplicate, which the reader can see; the consequence of
+    getting origin wrong is a silent misattribution, which they cannot.
+    """
+    tokens = _FOOTPRINT_ID.findall(raw.get("description") or "")
+    return bool(tokens) and all(token in reported_text for token in tokens)
+
+
+def _with_uncited_checks_of_our_own(findings: list, area: str, scope_id: str,
+                                    project_name: str | None, cited: set) -> list:
+    """Append any of our own findings the model did not report.
+
+    The model decides what is worth flagging, which is right for its own
+    judgement and wrong for a measurement. A symbol and its footprint
+    disagreeing is a fact about files on disk; if the model omits it, the user
+    simply never learns it, and the one thing this check exists to guarantee is
+    the thing that quietly did not happen.
+
+    So they are appended, in our own words, rather than trusted to survive.
+    """
+    if area not in _CHECK_AREA_LABELS:
+        return findings
+
+    real_project_name, _, _ = scope_id.partition(":")
+    try:
+        project = library_store.load_project(project_name or real_project_name)
+        parsed = json.loads(_check_status_note(project, area))
+    except Exception:  # noqa: BLE001 -- nothing to append is not an error
+        return findings
+
+    reported_text = " ".join(f"{f['title']} {f['detail']}" for f in findings)
+    for raw in parsed.get("findings", []):
+        finding_id = raw.get("finding_id") or ""
+        if not finding_id.startswith(OUR_FINDING_PREFIX) or finding_id in cited:
+            continue
+        if _already_reported(raw, reported_text):
+            continue
+        sources, _dropped = validate_source_refs([{
+            "kind": "check_finding",
+            "source_path": raw.get("source_path") or parsed.get("source_path"),
+            "finding_id": finding_id,
+        }])
+        findings.append({
+            "severity": "warning",
+            "title": raw.get("description", "").split(".")[0].strip() or "Structural mismatch",
+            "detail": raw.get("description", ""),
+            "sources": sources,
+            "general_practice": False,
+            "area": area,
+            "origin": "copperplane",
+        })
     return findings
 
 

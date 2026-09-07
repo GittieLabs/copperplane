@@ -77,6 +77,8 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
     }
   }
 
+  const ourFindingCount = (findings ?? []).filter((f) => f.origin === 'copperplane').length
+
   async function handleOpenSource(ref: SourceRef, key: string) {
     setOpeningSourceKey(key)
     setOpenSourceError(null)
@@ -133,11 +135,40 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
             </button>
           </div>
 
+          {/* SPEC-113 §5: a finding this app computed must never be mistaken
+              for one KiCad reported. The maintainer's own first look at a real
+              review put it plainly -- the distinction was "just a simple line
+              in the explanation", buried in prose the reader has to reach the
+              middle of before learning that no checker in their toolchain
+              reports this at all. It is the whole added value, so it is said
+              once, above the list, and marked on every card it applies to. */}
+          {ourFindingCount > 0 && (
+            <p className="text-xs text-accent">
+              {ourFindingCount === 1
+                ? '1 of these was found by Copperplane. ERC and DRC do not report it.'
+                : `${ourFindingCount} of these were found by Copperplane. ERC and DRC do not report them.`}
+            </p>
+          )}
+
           {findings.map((finding, i) => (
-            <div key={i} className="flex flex-col gap-1 rounded border border-line-subtle bg-surface p-2">
-              <p className={`text-xs font-medium uppercase ${SEVERITY_CLASS[finding.severity]}`}>
-                {SEVERITY_LABEL[finding.severity]}
-              </p>
+            <div
+              key={i}
+              className={`flex flex-col gap-1 rounded border bg-surface p-2 ${
+                finding.origin === 'copperplane'
+                  ? 'border-l-2 border-l-accent border-y-line-subtle border-r-line-subtle'
+                  : 'border-line-subtle'
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <p className={`text-xs font-medium uppercase ${SEVERITY_CLASS[finding.severity]}`}>
+                  {SEVERITY_LABEL[finding.severity]}
+                </p>
+                {finding.origin === 'copperplane' && (
+                  <span className="rounded-full border border-accent px-2 py-0.5 text-xs font-medium text-accent">
+                    Not reported by ERC or DRC
+                  </span>
+                )}
+              </div>
               <p className="text-sm font-medium text-fg">{finding.title}</p>
               <Markdown text={finding.detail} className="text-sm text-fg-secondary" />
               {/* `general_practice` means "SOME of this relies on general

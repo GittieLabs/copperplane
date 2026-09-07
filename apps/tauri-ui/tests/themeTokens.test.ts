@@ -55,6 +55,14 @@ describe('theme tokens', () => {
         // still has to name a real base token.
         const base = token.replace(/-\d+$/, '')
         if (defined.has(base) || BUILTIN.has(base)) continue
+        // A directional border colour, e.g. `border-l-accent`, is a real
+        // Tailwind v4 utility built from the same `--color-*` variable -- the
+        // built CSS emits `border-l-accent{border-left-color:var(--color-accent)}`,
+        // checked rather than assumed. Only the direction is stripped; the
+        // colour underneath it still has to be a token this theme defines, so
+        // `border-l-bogus` still fails.
+        const undirected = token.replace(/^[trblxyse]-/, '')
+        if (undirected !== token && (defined.has(undirected) || BUILTIN.has(undirected))) continue
         offenders.push(`${path.relative(ROOT, file)}: ${match[0]}`)
       }
     }

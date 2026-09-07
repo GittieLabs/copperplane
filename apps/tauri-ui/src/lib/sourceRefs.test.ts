@@ -95,3 +95,38 @@ describe('openSource', () => {
     expect(cacheDatasheetMock).not.toHaveBeenCalled()
   })
 })
+
+describe('sourceChipLabel: a check finding names the check that ran (SPEC-113)', () => {
+  it('labels one of our own by its id, not by the file it read', () => {
+    /* This is the defect the maintainer saw in a real review: a symbol/
+       footprint mismatch rendered "ERC finding" because it, like ERC, reads
+       the .kicad_sch. The extension says which file was opened; only the id
+       says which check ran. */
+    expect(sourceChipLabel({
+      kind: 'check_finding',
+      source_path: '/p/a.kicad_sch',
+      finding_id: 'copperplane-1',
+    })).toBe('Copperplane check')
+  })
+
+  it('still names ERC for a real ERC finding on the same file', () => {
+    expect(sourceChipLabel({
+      kind: 'check_finding',
+      source_path: '/p/a.kicad_sch',
+      finding_id: 'kicad-3',
+    })).toBe('ERC finding')
+  })
+
+  it('still names DRC for a board finding', () => {
+    expect(sourceChipLabel({
+      kind: 'check_finding',
+      source_path: '/p/b.kicad_pcb',
+      finding_id: 'kicad-1',
+    })).toBe('DRC finding')
+  })
+
+  it('falls back to the file when no id was carried', () => {
+    expect(sourceChipLabel({ kind: 'check_finding', source_path: '/p/a.kicad_sch' }))
+      .toBe('ERC finding')
+  })
+})

@@ -774,6 +774,10 @@ class TestReview(ChatAgentsTestCase):
             "sources": [],
             "general_practice": True,
             "area": "overview",
+            # CTX-113.2: where a finding came from, read off the id the model
+            # copied back. None is the honest third state -- it cited nothing
+            # identifiable, which is different from "KiCad said so".
+            "origin": None,
         }])
 
     def test_005_a_malformed_finding_is_dropped_not_shown_broken(self):
@@ -1377,6 +1381,112 @@ class TestStructuralFindingsReachTheReview(unittest.TestCase):
             )
 
         self.assertEqual(note["findings"][-1]["type"], "copperplane.pin_count_mismatch")
+
+
+class TestOriginIsReadFromAnIdWeGenerated(ChatAgentsTestCase):
+    """SPEC-113 §5, reported from a real review.
+
+    The maintainer ran the schematic review and every one of four findings --
+    including the two symbol/footprint mismatches ERC had said nothing about --
+    carried a chip reading "ERC finding". Two of them were this app's own.
+
+    Origin is therefore read off a `finding_id` the daemon generates and the
+    model copies back, never inferred from the model's wording. Asking the
+    model which check found something puts the answer back in exactly the place
+    this check exists to take it out of.
+    """
+
+    def _review(self, response_text, note_findings=None):
+        store.save_project({"name": "P", "kicad_project_path": "/p/p.kicad_pro"})
+        note = json.dumps({
+            "check": "ERC", "source_path": "/p/a.kicad_sch",
+            "findings": note_findings or [],
+        })
+
+        async def fake_dispatch(*a, **kw):
+            return {"text": response_text, "tool_calls_raw": [], "model": "m", "provider": "p"}
+
+        with patch.object(chat_agents, "_dispatch", side_effect=fake_dispatch), \
+             patch.object(chat_agents.tool_registry, "build_tool_registry", return_value={}), \
+             patch.object(chat_agents, "_check_status_note", return_value=note):
+            return chat_agents.review("project", "P:schematic", "schematic", project_name="P")
+
+    @staticmethod
+    def _block(finding_id):
+        source = (
+            f'{{"kind": "check_finding", "source_path": "/p/a.kicad_sch", '
+            f'"finding_id": "{finding_id}"}}' if finding_id else ''
+        )
+        return (
+            '<<<FINDINGS>>>\n'
+            '[{"severity": "warning", "title": "D1 mismatch", "detail": "two against four", '
+            f'"sources": [{source}], "general_practice": false}}]\n'
+            '<<<END_FINDINGS>>>'
+        )
+
+    def test_001_a_copperplane_id_makes_the_finding_ours(self):
+        findings = self._review(self._block("copperplane-1"))
+
+        self.assertEqual(findings[0]["origin"], "copperplane")
+
+    def test_002_a_kicad_id_credits_kicad(self):
+        findings = self._review(self._block("kicad-2"))
+
+        self.assertEqual(findings[0]["origin"], "kicad")
+
+    def test_003_citing_nothing_identifiable_claims_neither(self):
+        """A third state, and an honest one. Defaulting it to KiCad is the bug
+        that was reported; defaulting it to ours would be the same bug pointed
+        the other way."""
+        findings = self._review(self._block(None))
+
+        self.assertIsNone(findings[0]["origin"])
+
+    def test_004_one_of_our_findings_the_model_ignored_is_added_anyway(self):
+        """The model decides what is worth flagging. That is right for its own
+        judgement and wrong for a measurement: if it drops a symbol/footprint
+        mismatch, the user simply never learns it."""
+        findings = self._review(
+            self._block("kicad-1"),
+            note_findings=[{
+                "finding_id": "copperplane-1",
+                "type": "copperplane.pin_count_mismatch",
+                "description": "SW1's symbol and footprint disagree. Switch:SW_Push has 2.",
+                "source_path": "/p/a.kicad_sch",
+            }],
+        )
+
+        ours = [f for f in findings if f["origin"] == "copperplane"]
+        self.assertEqual(len(ours), 1)
+        self.assertIn("SW1", ours[0]["detail"])
+
+    def test_005_it_is_not_added_twice_when_the_model_did_report_it(self):
+        findings = self._review(
+            self._block("copperplane-1"),
+            note_findings=[{
+                "finding_id": "copperplane-1",
+                "type": "copperplane.pin_count_mismatch",
+                "description": "D1 disagrees.",
+                "source_path": "/p/a.kicad_sch",
+            }],
+        )
+
+        self.assertEqual(len(findings), 1)
+
+    def test_006_a_kicad_finding_the_model_ignored_is_not_added(self):
+        """Only measurements are guaranteed through. KiCad's findings are the
+        model's to prioritise -- that judgement is what the review is for."""
+        findings = self._review(
+            self._block("copperplane-1"),
+            note_findings=[{
+                "finding_id": "kicad-1",
+                "type": "annular_width",
+                "description": "Annular width too small.",
+                "source_path": "/p/a.kicad_sch",
+            }],
+        )
+
+        self.assertEqual(len(findings), 1)
 
 
 class TestTheFallbackDoesNotCreditKicad(ChatAgentsTestCase):

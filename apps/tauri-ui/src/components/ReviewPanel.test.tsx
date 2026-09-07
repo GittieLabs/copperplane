@@ -206,3 +206,67 @@ describe('ReviewPanel: CTX-319.6 menuCommand wiring', () => {
     await waitFor(() => expect(runReviewMock).toHaveBeenCalledTimes(2))
   })
 })
+
+describe('ReviewPanel: findings this app found itself (SPEC-113)', () => {
+  const OURS = {
+    severity: 'warning' as const,
+    title: "LED's footprint has more pads than its symbol has pins (D1)",
+    detail: 'Device:LED has 2 pins; LED_THT:LED_D5.0mm-4_RGB has 4 numbered pads.',
+    sources: [],
+    general_practice: false,
+    area: 'schematic',
+    origin: 'copperplane' as const,
+  }
+  const KICAD = {
+    severity: 'warning' as const,
+    title: "Arduino's power input (VIN) has nothing feeding it",
+    detail: 'ERC found that pin 8 on A1 is not driven.',
+    sources: [],
+    general_practice: false,
+    area: 'schematic',
+    origin: 'kicad' as const,
+  }
+
+  async function renderWith(findings: unknown[]) {
+    runReviewMock.mockResolvedValueOnce(findings)
+    render(<ReviewPanel area="schematic" scope="project" scopeId="p:schematic" title="Review the schematic" />)
+    fireEvent.click(screen.getByRole('button', { name: 'Run Review' }))
+    await waitFor(() => screen.getByText(/finding/))
+  }
+
+  it('TEST-101: says above the list how many no KiCad check reports', async () => {
+    await renderWith([KICAD, OURS])
+
+    screen.getByText('1 of these was found by Copperplane. ERC and DRC do not report it.')
+  })
+
+  it('TEST-102: counts them, and pluralises honestly', async () => {
+    await renderWith([KICAD, OURS, { ...OURS, title: 'SW1' }])
+
+    screen.getByText('2 of these were found by Copperplane. ERC and DRC do not report them.')
+  })
+
+  it('TEST-103: says nothing at all when every finding came from KiCad', async () => {
+    await renderWith([KICAD])
+
+    expect(screen.queryByText(/found by Copperplane/)).toBeNull()
+  })
+
+  it('TEST-104: marks the finding itself, not only the summary', async () => {
+    /* The maintainer's report was that the distinction lived in one line of
+       prose halfway down an explanation. A reader scanning the list has to be
+       able to see it without reading. */
+    await renderWith([KICAD, OURS])
+
+    expect(screen.getAllByText('Not reported by ERC or DRC')).toHaveLength(1)
+  })
+
+  it('TEST-105: an unattributed finding is not claimed as ours', async () => {
+    /* `origin` is null when the model cited nothing identifiable. That is a
+       third state and must not be rendered as either checker's work. */
+    await renderWith([{ ...KICAD, origin: null }])
+
+    expect(screen.queryByText(/found by Copperplane/)).toBeNull()
+    expect(screen.queryByText('Not reported by ERC or DRC')).toBeNull()
+  })
+})

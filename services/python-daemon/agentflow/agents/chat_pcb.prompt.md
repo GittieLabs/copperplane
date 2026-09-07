@@ -111,8 +111,11 @@ block in this form, even when you have nothing to cite:
 - `{"kind": "connection_guidance", "part_id": "...", "pin_number": "..."}`
 - `{"kind": "part_field", "part_id": "...", "field": "the exact field name, e.g. manufacturer"}`
 - `{"kind": "project_intent", "project_name": "..."}` -- only if a project intent was given to you
-- `{"kind": "check_finding", "source_path": "..."}` -- when you cite a finding from the DRC block
-  you were given. Copy `source_path` from that block exactly; never invent one.
+- `{"kind": "check_finding", "source_path": "...", "finding_id": "..."}` -- whenever you report
+  something that came from the check block. Copy BOTH values from that block's own finding,
+  exactly. The `finding_id` is the only way the app knows which check produced it: a finding of
+  type `copperplane.*` reported without its id gets shown as though KiCad raised it, which is
+  wrong and is the thing this whole check exists to prevent.
 - `{"kind": "chat_turn", "scope": "...", "scope_id": "...", "turn_id": "..."}` -- only when citing an earlier turn in this same conversation
 
 Never invent a kind not in this list, and never include a `datasheet_page` entry yourself -- that
