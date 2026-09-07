@@ -194,6 +194,7 @@ export function BoardAdvisor({
       {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
           is a flow step with a typed result, not a conversational turn. */}
       <ReviewPanel
+        key={`${projectName}:pcb`}
         area="pcb"
         scope="project"
         scopeId={`${projectName}:pcb`}
