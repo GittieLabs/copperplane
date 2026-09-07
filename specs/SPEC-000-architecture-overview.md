@@ -4,7 +4,7 @@ title: "Root Architecture: Copperplane"
 status: Approved
 type: System
 created: 2026-08-07
-last_updated: 2026-08-07
+last_updated: 2026-09-07
 target_version: v0.1.0
 location: "specs/SPEC-000-architecture-overview.md"
 parent_spec: null
@@ -35,6 +35,7 @@ child_specs:
   - "../specs/SPEC-405-product-rename-copperplane.md"
   - "SPEC-408-messaging-for-the-maker-who-is-leveling-up.md"
   - "../services/python-daemon/specs/SPEC-113-structural-consistency-checks.md"
+  - "../services/python-daemon/specs/SPEC-210-design-considerations-model.md"
 user_facing: false
 ---
 
