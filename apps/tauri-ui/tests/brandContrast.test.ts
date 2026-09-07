@@ -53,6 +53,26 @@ function block(selector: string): string {
   throw new Error(`${selector} block never closes`)
 }
 
+/** CIELAB ΔE (CIE76) between two hex colours.
+ *
+ *  Here because a WCAG contrast ratio cannot answer "are these two backgrounds
+ *  telling the reader different things" -- it is a luminance ratio and is blind
+ *  to hue by construction. */
+function deltaE(a: string, b: string): number {
+  const lab = (hex: string): [number, number, number] => {
+    const channel = (v: number) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)
+    const [r, g, bl] = [1, 3, 5].map((i) => channel(parseInt(hex.slice(i, i + 2), 16) / 255))
+    const x = (0.4124 * r + 0.3576 * g + 0.1805 * bl) / 0.95047
+    const y = 0.2126 * r + 0.7152 * g + 0.0722 * bl
+    const z = (0.0193 * r + 0.1192 * g + 0.9505 * bl) / 1.08883
+    const f = (t: number) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116)
+    return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))]
+  }
+  const [l1, a1, b1] = lab(a)
+  const [l2, a2, b2] = lab(b)
+  return Math.sqrt((l1 - l2) ** 2 + (a1 - a2) ** 2 + (b1 - b2) ** 2)
+}
+
 function token(text: string, name: string): string {
   const match = text.match(new RegExp(`--color-${name}:\\s*(#[0-9a-fA-F]{6})`))
   if (!match) throw new Error(`no --color-${name} in that block`)
@@ -89,6 +109,51 @@ describe('brand colour', () => {
     // A token missing from one block is the CTX-336.1 failure exactly: it
     // falls back to whatever it inherits, in one theme only.
     expect(() => [token(text, 'accent'), token(text, 'accent-fg'), token(text, 'brand')]).not.toThrow()
+  })
+
+  /* CTX-113.4: a review card's ground now carries its severity. Three new
+     surfaces is three new chances to repeat the CTX-336.1 failure -- a token
+     defined in one theme block and not the others falls back to whatever it
+     inherits, in one theme only, and nothing else in the suite looks at a
+     colour. */
+  const SEVERITY_SURFACES = ['surface-warning', 'surface-suggestion', 'surface-info']
+
+  it.each(THEMES)('$name: defines every severity surface', ({ selector }) => {
+    const text = block(selector)
+
+    expect(() => SEVERITY_SURFACES.map((name) => token(text, name))).not.toThrow()
+  })
+
+  it.each(THEMES)('$name: body text stays legible on every severity surface', ({ selector }) => {
+    const text = block(selector)
+
+    for (const surface of SEVERITY_SURFACES) {
+      expect(contrast(token(text, 'fg-secondary'), token(text, surface))).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
+  it.each(THEMES)('$name: the three severity surfaces are actually distinguishable', ({ selector }) => {
+    /* Measured as CIELAB ΔE, not as a WCAG contrast ratio, and the reason is
+       worth recording: a contrast ratio is luminance only. The first version
+       of this test used one, and it failed on tints that are obviously
+       different to look at -- a warm amber and a cool blue-grey of similar
+       lightness score 1.01, which reads as "identical" when the whole point of
+       the pair is the hue. Satisfying that metric would have meant making the
+       warning surface much brighter than it should be, to pass a check that
+       was measuring the wrong thing.
+
+       ΔE includes hue. Roughly 2.3 is the just-noticeable difference; 6 is a
+       difference a reader registers without looking for it, which is the bar
+       this needs to clear. */
+    const text = block(selector)
+    const values = SEVERITY_SURFACES.map((name) => token(text, name))
+
+    expect(new Set(values).size).toBe(3)
+    for (let i = 0; i < values.length; i++) {
+      for (let j = i + 1; j < values.length; j++) {
+        expect(deltaE(values[i], values[j])).toBeGreaterThanOrEqual(6)
+      }
+    }
   })
 
   it('the greens are the ones the brand kit specifies, not merely similar', () => {
