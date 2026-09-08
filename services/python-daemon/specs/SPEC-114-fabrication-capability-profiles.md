@@ -94,6 +94,27 @@ produced 11 findings at 20mm. The board simply has no parts within 1mm of each o
 exactly the trap `CLAUDE.md` names, and it would have gone into this spec as "unsupported" without
 the second run.
 
+**Two corrections measured during `CTX-114.1` Phase 1, both of which the table above hides.** The
+table records one rule per run, so neither behaviour could have appeared in it. Both were found by
+building the verification harness against real KiCad 10.0.3, and both had already shipped silently
+into the first version of it.
+
+*Correction 1 — rule precedence. For a given constraint class the **last matching rule wins**, and
+rules on different classes do not interfere.* Two rules on `track_width` in one file do not both
+apply and do not conflict: the later one simply replaces the earlier, with nothing reported. Any
+generated file that writes the same class twice therefore silently discards the first of them. This
+is a property of the file the app is generating, not of the user's board, so it belongs to the
+generator's correctness rather than to the review.
+
+*Correction 2 — "an absurdly large minimum always fires" is false, and the table's own method
+depends on it.* Every row above was produced by setting one constraint to a deliberately absurd
+value and counting what came back. That method holds for `track_width`, `text_height`,
+`annular_width`, `text_thickness`, `edge_clearance` and `hole_size`, each re-measured firing
+identically at 10mm and 500mm. It does **not** hold for `connection_width`, which fires 4 times at
+1mm — the value the table's row was taken at — and **zero** times at both 10mm and 500mm. The row
+is correct; the generalisation it invites is not. Anything that assumes a larger minimum is a
+stricter minimum will read a healthy result as a broken one on that class.
+
 ### 2.2 Two hard limits, both measured, both shape the scope
 
 **Limit 1: a sidecar rule cannot resurrect a check the project has set to `ignore`.** With

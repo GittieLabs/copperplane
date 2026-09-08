@@ -155,6 +155,24 @@ except Exception:
     kicad_cli = None
 
 try:
+    import capability_profile
+except Exception:
+    logger.exception(
+        "capability_profile failed to import -- fabrication.* routes will be unavailable"
+    )
+    _note_degraded("capability_profile", "fabrication.* routes")
+    capability_profile = None
+
+try:
+    import fabrication_review
+except Exception:
+    logger.exception(
+        "fabrication_review failed to import -- fabrication.review_board will be unavailable"
+    )
+    _note_degraded("fabrication_review", "fabrication.review_board")
+    fabrication_review = None
+
+try:
     import footprint_detail
 except Exception:
     logger.exception(
@@ -1965,6 +1983,84 @@ def kicad_list_open_boards() -> dict:
     }
 
 
+def fabrication_validate_profile(profile: dict) -> dict:
+    """The fabrication.validate_profile route (SPEC-114 section 2.6).
+
+    Returns what the profile can and cannot do rather than a bare boolean, so
+    the UI can show which numbers will be checked, which are recorded but
+    unenforceable, and which the user has not confirmed."""
+    capability_profile.validate(profile)
+    return {
+        "house_name": profile.get("house_name"),
+        "enforceable_fields": capability_profile.enforceable_fields(profile),
+        "recorded_but_unenforceable": capability_profile.recorded_but_unenforceable(profile),
+        "unenforceable_notes": capability_profile.describe_unenforceable(profile),
+        "unconfirmed_fields": capability_profile.unconfirmed_fields(profile),
+        "is_stale": capability_profile.is_stale(profile),
+    }
+
+
+def fabrication_generic_profile() -> dict:
+    """The fabrication.generic_profile route: a starting point, attributed to
+    nobody.
+
+    `SPEC-114` section 2.7 wants bundled starter profiles for the houses makers
+    actually use. Section 2.9 lists getting real numbers for real houses as the
+    largest open question in the spec and calls it a research task. Shipping
+    invented numbers under a real board house's name would resolve that question
+    by fabricating it, and section 3 warns that a too-strict profile spends the
+    credibility this whole family runs on.
+
+    So this is a deliberately unbranded standard-process starting point. It
+    names the process it describes, carries no source URL claiming a vendor
+    published it, and starts unconfirmed. Attributed profiles land when someone
+    has actually read the published pages."""
+    profile = {
+        "house_name": "Generic 2-layer standard process (not a real vendor quote)",
+        "schema_version": 1,
+        "layer_count": 2,
+        "min_track_width": 0.127,
+        "min_clearance": 0.127,
+        "min_annular_ring": 0.13,
+        "min_drill": 0.3,
+        "min_hole_to_hole": 0.5,
+        "min_silk_clearance": 0.15,
+        "min_text_height": 1.0,
+        "min_text_thickness": 0.15,
+        "min_edge_clearance": 0.2,
+    }
+    provenance_fields = [
+        f for f in capability_profile.ALL_VALUE_FIELDS if profile.get(f) is not None
+    ]
+    profile["provenance"] = {
+        field: {
+            "source_url": "",
+            "recorded_on": "2026-09-08",
+            "confirmed_by_user": False,
+            "note": (
+                "A commonly quoted standard-process figure, not taken from any "
+                "particular board house. Replace it with your own house's "
+                "published number before ordering."
+            ),
+        }
+        for field in provenance_fields
+    }
+    return capability_profile.validate(profile)
+
+
+def fabrication_review_board(pcb_path: str, profile: dict) -> dict:
+    """The fabrication.review_board route (SPEC-114 sections 2.8 and 5).
+
+    The before-and-after: this board against KiCad's defaults, then against the
+    house the user actually chose. Runs several real DRC subprocesses, so it is
+    registered in ASYNC_ROUTES below.
+
+    A `SidecarDiscarded` from underneath is deliberately allowed to surface as a
+    real error. Limit 2 means the alternative is a confident review drawn from
+    rules that were never active."""
+    return fabrication_review.review(pcb_path, profile)
+
+
 def kicad_check_board(pcb_path: str) -> dict:
     """The kicad.check_board route (SPEC-309): a real DRC via kicad-cli
     against an explicit `pcb_path`. Explains the real violations via a
@@ -2326,6 +2422,11 @@ def _build_routes() -> dict:
         if kicad_bridge is not None:
             routes["kicad.check_board"] = kicad_check_board
         routes["kicad.check_schematic"] = kicad_check_schematic
+    if capability_profile is not None:
+        routes["fabrication.validate_profile"] = fabrication_validate_profile
+        routes["fabrication.generic_profile"] = fabrication_generic_profile
+    if fabrication_review is not None and kicad_cli is not None:
+        routes["fabrication.review_board"] = fabrication_review_board
     if kicad_bridge is not None and freecad_bridge is not None:
         routes["kicad.get_component_heights"] = kicad_get_component_heights
     if kicad_cli is not None:
@@ -2360,6 +2461,11 @@ ASYNC_ROUTES = {
     "kicad.component_envelopes",
     # SPEC-326 2.7: runs `kicad-cli pcb drc --schematic-parity`, a subprocess.
     "kicad.check_schematic_parity",
+    # SPEC-114: two or three real `kicad-cli pcb drc` runs per call -- the
+    # baseline, the verified profile run, and a second verification pass when
+    # the canary has to share a constraint class with one of the profile's own
+    # rules. Measured at roughly 5 seconds on the example board.
+    "fabrication.review_board",
     # SPEC-334: resolves through fp_lib_table and reads files per call.
     "kicad.describe_footprint",
     "kicad.find_projects_in_directory",
