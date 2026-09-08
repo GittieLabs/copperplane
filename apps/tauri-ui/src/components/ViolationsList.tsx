@@ -58,6 +58,15 @@ export function ViolationsList({
 
       <IgnoredChecks checks={result.ignored_checks} kind={kind} />
 
+      {/* SPEC-340: the other half of the connection. Reported by a real
+          click-through -- this card and the review below each showed part of
+          the picture and neither mentioned the other. */}
+      <p className="text-xs text-fg-muted">
+        This is what {kind.toUpperCase()} reports. Copperplane also checks things{' '}
+        {kind.toUpperCase()} cannot see, such as a symbol and footprint disagreeing about pin
+        count — those are in “Review the {kind === 'erc' ? 'schematic' : 'board'}” below.
+      </p>
+
       {result.violations.length === 0 ? (
         <p className={result.unconnected_count || result.parity_count
           ? 'text-sm text-fg-tertiary'

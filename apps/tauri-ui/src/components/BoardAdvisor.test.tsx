@@ -559,8 +559,9 @@ describe('BoardAdvisor: a check result the review agent can actually read', () =
     // Scoped to this stub's own line: AgentChat and ReviewPanel render
     // `projectName=` too, so a bare query matches three elements.
     expect(stub.textContent).toContain('projectName=test-project')
-    // No board picked yet: an honest empty state, not an error (SPEC-114 2.9).
-    expect(stub.textContent).toContain('boardPath=none')
+    // A sole board is now selected on load, so the profile card knows the
+    // board without the user hunting for it.
+    expect(stub.textContent).toContain('boardPath=/real/board.kicad_pcb')
     expect(stub.textContent).toContain('profile=none')
   })
 
@@ -584,6 +585,31 @@ describe('BoardAdvisor: a check result the review agent can actually read', () =
       ),
     )
     expect(screen.getByText(/FabricationProfile stub/).textContent).toContain('profile=none')
+  })
+
+  it('offers a visible action for a board it already knows about', async () => {
+    // Regression from the auto-select fix: a linked project's board was
+    // selected on load, which rendered it in the "chosen" style while nothing
+    // had run. The card looked finished and showed nothing, with no obvious
+    // next step -- the same dead end as before, wearing a different hat.
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    const action = await screen.findByRole('button', { name: /Run board check/ })
+    expect(action).toBeTruthy()
+    expect(screen.getByText(/Nothing has been checked yet/)).toBeTruthy()
+  })
+
+  it('stops offering the action once a result is on screen', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run board check/ }))
+
+    await waitFor(() => expect(checkBoardMock).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText(/Nothing has been checked yet/)).toBeNull())
   })
 
   it('sends the chosen profile into the one board check, not a second check', async () => {

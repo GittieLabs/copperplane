@@ -293,6 +293,11 @@ export function SchematicAdvisor({
       {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
           is a flow step with a typed result, not a conversational turn. */}
       <ReviewPanel
+        siblingCheck={{
+          label: 'The schematic check (ERC)',
+          count: (result ? (result.violation_count ?? result.violations.length) + (result.unconnected_count ?? 0) : null),
+          where: 'Schematic (ERC) above',
+        }}
         key={`${projectName}:schematic`}
         area="schematic"
         scope="project"

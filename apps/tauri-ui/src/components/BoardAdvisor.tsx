@@ -108,15 +108,21 @@ export function BoardAdvisor({
       const linked = await linkedProjectBoard(projectName)
       if (linked) {
         setBoardListResult({ status: 'boards_found', candidates: [linked] })
-        // Found by a real click-through: a linked project resolves exactly one
-        // board, and the app already holds its path -- but `selectedBoard` was
-        // only ever set by a click, so anything depending on it behaved as
-        // though no board existed. Selecting it here does NOT run the check;
-        // it just stops the app pretending not to know which board this is.
         setSelectedBoard(linked)
         return
       }
-      setBoardListResult(await listOpenBoards())
+      const listed = await listOpenBoards()
+      setBoardListResult(listed)
+      // Found by a real click-through: when there is exactly one board -- from
+      // the linked project above, or from KiCad -- the app already holds its
+      // path, but `selectedBoard` was only ever set by a click, so everything
+      // downstream behaved as though no board existed. Selecting it does NOT
+      // run the check; it just stops the app pretending not to know which
+      // board this is. The check stays an explicit action because it spends a
+      // real LLM call (CTX-339.1: do not charge for a result twice).
+      if (listed.status === 'boards_found' && listed.candidates.length === 1) {
+        setSelectedBoard(listed.candidates[0])
+      }
     } catch (err) {
       setBoardListError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -223,6 +229,11 @@ export function BoardAdvisor({
       {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
           is a flow step with a typed result, not a conversational turn. */}
       <ReviewPanel
+        siblingCheck={{
+          label: 'The board check (DRC)',
+          count: (boardCheckResult ? (boardCheckResult.violation_count ?? boardCheckResult.violations.length) + (boardCheckResult.unconnected_count ?? 0) : null),
+          where: 'Board (DRC) above',
+        }}
         key={`${projectName}:pcb`}
         area="pcb"
         scope="project"
@@ -363,6 +374,7 @@ function BoardCheckSection({
                     }`}
                     onClick={() => onCheckBoard(candidate)}
                     disabled={checkingBoard}
+                    title="Check this board"
                   >
                     <span className="block font-medium">{candidate.label}</span>
                     <span className="block break-all text-fg-muted">{candidate.path}</span>
@@ -392,6 +404,23 @@ function BoardCheckSection({
               Refresh
             </button>
           </div>
+        </div>
+      )}
+
+      {selectedBoard && !checkResult && !checkingBoard && (
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            className="self-start rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
+            onClick={() => onCheckBoard(selectedBoard)}
+          >
+            Run board check
+          </button>
+          <p className="text-xs text-fg-muted">
+            Nothing has been checked yet. This runs KiCad&rsquo;s design-rule check on{' '}
+            {selectedBoard.label} against {houseName ?? "KiCad\u2019s own defaults"} and explains
+            what it finds.
+          </p>
         </div>
       )}
 

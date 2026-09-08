@@ -30,6 +30,7 @@ child_specs:
   - "SPEC-324-model-identity-verification.md"
   - "SPEC-325-kicad-project-integration.md"
   - "SPEC-328-project-intent-and-suggested-parts.md"
+  - "SPEC-341-one-findings-list-per-area.md"
 user_facing: true
 ---
 
