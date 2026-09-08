@@ -13,13 +13,7 @@ import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { ViolationsList } from './ViolationsList'
 import { FabricationProfile } from './FabricationProfile'
-import { FabricationReviewResult } from './FabricationReviewResult'
-import {
-  reviewBoard,
-  SidecarDiscardedError,
-  type CapabilityProfile,
-  type FabricationReview,
-} from '../lib/fabricationReview'
+import { type CapabilityProfile } from '../lib/fabricationReview'
 import { linkedProjectBoard } from '../lib/kicadProject'
 import { setProjectCheckResult } from '../lib/projects'
 
@@ -81,10 +75,6 @@ export function BoardAdvisor({
   // before-and-after it produces. Per project, never per install -- the same
   // design may go to two houses (SPEC-114 section 2.9).
   const [profile, setProfile] = useState<CapabilityProfile | null>(null)
-  const [fabReview, setFabReview] = useState<FabricationReview | null>(null)
-  const [fabRunning, setFabRunning] = useState(false)
-  const [fabError, setFabError] = useState<string | null>(null)
-  const [fabDiscarded, setFabDiscarded] = useState(false)
 
   const [checkingBoard, setCheckingBoard] = useState(false)
   const [selectedBoard, setSelectedBoard] = useState<BoardCandidate | null>(null)
@@ -104,32 +94,7 @@ export function BoardAdvisor({
     // reason the check result does -- and for the same reason it must NOT
     // reset on a mere tab switch.
     setProfile(null)
-    setFabReview(null)
-    setFabError(null)
-    setFabDiscarded(false)
   }, [projectName])
-
-  /** SPEC-340: the before-and-after. A discarded sidecar is kept distinct from
-   *  any other failure -- the user needs to know their design rules did not run
-   *  at all, which is a different sentence from "something went wrong". */
-  const onRunFabricationReview = useCallback(async () => {
-    if (!selectedBoard || !profile) return
-    setFabRunning(true)
-    setFabError(null)
-    setFabDiscarded(false)
-    setFabReview(null)
-    try {
-      setFabReview(await reviewBoard(selectedBoard.path, profile))
-    } catch (err) {
-      if (err instanceof SidecarDiscardedError) {
-        setFabDiscarded(true)
-      } else {
-        setFabError(err instanceof Error ? err.message : String(err))
-      }
-    } finally {
-      setFabRunning(false)
-    }
-  }, [selectedBoard, profile])
 
   const refreshBoardList = useCallback(async () => {
     setLoadingBoardList(true)
@@ -143,6 +108,12 @@ export function BoardAdvisor({
       const linked = await linkedProjectBoard(projectName)
       if (linked) {
         setBoardListResult({ status: 'boards_found', candidates: [linked] })
+        // Found by a real click-through: a linked project resolves exactly one
+        // board, and the app already holds its path -- but `selectedBoard` was
+        // only ever set by a click, so anything depending on it behaved as
+        // though no board existed. Selecting it here does NOT run the check;
+        // it just stops the app pretending not to know which board this is.
+        setSelectedBoard(linked)
         return
       }
       setBoardListResult(await listOpenBoards())
@@ -186,7 +157,9 @@ export function BoardAdvisor({
     setBoardCheckError(null)
     setBoardCheckResult(null)
     try {
-      const result = await checkBoard(candidate.path)
+      // SPEC-340: one check. The profile changes which rules it runs against,
+      // it does not add a second check beside this one.
+      const result = await checkBoard(candidate.path, profile)
       setBoardCheckResult(result)
       // SPEC-319 §2.1's prerequisite: persist it so the review and chat
       // agents can actually see it. Held only in React state before, which
@@ -223,6 +196,15 @@ export function BoardAdvisor({
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6">
+      {/* SPEC-340: an INPUT to the board check below, so it sits above it. It
+          was originally rendered underneath, which read as a third thing to
+          run rather than as the setting that changes what the check does. */}
+      <FabricationProfile
+        projectName={projectName}
+        boardPath={selectedBoard?.path ?? null}
+        profile={profile}
+        onProfileChange={setProfile}
+      />
       <BoardCheckSection
         loadingList={loadingBoardList}
         listResult={boardListResult}
@@ -236,62 +218,10 @@ export function BoardAdvisor({
         checkResult={boardCheckResult}
         checkError={boardCheckError}
         onCheckBoard={(candidate) => void handleCheckBoard(candidate)}
+        houseName={profile?.house_name ?? null}
       />
       {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
           is a flow step with a typed result, not a conversational turn. */}
-      {/* SPEC-340: where this board will actually be made, and what that
-          changes. Sits above the AI review because it is a real measurement
-          rather than an explanation of one. */}
-      <FabricationProfile
-        projectName={projectName}
-        boardPath={selectedBoard?.path ?? null}
-        profile={profile}
-        onProfileChange={(next) => {
-          setProfile(next)
-          setFabReview(null)
-          setFabDiscarded(false)
-        }}
-      />
-      {/* CTX-340.1 Phase 5, found by a real click-through: this block used to be
-          gated on `profile && selectedBoard`, so choosing a house with no board
-          picked rendered NOTHING -- no button, no explanation, no way forward.
-          The user was left looking at nine numbers they had just configured and
-          a review panel that ignored them. A dead end with no sentence
-          explaining it is the SPEC-302 failure mode in miniature. */}
-      {profile && !selectedBoard && (
-        <p className="text-sm text-fg-tertiary">
-          Pick a board above to check it against {profile.house_name}.
-        </p>
-      )}
-      {profile && selectedBoard && (
-        <div className="flex flex-col gap-2">
-          <div>
-            <button
-              type="button"
-              className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
-              onClick={onRunFabricationReview}
-              disabled={fabRunning}
-            >
-              {fabRunning ? 'Checking…' : `Check against ${profile.house_name}`}
-            </button>
-          </div>
-          {fabRunning && (
-            <p className="text-sm text-fg-tertiary">
-              Checking {selectedBoard.label} against your board house… this runs DRC more than
-              once, so it takes a few seconds.
-            </p>
-          )}
-          {fabDiscarded && (
-            <p className="text-sm text-danger">
-              KiCad rejected the design rules Copperplane wrote, so none of them ran and there is
-              no result to show. Your board and your project settings were not changed.
-            </p>
-          )}
-          {fabError && <p className="text-sm text-danger">{fabError}</p>}
-          {fabReview && <FabricationReviewResult review={fabReview} />}
-        </div>
-      )}
-
       <ReviewPanel
         key={`${projectName}:pcb`}
         area="pcb"
@@ -330,6 +260,7 @@ function BoardCheckSection({
   checkResult,
   checkError,
   onCheckBoard,
+  houseName,
 }: {
   loadingList: boolean
   listResult: ListOpenBoardsResult | null
@@ -343,6 +274,9 @@ function BoardCheckSection({
   checkResult: CheckResult | null
   checkError: string | null
   onCheckBoard: (candidate: BoardCandidate) => void
+  /** SPEC-340: names the rules this check will use, so the section says what
+   *  it does before it is run rather than only after. */
+  houseName: string | null
 }) {
   // CTX-309.4 second revision: real clicking-through found the first cut
   // still showing "could not connect" in alarming red on the very first
@@ -356,6 +290,16 @@ function BoardCheckSection({
   return (
     <div className="flex flex-col gap-2 rounded border border-line p-3">
       <p className="text-xs font-medium uppercase text-fg-muted">Board (DRC)</p>
+      {/* Found by a real click-through: three sections on this tab each ran a
+          check and none said what it checked or how it differed from the
+          others. Naming the rules and the output is the whole fix. */}
+      <p className="text-xs text-fg-tertiary">
+        Runs KiCad&rsquo;s design-rule check on the board and explains each finding in plain
+        language, with where to find it.{' '}
+        {houseName
+          ? `Checking against ${houseName}, not KiCad's defaults.`
+          : 'Checking against KiCad\u2019s own default rules \u2014 pick a board house above to check against what your fab can actually build.'}
+      </p>
 
       {loadingList && <p className="text-sm text-fg-tertiary">Scanning for boards open in KiCad…</p>}
 

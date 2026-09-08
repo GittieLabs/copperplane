@@ -238,7 +238,8 @@ def is_generated(path: str) -> bool:
         return GENERATED_MARKER in handle.read(4096)
 
 
-def write_and_verify(pcb_path: str, rules, allow_overwrite: bool = False) -> dict:
+def write_and_verify(pcb_path: str, rules, allow_overwrite: bool = False,
+                     schematic_parity: bool = False) -> dict:
     """Write the sidecar, run DRC, and prove the rules actually took effect.
 
     Returns a dict with `state`, the canary-stripped `report`, and `hits`, the
@@ -258,7 +259,7 @@ def write_and_verify(pcb_path: str, rules, allow_overwrite: bool = False) -> dic
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(render_sidecar(rules, include_canary=True))
 
-    report = kicad_cli.run_drc(pcb_path)
+    report = kicad_cli.run_drc(pcb_path, schematic_parity=schematic_parity)
     hits = rule_hits(report)
     canary_shares_a_class = pick_canary_constraint(rules) is None
 
@@ -272,7 +273,7 @@ def write_and_verify(pcb_path: str, rules, allow_overwrite: bool = False) -> dic
             # error, so the rules just proven to parse are the rules that run.
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write(render_sidecar(rules, include_canary=False))
-            report = kicad_cli.run_drc(pcb_path)
+            report = kicad_cli.run_drc(pcb_path, schematic_parity=schematic_parity)
             hits = rule_hits(report)
     elif _canary_fires_on(pcb_path):
         # The canary can fire on this board, but did not fire alongside our

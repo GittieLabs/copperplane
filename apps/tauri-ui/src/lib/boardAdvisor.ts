@@ -47,6 +47,36 @@ export interface CheckResult {
    *  a clean result from a check that was switched off. Optional: an older
    *  report has neither. */
   included_severities?: string[]
+  /** SPEC-340: present only when this check ran against a capability profile.
+   *  Its absence is how the UI knows to say "KiCad's own default rules" rather
+   *  than naming a board house. */
+  fabrication?: FabricationSummary
+}
+
+/** The before-and-after, and everything the check could not tell you.
+ *  Deliberately three separate "not checked" lists: they fail for three
+ *  different reasons and the daemon keeps them apart on purpose. */
+export interface FabricationSummary {
+  house_name: string
+  verification_state: 'applied' | 'indeterminate' | 'discarded'
+  before_count: number
+  after_count: number
+  profile_findings_count: number
+  counts_by_outcome: Partial<Record<'built_silently_wrong' | 'would_be_rejected' | 'cosmetic', number>>
+  rule_hits: Record<string, number>
+  not_checked: {
+    ignored_by_project: { key: string; description: string }[]
+    profile_rules_gated_off: {
+      field: string
+      constraint: string
+      rule: string
+      ignored_keys: string[]
+      fully_gated: boolean
+    }[]
+    recorded_but_unenforceable: string[]
+  }
+  profile_is_stale: boolean
+  unconfirmed_fields: string[]
 }
 
 export interface BoardCandidate {
@@ -100,8 +130,16 @@ export async function openKicad(path?: string | null): Promise<void> {
  * "pick one" state itself. A real subprocess plus a real LLM call, both
  * genuinely multi-second, so submitJob -- matching every other real
  * async kicad and component route's own precedent. */
-export async function checkBoard(pcbPath: string): Promise<CheckResult> {
-  const handle = await submitJob<CheckResult>('kicad.check_board', { pcb_path: pcbPath })
+export async function checkBoard(
+  pcbPath: string,
+  /** SPEC-340: a capability profile does not add a second check -- it changes
+   *  which rules this one runs against. Omitted means KiCad's own defaults. */
+  profile?: unknown | null,
+): Promise<CheckResult> {
+  const handle = await submitJob<CheckResult>('kicad.check_board', {
+    pcb_path: pcbPath,
+    ...(profile ? { profile } : {}),
+  })
   return handle.result
 }
 

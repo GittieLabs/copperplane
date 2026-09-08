@@ -2057,20 +2057,7 @@ def project_set_fabrication_profile(project_name: str, profile: dict = None) -> 
     return library_store.set_project_fabrication_profile(project_name, profile)
 
 
-def fabrication_review_board(pcb_path: str, profile: dict) -> dict:
-    """The fabrication.review_board route (SPEC-114 sections 2.8 and 5).
-
-    The before-and-after: this board against KiCad's defaults, then against the
-    house the user actually chose. Runs several real DRC subprocesses, so it is
-    registered in ASYNC_ROUTES below.
-
-    A `SidecarDiscarded` from underneath is deliberately allowed to surface as a
-    real error. Limit 2 means the alternative is a confident review drawn from
-    rules that were never active."""
-    return fabrication_review.review(pcb_path, profile)
-
-
-def kicad_check_board(pcb_path: str) -> dict:
+def kicad_check_board(pcb_path: str, profile: dict = None) -> dict:
     """The kicad.check_board route (SPEC-309): a real DRC via kicad-cli
     against an explicit `pcb_path`. Explains the real violations via a
     real LLM call. Async: a real subprocess plus a real LLM call, both
@@ -2094,9 +2081,28 @@ def kicad_check_board(pcb_path: str) -> dict:
     # subtype, and parity only runs when asked for, so neither appears by
     # accident. Both are real DRC findings to a user, who does not care
     # which JSON key KiCad filed them under.
-    report = kicad_cli.run_drc(pcb_path, schematic_parity=True)
+    # SPEC-340: one board check, not two. A capability profile does not add a
+    # second, competing check -- it changes which rules THIS one runs against.
+    # The first version shipped it as its own button beside this route, and a
+    # real click-through found the result: two surfaces running the same engine
+    # over the same board, one of them explained and one not, with nothing on
+    # screen saying which to use or whether both were needed. That is SPEC-302's
+    # own failure mode, and the fix is for the profile to be an input here.
+    fabrication = None
+    if profile:
+        fab = fabrication_review.review(pcb_path, profile, schematic_parity=True)
+        report = fab["raw_after_report"]
+        # Ranked by what the fab would actually do with each finding, so a
+        # capped explanation call spends its budget on the ones a maker had no
+        # way to know about rather than on silkscreen.
+        violations = fab["findings"]
+        fabrication = {k: v for k, v in fab.items() if k not in ("findings", "raw_after_report")}
+    else:
+        report = kicad_cli.run_drc(pcb_path, schematic_parity=True)
+        violations = report["violations"]
+
     findings = [
-        *report["violations"],
+        *violations,
         *report.get("unconnected_items", []),
         *report.get("schematic_parity", []),
     ]
@@ -2112,7 +2118,7 @@ def kicad_check_board(pcb_path: str) -> dict:
     # Counted separately so a caller can say WHICH kind of problem a board
     # has. A user reads "18 unconnected" and "1 mismatch" very differently
     # from one number.
-    result["violation_count"] = len(report["violations"])
+    result["violation_count"] = len(violations)
     result["unconnected_count"] = len(report.get("unconnected_items", []))
     result["parity_count"] = len(report.get("schematic_parity", []))
     # Which checks KiCad did NOT run. Carried because a disabled check is
@@ -2122,6 +2128,10 @@ def kicad_check_board(pcb_path: str) -> dict:
     # longer applies. `missing_courtyard` in particular is load-bearing for
     # SPEC-326's own enclosure envelopes.
     result["ignored_checks"] = report.get("ignored_checks", [])
+    # Present only when a profile was used. Its absence is how the UI knows to
+    # say "KiCad's own default rules" rather than naming a board house.
+    if fabrication is not None:
+        result["fabrication"] = fabrication
     return result
 
 
@@ -2436,8 +2446,6 @@ def _build_routes() -> dict:
         routes["fabrication.generic_profile"] = fabrication_generic_profile
         if library_store is not None:
             routes["project.set_fabrication_profile"] = project_set_fabrication_profile
-    if fabrication_review is not None and kicad_cli is not None:
-        routes["fabrication.review_board"] = fabrication_review_board
     if kicad_bridge is not None and freecad_bridge is not None:
         routes["kicad.get_component_heights"] = kicad_get_component_heights
     if kicad_cli is not None:
@@ -2472,11 +2480,6 @@ ASYNC_ROUTES = {
     "kicad.component_envelopes",
     # SPEC-326 2.7: runs `kicad-cli pcb drc --schematic-parity`, a subprocess.
     "kicad.check_schematic_parity",
-    # SPEC-114: two or three real `kicad-cli pcb drc` runs per call -- the
-    # baseline, the verified profile run, and a second verification pass when
-    # the canary has to share a constraint class with one of the profile's own
-    # rules. Measured at roughly 5 seconds on the example board.
-    "fabrication.review_board",
     # SPEC-334: resolves through fp_lib_table and reads files per call.
     "kicad.describe_footprint",
     "kicad.find_projects_in_directory",

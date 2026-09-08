@@ -96,6 +96,9 @@ export function FabricationProfile({
             check against until it does.
           </p>
         )}
+        <p className="text-xs text-fg-muted">
+          This does not run a separate check. It changes which rules the board check below uses.
+        </p>
         <div>
           <button
             type="button"
@@ -126,6 +129,11 @@ export function FabricationProfile({
           Choose a different house
         </button>
       </div>
+
+      <p className="text-xs text-fg-tertiary">
+        The board check below now runs against these numbers instead of KiCad&rsquo;s defaults, and
+        shows both counts so you can see the difference.
+      </p>
 
       {profile.layer_count && (
         <p className="text-xs text-fg-tertiary">

@@ -187,7 +187,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
 
     fireEvent.click(screen.getByText('board.kicad_pcb'))
 
-    await waitFor(() => expect(checkBoardMock).toHaveBeenCalledWith('/real/board.kicad_pcb'))
+    await waitFor(() => expect(checkBoardMock).toHaveBeenCalledWith('/real/board.kicad_pcb', null))
     await waitFor(() => screen.getByText(/Board has malformed outline/))
     screen.getByText('ERROR')
     screen.getByText(/no outline drawn on the Edge.Cuts layer/)
@@ -282,7 +282,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     await waitFor(() => screen.getByText('board_b.kicad_pcb'))
     fireEvent.click(screen.getByText('board_b.kicad_pcb'))
 
-    await waitFor(() => expect(checkBoardMock).toHaveBeenCalledWith('/boards/b/board_b.kicad_pcb'))
+    await waitFor(() => expect(checkBoardMock).toHaveBeenCalledWith('/boards/b/board_b.kicad_pcb', null))
     expect(checkBoardMock).toHaveBeenCalledTimes(1)
   })
 
@@ -586,30 +586,37 @@ describe('BoardAdvisor: a check result the review agent can actually read', () =
     expect(screen.getByText(/FabricationProfile stub/).textContent).toContain('profile=none')
   })
 
-  it('tells the user what to do next when a house is chosen but no board is picked', async () => {
-    // Found by a real click-through, not by these tests: this state used to
-    // render nothing at all -- no button and no explanation -- leaving someone
-    // staring at nine numbers they had just configured with no way forward.
-    listOpenBoardsMock.mockResolvedValue({ status: 'no_board_open' })
-    render(<BoardAdvisor projectName="test-project" />)
-
-    fireEvent.click(await screen.findByRole('button', { name: /stub choose profile/ }))
-
-    expect(await screen.findByText(/Pick a board above to check it against Test House/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: /^Check against/ })).toBeNull()
-  })
-
-  it('offers the check once a house and a board are both chosen', async () => {
+  it('sends the chosen profile into the one board check, not a second check', async () => {
+    // SPEC-340, after the click-through: a profile is an INPUT to this check.
+    // It used to be a separate button running DRC again beside this one, which
+    // is what made the tab read as three overlapping tools.
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
     setProjectCheckResultMock.mockResolvedValue(undefined)
     render(<BoardAdvisor projectName="test-project" />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /board\.kicad_pcb/ }))
     fireEvent.click(await screen.findByRole('button', { name: /stub choose profile/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /board\.kicad_pcb/ }))
 
-    expect(await screen.findByRole('button', { name: /Check against Test House/ })).toBeTruthy()
-    expect(screen.queryByText(/Pick a board above/)).toBeNull()
+    await waitFor(() =>
+      expect(checkBoardMock).toHaveBeenCalledWith('/real/board.kicad_pcb', {
+        house_name: 'Test House',
+      }),
+    )
+    // No second check anywhere on the tab.
+    expect(screen.queryByRole('button', { name: /^Check against/ })).toBeNull()
+  })
+
+  it('names the rules the board check will use before it is run', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    // Without a profile it says whose rules it is using, rather than leaving
+    // the user to guess what "Board (DRC)" checks against.
+    expect(await screen.findByText(/KiCad’s own default rules/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /stub choose profile/ }))
+    expect(await screen.findByText(/Checking against Test House/)).toBeTruthy()
   })
 
   it('says so when the result could not be saved, rather than failing quietly', async () => {

@@ -67,21 +67,44 @@ user_facing: true
     date it was recorded and whether the user confirmed it. The bundled starting point ships with
     all nine fields unconfirmed on purpose, so the UI has something true to say.
 
-*   **Data Flow / Interactions.** No new daemon work. Three routes exist on `develop`:
+*   **The profile is an input to the board check, not a second check.** This is the correction a
+    real click-through forced, and it is the most important sentence in this spec.
+
+    The first implementation shipped the profile as its own button and its own result list beside
+    `kicad.check_board`. The maintainer's own run found what that produced: two surfaces running the
+    same DRC engine over the same board, one of them explaining its findings and one not, with
+    nothing on screen saying which to use or whether both were needed — and a third, `SPEC-319`'s
+    review, quietly running DRC again underneath. Three overlapping tools, no stated purpose for
+    any. That is `SPEC-302`'s own failure mode, reproduced by a spec written specifically to avoid
+    it.
+
+    So `kicad.check_board` takes an optional `profile`. Absent, it behaves exactly as it does today.
+    Present, it checks against the house instead of KiCad's defaults and returns a `fabrication`
+    block carrying the before-and-after alongside the same explained findings list. There is one
+    board check, and the profile changes which rules it runs.
+
+*   **Data Flow / Interactions.** Three routes plus one changed one:
 
     | Route | Async | Returns |
     | :--- | :--- | :--- |
     | `fabrication.generic_profile` | no | The unbranded starting point, all fields unconfirmed |
     | `fabrication.validate_profile` | no | Enforceable, unenforceable, unconfirmed, stale |
-    | `fabrication.review_board` | yes | Before and after counts, ranked findings, `not_checked` |
+    | `project.set_fabrication_profile` | no | The project record, profile validated at store time |
+    | `kicad.check_board` | yes | As before, plus `fabrication` when a profile was supplied |
 
-    `fabrication.review_board` runs two or three real `kicad-cli` invocations and is registered in
-    `ASYNC_ROUTES`, so it goes through the existing `JobHandle` client from `CTX-105.2` rather than
-    blocking. Measured at roughly five seconds on the example board.
+    With a profile, `kicad.check_board` runs two or three real `kicad-cli` invocations rather than
+    one. It was already in `ASYNC_ROUTES`, so nothing changes about how the frontend calls it.
+
+*   **Every section says what it checks and what comes back.** The click-through's other finding:
+    a user facing three sections with no purpose statements cannot tell whether they need all
+    three. Naming the rules each one uses, before it is run, is a cheap fix and belongs in the spec
+    rather than being left to whoever writes the component.
 
 *   **Cross-Module Impacts.** `library_store` gains one persisted field on the project record.
-    `SPEC-319`'s review panel is the natural host for the findings list, and `SPEC-332` already
-    renders ignored checks — that component should be reused rather than reimplemented.
+    `kicad.check_board` gains an optional parameter and an optional response block. `SPEC-332`'s
+    ignored-checks component already renders KiCad's switched-off tests directly under the findings,
+    so this surface must not render them a second time — the profile's own ungated limits are a
+    different list and are the only one it owns.
 
 ### 2.1 The one genuinely new decision
 

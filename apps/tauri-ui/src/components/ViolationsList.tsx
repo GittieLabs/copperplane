@@ -1,4 +1,5 @@
 import type { CheckResult, Violation, ViolationItem } from '../lib/boardAdvisor'
+import { FabricationSummaryBanner } from './FabricationSummaryBanner'
 import { explainTerms, IGNORED_CHECK_NOTES } from '../lib/kicadGlossary'
 
 const _SEVERITY_COLOR: Record<string, string> = {
@@ -49,6 +50,11 @@ export function ViolationsList({
       ) : null}
 
       <SeverityFilter severities={result.included_severities} />
+
+      {/* SPEC-340: the before-and-after rides above the one findings list
+          rather than duplicating it. `fabrication` is absent unless a
+          capability profile was used. */}
+      {result.fabrication && <FabricationSummaryBanner fabrication={result.fabrication} />}
 
       <IgnoredChecks checks={result.ignored_checks} kind={kind} />
 

@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { FabricationReviewResult } from './FabricationReviewResult'
+import { FabricationSummaryBanner } from './FabricationSummaryBanner'
 
 /** The real payload the frozen sidecar returned during CTX-114.1: 4 findings
  *  becoming 27, with the five checks this board ignores by default. Copied from
@@ -44,10 +44,10 @@ const REVIEW = {
   unconfirmed_fields: ['min_drill'],
 }
 
-describe('FabricationReviewResult', () => {
+describe('FabricationSummaryBanner', () => {
   // TEST-012
   it('renders both counts together, never the after-count alone', () => {
-    render(<FabricationReviewResult review={REVIEW as never} />)
+    render(<FabricationSummaryBanner fabrication={REVIEW as never} />)
 
     // "27 findings" on its own reads as a broken board. The before-count is
     // what turns it into a discovery -- SPEC-340 section 2.
@@ -60,14 +60,14 @@ describe('FabricationReviewResult', () => {
 
   // TEST-013
   it('puts the silently-wrong group above the cosmetic one', () => {
-    render(<FabricationReviewResult review={REVIEW as never} />)
+    render(<FabricationSummaryBanner fabrication={REVIEW as never} />)
     const body = document.body.textContent ?? ''
     expect(body.indexOf('quietly wrong')).toBeGreaterThan(-1)
     expect(body.indexOf('quietly wrong')).toBeLessThan(body.indexOf('looking wrong'))
   })
 
   // TEST-016
-  it('renders ignored checks and gated-off rules', () => {
+  it('renders the limits the profile set that were not checked', () => {
     const review = {
       ...REVIEW,
       not_checked: {
@@ -84,11 +84,15 @@ describe('FabricationReviewResult', () => {
         recorded_but_unenforceable: ['min mask dam is recorded as 0.1mm but cannot be checked'],
       },
     }
-    render(<FabricationReviewResult review={review as never} />)
+    render(<FabricationSummaryBanner fabrication={review as never} />)
     const body = document.body.textContent ?? ''
-    expect(body).toContain('Footprint has no courtyard defined')
     expect(body).toContain('min drill')
     expect(body).toContain('cannot be checked')
+
+    // Deliberately NOT here: KiCad's own switched-off tests are rendered by
+    // ViolationsList's existing SPEC-332 block, directly below this banner.
+    // Showing them twice is the duplication this whole fold-in removes.
+    expect(body).not.toContain('Footprint has no courtyard defined')
   })
 
   it('says when a gated rule is only partly switched off', () => {
@@ -107,15 +111,15 @@ describe('FabricationReviewResult', () => {
         ],
       },
     }
-    render(<FabricationReviewResult review={review as never} />)
+    render(<FabricationSummaryBanner fabrication={review as never} />)
     expect(document.body.textContent).toContain('partly')
   })
 
   // TEST-014
   it('reads an indeterminate result as neither a pass nor a failure', () => {
     render(
-      <FabricationReviewResult
-        review={{ ...REVIEW, verification_state: 'indeterminate' } as never}
+      <FabricationSummaryBanner
+        fabrication={{ ...REVIEW, verification_state: 'indeterminate' } as never}
       />,
     )
     const body = document.body.textContent ?? ''
@@ -128,7 +132,7 @@ describe('FabricationReviewResult', () => {
   })
 
   it('does not show the could-not-confirm notice on a verified result', () => {
-    render(<FabricationReviewResult review={REVIEW as never} />)
+    render(<FabricationSummaryBanner fabrication={REVIEW as never} />)
     expect(document.body.textContent).not.toMatch(/could not confirm/i)
   })
 
@@ -143,7 +147,7 @@ describe('FabricationReviewResult', () => {
       { ...REVIEW, verification_state: 'indeterminate' as const },
     ]
     for (const review of cases) {
-      const { unmount } = render(<FabricationReviewResult review={review as never} />)
+      const { unmount } = render(<FabricationSummaryBanner fabrication={review as never} />)
       const body = (document.body.textContent ?? '').toLowerCase()
       // Verdict phrases only. A bare "passed" is too blunt: the ignored-checks
       // note correctly says a board "can look clean because a check is off
@@ -167,8 +171,8 @@ describe('FabricationReviewResult', () => {
 
   it('says a clean result is one check, not a verdict', () => {
     render(
-      <FabricationReviewResult
-        review={{ ...REVIEW, counts_by_outcome: {}, findings: [] } as never}
+      <FabricationSummaryBanner
+        fabrication={{ ...REVIEW, counts_by_outcome: {}, after_count: 4 } as never}
       />,
     )
     expect(document.body.textContent).toMatch(/not a verdict on the whole board/i)

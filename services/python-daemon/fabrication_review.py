@@ -184,7 +184,7 @@ def _gated_rules(profile: dict, ignored: list) -> list:
     return gated
 
 
-def baseline(pcb_path: str) -> dict:
+def baseline(pcb_path: str, schematic_parity: bool = False) -> dict:
     """The board as KiCad checks it today, with no profile applied.
 
     Deliberately run with any generated sidecar moved aside: a leftover file
@@ -197,14 +197,14 @@ def baseline(pcb_path: str) -> dict:
             stashed = handle.read()
         os.remove(sidecar)
     try:
-        return kicad_cli.run_drc(pcb_path)
+        return kicad_cli.run_drc(pcb_path, schematic_parity=schematic_parity)
     finally:
         if stashed is not None:
             with open(sidecar, "w", encoding="utf-8") as handle:
                 handle.write(stashed)
 
 
-def review(pcb_path: str, profile: dict) -> dict:
+def review(pcb_path: str, profile: dict, schematic_parity: bool = False) -> dict:
     """The whole feature, end to end: before, after, and what was not checked.
 
     Raises `kicad_dru.SidecarDiscarded` when the generated rules did not take
@@ -214,8 +214,8 @@ def review(pcb_path: str, profile: dict) -> dict:
     capability_profile.assert_rules_are_generatable(profile)
     rules = capability_profile.to_rules(profile)
 
-    before = baseline(pcb_path)
-    applied = kicad_dru.write_and_verify(pcb_path, rules)
+    before = baseline(pcb_path, schematic_parity=schematic_parity)
+    applied = kicad_dru.write_and_verify(pcb_path, rules, schematic_parity=schematic_parity)
     after = applied["report"]
 
     ignored = ignored_checks(pcb_path, after)
@@ -243,6 +243,10 @@ def review(pcb_path: str, profile: dict) -> dict:
         },
         "profile_is_stale": capability_profile.is_stale(profile),
         "unconfirmed_fields": capability_profile.unconfirmed_fields(profile),
+        # The raw report from the same run. Carried so `kicad.check_board` can
+        # take `unconnected_items` and `schematic_parity` from it instead of
+        # running DRC a fourth time for findings this run already has.
+        "raw_after_report": after,
     }
 
 
