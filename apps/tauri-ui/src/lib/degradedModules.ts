@@ -37,6 +37,13 @@ const _WHAT_IS_LOST: Record<string, string> = {
   structural_checks:
     'Finding symbol and footprint mismatches — the checks KiCad does not make. '
     + 'Reviews still run and still report everything ERC and DRC found.',
+
+  capability_profile:
+    'Recording what your board house can actually build. '
+    + 'Board checks still run against KiCad’s own default rules.',
+  fabrication_review:
+    'Checking your board against your chosen board house before you order it. '
+    + 'Board checks still run against KiCad’s own default rules.',
 }
 
 export interface LostCapability {

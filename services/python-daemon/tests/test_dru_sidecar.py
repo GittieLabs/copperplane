@@ -372,5 +372,71 @@ class SidecarVerificationTests(unittest.TestCase):
         self.assertGreater(hits["min-track-width"], 0)
 
 
+_SIDECAR_BIN = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "dist",
+    "hardware-agent-studio-daemon-aarch64-apple-darwin",
+))
+
+
+def _frozen_sidecar_is_real() -> bool:
+    """A real PyInstaller build, not the small committed placeholder."""
+    return os.path.isfile(_SIDECAR_BIN) and os.path.getsize(_SIDECAR_BIN) > 1_000_000
+
+
+@unittest.skipUnless(_frozen_sidecar_is_real(), "no locally built sidecar to probe")
+class FrozenSidecarRouteTests(unittest.TestCase):
+    """TEST-017: ask the artifact, not the module it was built from.
+
+    `CLAUDE.md`'s norm, and the gap `CTX-407.4` recorded as still open: every
+    existing sidecar checkpoint *inspects* the binary and none *runs* it. Four
+    shipped defects came from exactly that. This drives real JSON-RPC into the
+    frozen binary and asserts a new route answers.
+
+    Carries its own negative control. A route that answers proves nothing about
+    the probe's ability to notice one that does not, so a deliberately bogus
+    method is sent in the same session and must come back -32601."""
+
+    def _rpc(self, requests, timeout=180):
+        payload = "".join(json.dumps(r) + "\n" for r in requests)
+        result = subprocess.run(
+            [_SIDECAR_BIN], input=payload, capture_output=True, text=True, timeout=timeout,
+        )
+        responses = {}
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if message.get("id") is not None:
+                responses[message["id"]] = message
+        return responses
+
+    def test_017_the_frozen_binary_answers_the_new_routes(self):
+        responses = self._rpc([
+            {"jsonrpc": "2.0", "id": 1, "method": "daemon.get_capabilities", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "fabrication.generic_profile", "params": {}},
+            {"jsonrpc": "2.0", "id": 3, "method": "fabrication.no_such_route", "params": {}},
+        ])
+
+        self.assertIn("result", responses.get(1, {}),
+                      "control route must answer, or the probe itself is broken")
+
+        self.assertEqual(
+            responses.get(3, {}).get("error", {}).get("code"), -32601,
+            "negative control: the probe must be able to detect a missing route",
+        )
+
+        profile = responses.get(2, {})
+        self.assertIn(
+            "result", profile,
+            "fabrication.generic_profile is missing from the frozen sidecar. The source has it "
+            "and the suite passes; rebuild with scripts/freeze_sidecar.py.",
+        )
+        self.assertIn("provenance", profile["result"])
+
+
 if __name__ == "__main__":
     unittest.main()
