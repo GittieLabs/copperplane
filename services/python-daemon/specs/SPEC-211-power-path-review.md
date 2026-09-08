@@ -4,7 +4,7 @@ title: "The Power Path Review"
 status: Draft
 type: Feature
 created: 2026-09-07
-last_updated: 2026-09-07
+last_updated: 2026-09-08
 target_version: v0.7.0
 location: "services/python-daemon/specs/SPEC-211-power-path-review.md"
 parent_spec: "SPEC-210-design-considerations-model.md"
@@ -21,15 +21,27 @@ user_facing: true
     is the second pack under `SPEC-210` and the one that carries the *"this would have cooked"*
     story.
 
-*   **The lead case is linear regulator dissipation, and it is the best single demonstration this
-    product has.** A maker's first board runs an AMS1117 or a 7805 from a 12V wall adapter, because
-    that is what the tutorial they followed did. The heat a linear regulator throws away is
-    `(Vin - Vout) x I`, so 12V down to 3.3V at half an amp is **4.35 watts** inside a SOT-223. It
-    goes into thermal shutdown, and on the way there it is too hot to touch. Every property that
-    makes a good first lesson is present: it is arithmetic the user can follow in one line, the
-    threshold comes off a datasheet the app already parses, the fix is real and teachable (drop the
-    input voltage, or use a switching regulator), and it explains something the maker has physically
-    experienced and never understood.
+*   **The lead case is linear regulator dissipation, and the real numbers are better than the ones
+    this spec was drafted with.** Measured 2026-09-08 against the AMS1117 datasheet: SOT-223 thermal
+    resistance **88 degC/W** junction-to-ambient, operating junction temperature **-40 to +125 degC**,
+    on-chip **thermal shutdown at 150 degC**, absolute maximum input **18V**, rated **1A**.
+
+    A maker's first board runs one of these from a 12V wall adapter, because that is what the
+    tutorial they followed did. From 12V to 3.3V at half an amp the part throws away
+    `(12 - 3.3) x 0.5 = 4.35W`, and `4.35W x 88 degC/W` is a **383 degC rise above ambient**. It does
+    not get there; it shuts down.
+
+    **The sentence to actually put in front of the user is the ceiling, not the wattage.** Staying
+    inside the datasheet's own 125 degC maximum junction temperature at 25 degC ambient allows
+    `100 / 88 = 1.14W`, and at an 8.7V drop that is about **130mA**. So on a 12V supply, the "1A
+    regulator" everyone believes they have is a 130mA regulator. That is arithmetic a maker can
+    follow in one line, it explains something they have physically experienced, and the fix is real
+    and teachable: drop the input voltage, or use a switching regulator.
+
+    **The caveat travels with the number.** 88 degC/W is the datasheet's own figure and real thermal
+    resistance depends heavily on the copper the tab is soldered to, so this is a first-order
+    estimate and the UI must label it as one. It is also a *conservative* direction of error, which
+    is the right direction for this audience.
 
 *   **Why this pack rather than "input protection", which was the obvious candidate.** Reverse
     polarity has a hit-rate problem on exactly the audience this is for. A first board is usually
@@ -108,13 +120,28 @@ and not left to the implementation. Item 1 is a finding when the regulator's own
 voltages. Item 2 is a question. Item 5 is a question until the connector's role is confirmed, then a
 finding.
 
-### 2.5 Trace width, and a citation problem to settle first
+### 2.5 Trace width: the citation question, settled 2026-09-08
 
-The usual reference for conductor width against current is IPC-2221, which is a paid standard whose
-tables cannot be redistributed. The commonly published *formula* derived from it is a different
-matter. Before this item is built, settle what the app is actually citing and whether it may ship it,
-in the same way `licensing` already records that third-party data licences do not follow the repo's.
-If the answer is unclear, drop the item from v1 rather than shipping an uncited number.
+**Settled: name the standard, implement the formula, never reproduce the tables. The item stays in
+v1.** The precedent is KiCad itself. Its PCB Calculator ships a Track Width tool, and KiCad's own
+documentation says it *"calculates the trace width for printed circuit board conductors for a given
+current and temperature rise. It uses formulas from IPC-2221 (formerly IPC-D-275)."* A GPL tool in
+this exact domain names the standard and implements the relationship without republishing the
+standard's charts. Copperplane can do the same. What it must not do is reproduce IPC's tables or
+ship the document.
+
+**Two corrections that came out of checking, and both belong in the user-facing copy.** IPC-2152,
+published in 2009, supersedes IPC-2221's trace-sizing charts: it is based on modern thermal testing,
+accounts for board construction, copper weight and proximity to planes, and generally permits
+*narrower* traces for the same current. IPC-2221 is the older and more conservative one, and it is
+built on a single stackup from decades ago.
+
+For a maker's first board, conservative is the correct direction to be wrong in, and IPC-2221 is
+also the basis KiCad's own calculator uses, so a user cross-checking against KiCad will get the same
+answer. That makes IPC-2221 the defensible choice here. But the app must **say which standard it
+used and that a newer one exists**, rather than implying IPC-2221 is current. Presenting a
+superseded standard as the current one is exactly the kind of confidently-wrong output this family
+cannot afford.
 
 ### 2.6 Open questions
 
@@ -122,10 +149,10 @@ If the answer is unclear, drop the item from v1 rather than shipping an uncited 
     has no thermal data at all. Silence, or an explicit "cannot compare", never an assumed value.
 *   **Showing the arithmetic inline or on demand.** The sum is the teaching, so inline is likely
     right, but four sums in one review is a wall.
-*   **The AMS1117 numbers in §1 are illustrative and unverified.** The dissipation is simple
-    arithmetic, but the package's thermal resistance and maximum junction temperature must be read
-    off a real datasheet, and the copper area a SOT-223 is soldered to changes the answer
-    materially. Measure before any of it appears in a user-visible string.
+*   ~~**The AMS1117 numbers in §1 are illustrative and unverified.**~~ **Closed 2026-09-08**: read
+    off the datasheet and recorded in §1, including the copper-area caveat, which is now a UI
+    requirement rather than an open question. The framing changed as a result — the ceiling (about
+    130mA on a 12V supply) is the teachable number, not the 4.35W.
 *   **Where the two questions are asked.** They belong with `SPEC-328`'s intent surface rather than
     as a prompt inside the PCB tab, but that depends on `SPEC-210` §2.6's answer about what a
     question is.
