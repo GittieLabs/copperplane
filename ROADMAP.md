@@ -1627,7 +1627,16 @@ tracking, no quizzing, and no tutor tab.
 
 #### [SPEC-114](services/python-daemon/specs/SPEC-114-fabrication-capability-profiles.md) — Fabrication Capability Profiles & Design Rules — Draft
 
-*Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-210, SPEC-309
+*Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-210, SPEC-309 ·
+*Surface:* [SPEC-340](apps/tauri-ui/specs/SPEC-340-ordering-this-board-from-a-real-house.md)
+
+**Built and merged daemon-side** (PR #414) by
+[CTX-114.1](services/python-daemon/context/CTX-114.1-sidecar-rules-and-verification.md):
+the verified `.kicad_dru` generator, the capability profile record with per-field
+provenance, and three routes. Verified against the frozen sidecar, not just from source — 4 findings
+becoming 27 on the tutorial board. **No user can reach any of it**, because there is no UI; under
+this repo's own "verify as the user" norm the feature is not verified, and `SPEC-340` is what closes
+that. The spec stays Draft until it does.
 
 The first pack, and the lowest-bar proof in the product for a novice. Today a board is checked
 against nobody's process: on a first board, DRC enforces KiCad's permissive defaults, so a clean

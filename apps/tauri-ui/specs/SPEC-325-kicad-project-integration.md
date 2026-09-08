@@ -4,7 +4,7 @@ title: "KiCad Project Integration & Schematic Component Table"
 status: Completed
 type: Feature
 created: 2026-09-01
-last_updated: 2026-09-03
+last_updated: 2026-09-08
 target_version: v0.4.0
 location: "apps/tauri-ui/specs/SPEC-325-kicad-project-integration.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
@@ -12,6 +12,7 @@ child_specs:
   - "SPEC-334-footprint-literacy-and-component-detail.md"
   - "SPEC-337-naming-the-two-project-links.md"
   - "SPEC-327-design-advice-layout-and-clearance.md"
+  - "SPEC-340-ordering-this-board-from-a-real-house.md"
 user_facing: true
 ---
 
