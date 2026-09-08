@@ -2048,6 +2048,15 @@ def fabrication_generic_profile() -> dict:
     return capability_profile.validate(profile)
 
 
+def project_set_fabrication_profile(project_name: str, profile: dict = None) -> dict:
+    """The project.set_fabrication_profile route (SPEC-340 section 2).
+
+    Validation happens in `library_store` at store time, so an invalid number is
+    refused here rather than surfacing later as a board check that looks broken.
+    Passing `None` clears the choice."""
+    return library_store.set_project_fabrication_profile(project_name, profile)
+
+
 def fabrication_review_board(pcb_path: str, profile: dict) -> dict:
     """The fabrication.review_board route (SPEC-114 sections 2.8 and 5).
 
@@ -2425,6 +2434,8 @@ def _build_routes() -> dict:
     if capability_profile is not None:
         routes["fabrication.validate_profile"] = fabrication_validate_profile
         routes["fabrication.generic_profile"] = fabrication_generic_profile
+        if library_store is not None:
+            routes["project.set_fabrication_profile"] = project_set_fabrication_profile
     if fabrication_review is not None and kicad_cli is not None:
         routes["fabrication.review_board"] = fabrication_review_board
     if kicad_bridge is not None and freecad_bridge is not None:
