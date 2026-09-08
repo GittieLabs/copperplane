@@ -1638,19 +1638,32 @@ class a fab **accepts without comment**: silkscreen clipped off a pad, text belo
 returned as a smudge, a mask sliver not printed so two pads share an opening, an annular ring at the
 edge of tolerance that yields an intermittent connection. Those come back looking like real boards.
 
-Gated on one unmeasured question that decides the whole shape: does `kicad-cli pcb drc` honour a
-`.kicad_dru` sidecar, and for which constraint classes? If yes, v1 never writes the user's board at
-all, only a file the app owns — the safest first write path in a product that has kept writes last.
+**Measured 2026-09-08, KiCad 10.0.3:** `kicad-cli pcb drc` **does** honour a `<project>.kicad_dru`
+sidecar (wrong-name and removed-file controls both held), and 12 of 14 constraint classes were
+confirmed firing. So **v1 never writes the user's board at all**, only a file the app owns — the
+safest first write path in a product that has kept writes last.
+
+Two limits found in the same session shape the scope. A sidecar rule **cannot** resurrect a check
+the project set to `ignore`, even with an explicit severity, so the app reads the severity table and
+reports what was gated off rather than writing to `.kicad_pro`. And a malformed sidecar is discarded
+**entirely and silently** — one misspelled constraint name dropped every other rule in the file, with
+nothing on stderr — so every write must be followed by a verification run. A realistic profile
+against the tutorial board yields **27** findings rather than hundreds, and the three headline ones
+all land on D1, the same component `SPEC-113` is built around.
 
 #### [SPEC-211](services/python-daemon/specs/SPEC-211-power-path-review.md) — The Power Path Review — Draft
 
 *Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-210, SPEC-205, SPEC-328
 
 The second pack, and the one carrying the "this would have cooked" story. Lead case is linear
-regulator dissipation: `(Vin - Vout) x I`, so 12V to 3.3V at half an amp is 4.35W inside a SOT-223,
-which is arithmetic a maker can follow in one line and which explains something they have physically
-experienced. Input protection was the obvious candidate and lost on hit rate — a first board is
-usually fed from a keyed devkit or USB connector, so reverse polarity does not fire often enough to
+regulator dissipation. **Datasheet-verified 2026-09-08:** the AMS1117 in SOT-223 is 88 degC/W with a
+125 degC maximum junction temperature, so on a 12V supply at 3.3V out it can deliver about **130mA**
+before exceeding it. The "1A regulator" everyone believes they have is a 130mA regulator, which is
+arithmetic a maker can follow in one line and explains something they have physically experienced.
+The trace-width item's citation question is also settled: KiCad's own PCB Calculator names IPC-2221
+and implements the formula without republishing the tables, which is the precedent to follow — while
+saying plainly that IPC-2152 superseded it in 2009. Input protection was the obvious candidate and
+lost on hit rate — a first board is usually fed from a keyed devkit or USB connector, so reverse polarity does not fire often enough to
 carry the proof, and survives as one consideration inside this pack instead.
 
 Everything hangs off two questions (what feeds this board, roughly how much current), which makes
