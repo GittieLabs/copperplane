@@ -252,6 +252,17 @@ export function BoardAdvisor({
           setFabDiscarded(false)
         }}
       />
+      {/* CTX-340.1 Phase 5, found by a real click-through: this block used to be
+          gated on `profile && selectedBoard`, so choosing a house with no board
+          picked rendered NOTHING -- no button, no explanation, no way forward.
+          The user was left looking at nine numbers they had just configured and
+          a review panel that ignored them. A dead end with no sentence
+          explaining it is the SPEC-302 failure mode in miniature. */}
+      {profile && !selectedBoard && (
+        <p className="text-sm text-fg-tertiary">
+          Pick a board above to check it against {profile.house_name}.
+        </p>
+      )}
       {profile && selectedBoard && (
         <div className="flex flex-col gap-2">
           <div>

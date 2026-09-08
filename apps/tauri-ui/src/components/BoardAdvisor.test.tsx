@@ -37,15 +37,24 @@ vi.mock('./FabricationProfile', () => ({
     projectName,
     boardPath,
     profile,
+    onProfileChange,
   }: {
     projectName: string
     boardPath: string | null
     profile: { house_name: string } | null
+    onProfileChange: (p: { house_name: string } | null) => void
   }) => (
-    <p>
-      FabricationProfile stub: projectName={projectName} boardPath={boardPath ?? 'none'}{' '}
-      profile={profile ? profile.house_name : 'none'}
-    </p>
+    <div>
+      <p>
+        FabricationProfile stub: projectName={projectName} boardPath={boardPath ?? 'none'}{' '}
+        profile={profile ? profile.house_name : 'none'}
+      </p>
+      {/* Lets a test drive the real component into its "profile chosen" state,
+          which is where the click-through found a dead end. */}
+      <button type="button" onClick={() => onProfileChange({ house_name: 'Test House' })}>
+        stub choose profile
+      </button>
+    </div>
   ),
 }))
 
@@ -575,6 +584,32 @@ describe('BoardAdvisor: a check result the review agent can actually read', () =
       ),
     )
     expect(screen.getByText(/FabricationProfile stub/).textContent).toContain('profile=none')
+  })
+
+  it('tells the user what to do next when a house is chosen but no board is picked', async () => {
+    // Found by a real click-through, not by these tests: this state used to
+    // render nothing at all -- no button and no explanation -- leaving someone
+    // staring at nine numbers they had just configured with no way forward.
+    listOpenBoardsMock.mockResolvedValue({ status: 'no_board_open' })
+    render(<BoardAdvisor projectName="test-project" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /stub choose profile/ }))
+
+    expect(await screen.findByText(/Pick a board above to check it against Test House/)).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /^Check against/ })).toBeNull()
+  })
+
+  it('offers the check once a house and a board are both chosen', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /board\.kicad_pcb/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /stub choose profile/ }))
+
+    expect(await screen.findByRole('button', { name: /Check against Test House/ })).toBeTruthy()
+    expect(screen.queryByText(/Pick a board above/)).toBeNull()
   })
 
   it('says so when the result could not be saved, rather than failing quietly', async () => {
