@@ -12,6 +12,14 @@ import {
 import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { ViolationsList } from './ViolationsList'
+import { FabricationProfile } from './FabricationProfile'
+import { FabricationReviewResult } from './FabricationReviewResult'
+import {
+  reviewBoard,
+  SidecarDiscardedError,
+  type CapabilityProfile,
+  type FabricationReview,
+} from '../lib/fabricationReview'
 import { linkedProjectBoard } from '../lib/kicadProject'
 import { setProjectCheckResult } from '../lib/projects'
 
@@ -69,6 +77,15 @@ export function BoardAdvisor({
   const [openingKicad, setOpeningKicad] = useState(false)
   const [openKicadError, setOpenKicadError] = useState<string | null>(null)
 
+  // SPEC-340: the board house this project will be ordered from, and the
+  // before-and-after it produces. Per project, never per install -- the same
+  // design may go to two houses (SPEC-114 section 2.9).
+  const [profile, setProfile] = useState<CapabilityProfile | null>(null)
+  const [fabReview, setFabReview] = useState<FabricationReview | null>(null)
+  const [fabRunning, setFabRunning] = useState(false)
+  const [fabError, setFabError] = useState<string | null>(null)
+  const [fabDiscarded, setFabDiscarded] = useState(false)
+
   const [checkingBoard, setCheckingBoard] = useState(false)
   const [selectedBoard, setSelectedBoard] = useState<BoardCandidate | null>(null)
   const [boardCheckResult, setBoardCheckResult] = useState<CheckResult | null>(null)
@@ -83,7 +100,36 @@ export function BoardAdvisor({
     setSelectedBoard(null)
     setBoardCheckResult(null)
     setBoardCheckError(null)
+    // SPEC-340: a profile belongs to one project, so it resets for the same
+    // reason the check result does -- and for the same reason it must NOT
+    // reset on a mere tab switch.
+    setProfile(null)
+    setFabReview(null)
+    setFabError(null)
+    setFabDiscarded(false)
   }, [projectName])
+
+  /** SPEC-340: the before-and-after. A discarded sidecar is kept distinct from
+   *  any other failure -- the user needs to know their design rules did not run
+   *  at all, which is a different sentence from "something went wrong". */
+  const onRunFabricationReview = useCallback(async () => {
+    if (!selectedBoard || !profile) return
+    setFabRunning(true)
+    setFabError(null)
+    setFabDiscarded(false)
+    setFabReview(null)
+    try {
+      setFabReview(await reviewBoard(selectedBoard.path, profile))
+    } catch (err) {
+      if (err instanceof SidecarDiscardedError) {
+        setFabDiscarded(true)
+      } else {
+        setFabError(err instanceof Error ? err.message : String(err))
+      }
+    } finally {
+      setFabRunning(false)
+    }
+  }, [selectedBoard, profile])
 
   const refreshBoardList = useCallback(async () => {
     setLoadingBoardList(true)
@@ -193,6 +239,48 @@ export function BoardAdvisor({
       />
       {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
           is a flow step with a typed result, not a conversational turn. */}
+      {/* SPEC-340: where this board will actually be made, and what that
+          changes. Sits above the AI review because it is a real measurement
+          rather than an explanation of one. */}
+      <FabricationProfile
+        projectName={projectName}
+        boardPath={selectedBoard?.path ?? null}
+        profile={profile}
+        onProfileChange={(next) => {
+          setProfile(next)
+          setFabReview(null)
+          setFabDiscarded(false)
+        }}
+      />
+      {profile && selectedBoard && (
+        <div className="flex flex-col gap-2">
+          <div>
+            <button
+              type="button"
+              className="rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
+              onClick={onRunFabricationReview}
+              disabled={fabRunning}
+            >
+              {fabRunning ? 'Checking…' : `Check against ${profile.house_name}`}
+            </button>
+          </div>
+          {fabRunning && (
+            <p className="text-sm text-fg-tertiary">
+              Checking {selectedBoard.label} against your board house… this runs DRC more than
+              once, so it takes a few seconds.
+            </p>
+          )}
+          {fabDiscarded && (
+            <p className="text-sm text-danger">
+              KiCad rejected the design rules Copperplane wrote, so none of them ran and there is
+              no result to show. Your board and your project settings were not changed.
+            </p>
+          )}
+          {fabError && <p className="text-sm text-danger">{fabError}</p>}
+          {fabReview && <FabricationReviewResult review={fabReview} />}
+        </div>
+      )}
+
       <ReviewPanel
         key={`${projectName}:pcb`}
         area="pcb"

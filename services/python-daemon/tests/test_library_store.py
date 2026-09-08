@@ -590,10 +590,13 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
 
         loaded = store.load_project("weather-pcb")
 
-        # CTX-206.1/CTX-304.3/CTX-308.9/CTX-206.8: `intent`, `parts`,
-        # `footprint_overrides`, and `notes` are now real, backfilled
-        # state -- part of "exactly as before" now that all four fields
-        # exist at all.
+        # CTX-206.1/CTX-304.3/CTX-308.9/CTX-206.8/CTX-340.1: `intent`,
+        # `parts`, `footprint_overrides`, `notes`, and
+        # `fabrication_profile` are now real, backfilled state -- part of
+        # "exactly as before" now that all five fields exist at all.
+        # `fabrication_profile` backfills to None rather than {}: None
+        # means the user has never chosen a board house, which is not the
+        # same as a house that publishes no limits (SPEC-114 2.9).
         self.assertEqual(
             loaded,
             {
@@ -603,6 +606,7 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
                 "intent": None,
                 "parts": [],
                 "footprint_overrides": {},
+                "fabrication_profile": None,
                 "notes": None,
             },
         )

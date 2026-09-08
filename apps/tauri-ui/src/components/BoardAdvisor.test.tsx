@@ -20,6 +20,41 @@ vi.mock('../lib/projects', () => ({
   setProjectCheckResult: (...args: unknown[]) => setProjectCheckResultMock(...args),
 }))
 
+// SPEC-340: FabricationProfile and FabricationReviewResult each have their own
+// dedicated test file -- stubbed here, matching AgentChat's and ReviewPanel's
+// own precedent below, so these tests stay about BoardAdvisor's wiring.
+const reviewBoardMock = vi.fn()
+
+vi.mock('../lib/fabricationReview', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/fabricationReview')>()),
+  reviewBoard: (...args: unknown[]) => reviewBoardMock(...args),
+  genericProfile: vi.fn(),
+  setProjectProfile: vi.fn(),
+}))
+
+vi.mock('./FabricationProfile', () => ({
+  FabricationProfile: ({
+    projectName,
+    boardPath,
+    profile,
+  }: {
+    projectName: string
+    boardPath: string | null
+    profile: { house_name: string } | null
+  }) => (
+    <p>
+      FabricationProfile stub: projectName={projectName} boardPath={boardPath ?? 'none'}{' '}
+      profile={profile ? profile.house_name : 'none'}
+    </p>
+  ),
+}))
+
+vi.mock('./FabricationReviewResult', () => ({
+  FabricationReviewResult: ({ review }: { review: { after_count: number } }) => (
+    <p>FabricationReviewResult stub: after={review.after_count}</p>
+  ),
+}))
+
 // CTX-318.3: AgentChat has its own dedicated test file (AgentChat.test.tsx)
 // -- stubbed here, matching PartDetail.test.tsx's own precedent (CTX-318.2),
 // so BoardAdvisor's tests stay focused on its own wiring (does it mount
@@ -502,6 +537,44 @@ describe('BoardAdvisor: a check result the review agent can actually read', () =
     const record = setProjectCheckResultMock.mock.calls[0][2]
     expect(record.unconnected_count).toBe(18)
     expect(record.parity_count).toBe(1)
+  })
+
+  // TEST-018
+  it('passes the selected board and project through to the fabrication profile', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    const stub = await screen.findByText(/FabricationProfile stub/)
+    // Scoped to this stub's own line: AgentChat and ReviewPanel render
+    // `projectName=` too, so a bare query matches three elements.
+    expect(stub.textContent).toContain('projectName=test-project')
+    // No board picked yet: an honest empty state, not an error (SPEC-114 2.9).
+    expect(stub.textContent).toContain('boardPath=none')
+    expect(stub.textContent).toContain('profile=none')
+  })
+
+  it('resets the fabrication profile on a project switch, but not a re-render', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    const { rerender } = render(<BoardAdvisor projectName="test-project" />)
+    expect(await screen.findByText(/FabricationProfile stub/)).toBeTruthy()
+
+    // Same project re-rendering (what a tab switch looks like here, since this
+    // component stays mounted): nothing is thrown away.
+    rerender(<BoardAdvisor projectName="test-project" />)
+    expect(
+      screen.getByText(/FabricationProfile stub/).textContent,
+    ).toContain('projectName=test-project')
+
+    // A genuine project switch: the profile belongs to the old project.
+    rerender(<BoardAdvisor projectName="other-project" />)
+    await waitFor(() =>
+      expect(screen.getByText(/FabricationProfile stub/).textContent).toContain(
+        'projectName=other-project',
+      ),
+    )
+    expect(screen.getByText(/FabricationProfile stub/).textContent).toContain('profile=none')
   })
 
   it('says so when the result could not be saved, rather than failing quietly', async () => {
