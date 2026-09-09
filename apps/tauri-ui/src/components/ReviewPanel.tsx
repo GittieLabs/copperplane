@@ -76,9 +76,28 @@ export interface ReviewPanelProps {
    * all (SPEC-316's own menu), so this is `undefined` for Overview and
    * Components; the in-area button is their only real entry point. */
   menuCommand?: MenuCommand | null
+  /** SPEC-340: the ERC/DRC card sitting directly above this one.
+   *
+   *  Reported by a real click-through: this panel said "2 findings" on a board
+   *  whose DRC also had four errors and a missing connection, and neither card
+   *  referred to the other. The review is not ignoring them -- it deliberately
+   *  lists only what ERC and DRC do NOT report (SPEC-113) -- but without
+   *  naming that count, "2 findings" reads as the whole story.
+   *
+   *  `count` is null when that check has not been run this session, which must
+   *  never look the same as a check that ran and found nothing. */
+  siblingCheck?: { label: string; count: number | null; where: string }
 }
 
-export function ReviewPanel({ area, scope, scopeId, title, projectName, menuCommand }: ReviewPanelProps) {
+export function ReviewPanel({
+  area,
+  scope,
+  scopeId,
+  title,
+  projectName,
+  menuCommand,
+  siblingCheck,
+}: ReviewPanelProps) {
   const [findings, setFindings] = useState<ReviewFinding[] | null>(null)
   const [stored, setStored] = useState<StoredReview | null>(null)
   const [running, setRunning] = useState(false)
@@ -229,6 +248,13 @@ export function ReviewPanel({ area, scope, scopeId, title, projectName, menuComm
               {ourFindingCount === 1
                 ? '1 of these was found by Copperplane. ERC and DRC do not report it.'
                 : `${ourFindingCount} of these were found by Copperplane. ERC and DRC do not report them.`}
+            </p>
+          )}
+          {siblingCheck && (
+            <p className="text-xs text-fg-tertiary">
+              {siblingCheck.count === null
+                ? `${siblingCheck.label} has not been run yet — run it under ${siblingCheck.where} for the problems it reports. This review only lists the ones it does not.`
+                : `${siblingCheck.label} separately reports ${siblingCheck.count} ${siblingCheck.count === 1 ? 'problem' : 'problems'} on this ${area === 'schematic' ? 'schematic' : 'board'}, listed under ${siblingCheck.where}. This review does not repeat them.`}
             </p>
           )}
 

@@ -379,3 +379,54 @@ describe('ReviewPanel: findings this app found itself (SPEC-113)', () => {
     expect(screen.queryByText('Not reported by ERC or DRC')).toBeNull()
   })
 })
+
+describe('ReviewPanel: connected to the check above it (SPEC-340)', () => {
+  const OURS = {
+    severity: 'warning' as const,
+    title: "SW1's symbol and footprint disagree about how many pins this part has",
+    detail: 'Switch:SW_Push has 2; Button_Switch_THT:KSA_Tactile_SPST has 5 numbered pads.',
+    sources: [],
+    general_practice: false,
+    area: 'pcb',
+    origin: 'copperplane' as const,
+  }
+
+  async function renderWith(siblingCheck: unknown) {
+    runReviewMock.mockResolvedValueOnce([OURS])
+    render(
+      <ReviewPanel
+        area="pcb"
+        scope="project"
+        scopeId="p:pcb"
+        title="Review the board"
+        siblingCheck={siblingCheck as never}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Run Review' }))
+    await waitFor(() => screen.getByText(/finding/))
+  }
+
+  it('names what the board check reported, so its own count is not the whole story', async () => {
+    // Reported by a real click-through: this panel said "2 findings" on a board
+    // whose DRC also had four errors and a missing connection, and neither card
+    // mentioned the other.
+    await renderWith({ label: 'The board check (DRC)', count: 5, where: 'Board (DRC) above' })
+    expect(document.body.textContent).toContain('separately reports 5 problems')
+    expect(document.body.textContent).toContain('Board (DRC) above')
+    expect(document.body.textContent).toContain('does not repeat them')
+  })
+
+  it('says a check has not run rather than implying it found nothing', async () => {
+    // "We could not check" and "we checked and it is clean" must never look the
+    // same -- the rule _check_status_note already follows on the daemon side.
+    await renderWith({ label: 'The board check (DRC)', count: null, where: 'Board (DRC) above' })
+    expect(document.body.textContent).toContain('has not been run yet')
+    expect(document.body.textContent).not.toContain('separately reports')
+  })
+
+  it('says nothing extra when there is no sibling check to point at', async () => {
+    await renderWith(undefined)
+    expect(document.body.textContent).not.toContain('separately reports')
+    expect(document.body.textContent).not.toContain('has not been run yet')
+  })
+})

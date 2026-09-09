@@ -1,5 +1,15 @@
+import { useState } from 'react'
+
 import type { CheckResult, Violation, ViolationItem } from '../lib/boardAdvisor'
+import { FabricationSummaryBanner } from './FabricationSummaryBanner'
 import { explainTerms, IGNORED_CHECK_NOTES } from '../lib/kicadGlossary'
+
+/** Matches the review panel's own left-border treatment so the two lists on
+ *  one screen read as the same kind of thing. */
+const _SEVERITY_BORDER: Record<string, string> = {
+  error: 'border-l-2 border-l-danger',
+  warning: 'border-l-2 border-l-warning',
+}
 
 const _SEVERITY_COLOR: Record<string, string> = {
   error: 'text-danger',
@@ -50,7 +60,24 @@ export function ViolationsList({
 
       <SeverityFilter severities={result.included_severities} />
 
+      {/* SPEC-340: the before-and-after rides above the one findings list
+          rather than duplicating it. `fabrication` is absent unless a
+          capability profile was used. */}
+      {result.fabrication && <FabricationSummaryBanner fabrication={result.fabrication} />}
+
       <IgnoredChecks checks={result.ignored_checks} kind={kind} />
+
+      {/* SPEC-340: the other half of the connection. Reported by a real
+          click-through -- this card and the review below each showed part of
+          the picture and neither mentioned the other.
+          Reported again on contrast: this is an introductory statement, not a
+          section header, and rendering it in the same muted grey as the
+          collapsible header above made the two read as the same kind of thing. */}
+      <p className="border-l-2 border-l-line-strong pl-2 text-xs text-fg-secondary">
+        This is what {kind.toUpperCase()} reports. Copperplane also checks things{' '}
+        {kind.toUpperCase()} cannot see, such as a symbol and footprint disagreeing about pin
+        count — those are in “Review the {kind === 'erc' ? 'schematic' : 'board'}” below.
+      </p>
 
       {result.violations.length === 0 ? (
         <p className={result.unconnected_count || result.parity_count
@@ -63,39 +90,145 @@ export function ViolationsList({
       ) : (
         <>
           <p className="text-sm text-fg-secondary">{result.summary}</p>
-          <ul className="flex flex-col gap-2">
-            {result.violations.map((violation, index) => (
-              <ViolationCard key={index} violation={violation} />
-            ))}
-          </ul>
-          {result.truncated_count > 0 && (
-            <p className="text-xs text-fg-muted">
-              +{result.truncated_count} more violation(s) not shown.
-            </p>
-          )}
+          <FindingsList violations={result.violations} truncatedCount={result.truncated_count} />
         </>
       )}
     </div>
   )
 }
 
-function ViolationCard({ violation }: { violation: Violation }) {
+/** How many findings are shown before the list asks. A real board produced 28,
+ *  which is a long scroll before the review panel underneath even begins --
+ *  reported from the running app as "extremely long and potentially
+ *  distracting if you want to focus on one section". */
+const PAGE_SIZE = 10
+
+/** The findings, in a form that can be skimmed.
+ *
+ *  Three problems reported from the running app, all in one place:
+ *  every card was fully expanded so 28 findings meant an enormous scroll; the
+ *  ones past the explanation cap said "+13 more not shown" with no way to see
+ *  them; and severity was styled differently here than in the review panel
+ *  directly below, so the same idea looked like two different things.
+ *
+ *  Collapsed by default past the first few: the heading of each card carries
+ *  the severity and the description, which is what a user scans. The detail is
+ *  one click away rather than always on screen. */
+function FindingsList({
+  violations,
+  truncatedCount,
+}: {
+  violations: Violation[]
+  truncatedCount: number
+}) {
+  const [shown, setShown] = useState(PAGE_SIZE)
+  const visible = violations.slice(0, shown)
+  const remaining = violations.length - visible.length
+
   return (
-    <li className="rounded border border-line-subtle p-2 text-xs">
-      <p className="font-medium text-fg">
-        <span className={_SEVERITY_COLOR[violation.severity] ?? 'text-fg-tertiary'}>
-          {violation.severity.toUpperCase()}
-        </span>{' '}
-        {violation.description}
-        {violation.sheet_path && <span className="text-fg-muted"> ({violation.sheet_path})</span>}
-      </p>
-      {violation.explanation && (
-        <p className="mt-1 text-fg-secondary">{violation.explanation}</p>
+    <div className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-2">
+        {visible.map((violation, index) => (
+          <ViolationCard
+            key={index}
+            violation={violation}
+            /* The first few open, so the section is useful without a click;
+               the rest collapsed, so the page stays skimmable. */
+            defaultOpen={index < 3}
+          />
+        ))}
+      </ul>
+
+      {remaining > 0 && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="self-start rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
+            onClick={() => setShown((n) => n + PAGE_SIZE)}
+          >
+            Show {Math.min(PAGE_SIZE, remaining)} more
+          </button>
+          <button
+            type="button"
+            className="text-xs text-fg-muted underline"
+            onClick={() => setShown(violations.length)}
+          >
+            Show all {violations.length}
+          </button>
+        </div>
       )}
-      {violation.suggested_fix && (
-        <p className="mt-1 text-fg-tertiary">Suggested fix: {violation.suggested_fix}</p>
+
+      {shown >= violations.length && violations.length > PAGE_SIZE && (
+        <button
+          type="button"
+          className="self-start text-xs text-fg-muted underline"
+          onClick={() => setShown(PAGE_SIZE)}
+        >
+          Show fewer
+        </button>
       )}
-      <WhereItIs items={violation.items} />
+
+      {truncatedCount > 0 && (
+        <p className="text-xs text-fg-muted">
+          {truncatedCount} of these {truncatedCount === 1 ? 'is' : 'are'} listed without a
+          plain-language explanation. KiCad reported them and they are all shown above; only the
+          explanations are limited.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** One finding.
+ *
+ *  Severity is carried by a coloured left border AND the word, matching the
+ *  review panel directly below. Those two lists used different visual
+ *  languages for the same idea, which was reported as making the sections hard
+ *  to tell apart and hard to compare. Border alone would be colour-only
+ *  information; the word stays. */
+function ViolationCard({
+  violation,
+  defaultOpen,
+}: {
+  violation: Violation
+  defaultOpen: boolean
+}) {
+  const hasDetail = Boolean(
+    violation.explanation || violation.suggested_fix || (violation.items ?? []).length,
+  )
+
+  return (
+    <li
+      className={`rounded border border-y-line-subtle border-r-line-subtle p-2 text-xs ${
+        _SEVERITY_BORDER[violation.severity] ?? 'border-l-2 border-l-line-strong'
+      }`}
+    >
+      <details open={defaultOpen}>
+        <summary className={hasDetail ? 'cursor-pointer' : 'cursor-default list-none'}>
+          <span className="font-medium text-fg">
+            <span className={_SEVERITY_COLOR[violation.severity] ?? 'text-fg-tertiary'}>
+              {violation.severity.toUpperCase()}
+            </span>{' '}
+            {violation.description}
+            {violation.sheet_path && (
+              <span className="text-fg-muted"> ({violation.sheet_path})</span>
+            )}
+          </span>
+        </summary>
+
+        {violation.explanation && (
+          <p className="mt-1 text-fg-secondary">{violation.explanation}</p>
+        )}
+        {violation.suggested_fix && (
+          <p className="mt-1 text-fg-tertiary">Suggested fix: {violation.suggested_fix}</p>
+        )}
+        {!violation.explanation && (
+          <p className="mt-1 text-fg-muted">
+            KiCad reported this one; Copperplane did not write an explanation for it.
+          </p>
+        )}
+        <WhereItIs items={violation.items} />
+      </details>
     </li>
   )
 }
@@ -205,7 +338,10 @@ function IgnoredChecks({
 
   return (
     <details className="rounded border border-line-subtle p-2 text-xs">
-      <summary className="cursor-pointer text-fg-muted">
+      {/* Reported on contrast: this is a section holder and was rendered in
+          the same muted grey as ordinary body copy below it, so it did not
+          read as one. */}
+      <summary className="cursor-pointer font-medium text-fg-secondary">
         {checks.length} {kind.toUpperCase()} test{checks.length === 1 ? '' : 's'} switched off
         {notable.length > 0 && (
           <span className="text-warning">

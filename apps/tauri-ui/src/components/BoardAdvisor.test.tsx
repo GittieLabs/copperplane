@@ -20,6 +20,50 @@ vi.mock('../lib/projects', () => ({
   setProjectCheckResult: (...args: unknown[]) => setProjectCheckResultMock(...args),
 }))
 
+// SPEC-340: FabricationProfile and FabricationReviewResult each have their own
+// dedicated test file -- stubbed here, matching AgentChat's and ReviewPanel's
+// own precedent below, so these tests stay about BoardAdvisor's wiring.
+const reviewBoardMock = vi.fn()
+
+vi.mock('../lib/fabricationReview', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/fabricationReview')>()),
+  reviewBoard: (...args: unknown[]) => reviewBoardMock(...args),
+  genericProfile: vi.fn(),
+  setProjectProfile: vi.fn(),
+}))
+
+vi.mock('./FabricationProfile', () => ({
+  FabricationProfile: ({
+    projectName,
+    boardPath,
+    profile,
+    onProfileChange,
+  }: {
+    projectName: string
+    boardPath: string | null
+    profile: { house_name: string } | null
+    onProfileChange: (p: { house_name: string } | null) => void
+  }) => (
+    <div>
+      <p>
+        FabricationProfile stub: projectName={projectName} boardPath={boardPath ?? 'none'}{' '}
+        profile={profile ? profile.house_name : 'none'}
+      </p>
+      {/* Lets a test drive the real component into its "profile chosen" state,
+          which is where the click-through found a dead end. */}
+      <button type="button" onClick={() => onProfileChange({ house_name: 'Test House' })}>
+        stub choose profile
+      </button>
+    </div>
+  ),
+}))
+
+vi.mock('./FabricationReviewResult', () => ({
+  FabricationReviewResult: ({ review }: { review: { after_count: number } }) => (
+    <p>FabricationReviewResult stub: after={review.after_count}</p>
+  ),
+}))
+
 // CTX-318.3: AgentChat has its own dedicated test file (AgentChat.test.tsx)
 // -- stubbed here, matching PartDetail.test.tsx's own precedent (CTX-318.2),
 // so BoardAdvisor's tests stay focused on its own wiring (does it mount
@@ -143,7 +187,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
 
     fireEvent.click(screen.getByText('board.kicad_pcb'))
 
-    await waitFor(() => expect(checkBoardMock).toHaveBeenCalledWith('/real/board.kicad_pcb'))
+    await waitFor(() => expect(checkBoardMock).toHaveBeenCalledWith('/real/board.kicad_pcb', null))
     await waitFor(() => screen.getByText(/Board has malformed outline/))
     screen.getByText('ERROR')
     screen.getByText(/no outline drawn on the Edge.Cuts layer/)
@@ -238,7 +282,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     await waitFor(() => screen.getByText('board_b.kicad_pcb'))
     fireEvent.click(screen.getByText('board_b.kicad_pcb'))
 
-    await waitFor(() => expect(checkBoardMock).toHaveBeenCalledWith('/boards/b/board_b.kicad_pcb'))
+    await waitFor(() => expect(checkBoardMock).toHaveBeenCalledWith('/boards/b/board_b.kicad_pcb', null))
     expect(checkBoardMock).toHaveBeenCalledTimes(1)
   })
 
@@ -308,7 +352,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     await waitFor(() => expect(openKicadMock).toHaveBeenCalledTimes(1))
   })
 
-  it('a truncated_count > 0 tells the user violations were left out, not silently dropped', async () => {
+  it('a truncated_count > 0 says explanations were capped, not that findings were withheld', async () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     checkBoardMock.mockResolvedValueOnce({ ...VIOLATION_RESULT, truncated_count: 5 })
 
@@ -316,7 +360,9 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     fireEvent.click(screen.getByText('board.kicad_pcb'))
 
-    await waitFor(() => screen.getByText(/\+5 more violation\(s\) not shown\./))
+    // The contract changed: every finding is returned and shown. The cap is
+    // on the LLM explanation call, which is what this number now counts.
+    await waitFor(() => screen.getByText(/only the explanations are limited/))
   })
 
   it('a completed check survives being re-rendered with the same projectName -- App.tsx keeps this component mounted across tab switches, this just confirms the state isn\'t reset along the way', async () => {
@@ -502,6 +548,103 @@ describe('BoardAdvisor: a check result the review agent can actually read', () =
     const record = setProjectCheckResultMock.mock.calls[0][2]
     expect(record.unconnected_count).toBe(18)
     expect(record.parity_count).toBe(1)
+  })
+
+  // TEST-018
+  it('passes the selected board and project through to the fabrication profile', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    const stub = await screen.findByText(/FabricationProfile stub/)
+    // Scoped to this stub's own line: AgentChat and ReviewPanel render
+    // `projectName=` too, so a bare query matches three elements.
+    expect(stub.textContent).toContain('projectName=test-project')
+    // A sole board is now selected on load, so the profile card knows the
+    // board without the user hunting for it.
+    expect(stub.textContent).toContain('boardPath=/real/board.kicad_pcb')
+    expect(stub.textContent).toContain('profile=none')
+  })
+
+  it('resets the fabrication profile on a project switch, but not a re-render', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    const { rerender } = render(<BoardAdvisor projectName="test-project" />)
+    expect(await screen.findByText(/FabricationProfile stub/)).toBeTruthy()
+
+    // Same project re-rendering (what a tab switch looks like here, since this
+    // component stays mounted): nothing is thrown away.
+    rerender(<BoardAdvisor projectName="test-project" />)
+    expect(
+      screen.getByText(/FabricationProfile stub/).textContent,
+    ).toContain('projectName=test-project')
+
+    // A genuine project switch: the profile belongs to the old project.
+    rerender(<BoardAdvisor projectName="other-project" />)
+    await waitFor(() =>
+      expect(screen.getByText(/FabricationProfile stub/).textContent).toContain(
+        'projectName=other-project',
+      ),
+    )
+    expect(screen.getByText(/FabricationProfile stub/).textContent).toContain('profile=none')
+  })
+
+  it('offers a visible action for a board it already knows about', async () => {
+    // Regression from the auto-select fix: a linked project's board was
+    // selected on load, which rendered it in the "chosen" style while nothing
+    // had run. The card looked finished and showed nothing, with no obvious
+    // next step -- the same dead end as before, wearing a different hat.
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    const action = await screen.findByRole('button', { name: /Run board check/ })
+    expect(action).toBeTruthy()
+    expect(screen.getByText(/Nothing has been checked yet/)).toBeTruthy()
+  })
+
+  it('stops offering the action once a result is on screen', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /Run board check/ }))
+
+    await waitFor(() => expect(checkBoardMock).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByText(/Nothing has been checked yet/)).toBeNull())
+  })
+
+  it('sends the chosen profile into the one board check, not a second check', async () => {
+    // SPEC-340, after the click-through: a profile is an INPUT to this check.
+    // It used to be a separate button running DRC again beside this one, which
+    // is what made the tab read as three overlapping tools.
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    fireEvent.click(await screen.findByRole('button', { name: /stub choose profile/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /board\.kicad_pcb/ }))
+
+    await waitFor(() =>
+      expect(checkBoardMock).toHaveBeenCalledWith('/real/board.kicad_pcb', {
+        house_name: 'Test House',
+      }),
+    )
+    // No second check anywhere on the tab.
+    expect(screen.queryByRole('button', { name: /^Check against/ })).toBeNull()
+  })
+
+  it('names the rules the board check will use before it is run', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    render(<BoardAdvisor projectName="test-project" />)
+
+    // Without a profile it says whose rules it is using, rather than leaving
+    // the user to guess what "Board (DRC)" checks against.
+    expect(await screen.findByText(/KiCad’s own default rules/)).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: /stub choose profile/ }))
+    expect(await screen.findByText(/Checking against Test House/)).toBeTruthy()
   })
 
   it('says so when the result could not be saved, rather than failing quietly', async () => {

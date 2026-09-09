@@ -570,11 +570,13 @@ def explain_violations(
     own advice stays grounded in which real check produced these
     violations, never invented.
 
-    Returns each real violation dict enriched with `explanation`/
-    `suggested_fix`, plus `summary` and `truncated_count` (0 unless
-    _MAX_VIOLATIONS_PER_EXPLANATION_CALL capped the real list) -- ready
-    for the daemon route to return as-is, no re-indexing needed by the
-    caller. A clean (empty) violations list short-circuits before any
+    Returns EVERY real violation, enriched with `explanation`/`suggested_fix`
+    where one was generated and with empty strings where the explanation call
+    was capped, plus `summary` and `truncated_count` -- the number that went
+    unexplained, never the number withheld. The cap is on the LLM call, which
+    costs money; the findings themselves are free and are always returned.
+
+    A clean (empty) violations list short-circuits before any
     LLM call -- there is nothing to explain, and the honest, deterministic
     answer costs nothing, rather than spending a real network call asking
     a model to describe an empty list."""
@@ -583,8 +585,17 @@ def explain_violations(
 
     secrets = secrets or {}
 
+    # The CAP IS ON THE EXPLANATION CALL, NOT ON THE FINDINGS. Until now the
+    # violations beyond the cap were dropped here and the UI said "+13 more not
+    # shown" with no way to see them -- reported directly from the running app.
+    # KiCad's findings are a deterministic fact about the user's board and cost
+    # nothing to return; only the prose is expensive. So the remainder is kept
+    # and returned unexplained, which is the same trade `_explain_or_report_
+    # plainly` already makes when the LLM call fails outright: the numbers are
+    # still right, only the prose is missing.
     prioritized = _prioritize_violations(violations)
-    truncated_count = max(0, len(prioritized) - _MAX_VIOLATIONS_PER_EXPLANATION_CALL)
+    unexplained = prioritized[_MAX_VIOLATIONS_PER_EXPLANATION_CALL:]
+    truncated_count = len(unexplained)
     prioritized = prioritized[:_MAX_VIOLATIONS_PER_EXPLANATION_CALL]
 
     loader = ConfigLoader(_AGENTFLOW_DIR)
@@ -605,6 +616,11 @@ def explain_violations(
          "suggested_fix": explanations_by_index[i]["suggested_fix"]}
         for i in range(len(prioritized))
     ]
+    enriched.extend(
+        {**v, "explanation": "", "suggested_fix": ""} for v in unexplained
+    )
+    # `truncated_count` now means "how many were not EXPLAINED", not "how many
+    # were withheld". Every finding is present in `violations`.
     return {"violations": enriched, "summary": validated["summary"], "truncated_count": truncated_count}
 
 

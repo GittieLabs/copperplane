@@ -12,6 +12,8 @@ import {
 import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { ViolationsList } from './ViolationsList'
+import { FabricationProfile } from './FabricationProfile'
+import { type CapabilityProfile } from '../lib/fabricationReview'
 import { linkedProjectBoard } from '../lib/kicadProject'
 import { setProjectCheckResult } from '../lib/projects'
 
@@ -69,6 +71,11 @@ export function BoardAdvisor({
   const [openingKicad, setOpeningKicad] = useState(false)
   const [openKicadError, setOpenKicadError] = useState<string | null>(null)
 
+  // SPEC-340: the board house this project will be ordered from, and the
+  // before-and-after it produces. Per project, never per install -- the same
+  // design may go to two houses (SPEC-114 section 2.9).
+  const [profile, setProfile] = useState<CapabilityProfile | null>(null)
+
   const [checkingBoard, setCheckingBoard] = useState(false)
   const [selectedBoard, setSelectedBoard] = useState<BoardCandidate | null>(null)
   const [boardCheckResult, setBoardCheckResult] = useState<CheckResult | null>(null)
@@ -83,6 +90,10 @@ export function BoardAdvisor({
     setSelectedBoard(null)
     setBoardCheckResult(null)
     setBoardCheckError(null)
+    // SPEC-340: a profile belongs to one project, so it resets for the same
+    // reason the check result does -- and for the same reason it must NOT
+    // reset on a mere tab switch.
+    setProfile(null)
   }, [projectName])
 
   const refreshBoardList = useCallback(async () => {
@@ -97,9 +108,21 @@ export function BoardAdvisor({
       const linked = await linkedProjectBoard(projectName)
       if (linked) {
         setBoardListResult({ status: 'boards_found', candidates: [linked] })
+        setSelectedBoard(linked)
         return
       }
-      setBoardListResult(await listOpenBoards())
+      const listed = await listOpenBoards()
+      setBoardListResult(listed)
+      // Found by a real click-through: when there is exactly one board -- from
+      // the linked project above, or from KiCad -- the app already holds its
+      // path, but `selectedBoard` was only ever set by a click, so everything
+      // downstream behaved as though no board existed. Selecting it does NOT
+      // run the check; it just stops the app pretending not to know which
+      // board this is. The check stays an explicit action because it spends a
+      // real LLM call (CTX-339.1: do not charge for a result twice).
+      if (listed.status === 'boards_found' && listed.candidates.length === 1) {
+        setSelectedBoard(listed.candidates[0])
+      }
     } catch (err) {
       setBoardListError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -140,7 +163,9 @@ export function BoardAdvisor({
     setBoardCheckError(null)
     setBoardCheckResult(null)
     try {
-      const result = await checkBoard(candidate.path)
+      // SPEC-340: one check. The profile changes which rules it runs against,
+      // it does not add a second check beside this one.
+      const result = await checkBoard(candidate.path, profile)
       setBoardCheckResult(result)
       // SPEC-319 §2.1's prerequisite: persist it so the review and chat
       // agents can actually see it. Held only in React state before, which
@@ -177,6 +202,15 @@ export function BoardAdvisor({
 
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6">
+      {/* SPEC-340: an INPUT to the board check below, so it sits above it. It
+          was originally rendered underneath, which read as a third thing to
+          run rather than as the setting that changes what the check does. */}
+      <FabricationProfile
+        projectName={projectName}
+        boardPath={selectedBoard?.path ?? null}
+        profile={profile}
+        onProfileChange={setProfile}
+      />
       <BoardCheckSection
         loadingList={loadingBoardList}
         listResult={boardListResult}
@@ -190,10 +224,16 @@ export function BoardAdvisor({
         checkResult={boardCheckResult}
         checkError={boardCheckError}
         onCheckBoard={(candidate) => void handleCheckBoard(candidate)}
+        houseName={profile?.house_name ?? null}
       />
       {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
           is a flow step with a typed result, not a conversational turn. */}
       <ReviewPanel
+        siblingCheck={{
+          label: 'The board check (DRC)',
+          count: (boardCheckResult ? (boardCheckResult.violation_count ?? boardCheckResult.violations.length) + (boardCheckResult.unconnected_count ?? 0) : null),
+          where: 'Board (DRC) above',
+        }}
         key={`${projectName}:pcb`}
         area="pcb"
         scope="project"
@@ -231,6 +271,7 @@ function BoardCheckSection({
   checkResult,
   checkError,
   onCheckBoard,
+  houseName,
 }: {
   loadingList: boolean
   listResult: ListOpenBoardsResult | null
@@ -244,6 +285,9 @@ function BoardCheckSection({
   checkResult: CheckResult | null
   checkError: string | null
   onCheckBoard: (candidate: BoardCandidate) => void
+  /** SPEC-340: names the rules this check will use, so the section says what
+   *  it does before it is run rather than only after. */
+  houseName: string | null
 }) {
   // CTX-309.4 second revision: real clicking-through found the first cut
   // still showing "could not connect" in alarming red on the very first
@@ -257,6 +301,16 @@ function BoardCheckSection({
   return (
     <div className="flex flex-col gap-2 rounded border border-line p-3">
       <p className="text-xs font-medium uppercase text-fg-muted">Board (DRC)</p>
+      {/* Found by a real click-through: three sections on this tab each ran a
+          check and none said what it checked or how it differed from the
+          others. Naming the rules and the output is the whole fix. */}
+      <p className="text-xs text-fg-tertiary">
+        Runs KiCad&rsquo;s design-rule check on the board and explains each finding in plain
+        language, with where to find it.{' '}
+        {houseName
+          ? `Checking against ${houseName}, not KiCad's defaults.`
+          : 'Checking against KiCad\u2019s own default rules \u2014 pick a board house above to check against what your fab can actually build.'}
+      </p>
 
       {loadingList && <p className="text-sm text-fg-tertiary">Scanning for boards open in KiCad…</p>}
 
@@ -320,6 +374,7 @@ function BoardCheckSection({
                     }`}
                     onClick={() => onCheckBoard(candidate)}
                     disabled={checkingBoard}
+                    title="Check this board"
                   >
                     <span className="block font-medium">{candidate.label}</span>
                     <span className="block break-all text-fg-muted">{candidate.path}</span>
@@ -349,6 +404,23 @@ function BoardCheckSection({
               Refresh
             </button>
           </div>
+        </div>
+      )}
+
+      {selectedBoard && !checkResult && !checkingBoard && (
+        <div className="flex flex-col gap-1">
+          <button
+            type="button"
+            className="self-start rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
+            onClick={() => onCheckBoard(selectedBoard)}
+          >
+            Run board check
+          </button>
+          <p className="text-xs text-fg-muted">
+            Nothing has been checked yet. This runs KiCad&rsquo;s design-rule check on{' '}
+            {selectedBoard.label} against {houseName ?? "KiCad\u2019s own defaults"} and explains
+            what it finds.
+          </p>
         </div>
       )}
 

@@ -1027,6 +1027,33 @@ def _validate_project_intent(project: dict) -> None:
         raise SchemaValidationError("Project.intent must be a string or null.")
 
 
+def _validate_project_fabrication_profile(project: dict) -> None:
+    """CTX-340.1 Phase 1: validate at store time, not at review time.
+
+    An invalid profile that reaches disk surfaces later as a failed board check,
+    where it reads to the user as "this app's checking is broken" rather than
+    "this number is wrong". `capability_profile` owns the actual rules; this is
+    the gate that stops a bad record being persisted at all.
+
+    Imported lazily so `library_store` keeps working when `capability_profile`
+    could not import -- the daemon already degrades that module independently,
+    and a project should still load without it."""
+    profile = project.get("fabrication_profile")
+    if profile is None:
+        return
+    try:
+        import capability_profile
+    except Exception:  # noqa: BLE001
+        raise SchemaValidationError(
+            "Cannot store a fabrication profile: the capability_profile module "
+            "is unavailable in this build."
+        )
+    try:
+        capability_profile.validate(profile)
+    except capability_profile.ProfileValidationError as exc:
+        raise SchemaValidationError(str(exc)) from exc
+
+
 def _backfill_project_intent(record: dict) -> dict:
     """SPEC-206 §2.1: `None` and `""` must stay distinguishable -- the
     same reason `CTX-205.3` backfilled `design_guidance` as `None`
@@ -1055,6 +1082,11 @@ def _backfill_project_intent(record: dict) -> dict:
     record.setdefault("parts", [])
     record.setdefault("footprint_overrides", {})
     record.setdefault("notes", None)
+    # CTX-340.1: `None` means the user has never chosen a board house, which is
+    # the honest empty state SPEC-114 section 2.9 asks for -- not the same thing
+    # as an empty profile, which would be a house that publishes no limits at
+    # all. Follows `intent`'s convention rather than `parts`'s for that reason.
+    record.setdefault("fabrication_profile", None)
     return record
 
 
@@ -1072,6 +1104,7 @@ def save_project(project: dict) -> dict:
     if not name:
         raise SchemaValidationError("Project.name is required.")
     _validate_project_intent(project)
+    _validate_project_fabrication_profile(project)
     directory = project.get("directory")
     record = _backfill_project_intent({**project, "schema_version": 1})
 
@@ -1143,6 +1176,22 @@ def set_project_intent(name: str, intent: str) -> dict:
     the folder automatically, same as every other real field."""
     project = load_project(name)
     project["intent"] = intent
+    return save_project(project)
+
+
+def set_project_fabrication_profile(name: str, profile: dict | None) -> dict:
+    """SPEC-340 section 2: the profile is per project, not per install.
+
+    The same design may go to two houses, so a profile chosen for one project
+    must never follow the user to the next. Round-trips through
+    `load_project`/`save_project` for the same reason `set_project_intent` does
+    -- `CTX-312.1`'s pointer/manifest routing comes free rather than being
+    re-derived, so a linked project's profile lands in the folder manifest and
+    travels with it.
+
+    `None` clears the choice, which is distinct from an empty profile."""
+    project = load_project(name)
+    project["fabrication_profile"] = profile
     return save_project(project)
 
 
