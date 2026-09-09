@@ -264,6 +264,42 @@ class FabricationReviewTests(unittest.TestCase):
         self.pcb = os.path.join(self.project, "Copperplane_Blink_LEDs.kicad_pcb")
         self.addCleanup(self._tmp.cleanup)
 
+    def test_a_looser_house_limit_cannot_hide_a_real_violation(self):
+        """The defect this whole context exists for.
+
+        A sidecar rule REPLACES the board's own constraint rather than adding to
+        it. Measured on this board: a sidecar `annular_width` of 0.05mm against
+        a board setup requiring 0.1mm took four genuine errors to ZERO. The
+        shipped generic profile was looser than KiCad's defaults on two fields,
+        so the app could silently switch off a check the user already had --
+        exactly what SPEC-114 section 3 forbids."""
+        reckless = _profile(min_annular_ring=0.05)
+        result = fabrication_review.review(self.pcb, reckless)
+
+        annular = [v for v in result["findings"] if v["type"] == "annular_width"]
+        self.assertEqual(
+            len(annular), 4,
+            "the board's own 0.1mm annular rule must still fire; a looser house "
+            "limit may never replace a stricter setting the user already has",
+        )
+        stricter = {e["field"] for e in result["not_checked"]["your_setting_is_stricter"]}
+        self.assertIn("min_annular_ring", stricter, "and the app must say it did this")
+
+    def test_a_stricter_house_limit_still_applies(self):
+        """The control. Without this, the test above passes for a build that
+        simply never writes any rule at all."""
+        result = fabrication_review.review(self.pcb, _profile())
+        self.assertGreater(result["after_count"], result["before_count"])
+        self.assertGreater(result["rule_hits"]["min-annular-ring"], 0)
+
+    def test_an_equal_limit_writes_no_rule(self):
+        """Equal is not stricter. A duplicate rule buys nothing and is one more
+        way to get the replacement semantics wrong."""
+        rules = capability_profile.to_rules(
+            _profile(min_drill=0.3), board_rules={"min_through_hole_diameter": 0.3}
+        )
+        self.assertFalse(any(r[0] == "min-drill" for r in rules))
+
     # TEST-014
     def test_014_generation_touches_only_the_sidecar(self):
         pro = os.path.join(self.project, "Copperplane_Blink_LEDs.kicad_pro")

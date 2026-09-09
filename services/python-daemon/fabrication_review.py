@@ -87,6 +87,25 @@ def rank_findings(violations) -> list:
     return sorted(violations, key=_sort_key)
 
 
+def board_setup_rules(pcb_path: str) -> dict:
+    """The project's own numeric design-rule values from its `.kicad_pro`.
+
+    Needed because a sidecar rule REPLACES the board's constraint rather than
+    adding to it, so the app has to know what the user already requires before
+    it writes anything -- see `capability_profile.BOARD_SETUP_KEYS`."""
+    pro_path = os.path.splitext(pcb_path)[0] + ".kicad_pro"
+    if not os.path.exists(pro_path):
+        return {}
+    try:
+        with open(pro_path, encoding="utf-8") as handle:
+            pro = json.load(handle)
+    except (OSError, ValueError):
+        logger.warning("Could not read %s for its design rules", pro_path)
+        return {}
+    rules = pro.get("board", {}).get("design_settings", {}).get("rules", {}) or {}
+    return {k: v for k, v in rules.items() if isinstance(v, (int, float))}
+
+
 def ignored_checks(pcb_path: str, report: dict = None) -> list:
     """Which checks the project has switched off, as `{key, description}` dicts.
 
@@ -212,7 +231,9 @@ def review(pcb_path: str, profile: dict, schematic_parity: bool = False) -> dict
     built on inactive rules is worse than no review, because it reports a
     strengthened check while the board is unexamined."""
     capability_profile.assert_rules_are_generatable(profile)
-    rules = capability_profile.to_rules(profile)
+    board_rules = board_setup_rules(pcb_path)
+    comparison = capability_profile.compare_to_board_setup(profile, board_rules)
+    rules = capability_profile.to_rules(profile, board_rules=board_rules)
 
     before = baseline(pcb_path, schematic_parity=schematic_parity)
     applied = kicad_dru.write_and_verify(pcb_path, rules, schematic_parity=schematic_parity)
@@ -240,6 +261,15 @@ def review(pcb_path: str, profile: dict, schematic_parity: bool = False) -> dict
             "ignored_by_project": ignored,
             "profile_rules_gated_off": _gated_rules(profile, ignored),
             "recorded_but_unenforceable": capability_profile.describe_unenforceable(profile),
+            # Fields where the user's own KiCad setting is already at least as
+            # tight as the house requires. No rule is written for these, because
+            # one would REPLACE the stricter setting and hide real violations.
+            # Surfaced rather than hidden: "your own settings are stricter than
+            # your fab needs here" is useful, and silently doing nothing is not.
+            "your_setting_is_stricter": [
+                {"field": f, "house": e["house"], "project": e["project"]}
+                for f, e in comparison.items() if not e["house_is_stricter"]
+            ],
         },
         "profile_is_stale": capability_profile.is_stale(profile),
         "unconfirmed_fields": capability_profile.unconfirmed_fields(profile),

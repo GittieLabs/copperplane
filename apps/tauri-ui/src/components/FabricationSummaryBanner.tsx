@@ -95,7 +95,8 @@ function CouldNotConfirm() {
 function NotChecked({ fabrication }: { fabrication: FabricationSummary }) {
   const gated = fabrication.not_checked.profile_rules_gated_off
   const unenforceable = fabrication.not_checked.recorded_but_unenforceable
-  const total = gated.length + unenforceable.length
+  const yoursIsStricter = fabrication.not_checked.your_setting_is_stricter ?? []
+  const total = gated.length + unenforceable.length + yoursIsStricter.length
   if (total === 0) return null
 
   return (
@@ -115,6 +116,28 @@ function NotChecked({ fabrication }: { fabrication: FabricationSummary }) {
               <li key={rule.field}>
                 {rule.field.replace(/_/g, ' ')}
                 {rule.fully_gated ? '' : ' (partly — some of its checks still ran)'}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {yoursIsStricter.length > 0 && (
+        <div className="mt-2">
+          {/* MEASURED: a sidecar rule REPLACES the board's own constraint
+              rather than adding to it, so writing a looser one would switch off
+              a check the user already had -- four real errors went to zero in
+              testing. These are the fields where that would have happened. */}
+          <p className="text-fg-tertiary">
+            Your own KiCad settings are already at least as strict as this house requires here, so
+            they were left in place and no rule was written. Your board is still checked against
+            your own limits for these.
+          </p>
+          <ul className="mt-1 list-disc pl-4 text-fg-muted">
+            {yoursIsStricter.map((entry) => (
+              <li key={entry.field}>
+                {entry.field.replace(/_/g, ' ')} — yours {entry.project}mm, this house{' '}
+                {entry.house}mm
               </li>
             ))}
           </ul>

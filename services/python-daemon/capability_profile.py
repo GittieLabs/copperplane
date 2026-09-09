@@ -64,6 +64,29 @@ CONTEXT_FIELDS = ("layer_count", "copper_weight_oz", "board_thickness_mm")
 
 PROVENANCE_REQUIRED_KEYS = ("source_url", "recorded_on", "confirmed_by_user")
 
+# The project's own KiCad setting for each field, by its `.kicad_pro` key.
+#
+# MEASURED 2026-09-08, and the reason this mapping exists at all: a sidecar rule
+# does not combine with the board's own constraint, it REPLACES it. A rule
+# looser than the project's own setting therefore *hides real violations*. On
+# the example board, a sidecar `annular_width` of 0.05mm against a board setup
+# requiring 0.1mm took four genuine errors to ZERO.
+#
+# That is the exact failure `SPEC-114` section 3 forbids -- "the app must never
+# be the reason a board comes back wrong" -- and the bundled generic profile
+# was looser than KiCad's own defaults on two fields, so it was live.
+BOARD_SETUP_KEYS = {
+    "min_track_width": "min_track_width",
+    "min_clearance": "min_clearance",
+    "min_annular_ring": "min_via_annular_width",
+    "min_drill": "min_through_hole_diameter",
+    "min_hole_to_hole": "min_hole_to_hole",
+    "min_edge_clearance": "min_copper_edge_clearance",
+    "min_silk_clearance": "min_silk_clearance",
+    "min_text_height": "min_text_height",
+    "min_text_thickness": "min_text_thickness",
+}
+
 ALL_VALUE_FIELDS = tuple(ENFORCEABLE_FIELDS) + RECORDED_ONLY_FIELDS
 
 
@@ -131,7 +154,30 @@ def recorded_but_unenforceable(profile: dict) -> list:
     return [f for f in RECORDED_ONLY_FIELDS if profile.get(f) is not None]
 
 
-def to_rules(profile: dict, severity: str = "warning") -> list:
+def compare_to_board_setup(profile: dict, board_rules: dict) -> dict:
+    """Where the house is stricter than the project, and where it is not.
+
+    Returns `{field: {"house", "project", "house_is_stricter"}}` for every field
+    both sides define. This is what lets the app say which of the user's own
+    KiCad settings are already tighter than their fab requires -- and, more
+    importantly, stops it emitting a rule that would relax one."""
+    comparison = {}
+    for field, pro_key in BOARD_SETUP_KEYS.items():
+        house = profile.get(field)
+        project = board_rules.get(pro_key)
+        if house is None or not isinstance(project, (int, float)):
+            continue
+        comparison[field] = {
+            "house": house,
+            "project": project,
+            # Equal counts as "not stricter": emitting a duplicate rule buys
+            # nothing and only adds a way to get it wrong.
+            "house_is_stricter": house > project,
+        }
+    return comparison
+
+
+def to_rules(profile: dict, severity: str = "warning", board_rules: dict = None) -> list:
     """Turn a profile into `kicad_dru` rule tuples.
 
     An absent field produces no rule -- section 2.6, and the single most
@@ -143,10 +189,17 @@ def to_rules(profile: dict, severity: str = "warning") -> list:
     not build this" and "KiCad's own rules" without inventing a marker
     (section 2.3)."""
     validate(profile)
+    comparison = compare_to_board_setup(profile, board_rules or {})
     rules = []
     for field in ENFORCEABLE_FIELDS:
         value = profile.get(field)
         if value is None:
+            continue
+        # Never emit a rule the project's own setting already beats. A sidecar
+        # rule replaces the board constraint rather than adding to it, so a
+        # looser one silently switches off a check the user already had.
+        entry = comparison.get(field)
+        if entry and not entry["house_is_stricter"]:
             continue
         constraint, keyword, rule_name = ENFORCEABLE_FIELDS[field]
         rules.append((rule_name, constraint, f"{keyword} {value}mm", severity))
