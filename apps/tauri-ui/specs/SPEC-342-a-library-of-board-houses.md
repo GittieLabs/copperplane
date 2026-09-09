@@ -121,6 +121,32 @@ The user-visible flow is unchanged in effort: "start from standard 2-layer numbe
 click. It now produces a house of their own, which they can rename and edit, rather than silently
 adopting a set of numbers attributed to nobody.
 
+### 2.6 A shipped house is never edited in place
+
+Requested after the library landed: *"we should automatically clone a shipped house instead of
+overwriting it. This allows a user to essentially reset a house profile."*
+
+A house that came with the app — or was imported from a published set — is marked shipped. Saving a
+change to one does not overwrite it. The save produces the user's own copy (`<id>-mine`, then
+`-mine-2`), marked as theirs and recording which shipped house it came from. The original is
+untouched.
+
+That last property is what makes **reset** a real operation: `reset_house` deletes the copy and
+returns the original, offline, with no re-download and no network. A user can edit a shipped house
+freely knowing the numbers it shipped with are still there.
+
+Automatic rather than an error, deliberately. The user asked to change a number; refusing and making
+them clone by hand first is a step with no visible reason. The clone is the mechanism, not the task.
+
+Three limits fall out of it:
+
+*   **Only shipped houses auto-clone.** A house the user wrote is theirs to overwrite in place.
+*   **Reset is refused on a house that is not a copy**, because there would be nothing to go back to
+    and they would simply lose their own work.
+*   **Imports arrive shipped.** A set distributed through the repository is therefore safe to edit:
+    the imported original stays available to reset back to, which is the property that makes
+    periodic re-imports non-destructive.
+
 ## 3. Known Constraints & Risks
 
 *   **A looser limit can switch off a check.** Measured: a sidecar rule REPLACES the board's own

@@ -74,6 +74,20 @@ TEMPLATE_KEY = "is_template"
 def is_template(profile: dict) -> bool:
     return bool(profile.get(TEMPLATE_KEY))
 
+
+#: A house that came with the app, or was imported from a published set, rather
+#: than one the user wrote. Editing one never overwrites it: the edit becomes a
+#: copy, so the original stays intact and deleting the copy is a reset.
+SHIPPED_KEY = "is_shipped"
+
+#: On a copy, the id of the shipped house it came from. What makes "reset this
+#: back to how it shipped" a real operation rather than a re-download.
+CLONED_FROM_KEY = "cloned_from"
+
+
+def is_shipped(profile: dict) -> bool:
+    return bool(profile.get(SHIPPED_KEY))
+
 # The project's own KiCad setting for each field, by its `.kicad_pro` key.
 #
 # MEASURED 2026-09-08, and the reason this mapping exists at all: a sidecar rule
@@ -293,9 +307,14 @@ def clone(profile: dict, house_name: str, house_id: str, recorded_on: str,
         "house_id": house_id,
         "schema_version": 1,
     }
-    # A clone is always a real house. This is the only way one comes into
-    # existence from the bundled starting point (`SPEC-342` section 2.5).
+    # A clone is always a real house, and always the user's own. This is the
+    # only way one comes into existence from the bundled starting point
+    # (`SPEC-342` section 2.5), and the only way a shipped house becomes
+    # editable (section 2.6).
     cloned.pop(TEMPLATE_KEY, None)
+    cloned.pop(SHIPPED_KEY, None)
+    if profile.get("house_id") and is_shipped(profile):
+        cloned[CLONED_FROM_KEY] = profile["house_id"]
 
     provenance = {}
     for field in ALL_VALUE_FIELDS:

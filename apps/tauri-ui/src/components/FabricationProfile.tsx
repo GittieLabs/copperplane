@@ -8,6 +8,7 @@ import {
   saveHouse,
   setProjectProfile,
 } from '../lib/fabricationReview'
+import { HouseLibrary } from './HouseLibrary'
 
 /**
  * SPEC-340 §5: choosing the board house, once per project.
@@ -60,6 +61,9 @@ export function FabricationProfile({
 }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** SPEC-342 §5: the library is global, so choosing between houses is its own
+   *  surface rather than something crammed into this card. */
+  const [browsing, setBrowsing] = useState(false)
 
   useEffect(() => {
     setError(null)
@@ -111,6 +115,30 @@ export function FabricationProfile({
     }
   }, [projectName, onProfileChange])
 
+  const chooseFromLibrary = useCallback(
+    async (house: CapabilityProfile) => {
+      setError(null)
+      try {
+        await setProjectProfile(projectName, house)
+        onProfileChange(house)
+        setBrowsing(false)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [projectName, onProfileChange],
+  )
+
+  if (browsing) {
+    return (
+      <HouseLibrary
+        chosenId={(profile?.house_id as string) ?? null}
+        onChoose={chooseFromLibrary}
+        onClose={() => setBrowsing(false)}
+      />
+    )
+  }
+
   if (!profile) {
     return (
       <div className="flex flex-col gap-2 rounded border border-line-subtle p-3">
@@ -143,6 +171,13 @@ export function FabricationProfile({
           >
             {loading ? 'Setting up…' : 'Start from standard 2-layer numbers'}
           </button>
+          <button
+            type="button"
+            className="ml-3 text-xs text-fg-muted underline"
+            onClick={() => setBrowsing(true)}
+          >
+            Choose from your board houses
+          </button>
         </div>
         {error && <p className="text-xs text-danger">{error}</p>}
       </div>
@@ -155,14 +190,28 @@ export function FabricationProfile({
     <div className="flex flex-col gap-2 rounded border border-line-subtle p-3">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-medium text-fg-bright">{profile.house_name}</h3>
-        <button
-          type="button"
-          className="text-xs text-fg-muted underline"
-          onClick={onClear}
-          disabled={loading}
-        >
-          Choose a different house
-        </button>
+        <span className="flex items-baseline gap-3">
+          <button
+            type="button"
+            className="text-xs text-fg-muted underline"
+            onClick={() => setBrowsing(true)}
+            disabled={loading}
+          >
+            Choose a different house
+          </button>
+          {/* Clearing the choice is a real action, not the same as picking
+              another house: it puts the board check back on KiCad's own rules,
+              and the label should say that rather than leaving the user to
+              infer it. */}
+          <button
+            type="button"
+            className="text-xs text-fg-muted underline"
+            onClick={onClear}
+            disabled={loading}
+          >
+            Check against KiCad&rsquo;s defaults instead
+          </button>
+        </span>
       </div>
 
       <p className="text-xs text-fg-tertiary">

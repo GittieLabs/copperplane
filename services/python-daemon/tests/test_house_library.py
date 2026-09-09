@@ -248,5 +248,144 @@ class TemplateTests(unittest.TestCase):
             self.assertFalse(entry["confirmed_by_user"])
 
 
+def _shipped(house_id="acme", name="Acme PCB"):
+    house = _house(house_id=house_id, name=name)
+    house[capability_profile.SHIPPED_KEY] = True
+    return house
+
+
+class ShippedHouseTests(unittest.TestCase):
+    """SPEC-342 section 2.6: a shipped house is never edited in place.
+
+    Requested directly: "we should automatically clone a shipped house instead
+    of overwriting it. This allows a user to essentially reset a house profile."
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        library_store.configure(storage_root=self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(library_store.configure, storage_root=None)
+
+    def test_editing_a_shipped_house_makes_a_copy_and_leaves_it_alone(self):
+        library_store.save_house(_shipped())
+
+        saved = library_store.save_house(
+            {**library_store.load_house("acme"), "min_drill": 0.25}, overwrite=True
+        )
+
+        self.assertEqual(saved["house_id"], "acme-mine")
+        self.assertFalse(capability_profile.is_shipped(saved))
+        self.assertEqual(saved[capability_profile.CLONED_FROM_KEY], "acme")
+        self.assertEqual(library_store.load_house("acme")["min_drill"], 0.35,
+                         "the shipped house is untouched, which is what makes reset possible")
+
+    def test_a_second_edit_makes_a_second_copy_rather_than_replacing_the_first(self):
+        library_store.save_house(_shipped())
+        first = library_store.save_house(
+            {**library_store.load_house("acme"), "min_drill": 0.25}, overwrite=True
+        )
+        second = library_store.save_house(
+            {**library_store.load_house("acme"), "min_drill": 0.2}, overwrite=True
+        )
+        self.assertEqual(first["house_id"], "acme-mine")
+        self.assertEqual(second["house_id"], "acme-mine-2")
+
+    def test_a_users_own_house_is_still_edited_in_place(self):
+        # The auto-clone applies to shipped houses only. A house the user wrote
+        # is theirs to overwrite.
+        library_store.save_house(_house())
+        saved = library_store.save_house(_house(min_drill=0.2), overwrite=True)
+        self.assertEqual(saved["house_id"], "house-a")
+        self.assertEqual(library_store.list_houses(), ["house-a"])
+
+    def test_reset_removes_the_copy_and_returns_the_shipped_original(self):
+        library_store.save_house(_shipped())
+        library_store.save_house(
+            {**library_store.load_house("acme"), "min_drill": 0.25}, overwrite=True
+        )
+
+        original = library_store.reset_house("acme-mine")
+
+        self.assertEqual(original["house_id"], "acme")
+        self.assertEqual(original["min_drill"], 0.35)
+        self.assertEqual(library_store.list_houses(), ["acme"])
+
+    def test_resetting_a_house_that_is_not_a_copy_is_refused(self):
+        # There would be nothing to go back to, and the user would just lose
+        # their own work.
+        library_store.save_house(_house())
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.reset_house("house-a")
+        self.assertEqual(library_store.list_houses(), ["house-a"])
+
+    def test_a_clone_of_a_shipped_house_records_where_it_came_from(self):
+        cloned = capability_profile.clone(
+            _shipped(), "My Acme", "my-acme", "2026-09-09"
+        )
+        self.assertFalse(capability_profile.is_shipped(cloned))
+        self.assertEqual(cloned[capability_profile.CLONED_FROM_KEY], "acme")
+
+
+class ImportExportTests(unittest.TestCase):
+    """SPEC-342 section 2.4."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        library_store.configure(storage_root=self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(library_store.configure, storage_root=None)
+
+    # TEST-008
+    def test_008_an_import_validates_and_reports_a_collision_rather_than_merging(self):
+        library_store.save_house(_house())
+        payload = library_store.export_houses()
+
+        result = library_store.import_houses(payload)
+
+        self.assertEqual(result["skipped_existing"], ["house-a"])
+        self.assertEqual(result["imported"], [])
+        self.assertEqual(library_store.load_house("house-a")["min_drill"], 0.35,
+                         "and the user's own edits are still there")
+
+    def test_a_malformed_record_is_rejected_and_named(self):
+        payload = {"houses": [{"house_id": "broken", "house_name": "B", "min_drill": 0.1,
+                               "provenance": {}}]}
+        result = library_store.import_houses(payload)
+        self.assertEqual([r["house_id"] for r in result["rejected"]], ["broken"])
+        self.assertEqual(library_store.list_houses(), [])
+
+    def test_a_file_that_is_not_a_library_is_refused_outright(self):
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.import_houses({"something": "else"})
+
+    def test_an_imported_house_arrives_as_shipped_so_editing_it_makes_a_copy(self):
+        """Which is what makes a set distributed through the repository safe to
+        edit: the imported original stays available to reset back to."""
+        payload = {"houses": [_house()]}
+        library_store.import_houses(payload)
+
+        self.assertTrue(capability_profile.is_shipped(library_store.load_house("house-a")))
+        saved = library_store.save_house(
+            {**library_store.load_house("house-a"), "min_drill": 0.2}, overwrite=True
+        )
+        self.assertEqual(saved["house_id"], "house-a-mine")
+
+    def test_a_round_trip_preserves_the_numbers_and_their_provenance(self):
+        library_store.save_house(_house())
+        payload = library_store.export_houses()
+        self.assertTrue(payload["exported_at"], "an imported set can say how old it is")
+
+        library_store.delete_house("house-a")
+        library_store.import_houses(payload)
+
+        restored = library_store.load_house("house-a")
+        self.assertEqual(restored["min_drill"], 0.35)
+        self.assertEqual(
+            restored["provenance"]["min_drill"]["source_url"],
+            "https://example.invalid/capabilities",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

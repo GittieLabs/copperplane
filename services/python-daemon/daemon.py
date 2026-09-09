@@ -2077,6 +2077,27 @@ def house_list() -> dict:
     return {"houses": [library_store.load_house(h) for h in library_store.list_houses()]}
 
 
+def house_export(house_ids: list = None) -> dict:
+    """The house.export route (SPEC-342 section 2.4). Returns the records; the
+    frontend writes the file, so the daemon never touches a path the user
+    picked."""
+    return library_store.export_houses(house_ids)
+
+
+def house_import(payload: dict, overwrite: bool = False) -> dict:
+    """The house.import route. Treats the file as untrusted and reports what it
+    did with each record rather than returning a bare count -- a house that was
+    skipped for a name collision and one that was rejected as malformed are
+    different problems with different fixes."""
+    return library_store.import_houses(payload, overwrite=overwrite)
+
+
+def house_reset(house_id: str) -> dict:
+    """The house.reset route (SPEC-342 section 2.6): drop the user's copy and go
+    back to the shipped house it came from."""
+    return library_store.reset_house(house_id)
+
+
 def house_delete(house_id: str) -> dict:
     """The house.delete route. Reports which projects still referenced it --
     they keep working, because a project stores the numbers it was checked
@@ -2508,6 +2529,9 @@ def _build_routes() -> dict:
             routes["house.list"] = house_list
             routes["house.delete"] = house_delete
             routes["house.clone"] = house_clone
+            routes["house.export"] = house_export
+            routes["house.import"] = house_import
+            routes["house.reset"] = house_reset
     if kicad_bridge is not None and freecad_bridge is not None:
         routes["kicad.get_component_heights"] = kicad_get_component_heights
     if kicad_cli is not None:
