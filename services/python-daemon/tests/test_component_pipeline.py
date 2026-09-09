@@ -746,7 +746,7 @@ class TestExplainViolations(unittest.TestCase):
 
     @patch('component_pipeline._build_agent_executor')
     @patch('component_pipeline._run_agent_and_close')
-    def test_001_caps_at_the_real_limit_and_reports_the_real_truncated_count(self, mock_run, mock_build):
+    def test_001_caps_the_explanation_call_but_returns_every_finding(self, mock_run, mock_build):
         violations = [{"severity": "error", "description": f"v{i}", "type": "t"} for i in range(20)]
         mock_build.return_value = (MagicMock(), MagicMock())
         response = {
@@ -760,8 +760,20 @@ class TestExplainViolations(unittest.TestCase):
 
         result = cp.explain_violations(violations, "drc")
 
-        self.assertEqual(len(result["violations"]), cp._MAX_VIOLATIONS_PER_EXPLANATION_CALL)
+        # The contract changed deliberately: the cap is on the EXPLANATION call,
+        # not on the findings. Dropping the remainder produced a UI that said
+        # "+13 more not shown" with no way to see them, reported from the
+        # running app. KiCad's findings are deterministic and free to return;
+        # only the prose costs money.
+        self.assertEqual(len(result["violations"]), 20, "every finding is returned")
         self.assertEqual(result["truncated_count"], 20 - cp._MAX_VIOLATIONS_PER_EXPLANATION_CALL)
+
+        explained = [v for v in result["violations"] if v["explanation"]]
+        self.assertEqual(len(explained), cp._MAX_VIOLATIONS_PER_EXPLANATION_CALL,
+                         "only the capped number is explained")
+        for violation in result["violations"][cp._MAX_VIOLATIONS_PER_EXPLANATION_CALL:]:
+            self.assertEqual(violation["explanation"], "")
+            self.assertEqual(violation["suggested_fix"], "")
 
     @patch('component_pipeline._build_agent_executor')
     @patch('component_pipeline._run_agent_and_close')

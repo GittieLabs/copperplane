@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { ViolationsList } from './ViolationsList'
@@ -225,5 +225,76 @@ describe('ViolationsList: ignored checks name the right checker', () => {
 
     expect(screen.queryByText(/worth turning back on/)).toBeNull()
     expect(screen.getByText(/Irrelevant unless you actually simulate/)).toBeTruthy()
+  })
+})
+
+describe('ViolationsList: a long list you can actually work through (SPEC-340)', () => {
+  function manyViolations(n: number, explainedUpTo: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      description: `Violation number ${i}`,
+      severity: i === 0 ? 'error' : 'warning',
+      type: 'annular_width',
+      items: [],
+      explanation: i < explainedUpTo ? `explanation ${i}` : '',
+      suggested_fix: i < explainedUpTo ? `fix ${i}` : '',
+    }))
+  }
+
+  function renderMany(n = 28, explained = 15) {
+    render(
+      <ViolationsList
+        result={{
+          violations: manyViolations(n, explained),
+          summary: 'A board with a lot going on.',
+          truncated_count: n - explained,
+          source_path: '/b.kicad_pcb',
+        } as never}
+        kind="drc"
+        hideSourcePath
+      />,
+    )
+  }
+
+  it('shows a first page rather than all 28 at once', () => {
+    // Reported from the running app: 28 fully expanded cards is an enormous
+    // scroll before the review panel underneath even starts.
+    renderMany()
+    expect(screen.getByText(/Violation number 0/)).toBeTruthy()
+    expect(screen.queryByText(/Violation number 20/)).toBeNull()
+  })
+
+  it('lets the user reach every finding, including the unexplained ones', () => {
+    // The old build said "+13 more violation(s) not shown" and offered no way
+    // to see them -- they were never sent by the daemon at all.
+    renderMany()
+    fireEvent.click(screen.getByRole('button', { name: /Show all 28/ }))
+    expect(screen.getByText(/Violation number 27/)).toBeTruthy()
+  })
+
+  it('says the cap is on explanations, not on what it will show', () => {
+    renderMany()
+    const body = document.body.textContent ?? ''
+    expect(body).toContain('only the explanations are limited')
+    expect(body).not.toContain('not shown')
+  })
+
+  it('says so on a finding that has no explanation, rather than looking empty', () => {
+    renderMany()
+    fireEvent.click(screen.getByRole('button', { name: /Show all 28/ }))
+    expect(screen.getAllByText(/did not write an explanation for it/).length).toBeGreaterThan(0)
+  })
+
+  it('collapses the long tail so the list stays skimmable', () => {
+    renderMany()
+    // The first few are open; later ones are collapsed to their heading.
+    const details = document.querySelectorAll('details[open]')
+    expect(details.length).toBeLessThan(10)
+    expect(details.length).toBeGreaterThan(0)
+  })
+
+  it('does not page a short list', () => {
+    renderMany(4, 4)
+    expect(screen.queryByRole('button', { name: /Show all/ })).toBeNull()
+    expect(screen.getByText(/Violation number 3/)).toBeTruthy()
   })
 })

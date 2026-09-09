@@ -249,7 +249,7 @@ describe('SchematicAdvisor: list-first flow', () => {
     screen.getByRole('button', { name: 'Open KiCad' })
   })
 
-  it('a truncated_count > 0 tells the user violations were left out, not silently dropped', async () => {
+  it('a truncated_count > 0 says explanations were capped, not that findings were withheld', async () => {
     listProjectSchematicsMock.mockResolvedValue(ONE_SCHEMATIC_FOUND)
     checkSchematicMock.mockResolvedValueOnce({ ...VIOLATION_RESULT, truncated_count: 5 })
 
@@ -257,7 +257,9 @@ describe('SchematicAdvisor: list-first flow', () => {
     await waitFor(() => screen.getByText('board.kicad_sch'))
     fireEvent.click(screen.getByText('board.kicad_sch'))
 
-    await waitFor(() => screen.getByText(/\+5 more violation\(s\) not shown\./))
+    // The contract changed: every finding is returned and shown. The cap is
+    // on the LLM explanation call, which is what this number now counts.
+    await waitFor(() => screen.getByText(/only the explanations are limited/))
   })
 
   it('a completed check survives being re-rendered with the same projectName', async () => {

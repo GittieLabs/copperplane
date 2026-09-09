@@ -352,7 +352,7 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     await waitFor(() => expect(openKicadMock).toHaveBeenCalledTimes(1))
   })
 
-  it('a truncated_count > 0 tells the user violations were left out, not silently dropped', async () => {
+  it('a truncated_count > 0 says explanations were capped, not that findings were withheld', async () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     checkBoardMock.mockResolvedValueOnce({ ...VIOLATION_RESULT, truncated_count: 5 })
 
@@ -360,7 +360,9 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     fireEvent.click(screen.getByText('board.kicad_pcb'))
 
-    await waitFor(() => screen.getByText(/\+5 more violation\(s\) not shown\./))
+    // The contract changed: every finding is returned and shown. The cap is
+    // on the LLM explanation call, which is what this number now counts.
+    await waitFor(() => screen.getByText(/only the explanations are limited/))
   })
 
   it('a completed check survives being re-rendered with the same projectName -- App.tsx keeps this component mounted across tab switches, this just confirms the state isn\'t reset along the way', async () => {
