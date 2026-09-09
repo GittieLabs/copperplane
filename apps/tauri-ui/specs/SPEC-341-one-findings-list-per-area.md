@@ -4,7 +4,7 @@ title: "One Findings List Per Area"
 status: Draft
 type: Feature
 created: 2026-09-08
-last_updated: 2026-09-08
+last_updated: 2026-09-09
 target_version: v0.7.0
 location: "apps/tauri-ui/specs/SPEC-341-one-findings-list-per-area.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
@@ -54,19 +54,40 @@ user_facing: true
 
 ## 2. System Architecture & Design Choices
 
-### 2.1 The measurement this spec needs before it is built
+### 2.1 Measured 2026-09-09: how many times a check actually runs
 
-**How many times is a check actually run per area today, and what does each run cost?** The answer
-is believed to be three on the PCB tab with a profile set — `kicad.check_board`'s own DRC, the
-baseline-plus-verified pair inside `fabrication_review`, and a third inside `chat_agents`'
-`_check_status_note`, which deliberately re-runs rather than reading a stored result — but that is
-inference from reading the code, not a measurement.
+This section previously carried an inference — three runs on the PCB tab with a profile set — and
+said plainly that it was *"inference from reading the code, not a measurement"*. `CTX-341.1` Phase 1
+took the measurement by instrumenting the real `kicad_cli` entry points and driving each user action
+through the real routes. **The inference was wrong.**
 
-It matters because the merge's main practical benefit is doing that work once, and the main risk is
-that consolidating changes when the LLM explanation call happens and therefore what it costs. The
-same discipline `SPEC-114` §2.1 used applies: measure it, write the numbers down, and let the design
-follow them. Building this on the assumption above without checking would repeat exactly the mistake
-`SPEC-114` §2.2 was written to prevent.
+| Action | DRC/ERC runs | Wall clock | LLM calls |
+| :--- | :--- | :--- | :--- |
+| Board check, no house | 1 | 2.7s | 1 (`board_advisor`) |
+| Board check, house selected | 2 | 3.6s | 1 (`board_advisor`) |
+| Run Review on PCB | 1 | 1.9s | its own review agent |
+| Run Review on Schematic | 1 | 1.5s | its own review agent |
+
+`kicad.check_board` does not add a DRC run on top of `fabrication_review`'s — it delegates, and
+`CTX-340.1` threaded `schematic_parity` through so one run serves both. The old text double-counted
+a run the fold-in had already removed, and its own enumeration listed four items while claiming
+three.
+
+The profile's second run is conditional: `write_and_verify` runs DRC twice only when the
+verification canary must share a constraint class with one of the profile's own rules. The generic
+profile found a free class on this board, so it costs two. A profile using every candidate class
+would cost three — a real worst case, not the common one.
+
+**What this does to the argument for merging.** The stated practical benefit was doing the work once
+instead of three or four times. The measured duplication is **one redundant DRC run (~1.9s) and one
+redundant LLM call per area** — the review's. Worth having, but not the prize this spec was written
+on. The case now rests almost entirely on the user-comprehension half: one action, one list, one
+count. That was always the stronger half and is now effectively the only one, which is a legitimate
+reason to build this and also a legitimate reason to do something smaller.
+
+The cost that remains is not the subprocess. A DRC run is under two seconds; the LLM explanation
+call is what costs money, and `explain_violations` already caps it at 15 findings. A merged list is
+longer, so **what gets explained** becomes a visible product decision — see §3.
 
 ### 2.2 The shape the merge probably takes
 
