@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "exported_at": "2026-09-09T00:00:00+00:00",
+  "houses": [
+    {
+      "house_id": "jlcpcb-2layer-1oz",
+      "house_name": "JLCPCB \u2014 2-layer FR4, 1 oz",
+      "schema_version": 1,
+      "layer_count": 2,
+      "copper_weight_oz": 1,
+      "min_track_width": 0.1,
+      "min_clearance": 0.1,
+      "min_annular_ring": 0.18,
+      "min_drill": 0.15,
+      "min_hole_to_hole": 0.45,
+      "min_edge_clearance": 0.2,
+      "min_text_height": 1.0,
+      "min_text_thickness": 0.15,
+      "min_mask_dam": 0.1,
+      "provenance": {
+        "min_track_width": {
+          "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 0.10 / 0.10 mm (4 / 4 mil) for 1 oz copper."
+        },
+        "min_clearance": {
+          "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 0.10 / 0.10 mm (4 / 4 mil) for 1 oz copper."
+        },
+        "min_annular_ring": {
+          "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Page states 'Recommended 0.25 mm or above; absolute minimum 0.18 mm'. The absolute minimum is recorded, because this field means what the house will build; 0.25 mm is the safer target."
+        },
+        "min_drill": {
+          "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Drill range published as 0.15 - 6.3 mm for 2 layers."
+        },
+        "min_hole_to_hole": {
+          "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 0.45 mm pad hole-to-hole."
+        },
+        "min_edge_clearance": {
+          "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as >= 0.2 mm for routed board edges."
+        },
+        "min_text_height": {
+          "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 40 mil (1.0 mm)."
+        },
+        "min_text_thickness": {
+          "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as silkscreen line width >= 0.15 mm."
+        },
+        "min_mask_dam": {
+          "source_url": "https://jlcpcb.com/capabilities/pcb-capabilities",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Solder mask bridge 0.10 mm, 1 oz, standard colours. Recorded only: KiCad has no DRC constraint for it."
+        }
+      }
+    }
+  ]
+}

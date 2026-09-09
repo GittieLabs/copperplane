@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "exported_at": "2026-09-09T00:00:00+00:00",
+  "houses": [
+    {
+      "house_id": "aisler-2layer-35um-hasl",
+      "house_name": "AISLER \u2014 2-layer, 1.6 mm, 35 um, HASL",
+      "schema_version": 1,
+      "layer_count": 2,
+      "board_thickness_mm": 1.6,
+      "min_track_width": 0.2,
+      "min_clearance": 0.15,
+      "min_annular_ring": 0.2,
+      "min_drill": 0.5,
+      "min_hole_to_hole": 0.3,
+      "min_edge_clearance": 0.3,
+      "min_text_height": 0.8,
+      "min_text_thickness": 0.15,
+      "min_mask_dam": 0.1,
+      "provenance": {
+        "min_track_width": {
+          "source_url": "https://community.aisler.net/t/2-layer-1-6-mm-35-m-hasl-design-rules/3735",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 200 um / 8 mil."
+        },
+        "min_clearance": {
+          "source_url": "https://community.aisler.net/t/2-layer-1-6-mm-35-m-hasl-design-rules/3735",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 150 um / 6 mil copper to copper."
+        },
+        "min_annular_ring": {
+          "source_url": "https://community.aisler.net/t/2-layer-1-6-mm-35-m-hasl-design-rules/3735",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 200 um / 8 mil for vias and 300 um / 12 mil for plated through holes. The via figure is recorded because this field maps to KiCad's min_via_annular_width; a PTH on this process needs 300 um."
+        },
+        "min_drill": {
+          "source_url": "https://community.aisler.net/t/2-layer-1-6-mm-35-m-hasl-design-rules/3735",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 0.5 mm for plated through holes and 0.3 mm for vias. The PTH figure is recorded because this field maps to KiCad's min_through_hole_diameter."
+        },
+        "min_hole_to_hole": {
+          "source_url": "https://community.aisler.net/t/2-layer-1-6-mm-35-m-hasl-design-rules/3735",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 300 um / 12 mil drill to drill."
+        },
+        "min_edge_clearance": {
+          "source_url": "https://community.aisler.net/t/2-layer-1-6-mm-35-m-hasl-design-rules/3735",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 300 um / 12 mil."
+        },
+        "min_text_height": {
+          "source_url": "https://community.aisler.net/t/2-layer-1-6-mm-35-m-hasl-design-rules/3735",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 800 um / 32 mil."
+        },
+        "min_text_thickness": {
+          "source_url": "https://community.aisler.net/t/2-layer-1-6-mm-35-m-hasl-design-rules/3735",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 150 um / 6 mil silkscreen line width."
+        },
+        "min_mask_dam": {
+          "source_url": "https://community.aisler.net/t/2-layer-1-6-mm-35-m-hasl-design-rules/3735",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 100 um / 4 mil. Recorded only: KiCad has no DRC constraint for it."
+        }
+      }
+    }
+  ]
+}

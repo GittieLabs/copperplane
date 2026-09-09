@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "exported_at": "2026-09-09T00:00:00+00:00",
+  "houses": [
+    {
+      "house_id": "pcbway-standard",
+      "house_name": "PCBWay \u2014 Standard PCB (1-14 layers)",
+      "schema_version": 1,
+      "min_track_width": 0.1,
+      "min_clearance": 0.1,
+      "min_annular_ring": 0.15,
+      "min_drill": 0.15,
+      "provenance": {
+        "min_track_width": {
+          "source_url": "https://www.pcbway.com/capabilities.html",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 0.1 mm / 4 mil."
+        },
+        "min_clearance": {
+          "source_url": "https://www.pcbway.com/capabilities.html",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 0.1 mm / 4 mil."
+        },
+        "min_annular_ring": {
+          "source_url": "https://www.pcbway.com/capabilities.html",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 0.15 mm (6 mil) minimum width."
+        },
+        "min_drill": {
+          "source_url": "https://www.pcbway.com/capabilities.html",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Drill range published as 0.15 - 6.0 mm."
+        }
+      }
+    }
+  ]
+}
