@@ -6,6 +6,8 @@ on:
     paths:
       - "services/python-daemon/**"
       - "scripts/**"
+      - "board-houses/**"
+      - "docs/site/public/board-houses/**"
       - ".github/workflows/python-ci.yml"
 
 jobs:
@@ -46,3 +48,12 @@ jobs:
       # silently stopped running would also show zero failures.
       - name: Run daemon + scripts test suites, verify expected skips
         run: ${{ env.VENV_PYTHON }} scripts/ci/check_expected_skips.py
+
+      # The four researched board houses exist in two places -- the source of
+      # truth in board-houses/, and the copies the docs site serves as
+      # downloads. Two copies of the same numbers drift, and the failure is
+      # silent: a user downloads a house, orders against it, and it is a
+      # revision behind what the vendor published.
+      - name: Board-house downloads match their source
+        if: runner.os == 'Linux'
+        run: ${{ env.VENV_PYTHON }} scripts/publish_board_houses.py --check

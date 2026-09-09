@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "exported_at": "2026-09-09T00:00:00+00:00",
+  "houses": [
+    {
+      "house_id": "oshpark-2layer",
+      "house_name": "OSH Park \u2014 Two-layer service",
+      "schema_version": 1,
+      "layer_count": 2,
+      "min_track_width": 0.1524,
+      "min_clearance": 0.1524,
+      "min_annular_ring": 0.127,
+      "min_drill": 0.254,
+      "min_edge_clearance": 0.381,
+      "min_text_thickness": 0.0762,
+      "min_mask_dam": 0.1016,
+      "provenance": {
+        "min_track_width": {
+          "source_url": "https://docs.oshpark.com/services/two-layer/",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 6 mil (0.1524 mm)."
+        },
+        "min_clearance": {
+          "source_url": "https://docs.oshpark.com/services/two-layer/",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 6 mil (0.1524 mm)."
+        },
+        "min_annular_ring": {
+          "source_url": "https://docs.oshpark.com/services/two-layer/",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 5 mil (0.127 mm)."
+        },
+        "min_drill": {
+          "source_url": "https://docs.oshpark.com/services/two-layer/",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 10 mil (0.254 mm)."
+        },
+        "min_edge_clearance": {
+          "source_url": "https://docs.oshpark.com/services/two-layer/",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Published as 15 mil (0.381 mm) from nominal board edge."
+        },
+        "min_text_thickness": {
+          "source_url": "https://docs.oshpark.com/services/two-layer/",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Page gives 5 mil (0.127 mm) as the recommended minimum silkscreen line width and 3 mil (0.0762 mm) for short lines, text and graphics. The text figure is recorded, since this field is text thickness."
+        },
+        "min_mask_dam": {
+          "source_url": "https://docs.oshpark.com/services/two-layer/",
+          "recorded_on": "2026-09-09",
+          "confirmed_by_user": false,
+          "note": "Minimum soldermask web 4 mil (0.1016 mm). Recorded only: KiCad has no DRC constraint for it."
+        }
+      }
+    }
+  ]
+}

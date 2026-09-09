@@ -5,6 +5,7 @@ on:
     branches: [develop]
     paths:
       - 'docs/site/**'
+      - 'board-houses/**'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
@@ -36,6 +37,11 @@ jobs:
           cache-dependency-path: docs/site/package-lock.json
 
       - run: npm ci
+
+      # Never deploy downloads that have fallen behind board-houses/.
+      - name: Board-house downloads match their source
+        working-directory: .
+        run: python3 scripts/publish_board_houses.py --check
 
       - name: Build
         # Astro reports anonymous usage data by default. This project's whole

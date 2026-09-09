@@ -2035,7 +2035,15 @@ def fabrication_generic_profile() -> dict:
         "min_annular_ring": 0.13,
         "min_drill": 0.3,
         "min_hole_to_hole": 0.5,
-        "min_silk_clearance": 0.15,
+        # No min_silk_clearance. Measured 2026-09-09 against four real houses'
+        # published pages (JLCPCB, PCBWay, OSH Park, AISLER): NOT ONE publishes
+        # a silkscreen-to-copper clearance. Asserting 0.15mm here produced 16 of
+        # this template's 27 findings on the tutorial board -- the largest single
+        # group -- from a limit no board house states.
+        #
+        # That is exactly what `SPEC-114` section 3 warned about: "a too-strict
+        # profile is worse than none ... the app manufactures findings and spends
+        # the credibility this family runs on." See `board-houses/README.md`.
         "min_text_height": 1.0,
         "min_text_thickness": 0.15,
         "min_edge_clearance": 0.2,
@@ -2079,17 +2087,37 @@ def house_list() -> dict:
 
 def house_export(house_ids: list = None) -> dict:
     """The house.export route (SPEC-342 section 2.4). Returns the records; the
-    frontend writes the file, so the daemon never touches a path the user
-    picked."""
+    frontend puts them on the clipboard, so export never involves a path."""
     return library_store.export_houses(house_ids)
 
 
-def house_import(payload: dict, overwrite: bool = False) -> dict:
+def house_import(payload: dict, on_collision: str = "report",
+                 overwrite: bool = False) -> dict:
     """The house.import route. Treats the file as untrusted and reports what it
-    did with each record rather than returning a bare count -- a house that was
-    skipped for a name collision and one that was rejected as malformed are
-    different problems with different fixes."""
-    return library_store.import_houses(payload, overwrite=overwrite)
+    did with each record rather than returning a bare count -- a house skipped
+    for a name collision and one rejected as malformed are different problems
+    with different fixes.
+
+    `on_collision` is "report", "overwrite" or "rename"; the default resolves
+    nothing on its own, so the user is asked."""
+    return library_store.import_houses(
+        payload, on_collision=on_collision, overwrite=overwrite
+    )
+
+
+def house_read_files(paths: list) -> dict:
+    """The house.read_files route: turn chosen file paths into an import payload.
+
+    The daemon reads the file because the frontend cannot. The app ships the
+    dialog plugin but no filesystem plugin, so a picker gives the UI a path and
+    nothing else -- reported as "i don't see an import that allows me to add
+    the file(s) with house settings" after downloading them from the docs site.
+
+    This deliberately does not import. It returns the payload, which then goes
+    through the ordinary `house.import` route, so a file gets the same
+    untrusted-input validation and the same collision question as a paste. The
+    only thing a file changes is where the bytes came from."""
+    return library_store.read_house_files(paths)
 
 
 def house_reset(house_id: str) -> dict:
@@ -2531,6 +2559,7 @@ def _build_routes() -> dict:
             routes["house.clone"] = house_clone
             routes["house.export"] = house_export
             routes["house.import"] = house_import
+            routes["house.read_files"] = house_read_files
             routes["house.reset"] = house_reset
     if kicad_bridge is not None and freecad_bridge is not None:
         routes["kicad.get_component_heights"] = kicad_get_component_heights

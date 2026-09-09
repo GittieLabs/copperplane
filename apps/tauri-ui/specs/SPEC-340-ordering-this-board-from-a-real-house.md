@@ -27,7 +27,7 @@ user_facing: true
     every capability this needs; not one of them is reachable by a person today.
 
 *   **Business / Technical Value:** `CTX-114.1` shipped three daemon routes, a verified sidecar
-    generator, and a measured proof surface — 4 findings becoming 27 on the tutorial board — and
+    generator, and a measured proof surface — 4 findings becoming 11 on the tutorial board — and
     closed with the sentence *"no user has used this."* Under this repo's own norm, written after
     `SPEC-302` shipped a mechanically perfect feature nobody could use, that means the feature is
     **not verified**. This spec is what makes it real, and it is deliberately small: the hard,
@@ -56,8 +56,8 @@ user_facing: true
 
     **The before-and-after is the whole screen, not a detail.** `SPEC-114` section 2.8 calls it
     the entire argument in one view. The route already returns both counts; this surface must not
-    reduce that to a single number: "27 findings" alone reads as a broken board, while "4 with
-    KiCad's defaults, 27 against the house you picked" reads as the discovery it actually is.
+    reduce that to a single number: "11 findings" alone reads as a broken board, while "4 with
+    KiCad's defaults, 11 against the house you picked" reads as the discovery it actually is.
 
     **What was not checked is part of the result, not a footnote.** The route returns three separate
     honesty fields — checks the project ignores, profile rules gated off by those, and numbers
@@ -129,7 +129,7 @@ result to show at all.
 *   **A too-strict profile manufactures findings.** If a user types their house's advanced-process
     numbers while ordering the standard process, the app produces confident findings about a board
     that is fine. The mitigation is showing which process the numbers describe, next to the numbers.
-*   **27 findings is reviewable; a denser board will not be.** The ranking exists but has only ever
+*   **11 findings is reviewable; a denser board will not be.** The ranking exists but has only ever
     been exercised against one board. Ordering is settled in `SPEC-114` section 2.9 as a proposal,
     and this surface is where it is either confirmed or corrected against a real reading.
 *   **The measurements behind all of this are from one machine, one board, KiCad 10.0.3.**
@@ -169,6 +169,6 @@ result to show at all.
     and the result states plainly which of their numbers could not be checked and why.
 
 *   **How we will know it worked:** A person who has never heard the phrase "annular ring" picks a
-    profile on the tutorial board, sees the count go from 4 to 27, and can say out loud which of
+    profile on the tutorial board, sees the count go from 4 to 11, and can say out loud which of
     those findings would have come back as a working board that was quietly wrong. Until someone has
     actually done that, this spec is unverified no matter how green its tests are.

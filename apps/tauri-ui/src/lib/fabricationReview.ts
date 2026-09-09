@@ -21,10 +21,6 @@ export interface CapabilityProfile {
   /** SPEC-342 §2.5: a starting point, not a board house. Cannot be saved to
    *  the library or chosen by a project until it is cloned. */
   is_template?: boolean
-  /** SPEC-342 §2.6: came WITH THE APP. Read-only — it can be cloned but never
-   *  edited, because a mistake in it would otherwise be unrecoverable. An
-   *  imported house is not bundled: the user brought it in and owns it. */
-  is_bundled?: boolean
   /** On a clone, the house it came from — what `resetHouse` goes back to. */
   cloned_from?: string
   house_id?: string
@@ -172,16 +168,30 @@ export async function exportHouses(houseIds?: string[]): Promise<HouseExport> {
 export interface ImportReport {
   imported: string[]
   skipped_existing: string[]
+  renamed: { from: string; to: string }[]
   rejected: { house_id: string | null; reason: string }[]
 }
 
-/** A collision is reported, never merged: replacing a house silently would
- *  discard edits the user made to numbers a board gets judged against. */
+/** SPEC-342 §2.6: a collision is never resolved silently, because the thing
+ *  being replaced is numbers a board gets judged against. The default reports
+ *  and imports nothing that collides; the user then picks. */
+export type CollisionMode = 'report' | 'overwrite' | 'rename'
+
+/** Turn chosen file paths into an import payload.
+ *
+ *  The daemon reads the file because the frontend cannot: the app ships the
+ *  dialog plugin but no filesystem plugin, so a picker yields a path and
+ *  nothing else. Returns a payload for `importHouses`, so a file goes through
+ *  the same validation and the same collision question as a paste. */
+export async function readHouseFiles(paths: string[]): Promise<unknown> {
+  return call<unknown>('house.read_files', { paths })
+}
+
 export async function importHouses(
   payload: unknown,
-  overwrite = false,
+  onCollision: CollisionMode = 'report',
 ): Promise<ImportReport> {
-  return call<ImportReport>('house.import', { payload, overwrite })
+  return call<ImportReport>('house.import', { payload, on_collision: onCollision })
 }
 
 export async function setProjectProfile(
