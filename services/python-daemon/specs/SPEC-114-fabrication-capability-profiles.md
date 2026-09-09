@@ -1,7 +1,7 @@
 ---
 id: SPEC-114
 title: "Fabrication Capability Profiles & Design Rules"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-07
 last_updated: 2026-09-09

@@ -61,7 +61,15 @@ are worth preserving as norms rather than accidents:
 
 ### 1.2 The gap between the README and the binary
 
-The README advertises four features. Measured honestly:
+> **Superseded 2026-09-09, kept as a record.** Everything below describes the repository at
+> `v0.1.0`, when the primary generate button was `time.sleep(1.5)` and the app could not be handed
+> to anyone. It is all fixed: the LLM client, datasheet ingestion, KiCad injection, enclosure from
+> real board geometry, and packaging all shipped, and the app is at `v0.4.0` with signed releases
+> and an auto-updater. Kept unedited because it is the honest baseline the project measured itself
+> against, and rewriting it would erase the distance travelled. **Do not read the table below as
+> current state.** For that, see §1.1 and the milestone sections in §4.
+
+The README advertises four features. Measured honestly *(as of v0.1.0)*:
 
 | README claim | Reality |
 | :--- | :--- |
@@ -1383,6 +1391,44 @@ or **a real KiCad add-on this app talks to**, which makes the permission boundar
 the write inside KiCad's own process rather than behind its back. Either way, per-action
 authorisation, never a setting. Read-only may prove sufficient; that is the point of doing it last.
 
+#### [SPEC-339](apps/tauri-ui/specs/SPEC-339-review-persistence-and-staleness.md) — Review Persistence & Staleness — ✅ done ([CTX-339.1](apps/tauri-ui/context/CTX-339.1-keep-the-review.md)) 2026-09-08
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-319 · *Parent:* SPEC-300
+
+A review that vanished on a tab switch was being re-run for no reason and re-billed for less. Keeps
+the last review per area with the timestamp it was produced, and says plainly when the design has
+moved since.
+
+#### [SPEC-340](apps/tauri-ui/specs/SPEC-340-ordering-this-board-from-a-real-house.md) — Ordering This Board From a Real House — ✅ done ([CTX-340.1](apps/tauri-ui/context/CTX-340.1-choosing-a-board-house.md), [CTX-340.2](apps/tauri-ui/context/CTX-340.2-a-house-cannot-weaken-your-check.md)) 2026-09-09
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-114, SPEC-309 · *Parent:* SPEC-300
+
+The surface for `SPEC-114`'s capability profiles: pick the house you are actually ordering from and
+check the board against its published limits rather than KiCad's defaults.
+
+`CTX-340.2` is the one to read. A sidecar rule **replaces** the board's own constraint rather than
+adding to it, so a house limit looser than the user's own setting switched off a check they already
+had — four genuine errors went to zero in testing. The fix is to never write a rule the project's
+own setting already beats, and it lives in exactly one place.
+
+#### [SPEC-341](apps/tauri-ui/specs/SPEC-341-one-findings-list-per-area.md) — One Findings List Per Area — ❌ DECLINED 2026-09-09 after measurement, never built
+*Module:* `apps/tauri-ui` · *Parent:* SPEC-300
+
+Would have merged each area's two findings lists into one. `CTX-341.1` Phase 1 measured the
+duplication the spec was written on and found **one** redundant DRC run (~1.9s) and one redundant
+LLM call per area, not the 3-4x inferred. Declined on that basis. The spec is kept as a tombstone
+carrying the measurement and what would reopen it — read it before proposing this again.
+
+#### [SPEC-342](apps/tauri-ui/specs/SPEC-342-a-library-of-board-houses.md) — A Library of Board Houses — ✅ done ([CTX-342.1](apps/tauri-ui/context/CTX-342.1-a-library-of-houses.md)) 2026-09-09
+*Module:* `apps/tauri-ui`, `services/python-daemon` · *Depends on:* SPEC-340, SPEC-114 · *Parent:* SPEC-340
+
+Turns the single per-project profile into a global library: save, edit, rename, clone, remove,
+import and export, with the choice per project and the numbers a board was actually checked against
+kept on the project so editing a house never rewrites history.
+
+Four real houses — JLCPCB, PCBWay, OSH Park, AISLER — are **published as downloads on the docs site
+rather than bundled**, each field carrying the vendor URL and the date it was read, absent where a
+vendor publishes nothing. `scripts/publish_board_houses.py --check` keeps those downloads honest;
+CI fails if they drift from `board-houses/board-houses.json`.
+
 ### 3.4 `4xx` — Distribution & operations
 
 #### [SPEC-401](specs/SPEC-401-python-sidecar-packaging.md) — Python Sidecar Packaging — ✅ Completed ([CTX-401.1](context/CTX-401.1-python-sidecar-macos.md), [CTX-401.2](context/CTX-401.2-tauri-sidecar-wiring.md)) 2026-08-14
@@ -1625,7 +1671,7 @@ Scope is chosen by the user's own declared goal for the board (for me / for othe
 never by an assessment of their skill. Explicitly not a curriculum: no lesson ordering, no progress
 tracking, no quizzing, and no tutor tab.
 
-#### [SPEC-114](services/python-daemon/specs/SPEC-114-fabrication-capability-profiles.md) — Fabrication Capability Profiles & Design Rules — Draft
+#### [SPEC-114](services/python-daemon/specs/SPEC-114-fabrication-capability-profiles.md) — Fabrication Capability Profiles & Design Rules — ✅ done ([CTX-114.1](services/python-daemon/context/CTX-114.1-sidecar-rules-and-verification.md)) 2026-09-09
 
 *Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-210, SPEC-309 ·
 *Surface:* [SPEC-340](apps/tauri-ui/specs/SPEC-340-ordering-this-board-from-a-real-house.md)
@@ -1874,4 +1920,32 @@ blocking it.
     **SPEC-107** (structured logging, startup handshake & diagnostics).~~ ✅ done
 6.  ~~Spike **SPEC-401** packaging far enough to know whether frozen `pynng`/`trimesh` is a day or a
     fortnight.~~ ✅ done — no spike needed; CTX-401.1/CTX-401.2 landed the real macOS packaging.
-7.  Start M1.
+7.  ~~Start M1.~~ ✅ done — M1, M2 and M3 have all shipped; the app is at `v0.4.0`.
+
+### 7.1 Current next actions — reviewed 2026-09-09
+
+The list above is `M0`-era and is kept for the record. What is actually next, in order:
+
+1.  **`SPEC-332` — ERC as a Teaching Surface.** Raised above its neighbours by the maintainer:
+    *"i want the erc teaching surface with a higher priority than the other 2 specs."* It is also
+    the dependency `SPEC-334` names, so this order is forced as well as chosen.
+2.  **`SPEC-334` — Footprint Literacy & Component Detail.** Depends on `SPEC-332`.
+3.  **`SPEC-326` — Component Volume Placeholders.** Independent of both; the labelled bounding
+    solid is still unbuilt.
+
+All three are `In-Progress` and all three target `v0.4.0`, which is the version already shipping —
+they are the current milestone's remaining debt, not new work.
+
+**Parked, with reasons recorded in the specs themselves rather than here:**
+
+*   `SPEC-320` / `SPEC-404` — managed sign-in and hosted access. Waiting on real users testing the
+    self-managed app first, so the metering is shaped by what people do rather than by a guess.
+*   `SPEC-341` — declined after measurement; see the tombstone at the top of that spec.
+*   `SPEC-403` — cross-platform verification. Real, and the largest standing gap in what this
+    project can honestly claim: Windows and Linux live paths are still CI-only.
+
+**Standing hazard, not a task:** the frozen sidecar goes stale silently during development, and
+`services/python-daemon/scripts/ensure_sidecar.py --check-only` is what catches it. It is wired into
+the release workflow, so a stale sidecar cannot ship — but every local click-through runs
+`daemon.py` from source, which means "verified in the app" routinely means "verified in a build that
+is not the one users get." `SPEC-407` owns this.
