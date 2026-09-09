@@ -46,6 +46,12 @@ beforeEach(() => {
   }
   listHousesMock.mockResolvedValue([])
   saveHouseMock.mockResolvedValue(house())
+  genericProfileMock.mockResolvedValue({
+    house_name: 'Standard 2-layer process',
+    is_template: true,
+    min_drill: 0.3,
+    provenance: {},
+  })
 })
 
 function renderLibrary(chosenId: string | null = null) {
@@ -68,6 +74,38 @@ describe('HouseLibrary', () => {
     expect(await screen.findByText(/did not publish it/i)).toBeTruthy()
   })
 
+  it('always shows the standard numbers, read-only, so there is a way back', async () => {
+    // Reported: "i can edit or remove any board settings." Nothing set
+    // is_bundled anywhere, so the read-only rule protected nothing and there
+    // were no default settings in the library to return to.
+    listHousesMock.mockResolvedValue([])
+    renderLibrary()
+
+    expect(await screen.findByText('Standard 2-layer process')).toBeTruthy()
+    expect(screen.getByText(/comes with the app, read-only/)).toBeTruthy()
+    expect(screen.getByText(/always something to go back to/)).toBeTruthy()
+  })
+
+  it('offers only Clone on the standard numbers — never Edit, Remove or Use', async () => {
+    listHousesMock.mockResolvedValue([])
+    renderLibrary()
+
+    await screen.findByText('Standard 2-layer process')
+    expect(screen.getByRole('button', { name: 'Clone' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
+    // SPEC-342 §2.5: a template is never what a board gets checked against.
+    expect(screen.queryByRole('button', { name: /Use for this project/ })).toBeNull()
+  })
+
+  it('still shows the standard numbers once the user has houses of their own', async () => {
+    listHousesMock.mockResolvedValue([house({ cloned_from: 'x' })])
+    renderLibrary()
+
+    expect(await screen.findByText('Standard 2-layer process')).toBeTruthy()
+    expect(screen.getByText('Acme PCB')).toBeTruthy()
+  })
+
   it('marks which houses came with the app and which are the user’s copies', async () => {
     listHousesMock.mockResolvedValue([
       house({ is_bundled: true }),
@@ -86,7 +124,8 @@ describe('HouseLibrary', () => {
     listHousesMock.mockResolvedValue([house({ is_bundled: true })])
     renderLibrary()
 
-    expect(await screen.findByRole('button', { name: 'Clone' })).toBeTruthy()
+    await screen.findByText('Acme PCB')
+    expect(screen.getAllByRole('button', { name: 'Clone' }).length).toBe(2)
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
     // Removing it would lose the known-good copy just as surely as editing it.
     expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
@@ -132,7 +171,9 @@ describe('HouseLibrary', () => {
     cloneHouseMock.mockResolvedValue(house({ house_id: 'acme-copy' }))
     renderLibrary()
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Clone' }))
+    await screen.findByText('Acme PCB')
+    // Two Clone buttons now: the standard numbers, and this house.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clone' })[1])
 
     await waitFor(() => expect(cloneHouseMock).toHaveBeenCalled())
     expect(await screen.findByText(/unconfirmed until you check it/i)).toBeTruthy()

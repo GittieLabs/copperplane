@@ -148,6 +148,15 @@ but it answered a question nobody asked: the user pressed Edit and got a differe
 Refusing, and offering Clone instead, says the same thing without the surprise — and it means the
 rule is visible in the interface rather than only in the outcome.
 
+**The standard numbers are always in the list, read-only.** Not stored — read from
+`fabrication.generic_profile` each time, so they cannot drift, be edited or be deleted. They offer
+Clone and nothing else, which keeps §2.5 intact: a template is still never what a board is checked
+against.
+
+This is what makes the rule above mean anything. Without it, nothing in a new library is bundled,
+everything is editable, and "get back to default settings" has no destination — which is exactly
+what shipped in the first attempt.
+
 `reset_house` deletes a clone and returns what it came from. Cheap and offline, because the
 original was never edited — the property the read-only rule exists to guarantee.
 

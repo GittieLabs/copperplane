@@ -59,6 +59,17 @@ export function HouseLibrary({
   onClose: () => void
 }) {
   const [houses, setHouses] = useState<CapabilityProfile[] | null>(null)
+  /** The standard numbers that come with the app, shown as a read-only entry.
+   *
+   *  Without this the read-only rule protected nothing: no code path ever
+   *  marked a house bundled, so every house in the library was the user's own
+   *  and everything could be edited and removed — reported exactly that way.
+   *  It is also the "default settings" there was previously no way back to,
+   *  because the template existed but was never listed.
+   *
+   *  Not stored, so it cannot drift, be edited, or be deleted. §2.5 stands: it
+   *  is a template, so it offers Clone and not "Use for this project". */
+  const [template, setTemplate] = useState<CapabilityProfile | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -66,7 +77,9 @@ export function HouseLibrary({
   const [draft, setDraft] = useState<Record<string, string>>({})
 
   const refresh = useCallback(async () => {
-    setHouses(await listHouses())
+    const [saved, standard] = await Promise.all([listHouses(), genericProfile()])
+    setHouses(saved)
+    setTemplate(standard)
   }, [])
 
   useEffect(() => {
@@ -184,6 +197,28 @@ export function HouseLibrary({
 
       {error && <p className="text-xs text-danger">{error}</p>}
       {notice && <p className="text-xs text-fg-secondary">{notice}</p>}
+
+      {template && (
+        <div className="rounded border border-line-subtle p-2 text-xs">
+          <p className="font-medium text-fg-bright">
+            {template.house_name}
+            <span className="text-fg-muted"> · comes with the app, read-only</span>
+          </p>
+          <p className="mt-1 text-fg-tertiary">
+            Commonly quoted numbers for a standard 2-layer process, attributed to no vendor. They
+            cannot be edited or removed, so there is always something to go back to. Clone it to
+            make a house you own.
+          </p>
+          <button
+            type="button"
+            className="mt-1 rounded border border-line-strong px-2 py-0.5 text-fg-bright"
+            onClick={() => onClone(template)}
+            disabled={busy}
+          >
+            Clone
+          </button>
+        </div>
+      )}
 
       {houses === null ? (
         <p className="text-xs text-fg-muted">Loading…</p>
