@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import type { CapabilityProfile } from '../lib/fabricationReview'
+import type { ImportReport } from '../lib/fabricationReview'
 import {
   cloneHouse,
   deleteHouse,
@@ -18,11 +19,11 @@ import {
  * The library is global; the choice is per project. Two things this surface has
  * to keep true, both of them measured or decided rather than preferences:
  *
- * *   **A house that came with the app is read-only** (§2.6). It offers Clone
- *     and not Edit, because a mistake in a bundled house would otherwise be
- *     unrecoverable — there would be nothing left to revert to. An *imported*
- *     house is not bundled: the user brought it in and owns it, so it edits
- *     like any other.
+ * *   **Only the template is read-only** (§2.6). Every house in the library is
+ *     the user's to edit, because houses are distributed as an importable file
+ *     and any of them can be got back by importing again. The template is the
+ *     exception because it is not a house at all — it names no vendor, so it
+ *     can only be cloned.
  * *   **Nothing here is attributed to a vendor who did not publish it**
  *     (`CTX-114.1` Deviation 6). The bundled starting point is a template, so
  *     it is offered as something to start from and never as a house.
@@ -74,6 +75,9 @@ export function HouseLibrary({
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [editing, setEditing] = useState<string | null>(null)
+  const [pending, setPending] = useState<
+    { payload: unknown; collisions: string[]; report: ImportReport } | null
+  >(null)
   const [draft, setDraft] = useState<Record<string, string>>({})
 
   const refresh = useCallback(async () => {
@@ -167,18 +171,37 @@ export function HouseLibrary({
     })
   }
 
+  function describe(report: ImportReport): string {
+    const parts = [`${report.imported.length} imported`]
+    if (report.renamed.length) {
+      parts.push(`${report.renamed.length} brought in alongside the one you already had`)
+    }
+    if (report.rejected.length) parts.push(`${report.rejected.length} rejected`)
+    return parts.join(', ') + '.'
+  }
+
   function onImport() {
     void run('Could not import', async () => {
       const text = await navigator.clipboard?.readText()
       if (!text) throw new Error('There was nothing on the clipboard to import.')
-      const report = await importHouses(JSON.parse(text))
-      const parts = [`${report.imported.length} imported`]
+      const payload = JSON.parse(text)
+      const report = await importHouses(payload)
+      // SPEC-342 §2.6: a collision is never resolved silently. Nothing that
+      // collided was imported; the user picks, because only they know whether
+      // the copy they already have is one they edited.
       if (report.skipped_existing.length) {
-        parts.push(`${report.skipped_existing.length} already in your library and left alone`)
+        setPending({ payload, collisions: report.skipped_existing, report })
+        return null
       }
-      if (report.rejected.length) parts.push(`${report.rejected.length} rejected`)
-      return parts.join(', ') + '.'
+      return describe(report)
     })
+  }
+
+  function resolveCollisions(mode: 'overwrite' | 'rename') {
+    const p = pending
+    if (!p) return
+    setPending(null)
+    void run('Could not import', async () => describe(await importHouses(p.payload, mode)))
   }
 
   return (
@@ -197,6 +220,44 @@ export function HouseLibrary({
 
       {error && <p className="text-xs text-danger">{error}</p>}
       {notice && <p className="text-xs text-fg-secondary">{notice}</p>}
+
+      {pending && (
+        <div className="flex flex-col gap-2 rounded border border-l-2 border-l-warning border-y-line-subtle border-r-line-subtle p-2 text-xs">
+          <p className="text-fg-secondary">
+            You already have {pending.collisions.length === 1 ? 'a house' : 'houses'} named{' '}
+            {pending.collisions.join(', ')}. Nothing has been changed yet.
+          </p>
+          <p className="text-fg-muted">
+            If you have edited yours, replacing it loses those edits. Bringing the new one in
+            alongside keeps both.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded border border-line-strong px-2 py-0.5 text-fg-bright"
+              onClick={() => resolveCollisions('rename')}
+              disabled={busy}
+            >
+              Keep both
+            </button>
+            <button
+              type="button"
+              className="rounded border border-line-strong px-2 py-0.5 text-fg-bright"
+              onClick={() => resolveCollisions('overwrite')}
+              disabled={busy}
+            >
+              Replace mine
+            </button>
+            <button
+              type="button"
+              className="text-fg-muted underline"
+              onClick={() => setPending(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {template && (
         <div className="rounded border border-line-subtle p-2 text-xs">
@@ -254,10 +315,7 @@ export function HouseLibrary({
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="font-medium text-fg-bright">
                     {house.house_name}
-                    {house.is_bundled && (
-                      <span className="text-fg-muted"> · came with the app, read-only</span>
-                    )}
-                    {house.cloned_from && <span className="text-fg-muted"> · your copy</span>}
+                    {house.cloned_from && <span className="text-fg-muted"> · a copy</span>}
                     {isChosen && <span className="text-fg-muted"> · in use here</span>}
                   </span>
                 </div>
@@ -317,21 +375,16 @@ export function HouseLibrary({
                         Use for this project
                       </button>
                     )}
-                    {/* No Edit on a bundled house. Clone it and edit the
-                        clone -- keeping the bundled copy pristine is the only
-                        way back if a change turns out to be wrong. */}
-                    {!house.is_bundled && (
-                      <button
-                        type="button"
-                        className="text-fg-muted underline"
-                        onClick={() => {
-                          setEditing(id)
-                          setDraft({})
-                        }}
-                      >
-                        Edit
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="text-fg-muted underline"
+                      onClick={() => {
+                        setEditing(id)
+                        setDraft({})
+                      }}
+                    >
+                      Edit
+                    </button>
                     <button
                       type="button"
                       className="text-fg-muted underline"
@@ -350,16 +403,14 @@ export function HouseLibrary({
                         Reset to shipped
                       </button>
                     )}
-                    {!house.is_bundled && (
-                      <button
-                        type="button"
-                        className="text-fg-muted underline"
-                        onClick={() => onRemove(house)}
-                        disabled={busy}
-                      >
-                        Remove
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className="text-fg-muted underline"
+                      onClick={() => onRemove(house)}
+                      disabled={busy}
+                    >
+                      Remove
+                    </button>
                   </div>
                 )}
               </li>

@@ -70,16 +70,22 @@ A cloned profile must reset `confirmed_by_user` on every field it did not change
 own `recorded_on`. Inheriting someone else's confirmation is exactly the attribution failure
 `SPEC-114` §2.6 built per-field provenance to prevent.
 
-### 2.3 Bundled houses, and the honesty problem they create
+### 2.3 Real houses ship as an import, not bundled
 
 *"we should provide the settings for the main houses"* — and this is where the family's own rules
-bite hardest. `CTX-114.1` Deviation 6 declined to invent numbers for named vendors, and shipped an
-explicitly unbranded generic profile instead, because attributing invented figures to a real
-business is not a placeholder, it is a fabricated record a user might order against.
+bite hardest. `CTX-114.1` Deviation 6 declined to invent numbers for named vendors, because
+attributing invented figures to a real business is not a placeholder, it is a fabricated record a
+user might order against.
 
-So bundled houses are only bundled once someone has actually read the published page. Each entry
+So a house exists only once someone has actually read that vendor's published page. Each entry
 carries the source URL, the date it was read, and the process it describes. The app shows all three
-before an order, and never presents a bundled number as current.
+before an order, and never presents a recorded number as current.
+
+**They are distributed as a file, not bundled with the app** — `board-houses/board-houses.json`,
+four houses read 2026-09-09. Importing is a deliberate act by the user, which keeps the app from
+shipping as though it endorses a vendor's numbers, and an updated set is a file rather than a
+release. It is also what makes §2.6's read-only question collapse to almost nothing: a house from
+a file can always be got back from the file.
 
 ### 2.4 JSON, import and export
 
@@ -121,44 +127,43 @@ The user-visible flow is unchanged in effort: "start from standard 2-layer numbe
 click. It now produces a house of their own, which they can rename and edit, rather than silently
 adopting a set of numbers attributed to nobody.
 
-### 2.6 A house that came with the app is read-only
+### 2.6 One read-only thing: the template
 
-*"we should only allow edits on a cloned template ... you can clone any template though. allowing
-edits to template bundled with the app would prevent us from getting back to default settings if the
-user makes a mistake and wants to revert."*
+*"Read only would just be reserved for our generic import included template. and everything else
+would be editable which is fine bc you could always reimport a house file."*
 
-**The reason is recovery, not ownership**, and that distinction decides everything else here. A
-bundled house is the only thing in the library a user cannot get back any other way: if they edit it
-and get it wrong, there is nothing left to revert to short of reinstalling. So it offers Clone and
-never Edit, and it cannot be removed either — deleting it loses the known-good copy just as surely.
+Houses ship as an **importable file**, not bundled with the app. That single decision collapses the
+whole read-only question: any house can be got back by importing it again, so locking one protects
+nothing and costs the user the ability to fix a number.
 
-An **imported** house is not bundled. It came from outside, but the user chose to bring it in and
-can bring it in again, so locking it would buy nothing and cost them the ability to fix a number. It
-edits in place like any house they wrote themselves.
+So the rule is one sentence. **The template is read-only; every house is editable.**
 
-| Kind | Clone | Edit | Remove | Reset |
-| :--- | :--- | :--- | :--- | :--- |
-| Came with the app | yes | **no** | **no** | n/a |
-| Cloned from anything | yes | yes | yes | yes |
-| Imported | yes | yes | yes | no |
-| Written by the user | yes | yes | yes | no |
+| | Clone | Edit | Remove |
+| :--- | :--- | :--- | :--- |
+| The standard-process template | yes | **no** | **no** |
+| Every board house | yes | yes | yes |
 
-An earlier draft had a bundled house auto-clone on edit instead. That preserved the original too,
-but it answered a question nobody asked: the user pressed Edit and got a differently-named house.
-Refusing, and offering Clone instead, says the same thing without the surprise — and it means the
-rule is visible in the interface rather than only in the outcome.
+The template is the exception because it is not a house at all. It names no vendor, so it cannot be
+saved to the library or checked against — §2.5 — and cloning is the only thing that can be done with
+it. That is the entire rule, and it is enforced in `capability_profile` and `library_store` rather
+than described here.
 
-**The standard numbers are always in the list, read-only.** Not stored — read from
-`fabrication.generic_profile` each time, so they cannot drift, be edited or be deleted. They offer
-Clone and nothing else, which keeps §2.5 intact: a template is still never what a board is checked
-against.
+An earlier draft had a second concept: houses shipped *with the app*, read-only so that a mistake in
+one stayed recoverable. It was removed, not because it was wrong in itself but because distributing
+by import makes it unnecessary — and a concept that protects nothing is one more thing to reason
+about. Nothing ever set the flag, which was the first sign.
 
-This is what makes the rule above mean anything. Without it, nothing in a new library is bundled,
-everything is editable, and "get back to default settings" has no destination — which is exactly
-what shipped in the first attempt.
+### 2.7 A collision is never resolved silently
 
-`reset_house` deletes a clone and returns what it came from. Cheap and offline, because the
-original was never edited — the property the read-only rule exists to guarantee.
+Importing a house you already have is a real fork and the app does not guess which way. Nothing that
+collides is imported on the first pass; the user is told what clashed and picks:
+
+*   **Keep both** brings the incoming one in under a free id, leaving what they had.
+*   **Replace mine** overwrites, which is destructive and only ever happens after they say so.
+
+The reason to ask rather than default: only the user knows whether the copy they have is one they
+edited. Replacing an edited house discards work on numbers a board gets judged against, and doing
+that quietly to save a click is the wrong trade.
 
 ## 3. Known Constraints & Risks
 

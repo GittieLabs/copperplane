@@ -1308,21 +1308,6 @@ def save_house(house: dict, overwrite: bool = False) -> dict:
 
     path = _house_path(house_id)
 
-    # A house that came with the app is read-only. Not auto-cloned on edit --
-    # refused, so the UI never offers Edit on one at all (`SPEC-342` section
-    # 2.6).
-    #
-    # The reason is recovery rather than ownership: if a bundled house could be
-    # changed, a mistake in it would be unrecoverable short of reinstalling.
-    # Keeping the bundled copy pristine is the only thing that makes "revert to
-    # how it shipped" possible. Cloning it is always allowed, and the clone is
-    # the user's to edit freely.
-    if os.path.exists(path) and _capability_profile().is_bundled(_read_json(path)):
-        raise SchemaValidationError(
-            f"{house_id!r} came with the app and cannot be edited -- that is what "
-            f"keeps a known-good copy to go back to. Clone it and edit the clone."
-        )
-
     if os.path.exists(path) and not overwrite:
         # `SPEC-342` section 2.4 asks for this on import; it is the same rule
         # everywhere. Silently replacing a house would discard edits the user
@@ -1337,15 +1322,17 @@ def save_house(house: dict, overwrite: bool = False) -> dict:
     return record
 
 
-def _unused_house_id(base: str) -> str:
-    """`<base>-mine`, then `-mine-2` and so on. Never silently reuses an id: a
-    second copy of a shipped house is a second house, not a replacement of the
-    first."""
-    candidate = f"{base}-mine"
+def _unused_house_id(base: str, suffix: str = "copy") -> str:
+    """`<base>-<suffix>`, then `-2` and so on. Never silently reuses an id: a
+    second copy is a second house, not a replacement of the first.
+
+    The suffix is a parameter because the two callers mean different things by
+    it -- an imported house that collided is a "-2", not somebody's copy."""
+    candidate = f"{base}-{suffix}" if suffix else f"{base}-2"
     n = 2
     while os.path.exists(_house_path(candidate)):
-        candidate = f"{base}-mine-{n}"
         n += 1
+        candidate = f"{base}-{suffix}-{n}" if suffix else f"{base}-{n}"
     return candidate
 
 
@@ -1405,45 +1392,80 @@ def export_houses(house_ids: list = None) -> dict:
     }
 
 
-def import_houses(payload: dict, overwrite: bool = False) -> dict:
+#: What to do when an imported house has the id of one already in the library.
+#: The user is asked rather than guessed at -- `SPEC-342` section 2.6.
+COLLISION_MODES = ("report", "overwrite", "rename")
+
+
+def import_houses(payload: dict, on_collision: str = "report",
+                  overwrite: bool = False) -> dict:
     """Read a set of houses back, treating the file as untrusted.
 
     Every record goes through the same validation as anything else -- a profile
     is numbers a board gets judged against, and a malformed or hostile one is a
     wrong answer with a confident face.
 
-    A name collision is reported, never merged: `SPEC-342` section 2.4 is
-    explicit, and silently replacing a house would discard edits the user made.
-    Imports land as shipped houses, so editing one produces the user's own copy
-    and the imported original stays available to reset back to."""
+    Three ways to handle a name collision, because there is no right default
+    and the user is the one who knows which they want:
+
+    *   `report` (default) imports everything that does not collide and names
+        the ones that do, so the caller can ask. Nothing is replaced.
+    *   `overwrite` replaces the existing house. Destructive, and only ever
+        after the user has said so.
+    *   `rename` imports the incoming one alongside under a free id, leaving
+        both. Non-destructive, at the cost of a longer list.
+
+    Imported houses are ordinary, fully editable houses. Nothing here is
+    read-only: a house that came from a file can always be imported again,
+    which is exactly why locking it would cost the user something and protect
+    nothing (`SPEC-342` section 2.6)."""
     if not isinstance(payload, dict) or not isinstance(payload.get("houses"), list):
         raise SchemaValidationError(
             "That file does not look like an exported board-house library: it "
             "has no 'houses' list."
         )
 
-    imported, skipped, rejected = [], [], []
+    # `overwrite=True` is the older spelling of `on_collision="overwrite"`,
+    # kept so an existing caller does not silently change behaviour.
+    if overwrite:
+        on_collision = "overwrite"
+    if on_collision not in COLLISION_MODES:
+        raise SchemaValidationError(
+            f"on_collision must be one of {COLLISION_MODES}, got {on_collision!r}."
+        )
+
+    imported, skipped, renamed, rejected = [], [], [], []
     for entry in payload["houses"]:
         house_id = (entry or {}).get("house_id") if isinstance(entry, dict) else None
         if not house_id:
             rejected.append({"house_id": None, "reason": "no house_id"})
             continue
-        if os.path.exists(_house_path(house_id)) and not overwrite:
-            skipped.append(house_id)
-            continue
+
+        target = house_id
+        if os.path.exists(_house_path(house_id)):
+            if on_collision == "report":
+                skipped.append(house_id)
+                continue
+            if on_collision == "rename":
+                target = _unused_house_id(house_id, suffix="")
+                renamed.append({"from": house_id, "to": target})
+
         try:
-            # An imported house is the user's own and fully editable. Only what
-            # came WITH THE APP is read-only, because only that has a pristine
-            # copy the user cannot otherwise get back.
-            record = {**entry}
-            record.pop(_capability_profile().BUNDLED_KEY, None)
+            record = {**entry, "house_id": target}
             record.pop(_capability_profile().CLONED_FROM_KEY, None)
             save_house(record, overwrite=True)
-            imported.append(house_id)
+            imported.append(target)
         except (SchemaValidationError, Exception) as exc:  # noqa: BLE001
             rejected.append({"house_id": house_id, "reason": str(exc)})
+            if renamed and renamed[-1]["to"] == target:
+                renamed.pop()
 
-    return {"imported": imported, "skipped_existing": skipped, "rejected": rejected}
+    return {
+        "imported": imported,
+        "skipped_existing": skipped,
+        "renamed": renamed,
+        "rejected": rejected,
+    }
 
 
 def delete_house(house_id: str) -> dict:

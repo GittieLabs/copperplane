@@ -2092,12 +2092,18 @@ def house_export(house_ids: list = None) -> dict:
     return library_store.export_houses(house_ids)
 
 
-def house_import(payload: dict, overwrite: bool = False) -> dict:
+def house_import(payload: dict, on_collision: str = "report",
+                 overwrite: bool = False) -> dict:
     """The house.import route. Treats the file as untrusted and reports what it
-    did with each record rather than returning a bare count -- a house that was
-    skipped for a name collision and one that was rejected as malformed are
-    different problems with different fixes."""
-    return library_store.import_houses(payload, overwrite=overwrite)
+    did with each record rather than returning a bare count -- a house skipped
+    for a name collision and one rejected as malformed are different problems
+    with different fixes.
+
+    `on_collision` is "report", "overwrite" or "rename"; the default resolves
+    nothing on its own, so the user is asked."""
+    return library_store.import_houses(
+        payload, on_collision=on_collision, overwrite=overwrite
+    )
 
 
 def house_reset(house_id: str) -> dict:

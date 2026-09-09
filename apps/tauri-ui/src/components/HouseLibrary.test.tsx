@@ -106,45 +106,27 @@ describe('HouseLibrary', () => {
     expect(screen.getByText('Acme PCB')).toBeTruthy()
   })
 
-  it('marks which houses came with the app and which are the user’s copies', async () => {
+  it('marks a house that is a copy of another', async () => {
     listHousesMock.mockResolvedValue([
-      house({ is_bundled: true }),
-      house({ house_id: 'acme-mine', house_name: 'My Acme', cloned_from: 'acme' }),
+      house(),
+      house({ house_id: 'acme-2', house_name: 'My Acme', cloned_from: 'acme' }),
     ])
     renderLibrary()
 
-    expect(await screen.findByText(/came with the app, read-only/)).toBeTruthy()
-    expect(screen.getByText(/your copy/)).toBeTruthy()
+    await screen.findByText('My Acme')
+    expect(screen.getByText(/· a copy/)).toBeTruthy()
   })
 
-  it('offers Clone but not Edit on a house that came with the app', async () => {
-    // Requested directly: "we should only allow edits on a cloned template ...
-    // you can clone any template though. allowing edits to template bundled
-    // with the app would prevent us from getting back to default settings."
-    listHousesMock.mockResolvedValue([house({ is_bundled: true })])
+  it('offers Edit and Remove on every house, because every house is editable', async () => {
+    // SPEC-342 §2.6, simplified: the template is the only read-only thing.
+    // Houses ship as an importable file, so any of them can be got back by
+    // importing again -- locking one protects nothing.
+    listHousesMock.mockResolvedValue([house()])
     renderLibrary()
 
     await screen.findByText('Acme PCB')
-    expect(screen.getAllByRole('button', { name: 'Clone' }).length).toBe(2)
-    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
-    // Removing it would lose the known-good copy just as surely as editing it.
-    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
-  })
-
-  it('offers Edit on a house the user owns', async () => {
-    listHousesMock.mockResolvedValue([house({ cloned_from: 'acme' })])
-    renderLibrary()
-
-    expect(await screen.findByRole('button', { name: 'Edit' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
-  })
-
-  it('offers Edit on an imported house, which is not bundled', async () => {
-    // An imported house can be imported again, so there is no reason to lock
-    // it -- the read-only rule is about recovery, not about origin.
-    listHousesMock.mockResolvedValue([house({ is_bundled: false })])
-    renderLibrary()
-    expect(await screen.findByRole('button', { name: 'Edit' })).toBeTruthy()
   })
 
   it('lets a project use a house, and says which one it already uses', async () => {
@@ -206,7 +188,7 @@ describe('HouseLibrary', () => {
   })
 
   it('offers reset only on a copy, since there is nothing else to go back to', async () => {
-    listHousesMock.mockResolvedValue([house({ is_bundled: true })])
+    listHousesMock.mockResolvedValue([house()])
     const { unmount } = render(
       <HouseLibrary chosenId={null} onChoose={vi.fn()} onClose={vi.fn()} />,
     )
@@ -240,11 +222,12 @@ describe('HouseLibrary', () => {
     expect(await screen.findByText(/weather-pcb still shows the numbers/)).toBeTruthy()
   })
 
-  it('reports an import that skipped an existing house rather than merging it', async () => {
+  it('asks what to do when an import collides, rather than deciding for the user', async () => {
     listHousesMock.mockResolvedValue([house()])
     importHousesMock.mockResolvedValue({
-      imported: ['bravo'],
+      imported: [],
       skipped_existing: ['acme'],
+      renamed: [],
       rejected: [],
     })
     Object.assign(navigator, {
@@ -254,7 +237,34 @@ describe('HouseLibrary', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Import from clipboard/ }))
 
-    expect(await screen.findByText(/already in your library and left alone/)).toBeTruthy()
+    // Nothing changed yet; the user picks, because only they know whether the
+    // copy they have is one they edited.
+    expect(await screen.findByText(/Nothing has been changed yet/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Keep both' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Replace mine' })).toBeTruthy()
+  })
+
+  it('brings both in when the user says keep both', async () => {
+    listHousesMock.mockResolvedValue([house()])
+    importHousesMock
+      .mockResolvedValueOnce({ imported: [], skipped_existing: ['acme'], renamed: [], rejected: [] })
+      .mockResolvedValueOnce({
+        imported: ['acme-2'],
+        skipped_existing: [],
+        renamed: [{ from: 'acme', to: 'acme-2' }],
+        rejected: [],
+      })
+    Object.assign(navigator, {
+      clipboard: { readText: vi.fn().mockResolvedValue('{"houses":[]}'), writeText: vi.fn() },
+    })
+    renderLibrary()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Import from clipboard/ }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep both' }))
+
+    await waitFor(() => expect(importHousesMock).toHaveBeenCalledTimes(2))
+    expect(importHousesMock.mock.calls[1][1]).toBe('rename')
+    expect(await screen.findByText(/brought in alongside/)).toBeTruthy()
   })
 
   it('surfaces a failure instead of leaving the list looking unchanged', async () => {
