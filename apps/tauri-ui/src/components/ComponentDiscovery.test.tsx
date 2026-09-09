@@ -7,10 +7,15 @@ const writeTextMock = vi.fn()
 const openMock = vi.fn()
 const listPartsMock = vi.fn()
 const loadPartMock = vi.fn()
+const searchFootprintsMock = vi.fn()
 
 vi.mock('../lib/components', () => ({
   searchComponents: (...args: unknown[]) => searchComponentsMock(...args),
   cacheDatasheet: (...args: unknown[]) => cacheDatasheetMock(...args),
+}))
+
+vi.mock('../lib/footprints', () => ({
+  searchFootprints: (...args: unknown[]) => searchFootprintsMock(...args),
 }))
 
 vi.mock('../lib/library', () => ({
@@ -63,6 +68,7 @@ beforeEach(() => {
   openMock.mockReset()
   listPartsMock.mockReset().mockResolvedValue([])
   loadPartMock.mockReset()
+  searchFootprintsMock.mockReset().mockResolvedValue([])
 })
 
 describe('ComponentDiscovery', () => {
@@ -170,6 +176,70 @@ describe('ComponentDiscovery', () => {
     search('???')
 
     await waitFor(() => screen.getByText('Search did not return a non-empty list of candidates.'))
+  })
+
+  it('answers a footprint-shaped query from KiCad’s own libraries', async () => {
+    // SPEC-334 §2. The two namespaces were never connected, so this query
+    // went to an LLM that guessed at a manufacturer part number. Reported:
+    // "I have a hunch that the component I searched for ... is a kicad only
+    // reference name and would not be searchable with our component search."
+    searchFootprintsMock.mockResolvedValueOnce([
+      { library: 'Connector_PinHeader_2.54mm', footprint_name: 'PinHeader_1x04_P2.54mm_Vertical', source: 'kicad_library' },
+    ])
+    searchComponentsMock.mockResolvedValueOnce([])
+
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('PinHeader_1x04_P2.54mm_Vertical')
+
+    expect(await screen.findByText('PinHeader_1x04_P2.54mm_Vertical')).toBeTruthy()
+    expect(screen.getByText(/Connector_PinHeader_2.54mm/)).toBeTruthy()
+    // Said plainly, because a footprint is not something you can order.
+    expect(screen.getByText(/not parts/i)).toBeTruthy()
+  })
+
+  it('searches KiCad’s libraries on every query, rather than classifying first', async () => {
+    // Deliberately not a router: a classifier is a new thing that can be
+    // wrong, and silently so. This search is free, instant and cannot
+    // hallucinate, so it runs always and an ambiguous query gets both
+    // answers instead of a coin flip.
+    searchFootprintsMock.mockResolvedValueOnce([])
+    searchComponentsMock.mockResolvedValueOnce([
+      { part_number: 'NE555P', manufacturer: 'TI', package: 'DIP-8', datasheet_url: 'https://e.invalid/d.pdf', confidence: 'high', rationale: 'r' },
+    ])
+
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('NE555P')
+
+    await waitFor(() => expect(searchFootprintsMock).toHaveBeenCalledWith('NE555P'))
+    expect(searchComponentsMock).toHaveBeenCalledWith('NE555P')
+  })
+
+  it('still shows KiCad footprint hits when the part search fails outright', async () => {
+    // The case that used to be worst: an expensive call that returns a
+    // confident guess, or nothing. The free answer must survive it.
+    searchFootprintsMock.mockResolvedValueOnce([
+      { library: 'Package_DIP', footprint_name: 'DIP-8_W7.62mm', source: 'kicad_library' },
+    ])
+    searchComponentsMock.mockRejectedValueOnce(new Error('provider is unreachable'))
+
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('DIP-8_W7.62mm')
+
+    expect(await screen.findByText('DIP-8_W7.62mm')).toBeTruthy()
+    expect(screen.getByText('provider is unreachable')).toBeTruthy()
+  })
+
+  it('a missing footprint library never blocks the search the user asked for', async () => {
+    searchFootprintsMock.mockRejectedValueOnce(new Error('no fp-lib-table'))
+    searchComponentsMock.mockResolvedValueOnce([
+      { part_number: 'ATtiny85', manufacturer: 'Microchip', package: 'SOIC-8', datasheet_url: 'https://e.invalid/d.pdf', confidence: 'high', rationale: 'r' },
+    ])
+
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('ATtiny85')
+
+    expect(await screen.findByText('ATtiny85')).toBeTruthy()
+    expect(screen.queryByText(/no fp-lib-table/)).toBeNull()
   })
 
   it('clicking "This one" caches the datasheet and renders a confirmed state naming SPEC-307 as not built yet', async () => {

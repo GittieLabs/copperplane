@@ -1261,7 +1261,7 @@ project-level Run Review were **removed** on 2026-09-02 as *"a guess at what the
 need"*. What a returning user should see there is a separate question this spec must not quietly
 answer.
 
-#### [SPEC-334](apps/tauri-ui/specs/SPEC-334-footprint-literacy-and-component-detail.md) — Footprint Literacy & Component Detail — Draft
+#### [SPEC-334](apps/tauri-ui/specs/SPEC-334-footprint-literacy-and-component-detail.md) — Footprint Literacy & Component Detail — ✅ done ([CTX-334.1](apps/tauri-ui/context/CTX-334.1-footprint-detail.md), [CTX-334.2](apps/tauri-ui/context/CTX-334.2-kicad-glossary.md), [CTX-334.3](apps/tauri-ui/context/CTX-334.3-kicads-own-libraries-in-search.md)) 2026-09-09
 
 *Module:* `apps/tauri-ui` + `services/python-daemon` · *Depends on:* SPEC-325, SPEC-332
 
@@ -1929,12 +1929,15 @@ The list above is `M0`-era and is kept for the record. What is actually next, in
 1.  **`SPEC-332` — ERC as a Teaching Surface.** Raised above its neighbours by the maintainer:
     *"i want the erc teaching surface with a higher priority than the other 2 specs."* It is also
     the dependency `SPEC-334` names, so this order is forced as well as chosen.
-2.  **`SPEC-334` — Footprint Literacy & Component Detail.** Depends on `SPEC-332`.
+2.  ~~**`SPEC-334` — Footprint Literacy & Component Detail.**~~ ✅ done 2026-09-09. Its second open
+    question — disambiguating part-search results — was deliberately deferred to `SPEC-306` rather
+    than carried here; see that spec's header for why.
 3.  **`SPEC-326` — Component Volume Placeholders.** Independent of both; the labelled bounding
-    solid is still unbuilt.
+    solid is still unbuilt, and it is now the only one of the three with substantial work left.
 
-All three are `In-Progress` and all three target `v0.4.0`, which is the version already shipping —
-they are the current milestone's remaining debt, not new work.
+`SPEC-332` and `SPEC-334` were both `In-Progress` because of leftover open questions rather than
+unbuilt features — worth knowing before planning around them. All three target `v0.4.0`, the
+version already shipping: current-milestone debt, not new work.
 
 **Parked, with reasons recorded in the specs themselves rather than here:**
 
