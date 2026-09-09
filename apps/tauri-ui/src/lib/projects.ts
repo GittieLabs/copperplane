@@ -38,6 +38,10 @@ export interface Project {
   schema_version?: number
   directory?: string
   last_results?: Record<string, unknown>
+  /** SPEC-340: the board house this project is checked against. Null means
+   *  the user has never chosen one, which is not the same as a house that
+   *  publishes no limits. */
+  fabrication_profile?: Record<string, unknown> | null
   /** CTX-340.2: the check result as the UI showed it, plus `ran_at`. */
   check_display?: Record<string, (Record<string, unknown> & { ran_at?: string }) | undefined>
   export_history?: ExportHistoryEntry[]

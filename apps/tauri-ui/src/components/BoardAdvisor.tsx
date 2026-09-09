@@ -118,7 +118,10 @@ export function BoardAdvisor({
         setBoardCheckResult(result as unknown as CheckResult)
         setCheckRanAt(typeof ranAt === 'string' ? ranAt : null)
         setCheckedHouse(typeof house === 'string' ? house : null)
-        setProfile((current) => current ?? (project.fabrication_profile as CapabilityProfile) ?? null)
+        setProfile(
+          (current) =>
+            current ?? ((project.fabrication_profile as unknown as CapabilityProfile) || null),
+        )
       })
       .catch(() => {
         /* A project with no stored check is the normal case, not an error. */
