@@ -1,18 +1,56 @@
 ---
 id: SPEC-341
-title: "One Findings List Per Area"
-status: Draft
+title: "One Findings List Per Area (DECLINED)"
+status: Deprecated
 type: Feature
 created: 2026-09-08
 last_updated: 2026-09-09
-target_version: v0.7.0
+target_version: n/a
 location: "apps/tauri-ui/specs/SPEC-341-one-findings-list-per-area.md"
 parent_spec: "SPEC-300-product-ia-interaction-model.md"
 child_specs: []
 user_facing: true
 ---
 
-# SPEC-341: One Findings List Per Area
+# SPEC-341: One Findings List Per Area — DECLINED, NOT BUILT
+
+> **Decided 2026-09-09 by the maintainer: this will not be built.** The spec is kept rather than
+> deleted because the measurement in §2.1 is the valuable part and the reasoning should be findable
+> by whoever proposes this again — which someone will, because the duplication is visible on screen
+> and the argument for merging is genuinely appealing until you price it.
+>
+> **The reason, in one sentence:** the spec was written on a benefit that measurement disproved, and
+> what remains does not justify the cost.
+>
+> §2.1 was originally an inference — three or four checks per action — and said so honestly. Phase 1
+> of `CTX-341.1` instrumented the real `kicad_cli` entry points and drove each user action through
+> the real routes. **The inference was wrong.** The measured duplication is *one* redundant DRC run
+> (~1.9s) and *one* redundant LLM call per area. The maintainer's decision:
+>
+> > *"i think we don't do it if it only saves a marginal amount of llm effort."*
+>
+> Two further reasons the cost is higher than it looks, both of which point the same way:
+>
+> *   **The user-comprehension half was already delivered by something else.** `CTX-340.1` folded
+>     three overlapping board-check surfaces into one, and `SPEC-340`'s cross-reference already
+>     reconciles the counts between the board check and the review. The most visible confusion this
+>     spec was written to fix has been fixed by a cheaper change that shipped.
+>
+> *   **Merging makes a product decision unavoidable that is currently avoided for free.**
+>     `explain_violations` caps the LLM explanation at 15 findings. One merged list is longer than
+>     either list alone, so *which findings get explained* stops being an implementation detail and
+>     becomes a choice with a wrong answer — and the wrong answer is silently dropping the finding
+>     that mattered. Two lists sidestep this entirely.
+>
+> **What would reopen it.** Not a tidier interface — that argument is already priced in above. The
+> thing that would change the answer is evidence that users are acting on the wrong list: reading
+> the review's count as the authoritative one, or fixing a DRC violation the review had already
+> explained differently. That is a real failure and this spec is the fix for it. Nobody has reported
+> it, and the counts are cross-referenced today.
+>
+> **What was kept.** §2.1's measurement table stands as the record of what a check actually costs;
+> it is cited elsewhere and is true regardless of this decision. `CTX-341.1` is Completed — it did
+> its job, which was to test an assumption before building on it.
 
 ## 1. Executive Summary & Goals
 
