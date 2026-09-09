@@ -2001,8 +2001,8 @@ def fabrication_validate_profile(profile: dict) -> dict:
 
 
 def fabrication_generic_profile() -> dict:
-    """The fabrication.generic_profile route: a starting point, attributed to
-    nobody.
+    """The fabrication.generic_profile route: a starting TEMPLATE, attributed to
+    nobody, which must be cloned before it can be used.
 
     `SPEC-114` section 2.7 wants bundled starter profiles for the houses makers
     actually use. Section 2.9 lists getting real numbers for real houses as the
@@ -2014,9 +2014,20 @@ def fabrication_generic_profile() -> dict:
     So this is a deliberately unbranded standard-process starting point. It
     names the process it describes, carries no source URL claiming a vendor
     published it, and starts unconfirmed. Attributed profiles land when someone
-    has actually read the published pages."""
+    has actually read the published pages.
+
+    `SPEC-342` section 2.5 settled what it is: a template. Listing it beside
+    real vendors would make it answer a question it cannot -- *which house is
+    this?* -- and every field would stay unconfirmed forever, because there is
+    no page to check it against. `save_house` and
+    `set_project_fabrication_profile` both refuse it; `capability_profile.clone`
+    is the only way it becomes something a board can be checked against."""
     profile = {
-        "house_name": "Generic 2-layer standard process (not a real vendor quote)",
+        "house_name": "Standard 2-layer process",
+        # SPEC-342 section 2.5: a template, not a house. It names no vendor, so
+        # it cannot be saved to the library or chosen by a project -- it has to
+        # be cloned first, and the clone is a real house the user owns.
+        capability_profile.TEMPLATE_KEY: True,
         "schema_version": 1,
         "layer_count": 2,
         "min_track_width": 0.127,
@@ -2048,10 +2059,14 @@ def fabrication_generic_profile() -> dict:
     return capability_profile.validate(profile)
 
 
-def house_save(house: dict) -> dict:
+def house_save(house: dict, overwrite: bool = False) -> dict:
     """The house.save route (SPEC-342). Validated at store time, like every
-    other record whose numbers a board is judged against."""
-    return library_store.save_house(house)
+    other record whose numbers a board is judged against.
+
+    Refuses to replace an existing house unless the caller says so explicitly:
+    silently overwriting would discard edits the user made to numbers a board
+    gets judged against."""
+    return library_store.save_house(house, overwrite=overwrite)
 
 
 def house_list() -> dict:

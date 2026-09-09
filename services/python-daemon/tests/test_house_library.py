@@ -101,14 +101,27 @@ class HouseLibraryTests(unittest.TestCase):
         library_store.save_project({"name": "alpha"})
         library_store.set_project_fabrication_profile("alpha", _house())
 
-        # The shared house is revised later, as SPEC-342 section 3 warns it will be.
-        library_store.save_house(_house(min_drill=0.2))
+        # The shared house is revised later, as SPEC-342 section 3 warns it will
+        # be. Editing an existing house is an explicit overwrite -- saving over
+        # one by accident would discard edits to numbers a board is judged by.
+        library_store.save_house(_house(min_drill=0.2), overwrite=True)
 
         self.assertEqual(library_store.load_house("house-a")["min_drill"], 0.2)
         self.assertEqual(
             library_store.load_project("alpha")["fabrication_profile"]["min_drill"], 0.35,
             "the project's findings were produced against the old number and still say so",
         )
+
+    def test_saving_over_an_existing_house_is_refused_unless_asked_for(self):
+        """SPEC-342 section 2.4 asks for this on import; it is the same rule
+        everywhere, because the thing being replaced is a set of numbers a
+        board gets judged against."""
+        library_store.save_house(_house())
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.save_house(_house(min_drill=0.2))
+
+        self.assertEqual(library_store.load_house("house-a")["min_drill"], 0.35,
+                         "the refused save changed nothing")
 
     def test_a_missing_house_is_an_error_rather_than_an_empty_record(self):
         with self.assertRaises(FileNotFoundError):
@@ -181,6 +194,58 @@ class CloneTests(unittest.TestCase):
         cloned = capability_profile.clone(_house(), "House B", "house-b", "2026-09-09")
         library_store.save_house(cloned)
         self.assertIn("house-b", library_store.list_houses())
+
+
+class TemplateTests(unittest.TestCase):
+    """SPEC-342 section 2.5, settled: generic is a template, not a house."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        library_store.configure(storage_root=self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(library_store.configure, storage_root=None)
+        import daemon
+        self.template = daemon.fabrication_generic_profile()
+
+    def test_the_bundled_starting_point_is_a_template(self):
+        self.assertTrue(capability_profile.is_template(self.template))
+
+    def test_a_template_cannot_be_saved_as_a_house(self):
+        # The library holds houses. A template names no vendor, so every field
+        # in it would stay unconfirmed forever -- there is no page to check it
+        # against.
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.save_house({**self.template, "house_id": "generic"})
+        self.assertEqual(library_store.list_houses(), [])
+
+    def test_a_project_cannot_be_checked_against_a_template(self):
+        library_store.save_project({"name": "alpha"})
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.set_project_fabrication_profile("alpha", self.template)
+        self.assertIsNone(library_store.load_project("alpha")["fabrication_profile"])
+
+    def test_cloning_a_template_produces_a_real_house(self):
+        cloned = capability_profile.clone(
+            self.template, "My House", "my-house", "2026-09-09"
+        )
+        self.assertFalse(capability_profile.is_template(cloned))
+
+        library_store.save_house(cloned)
+        library_store.save_project({"name": "alpha"})
+        library_store.set_project_fabrication_profile("alpha", cloned)
+
+        self.assertEqual(library_store.list_houses(), ["my-house"])
+        self.assertEqual(
+            library_store.load_project("alpha")["fabrication_profile"]["house_name"],
+            "My House",
+        )
+
+    def test_the_template_is_not_attributed_to_any_vendor(self):
+        # CTX-114.1 Deviation 6: inventing figures under a real business's name
+        # is not a placeholder. Nothing here claims a vendor published these.
+        for entry in self.template["provenance"].values():
+            self.assertEqual(entry["source_url"], "")
+            self.assertFalse(entry["confirmed_by_user"])
 
 
 if __name__ == "__main__":

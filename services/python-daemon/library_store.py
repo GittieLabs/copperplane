@@ -1048,6 +1048,13 @@ def _validate_project_fabrication_profile(project: dict) -> None:
             "Cannot store a fabrication profile: the capability_profile module "
             "is unavailable in this build."
         )
+    if capability_profile.is_template(profile):
+        # `SPEC-342` section 2.5: a board is never checked against numbers that
+        # name no house. The template is what you start from, not what you use.
+        raise SchemaValidationError(
+            "This is a starting template, not a board house. Clone it and give "
+            "it a name before checking a board against it."
+        )
     try:
         capability_profile.validate(profile)
     except capability_profile.ProfileValidationError as exc:
@@ -1259,7 +1266,7 @@ def _house_path(house_id: str) -> str:
     return os.path.join(_houses_dir(), house_id + _HOUSE_SUFFIX)
 
 
-def save_house(house: dict) -> dict:
+def save_house(house: dict, overwrite: bool = False) -> dict:
     """Write a board house to the global library.
 
     Validated through `capability_profile` so the library cannot hold a record
@@ -1277,13 +1284,29 @@ def save_house(house: dict) -> dict:
             "Cannot store a board house: the capability_profile module is "
             "unavailable in this build."
         )
+    if capability_profile.is_template(house):
+        raise SchemaValidationError(
+            "This is a starting template, not a board house. Clone it and give "
+            "it a name first -- the library holds houses, and a template names "
+            "no vendor for its numbers to be attributed to."
+        )
     try:
         capability_profile.validate(house)
     except capability_profile.ProfileValidationError as exc:
         raise SchemaValidationError(str(exc)) from exc
 
+    path = _house_path(house_id)
+    if os.path.exists(path) and not overwrite:
+        # `SPEC-342` section 2.4 asks for this on import; it is the same rule
+        # everywhere. Silently replacing a house would discard edits the user
+        # made to numbers a board gets judged against.
+        raise SchemaValidationError(
+            f"A board house named {house_id!r} already exists. Rename this one, "
+            f"or say explicitly that you mean to replace it."
+        )
+
     record = {**house, "schema_version": 1}
-    _write_json(_house_path(house_id), record)
+    _write_json(path, record)
     return record
 
 

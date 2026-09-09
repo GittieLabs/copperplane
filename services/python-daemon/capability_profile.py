@@ -64,6 +64,16 @@ CONTEXT_FIELDS = ("layer_count", "copper_weight_oz", "board_thickness_mm")
 
 PROVENANCE_REQUIRED_KEYS = ("source_url", "recorded_on", "confirmed_by_user")
 
+#: A template is a starting point, never a board house (`SPEC-342` section 2.5).
+#: It names no vendor, so every field in it would carry `confirmed_by_user:
+#: false` forever -- there is no published page for anyone to check it against.
+#: It must be cloned before it can be used, and the clone is a real house.
+TEMPLATE_KEY = "is_template"
+
+
+def is_template(profile: dict) -> bool:
+    return bool(profile.get(TEMPLATE_KEY))
+
 # The project's own KiCad setting for each field, by its `.kicad_pro` key.
 #
 # MEASURED 2026-09-08, and the reason this mapping exists at all: a sidecar rule
@@ -283,6 +293,9 @@ def clone(profile: dict, house_name: str, house_id: str, recorded_on: str,
         "house_id": house_id,
         "schema_version": 1,
     }
+    # A clone is always a real house. This is the only way one comes into
+    # existence from the bundled starting point (`SPEC-342` section 2.5).
+    cloned.pop(TEMPLATE_KEY, None)
 
     provenance = {}
     for field in ALL_VALUE_FIELDS:

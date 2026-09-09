@@ -4,7 +4,7 @@ title: "A Library of Board Houses"
 status: Draft
 type: Feature
 created: 2026-09-08
-last_updated: 2026-09-08
+last_updated: 2026-09-09
 target_version: v0.7.0
 location: "apps/tauri-ui/specs/SPEC-342-a-library-of-board-houses.md"
 parent_spec: "SPEC-340-ordering-this-board-from-a-real-house.md"
@@ -93,19 +93,33 @@ silently overwriting the user's own edits.
 Distribution through the repository, and refreshing bundled houses at release time, then costs
 nothing extra: the file the user imports and the file the app ships are the same shape.
 
-### 2.5 The open question this spec does not answer
+### 2.5 Settled 2026-09-09: generic is a template, not a house
 
-**Is "generic" a house?** Today it appears in the same place a real house would, which invites
-exactly the question that was asked: *"would the generic option still show and isn't the generic
-option kicad's default or something different?"*
+**"Generic" is not a house and cannot be chosen as one.** It is a starting point that must be
+cloned, and the clone is what a project checks against.
 
-Measured 2026-09-08, and the answer is neither: the generic profile is stricter than KiCad's
-defaults on six of nine fields and **looser on two** — track width 0.127mm against KiCad's 0.2mm,
-and copper-to-edge 0.2mm against 0.5mm. It is a plausible standard process, not a floor and not a
-default.
+The question was *"would the generic option still show and isn't the generic option kicad's default
+or something different?"* — and measurement showed it is neither: stricter than KiCad's defaults on
+six of nine fields and **looser on two** (track width 0.127mm against 0.2mm, copper-to-edge 0.2mm
+against 0.5mm). A plausible standard process; not a floor, not a default, and not anybody's
+published capability.
 
-Whether it belongs in the list at all, or becomes a "start from" template that can only be cloned,
-is a product decision this spec records rather than settles.
+Listing it beside real vendors would have made it answer a question it cannot answer — *which house
+is this?* — and every field in it would have carried `confirmed_by_user: false` forever, because
+there is no page for a user to check it against. Making it clone-only says what it actually is: the
+numbers you start from before you have your own.
+
+Three consequences, each enforced rather than documented:
+
+*   A template is refused by `save_house`. The library holds houses, and a template is not one.
+*   A template is refused as a project's choice. `set_project_fabrication_profile` will not take
+    one, so a board is never checked against numbers that name no house.
+*   `clone` clears the template flag. A clone is always a real house, which is the only way one
+    comes into existence from the bundled starting point.
+
+The user-visible flow is unchanged in effort: "start from standard 2-layer numbers" still takes one
+click. It now produces a house of their own, which they can rename and edit, rather than silently
+adopting a set of numbers attributed to nobody.
 
 ## 3. Known Constraints & Risks
 

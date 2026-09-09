@@ -18,6 +18,10 @@ import { dispatch } from './ipc'
  *  single most important rule in the whole feature. */
 export interface CapabilityProfile {
   house_name: string
+  /** SPEC-342 §2.5: a starting point, not a board house. Cannot be saved to
+   *  the library or chosen by a project until it is cloned. */
+  is_template?: boolean
+  house_id?: string
   schema_version?: number
   layer_count?: number
   copper_weight_oz?: number
@@ -103,6 +107,39 @@ export interface ProfileSummary {
 
 export async function validateProfile(profile: CapabilityProfile): Promise<ProfileSummary> {
   return call<ProfileSummary>('fabrication.validate_profile', { profile })
+}
+
+/** SPEC-342 §2.5: the bundled starting point is a template, not a house. It
+ *  cannot be saved to the library or chosen by a project -- it has to be cloned
+ *  first, and the clone is a real house the user owns and can edit. */
+export async function cloneHouse(
+  house: CapabilityProfile,
+  houseName: string,
+  houseId: string,
+  recordedOn: string,
+  overrides?: Record<string, number>,
+): Promise<CapabilityProfile> {
+  return call<CapabilityProfile>('house.clone', {
+    house,
+    house_name: houseName,
+    house_id: houseId,
+    recorded_on: recordedOn,
+    ...(overrides ? { overrides } : {}),
+  })
+}
+
+export async function listHouses(): Promise<CapabilityProfile[]> {
+  const result = await call<{ houses: CapabilityProfile[] }>('house.list', {})
+  return result.houses ?? []
+}
+
+/** Refuses to replace an existing house unless asked: silently overwriting
+ *  would discard edits to numbers a board gets judged against. */
+export async function saveHouse(
+  house: CapabilityProfile,
+  overwrite = false,
+): Promise<CapabilityProfile> {
+  return call<CapabilityProfile>('house.save', { house, overwrite })
 }
 
 export async function setProjectProfile(
