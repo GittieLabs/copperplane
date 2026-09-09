@@ -337,6 +337,48 @@ class FabricationReviewTests(unittest.TestCase):
         )
         self.assertFalse(any(r[0] == "min-drill" for r in rules))
 
+    def test_the_board_check_runs_drc_once_without_a_house(self):
+        """CTX-341.1 Phase 1 pinned these counts, and SPEC-341's design decision
+        now rests on them. A silent change would invalidate that decision
+        without anyone noticing, which is the only reason to assert a number
+        that is not itself a user-visible behaviour."""
+        import daemon
+        calls = []
+        real = kicad_cli.run_drc
+        kicad_cli.run_drc = lambda *a, **kw: (calls.append(1), real(*a, **kw))[1]
+        self.addCleanup(setattr, kicad_cli, "run_drc", real)
+
+        daemon.kicad_check_board(self.pcb)
+        self.assertEqual(len(calls), 1)
+
+    def test_the_board_check_runs_drc_twice_with_a_house(self):
+        """Two, not three: `write_and_verify` only re-runs when the canary has
+        to share a constraint class with one of the profile's own rules, and
+        the generic profile finds a free class on this board."""
+        import daemon
+        calls = []
+        real = kicad_cli.run_drc
+        kicad_cli.run_drc = lambda *a, **kw: (calls.append(1), real(*a, **kw))[1]
+        self.addCleanup(setattr, kicad_cli, "run_drc", real)
+
+        daemon.kicad_check_board(self.pcb, _profile())
+        self.assertEqual(len(calls), 2)
+
+    def test_the_board_check_explains_once_either_way(self):
+        """The expensive half. SPEC-341 §3: the LLM call is what costs money,
+        not the subprocess, so this is the number a merge must not multiply."""
+        import daemon
+        import component_pipeline
+        built = []
+        real = component_pipeline._build_agent_executor
+        component_pipeline._build_agent_executor = lambda name, *a, **kw: (
+            built.append(name), real(name, *a, **kw)
+        )[1]
+        self.addCleanup(setattr, component_pipeline, "_build_agent_executor", real)
+
+        daemon.kicad_check_board(self.pcb, _profile())
+        self.assertEqual(built, ["board_advisor"])
+
     # TEST-014
     def test_014_generation_touches_only_the_sidecar(self):
         pro = os.path.join(self.project, "Copperplane_Blink_LEDs.kicad_pro")
