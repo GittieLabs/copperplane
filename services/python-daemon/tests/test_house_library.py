@@ -248,5 +248,154 @@ class TemplateTests(unittest.TestCase):
             self.assertFalse(entry["confirmed_by_user"])
 
 
+def _bundled(house_id="acme", name="Acme PCB"):
+    house = _house(house_id=house_id, name=name)
+    house[capability_profile.BUNDLED_KEY] = True
+    return house
+
+
+class BundledHouseTests(unittest.TestCase):
+    """SPEC-342 section 2.6: a house that came with the app is read-only.
+
+    Requested directly: "we should only allow edits on a cloned template ... you
+    can clone any template though. allowing edits to template bundled with the
+    app would prevent us from getting back to default settings if the user makes
+    a mistake and wants to revert."
+
+    The reason is recovery, not ownership -- which is why an *imported* house is
+    editable: the user brought it in and can bring it in again."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        library_store.configure(storage_root=self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(library_store.configure, storage_root=None)
+
+    def test_a_bundled_house_cannot_be_edited_at_all(self):
+        library_store.save_house(_bundled())
+
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.save_house(
+                {**library_store.load_house("acme"), "min_drill": 0.25}, overwrite=True
+            )
+
+        self.assertEqual(library_store.load_house("acme")["min_drill"], 0.35,
+                         "unchanged, which is the whole point -- there is a known-good copy")
+
+    def test_the_refusal_says_to_clone_it_instead(self):
+        # A refusal with no way forward is just a wall. Cloning is always
+        # allowed and is what the user actually wants to do.
+        library_store.save_house(_bundled())
+        with self.assertRaises(library_store.SchemaValidationError) as caught:
+            library_store.save_house(library_store.load_house("acme"), overwrite=True)
+        self.assertIn("Clone it", str(caught.exception))
+
+    def test_a_clone_of_a_bundled_house_is_editable(self):
+        library_store.save_house(_bundled())
+        cloned = capability_profile.clone(
+            library_store.load_house("acme"), "My Acme", "my-acme", "2026-09-09"
+        )
+        library_store.save_house(cloned)
+
+        saved = library_store.save_house(
+            {**library_store.load_house("my-acme"), "min_drill": 0.22}, overwrite=True
+        )
+
+        self.assertEqual(saved["house_id"], "my-acme", "edited in place; it is the user's own")
+        self.assertEqual(saved["min_drill"], 0.22)
+        self.assertFalse(capability_profile.is_bundled(saved))
+
+    def test_a_users_own_house_is_edited_in_place(self):
+        library_store.save_house(_house())
+        saved = library_store.save_house(_house(min_drill=0.2), overwrite=True)
+        self.assertEqual(saved["house_id"], "house-a")
+        self.assertEqual(library_store.list_houses(), ["house-a"])
+
+    def test_reset_removes_the_clone_and_returns_the_original(self):
+        library_store.save_house(_bundled())
+        library_store.save_house(
+            capability_profile.clone(
+                library_store.load_house("acme"), "My Acme", "my-acme", "2026-09-09"
+            )
+        )
+
+        original = library_store.reset_house("my-acme")
+
+        self.assertEqual(original["house_id"], "acme")
+        self.assertEqual(original["min_drill"], 0.35)
+        self.assertEqual(library_store.list_houses(), ["acme"])
+
+    def test_resetting_a_house_that_was_not_cloned_is_refused(self):
+        library_store.save_house(_house())
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.reset_house("house-a")
+        self.assertEqual(library_store.list_houses(), ["house-a"])
+
+    def test_a_clone_records_where_it_came_from_and_is_never_bundled(self):
+        cloned = capability_profile.clone(_bundled(), "My Acme", "my-acme", "2026-09-09")
+        self.assertFalse(capability_profile.is_bundled(cloned))
+        self.assertEqual(cloned[capability_profile.CLONED_FROM_KEY], "acme")
+
+
+class ImportExportTests(unittest.TestCase):
+    """SPEC-342 section 2.4."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        library_store.configure(storage_root=self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(library_store.configure, storage_root=None)
+
+    # TEST-008
+    def test_008_an_import_validates_and_reports_a_collision_rather_than_merging(self):
+        library_store.save_house(_house())
+        payload = library_store.export_houses()
+
+        result = library_store.import_houses(payload)
+
+        self.assertEqual(result["skipped_existing"], ["house-a"])
+        self.assertEqual(result["imported"], [])
+        self.assertEqual(library_store.load_house("house-a")["min_drill"], 0.35,
+                         "and the user's own edits are still there")
+
+    def test_a_malformed_record_is_rejected_and_named(self):
+        payload = {"houses": [{"house_id": "broken", "house_name": "B", "min_drill": 0.1,
+                               "provenance": {}}]}
+        result = library_store.import_houses(payload)
+        self.assertEqual([r["house_id"] for r in result["rejected"]], ["broken"])
+        self.assertEqual(library_store.list_houses(), [])
+
+    def test_a_file_that_is_not_a_library_is_refused_outright(self):
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.import_houses({"something": "else"})
+
+    def test_an_imported_house_is_the_users_own_and_editable(self):
+        """Imported is not bundled. The read-only rule exists because a bundled
+        house cannot be got back any other way; an imported one can simply be
+        imported again, so there is no reason to lock it."""
+        library_store.import_houses({"houses": [_bundled()]})
+
+        self.assertFalse(capability_profile.is_bundled(library_store.load_house("acme")))
+        saved = library_store.save_house(
+            {**library_store.load_house("acme"), "min_drill": 0.2}, overwrite=True
+        )
+        self.assertEqual(saved["house_id"], "acme", "edited in place")
+
+    def test_a_round_trip_preserves_the_numbers_and_their_provenance(self):
+        library_store.save_house(_house())
+        payload = library_store.export_houses()
+        self.assertTrue(payload["exported_at"], "an imported set can say how old it is")
+
+        library_store.delete_house("house-a")
+        library_store.import_houses(payload)
+
+        restored = library_store.load_house("house-a")
+        self.assertEqual(restored["min_drill"], 0.35)
+        self.assertEqual(
+            restored["provenance"]["min_drill"]["source_url"],
+            "https://example.invalid/capabilities",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

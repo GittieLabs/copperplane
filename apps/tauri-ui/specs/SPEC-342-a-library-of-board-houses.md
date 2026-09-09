@@ -121,6 +121,45 @@ The user-visible flow is unchanged in effort: "start from standard 2-layer numbe
 click. It now produces a house of their own, which they can rename and edit, rather than silently
 adopting a set of numbers attributed to nobody.
 
+### 2.6 A house that came with the app is read-only
+
+*"we should only allow edits on a cloned template ... you can clone any template though. allowing
+edits to template bundled with the app would prevent us from getting back to default settings if the
+user makes a mistake and wants to revert."*
+
+**The reason is recovery, not ownership**, and that distinction decides everything else here. A
+bundled house is the only thing in the library a user cannot get back any other way: if they edit it
+and get it wrong, there is nothing left to revert to short of reinstalling. So it offers Clone and
+never Edit, and it cannot be removed either — deleting it loses the known-good copy just as surely.
+
+An **imported** house is not bundled. It came from outside, but the user chose to bring it in and
+can bring it in again, so locking it would buy nothing and cost them the ability to fix a number. It
+edits in place like any house they wrote themselves.
+
+| Kind | Clone | Edit | Remove | Reset |
+| :--- | :--- | :--- | :--- | :--- |
+| Came with the app | yes | **no** | **no** | n/a |
+| Cloned from anything | yes | yes | yes | yes |
+| Imported | yes | yes | yes | no |
+| Written by the user | yes | yes | yes | no |
+
+An earlier draft had a bundled house auto-clone on edit instead. That preserved the original too,
+but it answered a question nobody asked: the user pressed Edit and got a differently-named house.
+Refusing, and offering Clone instead, says the same thing without the surprise — and it means the
+rule is visible in the interface rather than only in the outcome.
+
+**The standard numbers are always in the list, read-only.** Not stored — read from
+`fabrication.generic_profile` each time, so they cannot drift, be edited or be deleted. They offer
+Clone and nothing else, which keeps §2.5 intact: a template is still never what a board is checked
+against.
+
+This is what makes the rule above mean anything. Without it, nothing in a new library is bundled,
+everything is editable, and "get back to default settings" has no destination — which is exactly
+what shipped in the first attempt.
+
+`reset_house` deletes a clone and returns what it came from. Cheap and offline, because the
+original was never edited — the property the read-only rule exists to guarantee.
+
 ## 3. Known Constraints & Risks
 
 *   **A looser limit can switch off a check.** Measured: a sidecar rule REPLACES the board's own

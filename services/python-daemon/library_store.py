@@ -1253,6 +1253,23 @@ def set_project_check_result(name: str, area: str, result: dict) -> dict:
 # against -- see `set_project_fabrication_profile`. That second half is not
 # redundant: a profile is a historical record, so a bare reference would let an
 # edit next month silently rewrite what a finding was produced against.
+def _capability_profile():
+    """Imported lazily, and in one place.
+
+    `library_store` must keep loading when `capability_profile` cannot -- the
+    daemon degrades that module independently and a project should still open
+    without it. Three call sites need it now, so the lazy import lives here
+    rather than being copied into each of them."""
+    try:
+        import capability_profile
+    except Exception:  # noqa: BLE001
+        raise SchemaValidationError(
+            "Cannot work with board houses: the capability_profile module is "
+            "unavailable in this build."
+        )
+    return capability_profile
+
+
 def _houses_dir() -> str:
     return _ensure_dir("library", "houses")
 
@@ -1277,13 +1294,7 @@ def save_house(house: dict, overwrite: bool = False) -> dict:
     house_id = house.get("house_id")
     if not house_id:
         raise SchemaValidationError("House.house_id is required.")
-    try:
-        import capability_profile
-    except Exception:  # noqa: BLE001
-        raise SchemaValidationError(
-            "Cannot store a board house: the capability_profile module is "
-            "unavailable in this build."
-        )
+    capability_profile = _capability_profile()
     if capability_profile.is_template(house):
         raise SchemaValidationError(
             "This is a starting template, not a board house. Clone it and give "
@@ -1296,6 +1307,22 @@ def save_house(house: dict, overwrite: bool = False) -> dict:
         raise SchemaValidationError(str(exc)) from exc
 
     path = _house_path(house_id)
+
+    # A house that came with the app is read-only. Not auto-cloned on edit --
+    # refused, so the UI never offers Edit on one at all (`SPEC-342` section
+    # 2.6).
+    #
+    # The reason is recovery rather than ownership: if a bundled house could be
+    # changed, a mistake in it would be unrecoverable short of reinstalling.
+    # Keeping the bundled copy pristine is the only thing that makes "revert to
+    # how it shipped" possible. Cloning it is always allowed, and the clone is
+    # the user's to edit freely.
+    if os.path.exists(path) and _capability_profile().is_bundled(_read_json(path)):
+        raise SchemaValidationError(
+            f"{house_id!r} came with the app and cannot be edited -- that is what "
+            f"keeps a known-good copy to go back to. Clone it and edit the clone."
+        )
+
     if os.path.exists(path) and not overwrite:
         # `SPEC-342` section 2.4 asks for this on import; it is the same rule
         # everywhere. Silently replacing a house would discard edits the user
@@ -1308,6 +1335,41 @@ def save_house(house: dict, overwrite: bool = False) -> dict:
     record = {**house, "schema_version": 1}
     _write_json(path, record)
     return record
+
+
+def _unused_house_id(base: str) -> str:
+    """`<base>-mine`, then `-mine-2` and so on. Never silently reuses an id: a
+    second copy of a shipped house is a second house, not a replacement of the
+    first."""
+    candidate = f"{base}-mine"
+    n = 2
+    while os.path.exists(_house_path(candidate)):
+        candidate = f"{base}-mine-{n}"
+        n += 1
+    return candidate
+
+
+def reset_house(house_id: str) -> dict:
+    """Delete a clone and go back to the house it came from.
+
+    Cheap and offline, because the original was never edited -- a bundled house
+    cannot be, and that is the point. Refuses on a house that is not a clone,
+    since there would be nothing to go back to and the user would simply lose
+    their own work."""
+    record = load_house(house_id)
+    origin = record.get(_capability_profile().CLONED_FROM_KEY)
+    if not origin:
+        raise SchemaValidationError(
+            f"{house_id!r} was not cloned from another house, so there is nothing "
+            f"to reset it to. Delete it instead if you no longer want it."
+        )
+    if not os.path.exists(_house_path(origin)):
+        raise SchemaValidationError(
+            f"{house_id!r} came from {origin!r}, which is no longer in the "
+            f"library, so there is nothing to reset it to."
+        )
+    os.remove(_house_path(house_id))
+    return load_house(origin)
 
 
 def load_house(house_id: str) -> dict:
@@ -1325,6 +1387,63 @@ def list_houses() -> list:
         for f in os.listdir(_houses_dir())
         if f.endswith(_HOUSE_SUFFIX)
     )
+
+
+def export_houses(house_ids: list = None) -> dict:
+    """The library, or some of it, as a plain record ready to be written to
+    JSON.
+
+    `SPEC-342` section 2.4: the file a user imports and the file the app ships
+    are the same shape, so distributing houses through the repository costs
+    nothing extra. Carries the date so an imported set can say how old it is
+    without the importer having to guess."""
+    ids = house_ids if house_ids is not None else list_houses()
+    return {
+        "schema_version": 1,
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "houses": [load_house(h) for h in ids],
+    }
+
+
+def import_houses(payload: dict, overwrite: bool = False) -> dict:
+    """Read a set of houses back, treating the file as untrusted.
+
+    Every record goes through the same validation as anything else -- a profile
+    is numbers a board gets judged against, and a malformed or hostile one is a
+    wrong answer with a confident face.
+
+    A name collision is reported, never merged: `SPEC-342` section 2.4 is
+    explicit, and silently replacing a house would discard edits the user made.
+    Imports land as shipped houses, so editing one produces the user's own copy
+    and the imported original stays available to reset back to."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("houses"), list):
+        raise SchemaValidationError(
+            "That file does not look like an exported board-house library: it "
+            "has no 'houses' list."
+        )
+
+    imported, skipped, rejected = [], [], []
+    for entry in payload["houses"]:
+        house_id = (entry or {}).get("house_id") if isinstance(entry, dict) else None
+        if not house_id:
+            rejected.append({"house_id": None, "reason": "no house_id"})
+            continue
+        if os.path.exists(_house_path(house_id)) and not overwrite:
+            skipped.append(house_id)
+            continue
+        try:
+            # An imported house is the user's own and fully editable. Only what
+            # came WITH THE APP is read-only, because only that has a pristine
+            # copy the user cannot otherwise get back.
+            record = {**entry}
+            record.pop(_capability_profile().BUNDLED_KEY, None)
+            record.pop(_capability_profile().CLONED_FROM_KEY, None)
+            save_house(record, overwrite=True)
+            imported.append(house_id)
+        except (SchemaValidationError, Exception) as exc:  # noqa: BLE001
+            rejected.append({"house_id": house_id, "reason": str(exc)})
+
+    return {"imported": imported, "skipped_existing": skipped, "rejected": rejected}
 
 
 def delete_house(house_id: str) -> dict:

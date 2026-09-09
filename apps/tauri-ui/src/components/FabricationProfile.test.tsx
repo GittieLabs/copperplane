@@ -225,7 +225,7 @@ describe('FabricationProfile', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('clearing the choice returns to the empty state', async () => {
+  it('clearing the choice puts the check back on KiCad’s own rules', async () => {
     setProjectProfileMock.mockResolvedValue(undefined)
     const onChange = vi.fn()
 
@@ -237,7 +237,10 @@ describe('FabricationProfile', () => {
         onProfileChange={onChange}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: /different house/i }))
+    // "Choose a different house" now opens the library; clearing the choice is
+    // its own action, because putting the check back on KiCad's own rules is a
+    // different thing from picking another house.
+    fireEvent.click(screen.getByRole('button', { name: /KiCad’s defaults instead/i }))
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(null))
     expect(setProjectProfileMock).toHaveBeenCalledWith('alpha', null)

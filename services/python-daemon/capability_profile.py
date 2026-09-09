@@ -74,6 +74,25 @@ TEMPLATE_KEY = "is_template"
 def is_template(profile: dict) -> bool:
     return bool(profile.get(TEMPLATE_KEY))
 
+
+#: A house that came WITH THE APP. Read-only: it cannot be edited at all, only
+#: cloned. Deliberately narrower than "not written by this user" -- an imported
+#: house came from outside too, but the user chose to bring it in and owns it.
+#:
+#: The reason is recovery, not ownership. If a bundled house could be edited,
+#: a mistake in it would be unrecoverable: there is nothing left to go back to,
+#: short of reinstalling. Keeping the bundled copy pristine is what makes
+#: "revert to how it shipped" possible at all.
+BUNDLED_KEY = "is_bundled"
+
+#: On a clone, the id of the house it came from. What makes "reset this back to
+#: how it shipped" a real operation rather than a re-download.
+CLONED_FROM_KEY = "cloned_from"
+
+
+def is_bundled(profile: dict) -> bool:
+    return bool(profile.get(BUNDLED_KEY))
+
 # The project's own KiCad setting for each field, by its `.kicad_pro` key.
 #
 # MEASURED 2026-09-08, and the reason this mapping exists at all: a sidecar rule
@@ -293,9 +312,14 @@ def clone(profile: dict, house_name: str, house_id: str, recorded_on: str,
         "house_id": house_id,
         "schema_version": 1,
     }
-    # A clone is always a real house. This is the only way one comes into
-    # existence from the bundled starting point (`SPEC-342` section 2.5).
+    # A clone is always a real house, and always the user's own. This is the
+    # only way one comes into existence from the bundled starting point
+    # (`SPEC-342` section 2.5), and the only way a shipped house becomes
+    # editable (section 2.6).
     cloned.pop(TEMPLATE_KEY, None)
+    cloned.pop(BUNDLED_KEY, None)
+    if profile.get("house_id"):
+        cloned[CLONED_FROM_KEY] = profile["house_id"]
 
     provenance = {}
     for field in ALL_VALUE_FIELDS:

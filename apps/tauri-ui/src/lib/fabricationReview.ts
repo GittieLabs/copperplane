@@ -21,6 +21,12 @@ export interface CapabilityProfile {
   /** SPEC-342 §2.5: a starting point, not a board house. Cannot be saved to
    *  the library or chosen by a project until it is cloned. */
   is_template?: boolean
+  /** SPEC-342 §2.6: came WITH THE APP. Read-only — it can be cloned but never
+   *  edited, because a mistake in it would otherwise be unrecoverable. An
+   *  imported house is not bundled: the user brought it in and owns it. */
+  is_bundled?: boolean
+  /** On a clone, the house it came from — what `resetHouse` goes back to. */
+  cloned_from?: string
   house_id?: string
   schema_version?: number
   layer_count?: number
@@ -140,6 +146,42 @@ export async function saveHouse(
   overwrite = false,
 ): Promise<CapabilityProfile> {
   return call<CapabilityProfile>('house.save', { house, overwrite })
+}
+
+export async function deleteHouse(houseId: string): Promise<{ still_referenced_by: string[] }> {
+  return call('house.delete', { house_id: houseId })
+}
+
+/** SPEC-342 §2.6: drop the user's copy and go back to the shipped house it came
+ *  from. Offline, and non-destructive to the original because the original was
+ *  never edited. */
+export async function resetHouse(houseId: string): Promise<CapabilityProfile> {
+  return call<CapabilityProfile>('house.reset', { house_id: houseId })
+}
+
+export interface HouseExport {
+  schema_version: number
+  exported_at: string
+  houses: CapabilityProfile[]
+}
+
+export async function exportHouses(houseIds?: string[]): Promise<HouseExport> {
+  return call<HouseExport>('house.export', houseIds ? { house_ids: houseIds } : {})
+}
+
+export interface ImportReport {
+  imported: string[]
+  skipped_existing: string[]
+  rejected: { house_id: string | null; reason: string }[]
+}
+
+/** A collision is reported, never merged: replacing a house silently would
+ *  discard edits the user made to numbers a board gets judged against. */
+export async function importHouses(
+  payload: unknown,
+  overwrite = false,
+): Promise<ImportReport> {
+  return call<ImportReport>('house.import', { payload, overwrite })
 }
 
 export async function setProjectProfile(
