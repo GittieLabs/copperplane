@@ -2,6 +2,7 @@ import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import { cacheDatasheet, searchComponents, type ComponentCandidate } from '../lib/components'
+import { searchFootprints, type FootprintCandidate } from '../lib/footprints'
 import { listParts } from '../lib/library'
 import { loadPart, type SavedPart } from '../lib/partDetail'
 import type { Project } from '../lib/projects'
@@ -45,6 +46,7 @@ export function ComponentDiscovery({
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [candidates, setCandidates] = useState<ComponentCandidate[]>([])
+  const [footprintHits, setFootprintHits] = useState<FootprintCandidate[]>([])
   const [confirmed, setConfirmed] = useState<{
     candidate: ComponentCandidate
     datasheetPath: string | null
@@ -201,6 +203,31 @@ export function ComponentDiscovery({
     setStatus('searching')
     setError(null)
     setConfirmed(null)
+    setFootprintHits([])
+
+    // SPEC-334 §2, settled: search KiCad's own libraries too, and always.
+    //
+    // The two namespaces were never connected, so a footprint-shaped query
+    // ("PinHeader_1x04_P2.54mm_Vertical") went to an LLM that guessed at a
+    // manufacturer part number -- expensive and wrong, the worst pair.
+    //
+    // Deliberately NOT a query classifier that routes one way or the other. A
+    // classifier is a new thing that can be wrong, and when it is wrong it is
+    // silently wrong. This search is local disk I/O: free, instant, and unable
+    // to hallucinate. So it runs on every query and its hits are shown
+    // alongside, which turns "did we detect correctly?" into "did we find
+    // anything?" -- a question with an observable answer. An ambiguous query
+    // gets both answers instead of a coin flip.
+    //
+    // It also runs first because it returns first, so a user who typed a
+    // footprint name has their answer while the LLM is still working.
+    try {
+      setFootprintHits(await searchFootprints(trimmed))
+    } catch {
+      // Never a gate on the search the user actually asked for. A missing
+      // fp-lib-table is an ordinary state, not an error worth a message.
+      setFootprintHits([])
+    }
 
     try {
       const results = await searchComponents(trimmed)
@@ -241,6 +268,7 @@ export function ComponentDiscovery({
     setStatus('idle')
     setError(null)
     setCandidates([])
+    setFootprintHits([])
     setSavedPartIds(null)
   }
 
@@ -474,6 +502,42 @@ export function ComponentDiscovery({
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* SPEC-334 §2: KiCad's own libraries, searched on every query. Rendered
+          above the part candidates and independently of them, so a footprint
+          name still gets its real answer when the part search finds nothing or
+          fails outright -- which is exactly the case that used to produce a
+          confident guess at a manufacturer. */}
+      {footprintHits.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs font-medium uppercase text-fg-muted">
+            Footprints in KiCad&rsquo;s libraries
+          </p>
+          <p className="text-xs text-fg-tertiary">
+            These are footprints, not parts &mdash; a shape on the board, not something to order.
+            Read straight from KiCad&rsquo;s installed libraries, so nothing here is a guess.
+          </p>
+          <div className="flex flex-col gap-1">
+            {footprintHits.slice(0, 8).map((hit) => (
+              <div
+                key={`${hit.library}:${hit.footprint_name}`}
+                className="flex items-baseline justify-between gap-3 rounded border border-line px-3 py-2 text-xs"
+              >
+                <span className="text-fg-bright">{hit.footprint_name}</span>
+                <span className="text-fg-muted">
+                  {hit.library}
+                  {hit.source === 'your_library' ? ' · yours' : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+          {footprintHits.length > 8 && (
+            <p className="text-xs text-fg-tertiary">
+              and {footprintHits.length - 8} more &mdash; narrow the search to see them.
+            </p>
+          )}
         </div>
       )}
 

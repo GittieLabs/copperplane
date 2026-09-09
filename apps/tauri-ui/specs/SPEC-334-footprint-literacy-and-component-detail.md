@@ -1,7 +1,7 @@
 ---
 id: SPEC-334
 title: "Footprint Literacy & Component Detail"
-status: In-Progress
+status: Completed
 type: Feature
 created: 2026-09-02
 last_updated: 2026-09-03
@@ -14,7 +14,20 @@ user_facing: true
 
 # SPEC-334: Footprint Literacy & Component Detail
 
-> **Still open, 2026-09-03:** two questions, both about the component-search namespace — whether searching a footprint-shaped query should answer from KiCad's own libraries, and what *"which NE555P am I getting"* is answered with. The footprint-literacy half is delivered by `CTX-334.1` and `CTX-334.2`.
+> **Closed 2026-09-09.** The footprint-literacy half is delivered by `CTX-334.1` and `CTX-334.2`;
+> searching KiCad's own libraries is delivered by `CTX-334.3`.
+>
+> **`SPEC-334` §2's second open question — *"which NE555P am I getting"* — is not carried forward
+> here.** It is about disambiguating LLM part-search results by package, temperature grade and pin
+> layout: a different mechanism from reading a `.kicad_mod` off disk, and `SPEC-306`'s surface
+> rather than this one. Keeping it inside a spec titled *Footprint Literacy* is how it stays
+> unaddressed while looking tracked. Deprioritised deliberately, not dropped by oversight:
+>
+> > *"q2 isn't really the focus right now. the education of the user for the project is a bigger
+> > deal to me and we have been building the ground work for the teaching part given a project and
+> > schematic goal."*
+>
+> Pick it up from `SPEC-306` when part selection is the actual focus.
 
 ## 1. Executive Summary & Goals
 
@@ -72,13 +85,21 @@ user_facing: true
     token belonging to a vendor's product line is named as one rather than expanded, because it has
     no standard meaning to give. Delivered in `CTX-334.2`.
 
-*   **Whether KiCad's own libraries are searchable.** The maintainer searched a *footprint* name in
+*   **Settled: KiCad's own libraries are searched on every query, and never behind a classifier.**
+    Delivered in `CTX-334.3`. `kicad.search_footprints` is local disk I/O — free, instant, unable to
+    hallucinate — so it runs alongside the paid part search rather than instead of it, and its hits
+    are labelled as footprints. Measured against KiCad's own libraries, the objection that this
+    would clutter part results is empty: `NE555P` and `ATtiny85` return **zero** footprint hits,
+    while `PinHeader_1x04_P2.54mm_Vertical` returns 4 and `DIP-8` returns 25. The search
+    self-selects, so there was never a routing decision to get right. Original wording below.
+
+*   **(Original wording, for the record)** Whether KiCad's own libraries are searchable. The maintainer searched a *footprint* name in
     *component* search and got vendor part numbers, because the two namespaces were never
     connected: *"I have a hunch that the component I searched for ... is a kicad only reference name
     and would not be searchable with our component search."* Correct. Decide whether component
     search should detect a footprint-shaped query and answer from KiCad's libraries instead of
     guessing at a manufacturer.
-*   **What "which NE555P am I getting" is answered with.** Package, pin count and pin *layout*
+*   **Deferred to `SPEC-306`, see the header.** What "which NE555P am I getting" is answered with. Package, pin count and pin *layout*
     differ across a search's results. The footprint determines the physical part; the datasheet
     determines the pinout. Settle which of those the detail view leads with.
 *   ~~**How this reaches the user.**~~ **Delivered in `CTX-334.1`:** an action on each row of the board components table, opening a detail view. Original wording below.
