@@ -1087,6 +1087,7 @@ def _backfill_project_intent(record: dict) -> dict:
     # as an empty profile, which would be a house that publishes no limits at
     # all. Follows `intent`'s convention rather than `parts`'s for that reason.
     record.setdefault("fabrication_profile", None)
+    record.setdefault("check_display", {})
     return record
 
 
@@ -1235,6 +1236,37 @@ def set_project_check_result(name: str, area: str, result: dict) -> dict:
 
     project = load_project(name)
     project["last_results"] = {**(project.get("last_results") or {}), area: stored}
+    return save_project(project)
+
+
+def set_project_check_display(name: str, area: str, result: dict | None) -> dict:
+    """The check result exactly as the UI showed it, so it survives a tab switch.
+
+    Deliberately separate from `last_results`, which is the same check shaped
+    for the review agent and capped at `_MAX_PERSISTED_FINDINGS` because it is
+    read into an LLM context window. This record has no such constraint and no
+    such consumer: it exists so that reopening the PCB tab shows what was
+    already found instead of an empty card, the way `SPEC-339` already does for
+    the review.
+
+    Reported directly: "this new work for checking the board does not keep it's
+    state like the board review with a timestamp."
+
+    `None` clears it, which is what Dismiss does."""
+    if area not in _CHECK_RESULT_AREAS:
+        raise SchemaValidationError(
+            f"Project.check_display area must be one of {_CHECK_RESULT_AREAS}, got {area!r}."
+        )
+    project = load_project(name)
+    displays = {**(project.get("check_display") or {})}
+    if result is None:
+        displays.pop(area, None)
+    else:
+        displays[area] = {
+            **result,
+            "ran_at": datetime.now(timezone.utc).isoformat(),
+        }
+    project["check_display"] = displays
     return save_project(project)
 
 

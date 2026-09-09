@@ -15,7 +15,7 @@ import { ViolationsList } from './ViolationsList'
 import { FabricationProfile } from './FabricationProfile'
 import { type CapabilityProfile } from '../lib/fabricationReview'
 import { linkedProjectBoard } from '../lib/kicadProject'
-import { setProjectCheckResult } from '../lib/projects'
+import { loadProject, setProjectCheckDisplay, setProjectCheckResult } from '../lib/projects'
 
 /** The one board's path, when there is exactly one. More than one is never
  *  guessed -- opening the wrong board is worse than opening none. */
@@ -80,6 +80,12 @@ export function BoardAdvisor({
   const [selectedBoard, setSelectedBoard] = useState<BoardCandidate | null>(null)
   const [boardCheckResult, setBoardCheckResult] = useState<CheckResult | null>(null)
   const [boardCheckError, setBoardCheckError] = useState<string | null>(null)
+  /** CTX-340.2: when the displayed result was produced, and the house it was
+   *  produced against. The second is what makes a stale result detectable --
+   *  changing the house used to leave the old findings on screen under a
+   *  heading naming the new one. */
+  const [checkRanAt, setCheckRanAt] = useState<string | null>(null)
+  const [checkedHouse, setCheckedHouse] = useState<string | null>(null)
 
   // A genuine project switch starts fresh -- unlike a tab switch (this
   // component stays mounted for those), the previously-checked board
@@ -94,7 +100,53 @@ export function BoardAdvisor({
     // reason the check result does -- and for the same reason it must NOT
     // reset on a mere tab switch.
     setProfile(null)
+    setCheckRanAt(null)
+    setCheckedHouse(null)
   }, [projectName])
+
+  /* CTX-340.2: a completed check survives a tab switch, the way SPEC-339's
+     review already does. Reported directly: "this new work for checking the
+     board does not keep it's state like the board review with a timestamp." */
+  useEffect(() => {
+    let cancelled = false
+    loadProject(projectName)
+      .then((project) => {
+        if (cancelled) return
+        const stored = project.check_display?.pcb
+        if (!stored) return
+        const { ran_at: ranAt, checked_house: house, ...result } = stored as Record<string, unknown>
+        setBoardCheckResult(result as unknown as CheckResult)
+        setCheckRanAt(typeof ranAt === 'string' ? ranAt : null)
+        setCheckedHouse(typeof house === 'string' ? house : null)
+        setProfile(
+          (current) =>
+            current ?? ((project.fabrication_profile as unknown as CapabilityProfile) || null),
+        )
+      })
+      .catch(() => {
+        /* A project with no stored check is the normal case, not an error. */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [projectName])
+
+  async function handleDismissCheck() {
+    setBoardCheckResult(null)
+    setCheckRanAt(null)
+    setCheckedHouse(null)
+    try {
+      await setProjectCheckDisplay(projectName, 'pcb', null)
+    } catch (err) {
+      // Same rule: a dismissal that did not persist will reappear, and the
+      // user should know why rather than think the button is broken.
+      setBoardCheckError(
+        `Dismissed here, but could not clear the saved result: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
+  }
 
   const refreshBoardList = useCallback(async () => {
     setLoadingBoardList(true)
@@ -167,6 +219,27 @@ export function BoardAdvisor({
       // it does not add a second check beside this one.
       const result = await checkBoard(candidate.path, profile)
       setBoardCheckResult(result)
+      const house = profile?.house_name ?? null
+      setCheckedHouse(house)
+      setCheckRanAt(new Date().toISOString())
+      // CTX-340.2: kept so a tab switch does not throw it away. Failing to
+      // store it must not take down a result that is already on screen -- but
+      // it must not be silent either. The first version swallowed the error,
+      // and a broken write went unnoticed until someone switched projects and
+      // found their check gone. Two lines above, `setProjectCheckResult`
+      // already said "never swallow it silently"; this ignored its own advice.
+      try {
+        await setProjectCheckDisplay(projectName, 'pcb', {
+          ...(result as unknown as Record<string, unknown>),
+          checked_house: house,
+        })
+      } catch (persistErr) {
+        setBoardCheckError(
+          `Checked, but could not keep this result — it will be gone if you leave this project: ${
+            persistErr instanceof Error ? persistErr.message : String(persistErr)
+          }`,
+        )
+      }
       // SPEC-319 §2.1's prerequisite: persist it so the review and chat
       // agents can actually see it. Held only in React state before, which
       // is why the PCB review was told "No DRC check result is available
@@ -225,6 +298,9 @@ export function BoardAdvisor({
         checkError={boardCheckError}
         onCheckBoard={(candidate) => void handleCheckBoard(candidate)}
         houseName={profile?.house_name ?? null}
+        ranAt={checkRanAt}
+        checkedHouse={checkedHouse}
+        onDismissCheck={() => void handleDismissCheck()}
       />
       {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
           is a flow step with a typed result, not a conversational turn. */}
@@ -257,6 +333,20 @@ export function BoardAdvisor({
   )
 }
 
+/** Matches ReviewPanel's own relative wording, so the two panels on one screen
+ *  describe time the same way. */
+function whenItRan(iso: string): string {
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return 'earlier'
+  const mins = Math.round((Date.now() - then) / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`
+  const days = Math.round(hours / 24)
+  return `${days} day${days === 1 ? '' : 's'} ago`
+}
+
 /** CTX-309.4: the Board (DRC) section. */
 function BoardCheckSection({
   loadingList,
@@ -272,6 +362,9 @@ function BoardCheckSection({
   checkError,
   onCheckBoard,
   houseName,
+  ranAt,
+  checkedHouse,
+  onDismissCheck,
 }: {
   loadingList: boolean
   listResult: ListOpenBoardsResult | null
@@ -288,6 +381,13 @@ function BoardCheckSection({
   /** SPEC-340: names the rules this check will use, so the section says what
    *  it does before it is run rather than only after. */
   houseName: string | null
+  /** CTX-340.2: when the shown result was produced, and against which house.
+   *  `checkedHouse` differing from `houseName` is how a stale result is
+   *  detected -- changing the house used to leave old findings on screen under
+   *  a heading naming the new one. */
+  ranAt: string | null
+  checkedHouse: string | null
+  onDismissCheck: () => void
 }) {
   // CTX-309.4 second revision: real clicking-through found the first cut
   // still showing "could not connect" in alarming red on the very first
@@ -430,7 +530,55 @@ function BoardCheckSection({
         </p>
       )}
       {checkError && <p className="text-sm text-danger">{checkError}</p>}
-      {checkResult && <ViolationsList result={checkResult} kind="drc" hideSourcePath />}
+
+      {checkResult && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <p className="text-xs text-fg-muted" title={ranAt ? new Date(ranAt).toLocaleString() : undefined}>
+              {ranAt ? `Checked ${whenItRan(ranAt)}` : 'Checked'}
+              {ranAt ? ` (${new Date(ranAt).toLocaleTimeString()}).` : '.'}
+              {checkedHouse ? ` Against ${checkedHouse}.` : " Against KiCad\u2019s own defaults."}
+            </p>
+            <div className="flex items-baseline gap-3">
+              {/* Reported: "a button to recheck which the user may want to do if
+                  they changed their details in the actual board file. the
+                  re-check option only shows if you change the house."
+                  Editing the board in KiCad is the common reason to re-run and
+                  has nothing to do with the profile, so this is always here. */}
+              {selectedBoard && (
+                <button
+                  type="button"
+                  className="rounded border border-line-strong px-2 py-0.5 text-xs text-fg-bright disabled:opacity-50"
+                  onClick={() => onCheckBoard(selectedBoard)}
+                  disabled={checkingBoard}
+                >
+                  {checkingBoard ? 'Checking…' : 'Check again'}
+                </button>
+              )}
+              <button type="button" className="text-xs text-fg-muted underline" onClick={onDismissCheck}>
+                Dismiss
+              </button>
+            </div>
+          </div>
+
+          {/* CTX-340.2, reported directly: changing the house rewrote the
+              heading while leaving the old findings on screen, with no way to
+              re-run. A result produced against different rules is not a result
+              for the rules now selected, and saying nothing about that is the
+              one thing this feature must never do. */}
+          {(checkedHouse ?? null) !== (houseName ?? null) && (
+            <div className="flex flex-col gap-1 rounded border border-l-2 border-l-warning border-y-line-subtle border-r-line-subtle p-2">
+              <p className="text-xs text-warning">
+                These findings were produced against{' '}
+                {checkedHouse ?? 'KiCad’s own defaults'}, not{' '}
+                {houseName ?? 'KiCad’s own defaults'}. They do not describe your current choice.
+              </p>
+            </div>
+          )}
+
+          <ViolationsList result={checkResult} kind="drc" hideSourcePath />
+        </div>
+      )}
     </div>
   )
 }

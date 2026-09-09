@@ -8,7 +8,8 @@ last_updated: 2026-09-08
 target_version: v0.6.0
 location: "apps/tauri-ui/specs/SPEC-340-ordering-this-board-from-a-real-house.md"
 parent_spec: "SPEC-325-kicad-project-integration.md"
-child_specs: []
+child_specs:
+  - "SPEC-342-a-library-of-board-houses.md"
 user_facing: true
 ---
 

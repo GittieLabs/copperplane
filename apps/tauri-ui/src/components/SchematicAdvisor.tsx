@@ -288,7 +288,24 @@ export function SchematicAdvisor({
           </p>
         )}
         {error && <p className="text-sm text-danger">{error}</p>}
-        {result && <ViolationsList result={result} kind="erc" hideSourcePath={selectedIsListed} />}
+        {result && (
+          <div className="flex flex-col gap-2">
+            {/* Same gap as the PCB tab, reported there: once a result existed
+                there was no way to run the check again, even though editing
+                the schematic in KiCad is the obvious reason to want to. */}
+            {selected && (
+              <button
+                type="button"
+                className="self-start rounded border border-line-strong px-2 py-0.5 text-xs text-fg-bright disabled:opacity-50"
+                onClick={() => void handleCheck(selected)}
+                disabled={checking}
+              >
+                {checking ? 'Checking…' : 'Check again'}
+              </button>
+            )}
+            <ViolationsList result={result} kind="erc" hideSourcePath={selectedIsListed} />
+          </div>
+        )}
       </div>
       {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
           is a flow step with a typed result, not a conversational turn. */}

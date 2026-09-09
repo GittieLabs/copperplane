@@ -2048,6 +2048,15 @@ def fabrication_generic_profile() -> dict:
     return capability_profile.validate(profile)
 
 
+def project_set_check_display(project_name: str, area: str, result: dict = None) -> dict:
+    """The project.set_check_display route (SPEC-340, CTX-340.2).
+
+    Keeps the board/schematic check result the user is looking at, so it
+    survives a tab switch the way the review already does. `result` omitted
+    clears it, which is what Dismiss does."""
+    return library_store.set_project_check_display(project_name, area, result)
+
+
 def project_set_fabrication_profile(project_name: str, profile: dict = None) -> dict:
     """The project.set_fabrication_profile route (SPEC-340 section 2).
 
@@ -2446,6 +2455,8 @@ def _build_routes() -> dict:
         routes["fabrication.generic_profile"] = fabrication_generic_profile
         if library_store is not None:
             routes["project.set_fabrication_profile"] = project_set_fabrication_profile
+    if library_store is not None:
+        routes["project.set_check_display"] = project_set_check_display
     if kicad_bridge is not None and freecad_bridge is not None:
         routes["kicad.get_component_heights"] = kicad_get_component_heights
     if kicad_cli is not None:

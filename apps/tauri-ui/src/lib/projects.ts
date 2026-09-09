@@ -38,6 +38,12 @@ export interface Project {
   schema_version?: number
   directory?: string
   last_results?: Record<string, unknown>
+  /** SPEC-340: the board house this project is checked against. Null means
+   *  the user has never chosen one, which is not the same as a house that
+   *  publishes no limits. */
+  fabrication_profile?: Record<string, unknown> | null
+  /** CTX-340.2: the check result as the UI showed it, plus `ran_at`. */
+  check_display?: Record<string, (Record<string, unknown> & { ran_at?: string }) | undefined>
   export_history?: ExportHistoryEntry[]
   parts?: string[]
   footprint_overrides?: Record<string, string>
@@ -202,6 +208,26 @@ export async function setProjectFootprintOverride(
  *  A dedicated route rather than a full `saveProject`, matching
  *  `setProjectIntent`: saving a whole in-memory project to record one field
  *  races a stale copy of every other field into the manifest. */
+/** SPEC-340 / CTX-340.2: keep the check result the user is looking at.
+ *
+ *  Separate from `setProjectCheckResult`, which shapes the same check for the
+ *  review agent and caps its findings because that record is read into an LLM
+ *  context. This one is what the UI redisplays after a tab switch, the way the
+ *  review already does. Passing `null` clears it -- that is Dismiss. */
+export async function setProjectCheckDisplay(
+  projectName: string,
+  area: 'schematic' | 'pcb' | 'enclosure',
+  result: Record<string, unknown> | null,
+): Promise<Project> {
+  return unwrap(
+    await dispatch('project.set_check_display', {
+      project_name: projectName,
+      area,
+      ...(result ? { result } : {}),
+    }),
+  )
+}
+
 export async function setProjectCheckResult(
   projectName: string,
   area: 'schematic' | 'pcb' | 'enclosure',

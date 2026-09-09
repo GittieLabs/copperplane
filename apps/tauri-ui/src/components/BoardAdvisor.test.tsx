@@ -16,8 +16,15 @@ vi.mock('../lib/boardAdvisor', async (importOriginal) => ({
   openKicad: (...args: unknown[]) => openKicadMock(...args),
 }))
 
+const setProjectCheckDisplayMock = vi.fn()
+const loadProjectMock = vi.fn()
+
 vi.mock('../lib/projects', () => ({
   setProjectCheckResult: (...args: unknown[]) => setProjectCheckResultMock(...args),
+  // CTX-340.2: the check result now survives a tab switch, so this component
+  // reads the project back on mount and writes what it is showing.
+  setProjectCheckDisplay: (...args: unknown[]) => setProjectCheckDisplayMock(...args),
+  loadProject: (...args: unknown[]) => loadProjectMock(...args),
 }))
 
 // SPEC-340: FabricationProfile and FabricationReviewResult each have their own
@@ -150,6 +157,10 @@ const ONE_BOARD_OPEN = {
 }
 
 beforeEach(() => {
+  setProjectCheckDisplayMock.mockReset()
+  setProjectCheckDisplayMock.mockResolvedValue(undefined)
+  loadProjectMock.mockReset()
+  loadProjectMock.mockResolvedValue({ name: 'test-project', check_display: {} })
   checkBoardMock.mockReset()
   listOpenBoardsMock.mockReset().mockResolvedValue({ status: 'no_board_open' })
   openKicadMock.mockReset().mockResolvedValue(undefined)
@@ -612,6 +623,130 @@ describe('BoardAdvisor: a check result the review agent can actually read', () =
 
     await waitFor(() => expect(checkBoardMock).toHaveBeenCalled())
     await waitFor(() => expect(screen.queryByText(/Nothing has been checked yet/)).toBeNull())
+  })
+
+  it('restores a stored check with its timestamp instead of showing an empty card', async () => {
+    // Reported directly: "this new work for checking the board does not keep
+    // it's state like the board review with a timestamp."
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      check_display: {
+        pcb: {
+          ...VIOLATION_RESULT,
+          ran_at: new Date(Date.now() - 5 * 60000).toISOString(),
+          checked_house: null,
+        },
+      },
+    })
+
+    render(<BoardAdvisor projectName="test-project" />)
+
+    expect(await screen.findByText(/Checked 5 minutes ago/)).toBeTruthy()
+    // and it did NOT have to re-run the check to show it
+    expect(checkBoardMock).not.toHaveBeenCalled()
+  })
+
+  it('dismisses a stored check and clears it from the project', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      check_display: { pcb: { ...VIOLATION_RESULT, ran_at: new Date().toISOString() } },
+    })
+
+    render(<BoardAdvisor projectName="test-project" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Dismiss' }))
+
+    await waitFor(() =>
+      expect(setProjectCheckDisplayMock).toHaveBeenCalledWith('test-project', 'pcb', null),
+    )
+    expect(screen.queryByText(/Checked /)).toBeNull()
+  })
+
+  it('warns that findings are stale when the house changes, and offers a re-run', async () => {
+    // Reported directly: changing the house rewrote the heading but left the
+    // old findings on screen, "and not having a way to refresh this is a bug".
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      check_display: {
+        pcb: { ...VIOLATION_RESULT, ran_at: new Date().toISOString(), checked_house: null },
+      },
+    })
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+
+    render(<BoardAdvisor projectName="test-project" />)
+    await screen.findByText(/Checked /)
+
+    fireEvent.click(screen.getByRole('button', { name: /stub choose profile/ }))
+
+    expect(await screen.findByText(/do not describe your current choice/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: /Check again/ }))
+    await waitFor(() => expect(checkBoardMock).toHaveBeenCalled())
+  })
+
+  it('says so when the result could not be kept, rather than failing quietly', async () => {
+    // The deeper half of the bug: set_project_check_display raised on every
+    // call and the UI swallowed it with `.catch(() => undefined)`, so a
+    // feature that never worked looked like it did until someone switched
+    // projects and found their check gone.
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+    setProjectCheckDisplayMock.mockRejectedValue(new Error('storage is unavailable'))
+
+    render(<BoardAdvisor projectName="test-project" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Run board check/ }))
+
+    expect(await screen.findByText(/could not keep this result/)).toBeTruthy()
+    expect(screen.getByText(/storage is unavailable/)).toBeTruthy()
+    // and the result the user is looking at is still on screen
+    expect(screen.getByText(/Checked /)).toBeTruthy()
+  })
+
+  it('offers a re-check whenever a result is on screen, not only after a house change', async () => {
+    // Reported: "a button to recheck which the user may want to do if they
+    // changed their details in the actual board file. the re-check option only
+    // shows if you change the house." Editing the board in KiCad has nothing
+    // to do with the profile.
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      check_display: {
+        pcb: { ...VIOLATION_RESULT, ran_at: new Date().toISOString(), checked_house: null },
+      },
+    })
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+
+    render(<BoardAdvisor projectName="test-project" />)
+
+    // No house was changed; the result matches the current (absent) profile.
+    const again = await screen.findByRole('button', { name: /Check again/ })
+    expect(screen.queryByText(/do not describe your current choice/)).toBeNull()
+
+    fireEvent.click(again)
+    await waitFor(() => expect(checkBoardMock).toHaveBeenCalledWith('/real/board.kicad_pcb', null))
+  })
+
+  it('shows when the restored check actually ran, not just that it ran', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      check_display: {
+        pcb: {
+          ...VIOLATION_RESULT,
+          ran_at: new Date(Date.now() - 90 * 60000).toISOString(),
+          checked_house: null,
+        },
+      },
+    })
+
+    render(<BoardAdvisor projectName="test-project" />)
+
+    // Relative for scanning, absolute so it is an actual timestamp.
+    expect(await screen.findByText(/Checked 2 hours ago \(/)).toBeTruthy()
   })
 
   it('sends the chosen profile into the one board check, not a second check', async () => {

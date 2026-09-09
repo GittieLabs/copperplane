@@ -74,6 +74,10 @@ export interface FabricationSummary {
       fully_gated: boolean
     }[]
     recorded_but_unenforceable: string[]
+    /** CTX-340.2: fields where the user's own KiCad setting is already at
+     *  least as tight as the house requires, so no rule was written. Writing
+     *  one would REPLACE their stricter setting and hide real violations. */
+    your_setting_is_stricter?: { field: string; house: number; project: number }[]
   }
   profile_is_stale: boolean
   unconfirmed_fields: string[]

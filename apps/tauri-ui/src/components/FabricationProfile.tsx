@@ -169,6 +169,19 @@ export function FabricationProfile({
         })}
       </ul>
 
+      {/* CTX-340.2, reported directly: "just bc we can tell the user to choose a
+          house it doesn't mean the user knows where to change the settings in
+          kicad", and that only nine are shown with no way to tell which of
+          their own settings were moved off KiCad's defaults. Mirrors the
+          ignored-tests block, which already names its KiCad menu path. */}
+      <p className="text-xs text-fg-tertiary">
+        These nine are the limits a board house usually publishes, and the ones this check can
+        enforce. They are <strong>not</strong> KiCad&rsquo;s defaults — some are stricter and some
+        are looser. Your board&rsquo;s own values live in KiCad under{' '}
+        <strong>File → Board Setup → Design Rules → Constraints</strong>. Where your own setting is
+        already tighter than your house requires, this check keeps yours.
+      </p>
+
       {unconfirmedCount(profile) > 0 && (
         <p className="text-xs text-fg-muted">
           {unconfirmedCount(profile)} of these came from a general standard process, not from your

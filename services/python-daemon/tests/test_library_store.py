@@ -597,6 +597,9 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
         # `fabrication_profile` backfills to None rather than {}: None
         # means the user has never chosen a board house, which is not the
         # same as a house that publishes no limits (SPEC-114 2.9).
+        # CTX-340.2: `check_display` backfills to {} instead, following
+        # `footprint_overrides` -- an absent key and an empty dict both mean
+        # "no check result kept yet", so callers need no None-handling.
         self.assertEqual(
             loaded,
             {
@@ -607,6 +610,7 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
                 "parts": [],
                 "footprint_overrides": {},
                 "fabrication_profile": None,
+                "check_display": {},
                 "notes": None,
             },
         )
