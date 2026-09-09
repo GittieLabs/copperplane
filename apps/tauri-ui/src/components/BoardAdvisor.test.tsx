@@ -705,6 +705,50 @@ describe('BoardAdvisor: a check result the review agent can actually read', () =
     expect(screen.getByText(/Checked /)).toBeTruthy()
   })
 
+  it('offers a re-check whenever a result is on screen, not only after a house change', async () => {
+    // Reported: "a button to recheck which the user may want to do if they
+    // changed their details in the actual board file. the re-check option only
+    // shows if you change the house." Editing the board in KiCad has nothing
+    // to do with the profile.
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      check_display: {
+        pcb: { ...VIOLATION_RESULT, ran_at: new Date().toISOString(), checked_house: null },
+      },
+    })
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+
+    render(<BoardAdvisor projectName="test-project" />)
+
+    // No house was changed; the result matches the current (absent) profile.
+    const again = await screen.findByRole('button', { name: /Check again/ })
+    expect(screen.queryByText(/do not describe your current choice/)).toBeNull()
+
+    fireEvent.click(again)
+    await waitFor(() => expect(checkBoardMock).toHaveBeenCalledWith('/real/board.kicad_pcb', null))
+  })
+
+  it('shows when the restored check actually ran, not just that it ran', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      check_display: {
+        pcb: {
+          ...VIOLATION_RESULT,
+          ran_at: new Date(Date.now() - 90 * 60000).toISOString(),
+          checked_house: null,
+        },
+      },
+    })
+
+    render(<BoardAdvisor projectName="test-project" />)
+
+    // Relative for scanning, absolute so it is an actual timestamp.
+    expect(await screen.findByText(/Checked 2 hours ago \(/)).toBeTruthy()
+  })
+
   it('sends the chosen profile into the one board check, not a second check', async () => {
     // SPEC-340, after the click-through: a profile is an INPUT to this check.
     // It used to be a separate button running DRC again beside this one, which

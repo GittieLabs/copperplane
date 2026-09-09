@@ -534,13 +534,31 @@ function BoardCheckSection({
       {checkResult && (
         <div className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between gap-2">
-            <p className="text-xs text-fg-muted">
-              {ranAt ? `Checked ${whenItRan(ranAt)}.` : 'Checked this session.'}
+            <p className="text-xs text-fg-muted" title={ranAt ? new Date(ranAt).toLocaleString() : undefined}>
+              {ranAt ? `Checked ${whenItRan(ranAt)}` : 'Checked'}
+              {ranAt ? ` (${new Date(ranAt).toLocaleTimeString()}).` : '.'}
               {checkedHouse ? ` Against ${checkedHouse}.` : " Against KiCad\u2019s own defaults."}
             </p>
-            <button type="button" className="text-xs text-fg-muted underline" onClick={onDismissCheck}>
-              Dismiss
-            </button>
+            <div className="flex items-baseline gap-3">
+              {/* Reported: "a button to recheck which the user may want to do if
+                  they changed their details in the actual board file. the
+                  re-check option only shows if you change the house."
+                  Editing the board in KiCad is the common reason to re-run and
+                  has nothing to do with the profile, so this is always here. */}
+              {selectedBoard && (
+                <button
+                  type="button"
+                  className="rounded border border-line-strong px-2 py-0.5 text-xs text-fg-bright disabled:opacity-50"
+                  onClick={() => onCheckBoard(selectedBoard)}
+                  disabled={checkingBoard}
+                >
+                  {checkingBoard ? 'Checking…' : 'Check again'}
+                </button>
+              )}
+              <button type="button" className="text-xs text-fg-muted underline" onClick={onDismissCheck}>
+                Dismiss
+              </button>
+            </div>
           </div>
 
           {/* CTX-340.2, reported directly: changing the house rewrote the
@@ -555,16 +573,6 @@ function BoardCheckSection({
                 {checkedHouse ?? 'KiCad’s own defaults'}, not{' '}
                 {houseName ?? 'KiCad’s own defaults'}. They do not describe your current choice.
               </p>
-              {selectedBoard && (
-                <button
-                  type="button"
-                  className="self-start rounded border border-line-strong px-3 py-1 text-xs text-fg-bright"
-                  onClick={() => onCheckBoard(selectedBoard)}
-                  disabled={checkingBoard}
-                >
-                  Check again
-                </button>
-              )}
             </div>
           )}
 
