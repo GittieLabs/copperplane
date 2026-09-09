@@ -27,9 +27,13 @@ All four in one file: [board-houses.json](/copperplane/board-houses/board-houses
 
 ## Import one
 
-1. Open the file you downloaded and copy its contents to the clipboard.
+1. Download the file (or files) you want.
 2. In Copperplane, go to **PCB → Board houses**.
-3. Click **Import from clipboard**.
+3. Click **Import from file** and choose them.
+
+You can select more than one at a time — picking all four is a single import,
+not four. If you would rather paste, **Import from clipboard** takes the same
+JSON.
 
 If you already have a house with the same id, nothing is imported on the first
 pass. You are told what clashed and asked to pick: **Keep both** brings the
