@@ -1264,7 +1264,7 @@ def set_project_check_display(name: str, area: str, result: dict | None) -> dict
     else:
         displays[area] = {
             **result,
-            "ran_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "ran_at": datetime.now(timezone.utc).isoformat(),
         }
     project["check_display"] = displays
     return save_project(project)

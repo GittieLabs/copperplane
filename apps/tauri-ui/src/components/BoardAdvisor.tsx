@@ -131,11 +131,21 @@ export function BoardAdvisor({
     }
   }, [projectName])
 
-  function handleDismissCheck() {
+  async function handleDismissCheck() {
     setBoardCheckResult(null)
     setCheckRanAt(null)
     setCheckedHouse(null)
-    void setProjectCheckDisplay(projectName, 'pcb', null).catch(() => undefined)
+    try {
+      await setProjectCheckDisplay(projectName, 'pcb', null)
+    } catch (err) {
+      // Same rule: a dismissal that did not persist will reappear, and the
+      // user should know why rather than think the button is broken.
+      setBoardCheckError(
+        `Dismissed here, but could not clear the saved result: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      )
+    }
   }
 
   const refreshBoardList = useCallback(async () => {
@@ -213,11 +223,23 @@ export function BoardAdvisor({
       setCheckedHouse(house)
       setCheckRanAt(new Date().toISOString())
       // CTX-340.2: kept so a tab switch does not throw it away. Failing to
-      // store it must not take down a result that is already on screen.
-      void setProjectCheckDisplay(projectName, 'pcb', {
-        ...(result as unknown as Record<string, unknown>),
-        checked_house: house,
-      }).catch(() => undefined)
+      // store it must not take down a result that is already on screen -- but
+      // it must not be silent either. The first version swallowed the error,
+      // and a broken write went unnoticed until someone switched projects and
+      // found their check gone. Two lines above, `setProjectCheckResult`
+      // already said "never swallow it silently"; this ignored its own advice.
+      try {
+        await setProjectCheckDisplay(projectName, 'pcb', {
+          ...(result as unknown as Record<string, unknown>),
+          checked_house: house,
+        })
+      } catch (persistErr) {
+        setBoardCheckError(
+          `Checked, but could not keep this result — it will be gone if you leave this project: ${
+            persistErr instanceof Error ? persistErr.message : String(persistErr)
+          }`,
+        )
+      }
       // SPEC-319 §2.1's prerequisite: persist it so the review and chat
       // agents can actually see it. Held only in React state before, which
       // is why the PCB review was told "No DRC check result is available
@@ -278,7 +300,7 @@ export function BoardAdvisor({
         houseName={profile?.house_name ?? null}
         ranAt={checkRanAt}
         checkedHouse={checkedHouse}
-        onDismissCheck={handleDismissCheck}
+        onDismissCheck={() => void handleDismissCheck()}
       />
       {/* SPEC-319 §2.4: a sibling action, not inside AgentChat -- a review
           is a flow step with a typed result, not a conversational turn. */}

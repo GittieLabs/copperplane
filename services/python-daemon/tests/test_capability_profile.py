@@ -239,6 +239,43 @@ class ProfilePersistenceTests(unittest.TestCase):
             "the profile has to travel with the folder, like intent does",
         )
 
+    def test_a_check_result_round_trips_through_the_real_store(self):
+        """The test that was missing, and the reason a shipped feature did
+        nothing at all.
+
+        `set_project_check_display` raised `AttributeError` on every call --
+        `import datetime` shadowed this module's own
+        `from datetime import datetime, timezone`, so `datetime.datetime` did
+        not resolve. The frontend swallowed the error, so the result simply was
+        never stored and the user found their check gone after switching
+        projects. Every existing test mocked this function; none called it."""
+        self.store.save_project({"name": "alpha"})
+        self.store.set_project_check_display(
+            "alpha", "pcb", {"summary": "s", "checked_house": None}
+        )
+
+        stored = (self.store.load_project("alpha").get("check_display") or {}).get("pcb")
+        self.assertIsNotNone(stored, "the result has to actually be on disk")
+        self.assertEqual(stored["summary"], "s")
+        self.assertTrue(stored["ran_at"], "and carry when it ran, which is what the UI shows")
+
+    def test_dismissing_a_check_clears_it(self):
+        self.store.save_project({"name": "alpha"})
+        self.store.set_project_check_display("alpha", "pcb", {"summary": "s"})
+        self.store.set_project_check_display("alpha", "pcb", None)
+        self.assertEqual(self.store.load_project("alpha").get("check_display"), {})
+
+    def test_a_check_result_does_not_leak_between_projects(self):
+        self.store.save_project({"name": "alpha"})
+        self.store.save_project({"name": "beta"})
+        self.store.set_project_check_display("alpha", "pcb", {"summary": "s"})
+        self.assertEqual(self.store.load_project("beta").get("check_display"), {})
+
+    def test_an_unknown_area_is_refused(self):
+        self.store.save_project({"name": "alpha"})
+        with self.assertRaises(self.store.SchemaValidationError):
+            self.store.set_project_check_display("alpha", "not_an_area", {"summary": "s"})
+
     def test_a_project_saved_before_this_field_existed_reads_as_never_chosen(self):
         self.store.save_project({"name": "old"})
         record = self.store.load_project("old")

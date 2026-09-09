@@ -686,6 +686,25 @@ describe('BoardAdvisor: a check result the review agent can actually read', () =
     await waitFor(() => expect(checkBoardMock).toHaveBeenCalled())
   })
 
+  it('says so when the result could not be kept, rather than failing quietly', async () => {
+    // The deeper half of the bug: set_project_check_display raised on every
+    // call and the UI swallowed it with `.catch(() => undefined)`, so a
+    // feature that never worked looked like it did until someone switched
+    // projects and found their check gone.
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValue(VIOLATION_RESULT)
+    setProjectCheckResultMock.mockResolvedValue(undefined)
+    setProjectCheckDisplayMock.mockRejectedValue(new Error('storage is unavailable'))
+
+    render(<BoardAdvisor projectName="test-project" />)
+    fireEvent.click(await screen.findByRole('button', { name: /Run board check/ }))
+
+    expect(await screen.findByText(/could not keep this result/)).toBeTruthy()
+    expect(screen.getByText(/storage is unavailable/)).toBeTruthy()
+    // and the result the user is looking at is still on screen
+    expect(screen.getByText(/Checked /)).toBeTruthy()
+  })
+
   it('sends the chosen profile into the one board check, not a second check', async () => {
     // SPEC-340, after the click-through: a profile is an INPUT to this check.
     // It used to be a separate button running DRC again beside this one, which
