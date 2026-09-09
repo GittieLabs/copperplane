@@ -45,6 +45,21 @@ function slug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'house'
 }
 
+/** A name and id nothing in the library is using yet.
+ *
+ *  Cloning is "make another one", so colliding on a name is never the right
+ *  answer -- and the error it produced told the user to rename with nothing in
+ *  the UI able to rename anything. Reported exactly that way: "how would i
+ *  rename this board?" */
+function freeName(base: string, taken: CapabilityProfile[]): { name: string; id: string } {
+  const ids = new Set(taken.map((h) => h.house_id))
+  if (!ids.has(slug(base))) return { name: base, id: slug(base) }
+  for (let n = 2; ; n += 1) {
+    const name = `${base} ${n}`
+    if (!ids.has(slug(name))) return { name, id: slug(name) }
+  }
+}
+
 function today(): string {
   return new Date().toISOString().slice(0, 10)
 }
@@ -108,17 +123,17 @@ export function HouseLibrary({
   function onStartFromTemplate() {
     void run('Could not create a house', async () => {
       const template = await genericProfile()
-      const name = 'My board house'
-      const created = await cloneHouse(template, name, slug(name), today())
+      const { name, id } = freeName('My board house', houses ?? [])
+      const created = await cloneHouse(template, name, id, today())
       await saveHouse(created)
-      return `Created “${name}” from the standard numbers. Edit it to match your fab.`
+      return `Created “${name}” from the standard numbers. Rename it and edit the numbers to match your fab.`
     })
   }
 
   function onClone(house: CapabilityProfile) {
     void run('Could not clone', async () => {
-      const name = `${house.house_name} (copy)`
-      const created = await cloneHouse(house, name, slug(name), today())
+      const { name, id } = freeName(`${house.house_name} (copy)`, houses ?? [])
+      const created = await cloneHouse(house, name, id, today())
       await saveHouse(created)
       return `Cloned as “${name}”. Every number is marked unconfirmed until you check it.`
     })
@@ -144,6 +159,12 @@ export function HouseLibrary({
   function onSaveEdits(house: CapabilityProfile) {
     void run('Could not save', async () => {
       const next: Record<string, unknown> = { ...house }
+      // Renaming keeps the id. The id is internal plumbing; changing it would
+      // orphan any project that recorded this house as its choice, and the
+      // user is asking to relabel a thing, not to replace it.
+      const renamed = (draft.house_name ?? house.house_name).trim()
+      if (!renamed) throw new Error('A board house needs a name.')
+      next.house_name = renamed
       for (const { key } of FIELDS) {
         const raw = draft[key as string]
         if (raw === undefined) continue
@@ -322,6 +343,17 @@ export function HouseLibrary({
 
                 {isEditing ? (
                   <div className="mt-2 flex flex-col gap-1">
+                    <label className="flex items-baseline justify-between gap-2">
+                      <span className="text-fg-secondary">Name</span>
+                      <input
+                        className="w-48 rounded border border-line px-1 text-right text-fg-bright"
+                        value={draft.house_name ?? house.house_name}
+                        onChange={(e) =>
+                          setDraft((d) => ({ ...d, house_name: e.target.value }))
+                        }
+                        aria-label="Name"
+                      />
+                    </label>
                     {FIELDS.map(({ key, label }) => (
                       <label key={key as string} className="flex items-baseline justify-between gap-2">
                         <span className="text-fg-secondary">{label}</span>

@@ -161,6 +161,54 @@ describe('HouseLibrary', () => {
     expect(await screen.findByText(/unconfirmed until you check it/i)).toBeTruthy()
   })
 
+  it('picks a free name instead of failing when the copy already exists', async () => {
+    // Reported: "how would i rename this board?" -- the second click on Clone
+    // (or on the template) hit "already exists. Rename this one" and there was
+    // nothing in the UI that could rename anything. Cloning means "make another
+    // one", so a name collision is never the right answer here.
+    listHousesMock.mockResolvedValue([
+      house(),
+      house({ house_id: 'acme-pcb-copy', house_name: 'Acme PCB (copy)', cloned_from: 'acme' }),
+    ])
+    cloneHouseMock.mockResolvedValue(house({ house_id: 'acme-pcb-copy-2' }))
+    renderLibrary()
+
+    await screen.findByText('Acme PCB')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Clone' })[1])
+
+    await waitFor(() => expect(cloneHouseMock).toHaveBeenCalled())
+    const [, name, id] = cloneHouseMock.mock.calls[0]
+    expect(name).toBe('Acme PCB (copy) 2')
+    expect(id).toBe('acme-pcb-copy-2')
+  })
+
+  it('renames a house, keeping its id so projects using it are not orphaned', async () => {
+    listHousesMock.mockResolvedValue([house({ cloned_from: 'acme' })])
+    renderLibrary()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'JLCPCB 2-layer' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(saveHouseMock).toHaveBeenCalled())
+    const [saved, overwrite] = saveHouseMock.mock.calls[0]
+    expect(saved.house_name).toBe('JLCPCB 2-layer')
+    expect(saved.house_id).toBe('acme')
+    expect(overwrite).toBe(true)
+  })
+
+  it('refuses a blank name rather than saving a house nothing can identify', async () => {
+    listHousesMock.mockResolvedValue([house({ cloned_from: 'acme' })])
+    renderLibrary()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText(/needs a name/i)).toBeTruthy()
+    expect(saveHouseMock).not.toHaveBeenCalled()
+  })
+
   it('saves an edit to a house the user owns', async () => {
     listHousesMock.mockResolvedValue([house({ cloned_from: 'acme' })])
     saveHouseMock.mockResolvedValue(house({ cloned_from: 'acme', min_drill: 0.25 }))
