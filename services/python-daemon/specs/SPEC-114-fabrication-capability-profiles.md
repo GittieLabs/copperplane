@@ -4,7 +4,7 @@ title: "Fabrication Capability Profiles & Design Rules"
 status: Draft
 type: Feature
 created: 2026-09-07
-last_updated: 2026-09-08
+last_updated: 2026-09-09
 target_version: v0.6.0
 location: "services/python-daemon/specs/SPEC-114-fabrication-capability-profiles.md"
 parent_spec: "SPEC-210-design-considerations-model.md"
@@ -154,26 +154,42 @@ errors being KiCad's own and the warnings being the sidecar's. So the app's adde
 warnings while KiCad's defaults stay errors, and the review gets a free, honest visual separation
 between *"your fab would not build this"* and *"KiCad's own rules"* without inventing a marker.
 
-### 2.4 The wall-of-violations question, answered: 27, not hundreds
+### 2.4 The wall-of-violations question, answered: 11, not hundreds — and 27 was wrong
 
-A plausible 2-layer profile (0.127mm track and clearance, 0.13mm annular ring, 0.3mm drill, 0.5mm
-hole-to-hole, 0.15mm silk clearance, 1.0mm text height, 0.15mm text thickness, 0.2mm copper-to-edge)
-against the tutorial board returns **27 violations**: `silk_overlap` 14, `annular_width` 4,
-`hole_to_hole` 3, `text_thickness` 2, `text_height` 2, `silk_over_copper` 2. Those profile numbers
-are illustrative and not yet sourced to a real house; the count is what was being measured.
+**Re-measured 2026-09-09, and the earlier figure is corrected rather than kept.** The tutorial board
+against the bundled standard-process profile returns **11 violations**: `annular_width` 4,
+`hole_to_hole` 3, `text_height` 2, `text_thickness` 2. Seven of the eleven are the
+built-silently-wrong class; four are cosmetic.
 
-Twenty-seven is reviewable. Ranking still matters, but the feature does not drown a first board.
+Eleven is reviewable, and the feature does not drown a first board.
 
-And the findings read the way the pitch requires, unedited:
+**The original measurement said 27, and 16 of those were manufactured by this spec's own profile.**
+The illustrative profile included `min_silk_clearance: 0.15`, which produced fourteen `silk_overlap`
+and two `silk_over_copper` findings — 59% of the total. `CTX-342.1`'s research then read four real
+board houses' published capability pages (JLCPCB, PCBWay, OSH Park, AISLER) and found that **not one
+of them publishes a silkscreen-to-copper clearance at all**. The largest group of findings the
+feature produced came from a limit no board house states.
 
-*   `Silkscreen clipped by solder mask (rule 'min-silk-clearance' clearance 0.1500 mm; actual 0.1200 mm)` → *Arc of D1 on F.Silkscreen*
+That is precisely what §3 below warned about before any of this was built — *"a too-strict profile
+is worse than none ... the app manufactures findings and spends the credibility this family runs
+on"* — and it shipped anyway, because the profile's numbers were plausible-sounding rather than
+read off anything. The field is now absent from the bundled profile, and an absent field produces
+no rule.
+
+For scale, the same board against the four researched houses: PCBWay 4, OSH Park 4, AISLER 6,
+JLCPCB 11. The corrected profile now sits exactly at the strictest real house rather than at twice
+it. Numbers and sources in `board-houses/README.md`.
+
+And the findings still read the way the pitch requires, unedited:
+
+*   `Annular width (rule 'min-annular-ring' min annular width 0.1300 mm; actual 0.0850 mm)` → *PTH pad 1 [GND] of D1*
 *   `Text height out of range (min height 1.0000 mm; actual 0.8000 mm)` → *Footprint text of D1*
-*   `Annular width (min annular width 0.1300 mm; actual 0.0850 mm)` → *PTH pad 1 [GND] of D1*
+*   `Hole to hole (min 0.5000 mm; actual 0.4000 mm)` → *PTH pads of D1*
 
-Every one of those is a build-silently-wrong case rather than a rejection, which is precisely §1's
-claim. All three land on **D1**, already the tutorial's hero component from `SPEC-113`. The
+Every one is a build-silently-wrong or cosmetic case rather than a rejection, which is §1's claim.
+All three land on **D1**, already the tutorial's hero component from `SPEC-113`. The
 manufacturability pack and the structural pack tell the same story about the same part, from two
-independent directions.
+independent directions — and they still do with the silkscreen rule gone.
 
 ### 2.5 The parser question, now narrower
 
@@ -215,13 +231,13 @@ wanted; it is out of scope for v1.
 ### 2.8 The proof surface
 
 A **before and after**: this board passes with KiCad's defaults, here is what it looks like against
-the house you actually chose. On the tutorial board that is 4 findings becoming 27, all of the new
-ones being things a fab would build without comment. Cheap to construct, and it is the whole argument
-in one screen.
+the house you actually chose. On the tutorial board that is 4 findings becoming 11, seven of the
+new ones being things a fab would build without comment. Cheap to construct, and it is the whole
+argument in one screen.
 
 ### 2.9 Open questions that remain
 
-*   **Ranking.** 27 findings is reviewable but not self-organising. "Would this have built silently
+*   **Ranking.** 11 findings is reviewable but not self-organising. "Would this have built silently
     wrong" first, "would be rejected" second, cosmetic last, is the ordering this spec proposes, and
     it needs to be settled against a real reading rather than asserted.
 *   **Where the user chooses a profile.** Project wizard, Settings, or the PCB tab. A profile is per

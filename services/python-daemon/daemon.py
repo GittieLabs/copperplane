@@ -2035,7 +2035,15 @@ def fabrication_generic_profile() -> dict:
         "min_annular_ring": 0.13,
         "min_drill": 0.3,
         "min_hole_to_hole": 0.5,
-        "min_silk_clearance": 0.15,
+        # No min_silk_clearance. Measured 2026-09-09 against four real houses'
+        # published pages (JLCPCB, PCBWay, OSH Park, AISLER): NOT ONE publishes
+        # a silkscreen-to-copper clearance. Asserting 0.15mm here produced 16 of
+        # this template's 27 findings on the tutorial board -- the largest single
+        # group -- from a limit no board house states.
+        #
+        # That is exactly what `SPEC-114` section 3 warned about: "a too-strict
+        # profile is worse than none ... the app manufactures findings and spends
+        # the credibility this family runs on." See `board-houses/README.md`.
         "min_text_height": 1.0,
         "min_text_thickness": 0.15,
         "min_edge_clearance": 0.2,

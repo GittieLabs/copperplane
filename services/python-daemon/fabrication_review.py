@@ -5,8 +5,8 @@ CTX-114.1 Phases 3 to 5, implementing `SPEC-114` sections 2.2, 2.3, 2.8 and the
 
 The output this module exists to produce is the **before and after**: this board
 passes with KiCad's defaults, and here is what it looks like against the house
-you chose. On the example board that is 4 findings becoming 27, and every one of
-the new ones is something a fab would build without comment rather than reject.
+you chose. On the example board that is 4 findings becoming 11, seven of the new
+ones being things a fab would build without comment rather than reject.
 
 Two honesty rules run through all of it, both from measurement rather than
 preference:
