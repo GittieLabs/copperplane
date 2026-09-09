@@ -70,17 +70,42 @@ describe('HouseLibrary', () => {
 
   it('marks which houses came with the app and which are the user’s copies', async () => {
     listHousesMock.mockResolvedValue([
-      house(),
-      house({ house_id: 'acme-mine', house_name: 'Acme PCB', cloned_from: 'acme' }),
-    ])
-    listHousesMock.mockResolvedValueOnce([
-      house({ is_shipped: true }),
+      house({ is_bundled: true }),
       house({ house_id: 'acme-mine', house_name: 'My Acme', cloned_from: 'acme' }),
     ])
     renderLibrary()
 
-    expect(await screen.findByText(/came with the app/)).toBeTruthy()
+    expect(await screen.findByText(/came with the app, read-only/)).toBeTruthy()
     expect(screen.getByText(/your copy/)).toBeTruthy()
+  })
+
+  it('offers Clone but not Edit on a house that came with the app', async () => {
+    // Requested directly: "we should only allow edits on a cloned template ...
+    // you can clone any template though. allowing edits to template bundled
+    // with the app would prevent us from getting back to default settings."
+    listHousesMock.mockResolvedValue([house({ is_bundled: true })])
+    renderLibrary()
+
+    expect(await screen.findByRole('button', { name: 'Clone' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull()
+    // Removing it would lose the known-good copy just as surely as editing it.
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull()
+  })
+
+  it('offers Edit on a house the user owns', async () => {
+    listHousesMock.mockResolvedValue([house({ cloned_from: 'acme' })])
+    renderLibrary()
+
+    expect(await screen.findByRole('button', { name: 'Edit' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeTruthy()
+  })
+
+  it('offers Edit on an imported house, which is not bundled', async () => {
+    // An imported house can be imported again, so there is no reason to lock
+    // it -- the read-only rule is about recovery, not about origin.
+    listHousesMock.mockResolvedValue([house({ is_bundled: false })])
+    renderLibrary()
+    expect(await screen.findByRole('button', { name: 'Edit' })).toBeTruthy()
   })
 
   it('lets a project use a house, and says which one it already uses', async () => {
@@ -113,24 +138,34 @@ describe('HouseLibrary', () => {
     expect(await screen.findByText(/unconfirmed until you check it/i)).toBeTruthy()
   })
 
-  it('says so when an edit to a shipped house landed as a copy', async () => {
-    // SPEC-342 section 2.6. The daemon does this automatically, so the UI must
-    // say it happened -- a save that quietly lands under a different name would
-    // be worse than an error.
-    listHousesMock.mockResolvedValue([house({ is_shipped: true })])
-    saveHouseMock.mockResolvedValue(house({ house_id: 'acme-mine', cloned_from: 'acme' }))
+  it('saves an edit to a house the user owns', async () => {
+    listHousesMock.mockResolvedValue([house({ cloned_from: 'acme' })])
+    saveHouseMock.mockResolvedValue(house({ cloned_from: 'acme', min_drill: 0.25 }))
     renderLibrary()
 
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
     fireEvent.change(screen.getByLabelText('Minimum drill'), { target: { value: '0.25' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
-    expect(await screen.findByText(/saved as a copy/i)).toBeTruthy()
-    expect(screen.getByText(/original is untouched/i)).toBeTruthy()
+    await waitFor(() => expect(saveHouseMock).toHaveBeenCalled())
+    const [saved] = saveHouseMock.mock.calls[0]
+    expect(saved.min_drill).toBe(0.25)
+  })
+
+  it('refuses a measurement that is not a positive number', async () => {
+    listHousesMock.mockResolvedValue([house({ cloned_from: 'acme' })])
+    renderLibrary()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }))
+    fireEvent.change(screen.getByLabelText('Minimum drill'), { target: { value: '-1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText(/positive measurement/i)).toBeTruthy()
+    expect(saveHouseMock).not.toHaveBeenCalled()
   })
 
   it('offers reset only on a copy, since there is nothing else to go back to', async () => {
-    listHousesMock.mockResolvedValue([house({ is_shipped: true })])
+    listHousesMock.mockResolvedValue([house({ is_bundled: true })])
     const { unmount } = render(
       <HouseLibrary chosenId={null} onChoose={vi.fn()} onClose={vi.fn()} />,
     )

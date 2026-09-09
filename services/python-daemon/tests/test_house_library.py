@@ -248,18 +248,22 @@ class TemplateTests(unittest.TestCase):
             self.assertFalse(entry["confirmed_by_user"])
 
 
-def _shipped(house_id="acme", name="Acme PCB"):
+def _bundled(house_id="acme", name="Acme PCB"):
     house = _house(house_id=house_id, name=name)
-    house[capability_profile.SHIPPED_KEY] = True
+    house[capability_profile.BUNDLED_KEY] = True
     return house
 
 
-class ShippedHouseTests(unittest.TestCase):
-    """SPEC-342 section 2.6: a shipped house is never edited in place.
+class BundledHouseTests(unittest.TestCase):
+    """SPEC-342 section 2.6: a house that came with the app is read-only.
 
-    Requested directly: "we should automatically clone a shipped house instead
-    of overwriting it. This allows a user to essentially reset a house profile."
-    """
+    Requested directly: "we should only allow edits on a cloned template ... you
+    can clone any template though. allowing edits to template bundled with the
+    app would prevent us from getting back to default settings if the user makes
+    a mistake and wants to revert."
+
+    The reason is recovery, not ownership -- which is why an *imported* house is
+    editable: the user brought it in and can bring it in again."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -267,63 +271,69 @@ class ShippedHouseTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.addCleanup(library_store.configure, storage_root=None)
 
-    def test_editing_a_shipped_house_makes_a_copy_and_leaves_it_alone(self):
-        library_store.save_house(_shipped())
+    def test_a_bundled_house_cannot_be_edited_at_all(self):
+        library_store.save_house(_bundled())
+
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.save_house(
+                {**library_store.load_house("acme"), "min_drill": 0.25}, overwrite=True
+            )
+
+        self.assertEqual(library_store.load_house("acme")["min_drill"], 0.35,
+                         "unchanged, which is the whole point -- there is a known-good copy")
+
+    def test_the_refusal_says_to_clone_it_instead(self):
+        # A refusal with no way forward is just a wall. Cloning is always
+        # allowed and is what the user actually wants to do.
+        library_store.save_house(_bundled())
+        with self.assertRaises(library_store.SchemaValidationError) as caught:
+            library_store.save_house(library_store.load_house("acme"), overwrite=True)
+        self.assertIn("Clone it", str(caught.exception))
+
+    def test_a_clone_of_a_bundled_house_is_editable(self):
+        library_store.save_house(_bundled())
+        cloned = capability_profile.clone(
+            library_store.load_house("acme"), "My Acme", "my-acme", "2026-09-09"
+        )
+        library_store.save_house(cloned)
 
         saved = library_store.save_house(
-            {**library_store.load_house("acme"), "min_drill": 0.25}, overwrite=True
+            {**library_store.load_house("my-acme"), "min_drill": 0.22}, overwrite=True
         )
 
-        self.assertEqual(saved["house_id"], "acme-mine")
-        self.assertFalse(capability_profile.is_shipped(saved))
-        self.assertEqual(saved[capability_profile.CLONED_FROM_KEY], "acme")
-        self.assertEqual(library_store.load_house("acme")["min_drill"], 0.35,
-                         "the shipped house is untouched, which is what makes reset possible")
+        self.assertEqual(saved["house_id"], "my-acme", "edited in place; it is the user's own")
+        self.assertEqual(saved["min_drill"], 0.22)
+        self.assertFalse(capability_profile.is_bundled(saved))
 
-    def test_a_second_edit_makes_a_second_copy_rather_than_replacing_the_first(self):
-        library_store.save_house(_shipped())
-        first = library_store.save_house(
-            {**library_store.load_house("acme"), "min_drill": 0.25}, overwrite=True
-        )
-        second = library_store.save_house(
-            {**library_store.load_house("acme"), "min_drill": 0.2}, overwrite=True
-        )
-        self.assertEqual(first["house_id"], "acme-mine")
-        self.assertEqual(second["house_id"], "acme-mine-2")
-
-    def test_a_users_own_house_is_still_edited_in_place(self):
-        # The auto-clone applies to shipped houses only. A house the user wrote
-        # is theirs to overwrite.
+    def test_a_users_own_house_is_edited_in_place(self):
         library_store.save_house(_house())
         saved = library_store.save_house(_house(min_drill=0.2), overwrite=True)
         self.assertEqual(saved["house_id"], "house-a")
         self.assertEqual(library_store.list_houses(), ["house-a"])
 
-    def test_reset_removes_the_copy_and_returns_the_shipped_original(self):
-        library_store.save_house(_shipped())
+    def test_reset_removes_the_clone_and_returns_the_original(self):
+        library_store.save_house(_bundled())
         library_store.save_house(
-            {**library_store.load_house("acme"), "min_drill": 0.25}, overwrite=True
+            capability_profile.clone(
+                library_store.load_house("acme"), "My Acme", "my-acme", "2026-09-09"
+            )
         )
 
-        original = library_store.reset_house("acme-mine")
+        original = library_store.reset_house("my-acme")
 
         self.assertEqual(original["house_id"], "acme")
         self.assertEqual(original["min_drill"], 0.35)
         self.assertEqual(library_store.list_houses(), ["acme"])
 
-    def test_resetting_a_house_that_is_not_a_copy_is_refused(self):
-        # There would be nothing to go back to, and the user would just lose
-        # their own work.
+    def test_resetting_a_house_that_was_not_cloned_is_refused(self):
         library_store.save_house(_house())
         with self.assertRaises(library_store.SchemaValidationError):
             library_store.reset_house("house-a")
         self.assertEqual(library_store.list_houses(), ["house-a"])
 
-    def test_a_clone_of_a_shipped_house_records_where_it_came_from(self):
-        cloned = capability_profile.clone(
-            _shipped(), "My Acme", "my-acme", "2026-09-09"
-        )
-        self.assertFalse(capability_profile.is_shipped(cloned))
+    def test_a_clone_records_where_it_came_from_and_is_never_bundled(self):
+        cloned = capability_profile.clone(_bundled(), "My Acme", "my-acme", "2026-09-09")
+        self.assertFalse(capability_profile.is_bundled(cloned))
         self.assertEqual(cloned[capability_profile.CLONED_FROM_KEY], "acme")
 
 
@@ -359,17 +369,17 @@ class ImportExportTests(unittest.TestCase):
         with self.assertRaises(library_store.SchemaValidationError):
             library_store.import_houses({"something": "else"})
 
-    def test_an_imported_house_arrives_as_shipped_so_editing_it_makes_a_copy(self):
-        """Which is what makes a set distributed through the repository safe to
-        edit: the imported original stays available to reset back to."""
-        payload = {"houses": [_house()]}
-        library_store.import_houses(payload)
+    def test_an_imported_house_is_the_users_own_and_editable(self):
+        """Imported is not bundled. The read-only rule exists because a bundled
+        house cannot be got back any other way; an imported one can simply be
+        imported again, so there is no reason to lock it."""
+        library_store.import_houses({"houses": [_bundled()]})
 
-        self.assertTrue(capability_profile.is_shipped(library_store.load_house("house-a")))
+        self.assertFalse(capability_profile.is_bundled(library_store.load_house("acme")))
         saved = library_store.save_house(
-            {**library_store.load_house("house-a"), "min_drill": 0.2}, overwrite=True
+            {**library_store.load_house("acme"), "min_drill": 0.2}, overwrite=True
         )
-        self.assertEqual(saved["house_id"], "house-a-mine")
+        self.assertEqual(saved["house_id"], "acme", "edited in place")
 
     def test_a_round_trip_preserves_the_numbers_and_their_provenance(self):
         library_store.save_house(_house())

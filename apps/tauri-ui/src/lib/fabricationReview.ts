@@ -21,10 +21,11 @@ export interface CapabilityProfile {
   /** SPEC-342 §2.5: a starting point, not a board house. Cannot be saved to
    *  the library or chosen by a project until it is cloned. */
   is_template?: boolean
-  /** SPEC-342 §2.6: came with the app or from an imported set. Saving a change
-   *  to one produces the user's own copy rather than overwriting it. */
-  is_shipped?: boolean
-  /** On a copy, the shipped house it came from — what `resetHouse` goes back to. */
+  /** SPEC-342 §2.6: came WITH THE APP. Read-only — it can be cloned but never
+   *  edited, because a mistake in it would otherwise be unrecoverable. An
+   *  imported house is not bundled: the user brought it in and owns it. */
+  is_bundled?: boolean
+  /** On a clone, the house it came from — what `resetHouse` goes back to. */
   cloned_from?: string
   house_id?: string
   schema_version?: number

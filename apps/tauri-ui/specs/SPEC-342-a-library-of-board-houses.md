@@ -121,31 +121,35 @@ The user-visible flow is unchanged in effort: "start from standard 2-layer numbe
 click. It now produces a house of their own, which they can rename and edit, rather than silently
 adopting a set of numbers attributed to nobody.
 
-### 2.6 A shipped house is never edited in place
+### 2.6 A house that came with the app is read-only
 
-Requested after the library landed: *"we should automatically clone a shipped house instead of
-overwriting it. This allows a user to essentially reset a house profile."*
+*"we should only allow edits on a cloned template ... you can clone any template though. allowing
+edits to template bundled with the app would prevent us from getting back to default settings if the
+user makes a mistake and wants to revert."*
 
-A house that came with the app — or was imported from a published set — is marked shipped. Saving a
-change to one does not overwrite it. The save produces the user's own copy (`<id>-mine`, then
-`-mine-2`), marked as theirs and recording which shipped house it came from. The original is
-untouched.
+**The reason is recovery, not ownership**, and that distinction decides everything else here. A
+bundled house is the only thing in the library a user cannot get back any other way: if they edit it
+and get it wrong, there is nothing left to revert to short of reinstalling. So it offers Clone and
+never Edit, and it cannot be removed either — deleting it loses the known-good copy just as surely.
 
-That last property is what makes **reset** a real operation: `reset_house` deletes the copy and
-returns the original, offline, with no re-download and no network. A user can edit a shipped house
-freely knowing the numbers it shipped with are still there.
+An **imported** house is not bundled. It came from outside, but the user chose to bring it in and
+can bring it in again, so locking it would buy nothing and cost them the ability to fix a number. It
+edits in place like any house they wrote themselves.
 
-Automatic rather than an error, deliberately. The user asked to change a number; refusing and making
-them clone by hand first is a step with no visible reason. The clone is the mechanism, not the task.
+| Kind | Clone | Edit | Remove | Reset |
+| :--- | :--- | :--- | :--- | :--- |
+| Came with the app | yes | **no** | **no** | n/a |
+| Cloned from anything | yes | yes | yes | yes |
+| Imported | yes | yes | yes | no |
+| Written by the user | yes | yes | yes | no |
 
-Three limits fall out of it:
+An earlier draft had a bundled house auto-clone on edit instead. That preserved the original too,
+but it answered a question nobody asked: the user pressed Edit and got a differently-named house.
+Refusing, and offering Clone instead, says the same thing without the surprise — and it means the
+rule is visible in the interface rather than only in the outcome.
 
-*   **Only shipped houses auto-clone.** A house the user wrote is theirs to overwrite in place.
-*   **Reset is refused on a house that is not a copy**, because there would be nothing to go back to
-    and they would simply lose their own work.
-*   **Imports arrive shipped.** A set distributed through the repository is therefore safe to edit:
-    the imported original stays available to reset back to, which is the property that makes
-    periodic re-imports non-destructive.
+`reset_house` deletes a clone and returns what it came from. Cheap and offline, because the
+original was never edited — the property the read-only rule exists to guarantee.
 
 ## 3. Known Constraints & Risks
 

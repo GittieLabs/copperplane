@@ -18,11 +18,11 @@ import {
  * The library is global; the choice is per project. Two things this surface has
  * to keep true, both of them measured or decided rather than preferences:
  *
- * *   **A shipped house is never edited in place** (§2.6). Saving a change to
- *     one produces the user's own copy and leaves the original alone, which is
- *     what makes "reset" a delete rather than a re-download. The daemon does
- *     this automatically; the UI's job is to say it happened, because a save
- *     that quietly lands under a different name would be worse than an error.
+ * *   **A house that came with the app is read-only** (§2.6). It offers Clone
+ *     and not Edit, because a mistake in a bundled house would otherwise be
+ *     unrecoverable — there would be nothing left to revert to. An *imported*
+ *     house is not bundled: the user brought it in and owns it, so it edits
+ *     like any other.
  * *   **Nothing here is attributed to a vendor who did not publish it**
  *     (`CTX-114.1` Deviation 6). The bundled starting point is a template, so
  *     it is offered as something to start from and never as a house.
@@ -136,15 +136,10 @@ export function HouseLibrary({
         }
         next[key as string] = value
       }
-      const saved = await saveHouse(next as unknown as CapabilityProfile, true)
+      await saveHouse(next as unknown as CapabilityProfile, true)
       setEditing(null)
       setDraft({})
-      // SPEC-342 §2.6: a shipped house is never edited in place, so the save
-      // may have landed under a different name. Saying so is the point -- a
-      // silent rename would be worse than refusing the edit.
-      return saved.house_id !== house.house_id
-        ? `“${house.house_name}” came with the app, so your changes were saved as a copy. The original is untouched and you can reset back to it.`
-        : 'Saved.'
+      return 'Saved.'
     })
   }
 
@@ -224,8 +219,8 @@ export function HouseLibrary({
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="font-medium text-fg-bright">
                     {house.house_name}
-                    {house.is_shipped && (
-                      <span className="text-fg-muted"> · came with the app</span>
+                    {house.is_bundled && (
+                      <span className="text-fg-muted"> · came with the app, read-only</span>
                     )}
                     {house.cloned_from && <span className="text-fg-muted"> · your copy</span>}
                     {isChosen && <span className="text-fg-muted"> · in use here</span>}
@@ -287,16 +282,21 @@ export function HouseLibrary({
                         Use for this project
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="text-fg-muted underline"
-                      onClick={() => {
-                        setEditing(id)
-                        setDraft({})
-                      }}
-                    >
-                      Edit
-                    </button>
+                    {/* No Edit on a bundled house. Clone it and edit the
+                        clone -- keeping the bundled copy pristine is the only
+                        way back if a change turns out to be wrong. */}
+                    {!house.is_bundled && (
+                      <button
+                        type="button"
+                        className="text-fg-muted underline"
+                        onClick={() => {
+                          setEditing(id)
+                          setDraft({})
+                        }}
+                      >
+                        Edit
+                      </button>
+                    )}
                     <button
                       type="button"
                       className="text-fg-muted underline"
@@ -315,14 +315,16 @@ export function HouseLibrary({
                         Reset to shipped
                       </button>
                     )}
-                    <button
-                      type="button"
-                      className="text-fg-muted underline"
-                      onClick={() => onRemove(house)}
-                      disabled={busy}
-                    >
-                      Remove
-                    </button>
+                    {!house.is_bundled && (
+                      <button
+                        type="button"
+                        className="text-fg-muted underline"
+                        onClick={() => onRemove(house)}
+                        disabled={busy}
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 )}
               </li>

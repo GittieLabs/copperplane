@@ -1308,23 +1308,20 @@ def save_house(house: dict, overwrite: bool = False) -> dict:
 
     path = _house_path(house_id)
 
-    # A shipped house is never edited in place. The edit becomes the user's own
-    # copy, so the original stays intact and deleting the copy is a reset --
-    # `SPEC-342` section 2.6. Automatic rather than an error: the user asked to
-    # change a number, and refusing would make them do the clone by hand for no
-    # reason they can see.
-    if os.path.exists(path) and _capability_profile().is_shipped(_read_json(path)):
-        copy_id = _unused_house_id(house_id)
-        copy = {
-            **house,
-            "house_id": copy_id,
-            "house_name": house.get("house_name", house_id),
-            _capability_profile().CLONED_FROM_KEY: house_id,
-        }
-        copy.pop(_capability_profile().SHIPPED_KEY, None)
-        record = {**copy, "schema_version": 1}
-        _write_json(_house_path(copy_id), record)
-        return record
+    # A house that came with the app is read-only. Not auto-cloned on edit --
+    # refused, so the UI never offers Edit on one at all (`SPEC-342` section
+    # 2.6).
+    #
+    # The reason is recovery rather than ownership: if a bundled house could be
+    # changed, a mistake in it would be unrecoverable short of reinstalling.
+    # Keeping the bundled copy pristine is the only thing that makes "revert to
+    # how it shipped" possible. Cloning it is always allowed, and the clone is
+    # the user's to edit freely.
+    if os.path.exists(path) and _capability_profile().is_bundled(_read_json(path)):
+        raise SchemaValidationError(
+            f"{house_id!r} came with the app and cannot be edited -- that is what "
+            f"keeps a known-good copy to go back to. Clone it and edit the clone."
+        )
 
     if os.path.exists(path) and not overwrite:
         # `SPEC-342` section 2.4 asks for this on import; it is the same rule
@@ -1353,17 +1350,17 @@ def _unused_house_id(base: str) -> str:
 
 
 def reset_house(house_id: str) -> dict:
-    """Delete a copy and go back to the shipped house it came from.
+    """Delete a clone and go back to the house it came from.
 
-    This is what makes shipped houses safe to edit: the original was never
-    touched, so "reset" is a delete rather than a re-download, and it can be
-    done offline. Refuses on a house that is not a copy, because there would be
-    nothing to go back to and the user would just lose their own work."""
+    Cheap and offline, because the original was never edited -- a bundled house
+    cannot be, and that is the point. Refuses on a house that is not a clone,
+    since there would be nothing to go back to and the user would simply lose
+    their own work."""
     record = load_house(house_id)
     origin = record.get(_capability_profile().CLONED_FROM_KEY)
     if not origin:
         raise SchemaValidationError(
-            f"{house_id!r} is not a copy of a shipped house, so there is nothing "
+            f"{house_id!r} was not cloned from another house, so there is nothing "
             f"to reset it to. Delete it instead if you no longer want it."
         )
     if not os.path.exists(_house_path(origin)):
@@ -1435,8 +1432,11 @@ def import_houses(payload: dict, overwrite: bool = False) -> dict:
             skipped.append(house_id)
             continue
         try:
+            # An imported house is the user's own and fully editable. Only what
+            # came WITH THE APP is read-only, because only that has a pristine
+            # copy the user cannot otherwise get back.
             record = {**entry}
-            record[_capability_profile().SHIPPED_KEY] = True
+            record.pop(_capability_profile().BUNDLED_KEY, None)
             record.pop(_capability_profile().CLONED_FROM_KEY, None)
             save_house(record, overwrite=True)
             imported.append(house_id)
