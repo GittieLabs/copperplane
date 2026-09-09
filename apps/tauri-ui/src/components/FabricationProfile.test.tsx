@@ -3,10 +3,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const genericProfileMock = vi.fn()
 const setProjectProfileMock = vi.fn()
+const listHousesMock = vi.fn()
+const cloneHouseMock = vi.fn()
+const saveHouseMock = vi.fn()
 
 vi.mock('../lib/fabricationReview', () => ({
   genericProfile: genericProfileMock,
   setProjectProfile: setProjectProfileMock,
+  // SPEC-342 section 2.5: the bundled numbers are a template, so starting from
+  // them clones a house of the user's own rather than adopting the template.
+  listHouses: listHousesMock,
+  cloneHouse: cloneHouseMock,
+  saveHouse: saveHouseMock,
 }))
 
 const { FabricationProfile } = await import('./FabricationProfile')
@@ -42,6 +50,11 @@ function genericFixture(recordedOn = '2026-09-08') {
 beforeEach(() => {
   genericProfileMock.mockReset()
   setProjectProfileMock.mockReset()
+  listHousesMock.mockReset()
+  cloneHouseMock.mockReset()
+  saveHouseMock.mockReset()
+  listHousesMock.mockResolvedValue([])
+  saveHouseMock.mockResolvedValue(undefined)
   vi.useRealTimers()
 })
 
@@ -66,8 +79,14 @@ describe('FabricationProfile', () => {
   })
 
   // TEST-009
-  it('labels the starting point as attributed to no vendor', async () => {
-    genericProfileMock.mockResolvedValue(genericFixture())
+  it('clones the template into a house of the user’s own rather than adopting it', async () => {
+    // SPEC-342 section 2.5: the template names no vendor, so it can never be a
+    // project's board house. The daemon refuses it; this is the flow that makes
+    // one click still do one thing.
+    const template = { ...genericFixture(), is_template: true }
+    const cloned = { ...genericFixture(), house_name: 'My standard 2-layer house' }
+    genericProfileMock.mockResolvedValue(template)
+    cloneHouseMock.mockResolvedValue(cloned)
     setProjectProfileMock.mockResolvedValue(undefined)
     const onChange = vi.fn()
 
@@ -81,10 +100,35 @@ describe('FabricationProfile', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: /standard 2-layer/i }))
 
-    await waitFor(() => expect(onChange).toHaveBeenCalled())
-    const stored = onChange.mock.calls[0][0]
-    expect(stored.house_name).toMatch(/not a real vendor quote/i)
-    expect(setProjectProfileMock).toHaveBeenCalledWith('alpha', stored)
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(cloned))
+    expect(cloneHouseMock).toHaveBeenCalled()
+    expect(saveHouseMock).toHaveBeenCalledWith(cloned)
+    // The template itself is never what the project checks against.
+    expect(setProjectProfileMock).toHaveBeenCalledWith('alpha', cloned)
+    expect(setProjectProfileMock).not.toHaveBeenCalledWith('alpha', template)
+  })
+
+  it('reuses an existing house instead of cloning a second copy', async () => {
+    // The library is global: two projects starting the same way should share
+    // one house they can edit once, not accumulate duplicates.
+    const existing = { ...genericFixture(), house_id: 'my-standard-2-layer' }
+    listHousesMock.mockResolvedValue([existing])
+    setProjectProfileMock.mockResolvedValue(undefined)
+    const onChange = vi.fn()
+
+    render(
+      <FabricationProfile
+        projectName="beta"
+        boardPath="/tmp/b.kicad_pcb"
+        profile={null}
+        onProfileChange={onChange}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /standard 2-layer/i }))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(existing))
+    expect(cloneHouseMock).not.toHaveBeenCalled()
+    expect(saveHouseMock).not.toHaveBeenCalled()
   })
 
   // TEST-008
@@ -162,7 +206,8 @@ describe('FabricationProfile', () => {
   })
 
   it('surfaces a store failure instead of pretending the choice was saved', async () => {
-    genericProfileMock.mockResolvedValue(genericFixture())
+    genericProfileMock.mockResolvedValue({ ...genericFixture(), is_template: true })
+    cloneHouseMock.mockResolvedValue(genericFixture())
     setProjectProfileMock.mockRejectedValue(new Error('min_drill must be positive'))
     const onChange = vi.fn()
 

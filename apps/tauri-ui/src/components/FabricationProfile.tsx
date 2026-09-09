@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import type { CapabilityProfile } from '../lib/fabricationReview'
-import { genericProfile, setProjectProfile } from '../lib/fabricationReview'
+import {
+  cloneHouse,
+  genericProfile,
+  listHouses,
+  saveHouse,
+  setProjectProfile,
+} from '../lib/fabricationReview'
 
 /**
  * SPEC-340 §5: choosing the board house, once per project.
@@ -18,6 +24,11 @@ import { genericProfile, setProjectProfile } from '../lib/fabricationReview'
  *     standard process gets confident findings about a board that is fine, and
  *     naming the process is the whole mitigation.
  */
+
+/** The one house a first-time user gets, cloned from the bundled template.
+ *  Fixed rather than per-project because the library is global: two projects
+ *  starting the same way should share a house they can edit once. */
+const MY_STANDARD_HOUSE_ID = 'my-standard-2-layer'
 
 /** Field order is deliberate: the ones that cause silently-wrong boards first,
  *  matching how the findings themselves are ranked. */
@@ -54,13 +65,32 @@ export function FabricationProfile({
     setError(null)
   }, [projectName])
 
+  /** SPEC-342 §2.5: the standard-process numbers are a TEMPLATE. They name no
+   *  vendor, so they cannot be a project's board house -- the daemon refuses
+   *  it. One click still does one thing, but what it produces is a house of
+   *  your own, cloned from the template, which you can then edit.
+   *
+   *  The library is global, so an existing copy is reused rather than cloned a
+   *  second time: two projects starting from the same template should share one
+   *  house, not accumulate duplicates. */
   const onUseGeneric = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const generic = await genericProfile()
-      await setProjectProfile(projectName, generic)
-      onProfileChange(generic)
+      const existing = (await listHouses()).find((h) => h.house_id === MY_STANDARD_HOUSE_ID)
+      let house = existing
+      if (!house) {
+        const template = await genericProfile()
+        house = await cloneHouse(
+          template,
+          'My standard 2-layer house',
+          MY_STANDARD_HOUSE_ID,
+          new Date().toISOString().slice(0, 10),
+        )
+        await saveHouse(house)
+      }
+      await setProjectProfile(projectName, house)
+      onProfileChange(house)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -98,6 +128,11 @@ export function FabricationProfile({
         )}
         <p className="text-xs text-fg-muted">
           This does not run a separate check. It changes which rules the board check below uses.
+        </p>
+        <p className="text-xs text-fg-muted">
+          The standard numbers are a starting point, not a real vendor&rsquo;s. Starting from them
+          makes a board house of your own that you can edit — nothing here is attributed to a
+          company that did not publish it.
         </p>
         <div>
           <button

@@ -64,6 +64,16 @@ CONTEXT_FIELDS = ("layer_count", "copper_weight_oz", "board_thickness_mm")
 
 PROVENANCE_REQUIRED_KEYS = ("source_url", "recorded_on", "confirmed_by_user")
 
+#: A template is a starting point, never a board house (`SPEC-342` section 2.5).
+#: It names no vendor, so every field in it would carry `confirmed_by_user:
+#: false` forever -- there is no published page for anyone to check it against.
+#: It must be cloned before it can be used, and the clone is a real house.
+TEMPLATE_KEY = "is_template"
+
+
+def is_template(profile: dict) -> bool:
+    return bool(profile.get(TEMPLATE_KEY))
+
 # The project's own KiCad setting for each field, by its `.kicad_pro` key.
 #
 # MEASURED 2026-09-08, and the reason this mapping exists at all: a sidecar rule
@@ -250,6 +260,59 @@ def starter_profile(house_name: str, source_url: str, recorded_on: str, **values
     value_fields = [f for f in ALL_VALUE_FIELDS if profile.get(f) is not None]
     profile["provenance"] = _provenance_for(source_url, recorded_on, value_fields)
     return validate(profile)
+
+
+def clone(profile: dict, house_name: str, house_id: str, recorded_on: str,
+          overrides: dict = None) -> dict:
+    """Copy a house under a new name, overriding the fields that differ.
+
+    `SPEC-342` section 2.2 calls this the important operation, and the reason is
+    arithmetic: most houses differ from a standard process in two or three
+    numbers, not nine. Cloning and overriding is a thirty-second job; typing
+    nine numbers is a data-entry session, and one abandoned halfway leaves a
+    profile that is wrong in a way the app cannot detect.
+
+    **Confirmation is never inherited.** Every field the clone did not change
+    comes back `confirmed_by_user: False` with the clone's own `recorded_on`.
+    Carrying someone else's confirmation forward is precisely the attribution
+    failure per-field provenance was built to prevent (`SPEC-114` section 2.6):
+    the new record would claim a human had checked a number against this house's
+    published page when nobody had."""
+    overrides = overrides or {}
+    unknown = set(overrides) - set(ALL_VALUE_FIELDS) - set(CONTEXT_FIELDS)
+    if unknown:
+        raise ProfileValidationError(
+            f"Unknown capability field(s): {', '.join(sorted(unknown))}."
+        )
+
+    cloned = {
+        **{k: v for k, v in profile.items()
+           if k not in ("provenance", "house_name", "house_id", "schema_version")},
+        **overrides,
+        "house_name": house_name,
+        "house_id": house_id,
+        "schema_version": 1,
+    }
+    # A clone is always a real house. This is the only way one comes into
+    # existence from the bundled starting point (`SPEC-342` section 2.5).
+    cloned.pop(TEMPLATE_KEY, None)
+
+    provenance = {}
+    for field in ALL_VALUE_FIELDS:
+        if cloned.get(field) is None:
+            continue
+        source = field_provenance(profile, field)
+        changed = field in overrides
+        provenance[field] = {
+            # A changed number is the user's own and has no external source
+            # until they give it one; an unchanged one keeps the trail it came
+            # from, so the clone can still say where the figure originated.
+            "source_url": "" if changed else source.get("source_url", ""),
+            "recorded_on": recorded_on,
+            "confirmed_by_user": False,
+        }
+    cloned["provenance"] = provenance
+    return validate(cloned)
 
 
 def is_stale(profile: dict, today: str = None, max_age_days: int = 365) -> bool:
