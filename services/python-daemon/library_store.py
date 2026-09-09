@@ -1239,6 +1239,98 @@ def set_project_check_result(name: str, area: str, result: dict) -> dict:
     return save_project(project)
 
 
+# --- Board houses (SPEC-342) -------------------------------------------
+# Global, not per project: the same house is quoted for many boards, and
+# editing its numbers should not mean editing them once per project. The
+# *choice* stays on the project, along with the numbers it was actually checked
+# against -- see `set_project_fabrication_profile`. That second half is not
+# redundant: a profile is a historical record, so a bare reference would let an
+# edit next month silently rewrite what a finding was produced against.
+def _houses_dir() -> str:
+    return _ensure_dir("library", "houses")
+
+
+_HOUSE_SUFFIX = ".house.json"
+
+
+def _house_path(house_id: str) -> str:
+    if not house_id or "/" in house_id or os.path.isabs(house_id):
+        raise SchemaValidationError(f"Invalid house_id: {house_id!r}")
+    return os.path.join(_houses_dir(), house_id + _HOUSE_SUFFIX)
+
+
+def save_house(house: dict) -> dict:
+    """Write a board house to the global library.
+
+    Validated through `capability_profile` so the library cannot hold a record
+    the checker would refuse -- the same store-time gate
+    `set_project_fabrication_profile` already applies, for the same reason: a
+    bad number surfacing at review time reads as a broken app rather than a bad
+    number."""
+    house_id = house.get("house_id")
+    if not house_id:
+        raise SchemaValidationError("House.house_id is required.")
+    try:
+        import capability_profile
+    except Exception:  # noqa: BLE001
+        raise SchemaValidationError(
+            "Cannot store a board house: the capability_profile module is "
+            "unavailable in this build."
+        )
+    try:
+        capability_profile.validate(house)
+    except capability_profile.ProfileValidationError as exc:
+        raise SchemaValidationError(str(exc)) from exc
+
+    record = {**house, "schema_version": 1}
+    _write_json(_house_path(house_id), record)
+    return record
+
+
+def load_house(house_id: str) -> dict:
+    path = _house_path(house_id)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"No board house named {house_id!r} in the library.")
+    return _read_json(path)
+
+
+def list_houses() -> list:
+    """Same scan-and-sort shape as `list_parts`, rather than a second
+    convention for the same job."""
+    return sorted(
+        f[: -len(_HOUSE_SUFFIX)]
+        for f in os.listdir(_houses_dir())
+        if f.endswith(_HOUSE_SUFFIX)
+    )
+
+
+def delete_house(house_id: str) -> dict:
+    """Remove a house from the library.
+
+    The first delete in this module, so it sets the precedent: it reports which
+    projects still referenced the house rather than checking nothing. Those
+    projects keep working -- `Project.fabrication_profile` holds the numbers
+    they were actually checked against, not a pointer -- but the user is told,
+    because a house quietly vanishing from a project's history would be the
+    kind of silent difference this feature exists to avoid."""
+    path = _house_path(house_id)
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"No board house named {house_id!r} in the library.")
+
+    referencing = []
+    for name in list_projects():
+        try:
+            project = load_project(name)
+        except Exception:  # noqa: BLE001 -- one unreadable project must not block a delete
+            continue
+        profile = project.get("fabrication_profile") or {}
+        if profile.get("house_id") == house_id:
+            referencing.append(name)
+
+    os.remove(path)
+    return {"house_id": house_id, "still_referenced_by": sorted(referencing)}
+
+
 def set_project_check_display(name: str, area: str, result: dict | None) -> dict:
     """The check result exactly as the UI showed it, so it survives a tab switch.
 

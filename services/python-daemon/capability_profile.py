@@ -252,6 +252,56 @@ def starter_profile(house_name: str, source_url: str, recorded_on: str, **values
     return validate(profile)
 
 
+def clone(profile: dict, house_name: str, house_id: str, recorded_on: str,
+          overrides: dict = None) -> dict:
+    """Copy a house under a new name, overriding the fields that differ.
+
+    `SPEC-342` section 2.2 calls this the important operation, and the reason is
+    arithmetic: most houses differ from a standard process in two or three
+    numbers, not nine. Cloning and overriding is a thirty-second job; typing
+    nine numbers is a data-entry session, and one abandoned halfway leaves a
+    profile that is wrong in a way the app cannot detect.
+
+    **Confirmation is never inherited.** Every field the clone did not change
+    comes back `confirmed_by_user: False` with the clone's own `recorded_on`.
+    Carrying someone else's confirmation forward is precisely the attribution
+    failure per-field provenance was built to prevent (`SPEC-114` section 2.6):
+    the new record would claim a human had checked a number against this house's
+    published page when nobody had."""
+    overrides = overrides or {}
+    unknown = set(overrides) - set(ALL_VALUE_FIELDS) - set(CONTEXT_FIELDS)
+    if unknown:
+        raise ProfileValidationError(
+            f"Unknown capability field(s): {', '.join(sorted(unknown))}."
+        )
+
+    cloned = {
+        **{k: v for k, v in profile.items()
+           if k not in ("provenance", "house_name", "house_id", "schema_version")},
+        **overrides,
+        "house_name": house_name,
+        "house_id": house_id,
+        "schema_version": 1,
+    }
+
+    provenance = {}
+    for field in ALL_VALUE_FIELDS:
+        if cloned.get(field) is None:
+            continue
+        source = field_provenance(profile, field)
+        changed = field in overrides
+        provenance[field] = {
+            # A changed number is the user's own and has no external source
+            # until they give it one; an unchanged one keeps the trail it came
+            # from, so the clone can still say where the figure originated.
+            "source_url": "" if changed else source.get("source_url", ""),
+            "recorded_on": recorded_on,
+            "confirmed_by_user": False,
+        }
+    cloned["provenance"] = provenance
+    return validate(cloned)
+
+
 def is_stale(profile: dict, today: str = None, max_age_days: int = 365) -> bool:
     """True when the newest recorded-on date is older than `max_age_days`.
 

@@ -322,6 +322,24 @@ class FabricationReviewTests(unittest.TestCase):
         stricter = {e["field"] for e in result["not_checked"]["your_setting_is_stricter"]}
         self.assertIn("min_annular_ring", stricter, "and the app must say it did this")
 
+    def test_a_cloned_house_is_subject_to_the_same_protection(self):
+        """SPEC-342 section 3 carries CTX-340.2's hazard forward: the protection
+        against a looser limit lives in one place, and every house the library
+        holds -- bundled, cloned or imported -- has to go through it. A clone is
+        the easiest way to produce a too-loose house by accident, since the user
+        is typing a number over one they did not check."""
+        reckless = capability_profile.clone(
+            _profile(), "Cloned House", "cloned", "2026-09-09",
+            overrides={"min_annular_ring": 0.05},
+        )
+        result = fabrication_review.review(self.pcb, reckless)
+
+        annular = [v for v in result["findings"] if v["type"] == "annular_width"]
+        self.assertEqual(len(annular), 4,
+                         "the board's own 0.1mm rule still fires against a cloned house")
+        stricter = {e["field"] for e in result["not_checked"]["your_setting_is_stricter"]}
+        self.assertIn("min_annular_ring", stricter)
+
     def test_a_stricter_house_limit_still_applies(self):
         """The control. Without this, the test above passes for a build that
         simply never writes any rule at all."""

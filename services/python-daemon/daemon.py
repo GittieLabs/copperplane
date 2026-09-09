@@ -2048,6 +2048,37 @@ def fabrication_generic_profile() -> dict:
     return capability_profile.validate(profile)
 
 
+def house_save(house: dict) -> dict:
+    """The house.save route (SPEC-342). Validated at store time, like every
+    other record whose numbers a board is judged against."""
+    return library_store.save_house(house)
+
+
+def house_list() -> dict:
+    """The house.list route. Returns the full records rather than ids: the UI
+    needs each house's name, provenance and recorded-on date to show the list at
+    all, and the library is small enough that a second round trip per entry buys
+    nothing."""
+    return {"houses": [library_store.load_house(h) for h in library_store.list_houses()]}
+
+
+def house_delete(house_id: str) -> dict:
+    """The house.delete route. Reports which projects still referenced it --
+    they keep working, because a project stores the numbers it was checked
+    against rather than a pointer, but a house vanishing from a project's
+    history should not be silent."""
+    return library_store.delete_house(house_id)
+
+
+def house_clone(house: dict, house_name: str, house_id: str, recorded_on: str,
+                overrides: dict = None) -> dict:
+    """The house.clone route (SPEC-342 section 2.2).
+
+    Does not save: cloning and keeping are separate decisions, and a user who
+    abandons the rename should not find a half-named house in their library."""
+    return capability_profile.clone(house, house_name, house_id, recorded_on, overrides)
+
+
 def project_set_check_display(project_name: str, area: str, result: dict = None) -> dict:
     """The project.set_check_display route (SPEC-340, CTX-340.2).
 
@@ -2457,6 +2488,11 @@ def _build_routes() -> dict:
             routes["project.set_fabrication_profile"] = project_set_fabrication_profile
     if library_store is not None:
         routes["project.set_check_display"] = project_set_check_display
+        if capability_profile is not None:
+            routes["house.save"] = house_save
+            routes["house.list"] = house_list
+            routes["house.delete"] = house_delete
+            routes["house.clone"] = house_clone
     if kicad_bridge is not None and freecad_bridge is not None:
         routes["kicad.get_component_heights"] = kicad_get_component_heights
     if kicad_cli is not None:
