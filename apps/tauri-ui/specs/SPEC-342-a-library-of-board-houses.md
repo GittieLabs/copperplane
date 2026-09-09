@@ -1,7 +1,7 @@
 ---
 id: SPEC-342
 title: "A Library of Board Houses"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-08
 last_updated: 2026-09-09

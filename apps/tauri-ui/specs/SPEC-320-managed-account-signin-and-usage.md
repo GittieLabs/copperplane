@@ -14,6 +14,17 @@ user_facing: true
 
 # SPEC-320: Managed Account Sign-In & Usage
 
+> **Deferred 2026-09-09, deliberately — not stalled.** This waits on the managed app existing, and
+> that waits on something more useful: real users testing the self-managed app first.
+>
+> > *"spec-320 is delayed until i create managed app. i am delaying until i get users testing the
+> > self managed app first."*
+>
+> The order is the point. Sign-in and usage metering for a hosted product are shaped by what people
+> actually do with it, and building them against a guess would mean building them twice. `CTX-320.1`
+> stays `Planned` and its branch unstarted; nothing here is blocked on a technical unknown.
+
+
 ## 0. Why this is not being built yet
 
 **Recorded 2026-09-05, in the maintainer's own terms.** Two reasons, neither of them technical:

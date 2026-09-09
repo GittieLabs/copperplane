@@ -1,7 +1,7 @@
 ---
 id: SPEC-340
 title: "Ordering This Board From a Real House"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-08
 last_updated: 2026-09-08
