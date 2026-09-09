@@ -148,6 +148,35 @@ describe('FabricationProfile', () => {
     expect(body).toContain('recorded 2026-09-08')
   })
 
+/** A real house, read off a real published page: four of the nine fields, each
+ *  carrying the vendor's URL. The generic template carries an empty
+ *  source_url, and the difference between the two is what the panel's
+ *  "came from a general standard process" line is actually about. */
+function pcbwayFixture(recordedOn = '2026-09-09') {
+  const fields = {
+    min_track_width: 0.1,
+    min_clearance: 0.1,
+    min_annular_ring: 0.15,
+    min_drill: 0.15,
+  }
+  return {
+    house_id: 'pcbway-standard',
+    house_name: 'PCBWay — Standard PCB (1-14 layers)',
+    layer_count: 2,
+    ...fields,
+    provenance: Object.fromEntries(
+      Object.keys(fields).map((key) => [
+        key,
+        {
+          source_url: 'https://www.pcbway.com/capabilities.html',
+          recorded_on: recordedOn,
+          confirmed_by_user: false,
+        },
+      ]),
+    ),
+  }
+}
+
   it('names the process the numbers describe, next to the numbers', () => {
     render(
       <FabricationProfile
@@ -171,6 +200,56 @@ describe('FabricationProfile', () => {
       />,
     )
     expect(document.body.textContent).toMatch(/9 of these came from a general standard process/i)
+  })
+
+  it('does not call a vendor’s own published numbers a generic standard process', () => {
+    // Reported from the real window after importing PCBWay: the panel said
+    // "4 of these came from a general standard process, not from your board
+    // house. Replace them with your house's published numbers before you
+    // order" -- about the four numbers read off PCBWay's own capability page.
+    // The count was of confirmed_by_user, which is a different axis: the user
+    // has not personally checked them, which every row already says. Telling
+    // someone to replace correct vendor data before ordering is worse than
+    // saying nothing.
+    render(
+      <FabricationProfile
+        projectName="alpha"
+        boardPath="/tmp/b.kicad_pcb"
+        profile={pcbwayFixture() as never}
+        onProfileChange={vi.fn()}
+      />,
+    )
+    expect(document.body.textContent).not.toMatch(/general standard process/i)
+    // The honest statement is still there, per row.
+    expect(document.body.textContent).toMatch(/not confirmed/i)
+  })
+
+  it('says how many of the nine this house actually publishes', () => {
+    // PCBWay states four. An absent limit is not checked, rather than checked
+    // against a number nobody published -- and the panel used to say "These
+    // nine" over four rows.
+    render(
+      <FabricationProfile
+        projectName="alpha"
+        boardPath="/tmp/b.kicad_pcb"
+        profile={pcbwayFixture() as never}
+        onProfileChange={vi.fn()}
+      />,
+    )
+    expect(document.body.textContent).toMatch(/states 4 of the 9 limits/i)
+    expect(document.body.textContent).not.toMatch(/These nine are the limits/i)
+  })
+
+  it('still flags the generic template’s numbers as attributed to nobody', () => {
+    render(
+      <FabricationProfile
+        projectName="alpha"
+        boardPath="/tmp/b.kicad_pcb"
+        profile={genericFixture() as never}
+        onProfileChange={vi.fn()}
+      />,
+    )
+    expect(document.body.textContent).toMatch(/came from a general standard process/i)
   })
 
   it('warns when the numbers are over a year old, without changing them', () => {

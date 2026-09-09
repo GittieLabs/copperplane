@@ -259,16 +259,17 @@ export function FabricationProfile({
           their own settings were moved off KiCad's defaults. Mirrors the
           ignored-tests block, which already names its KiCad menu path. */}
       <p className="text-xs text-fg-tertiary">
-        These nine are the limits a board house usually publishes, and the ones this check can
-        enforce. They are <strong>not</strong> KiCad&rsquo;s defaults — some are stricter and some
-        are looser. Your board&rsquo;s own values live in KiCad under{' '}
+        This house states {publishedCount(profile)} of the {FIELDS.length} limits this check can
+        enforce; a limit it does not publish is not checked, rather than checked against a number
+        nobody stated. They are <strong>not</strong> KiCad&rsquo;s defaults — some are stricter and
+        some are looser. Your board&rsquo;s own values live in KiCad under{' '}
         <strong>File → Board Setup → Design Rules → Constraints</strong>. Where your own setting is
         already tighter than your house requires, this check keeps yours.
       </p>
 
-      {unconfirmedCount(profile) > 0 && (
+      {unattributedCount(profile) > 0 && (
         <p className="text-xs text-fg-muted">
-          {unconfirmedCount(profile)} of these came from a general standard process, not from your
+          {unattributedCount(profile)} of these came from a general standard process, not from your
           board house. Replace them with your house&rsquo;s published numbers before you order.
         </p>
       )}
@@ -278,8 +279,28 @@ export function FabricationProfile({
   )
 }
 
-function unconfirmedCount(profile: CapabilityProfile): number {
-  return Object.values(profile.provenance ?? {}).filter((p) => !p.confirmed_by_user).length
+/** Fields carrying no source URL -- the ones that came from the generic
+ *  starting template rather than off a vendor's published page.
+ *
+ *  This used to count `confirmed_by_user: false`, which is a different axis
+ *  entirely and made the app tell a user that PCBWay's own published numbers
+ *  "came from a general standard process, not from your board house" and
+ *  should be replaced before ordering. Unconfirmed means the user has not
+ *  personally checked a number; unattributed means nobody published it. Only
+ *  the second is grounds for telling someone to go and find the real one, and
+ *  the first is already said on every row. */
+function unattributedCount(profile: CapabilityProfile): number {
+  return FIELDS.filter(({ key }) => {
+    if (profile[key] == null) return false
+    return !profile.provenance?.[key as string]?.source_url
+  }).length
+}
+
+/** Fields this house actually states a number for. A house publishes what it
+ *  publishes -- PCBWay states four of the nine -- and an absent field produces
+ *  no rule rather than a rule against a number nobody stated. */
+function publishedCount(profile: CapabilityProfile): number {
+  return FIELDS.filter(({ key }) => profile[key] != null).length
 }
 
 /** Mirrors `capability_profile.is_stale`'s one-year default. Reported, never
