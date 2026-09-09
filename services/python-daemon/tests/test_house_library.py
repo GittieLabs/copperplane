@@ -9,6 +9,7 @@ on every call while 890 tests agreed it worked, because every one of them
 mocked it -- a mock asserts the caller's intent, and the intent was correct.
 """
 
+import json
 import os
 import tempfile
 import unittest
@@ -407,6 +408,111 @@ class ImportExportTests(unittest.TestCase):
             restored["provenance"]["min_drill"]["source_url"],
             "https://example.invalid/capabilities",
         )
+
+
+class ReadHouseFilesTests(unittest.TestCase):
+    """Reading a downloaded file off disk -- SPEC-342 section 2.4.
+
+    Reported after the four researched houses went up on the docs site: "i
+    don't see an import that allows me to add the file(s) with house settings."
+    The app ships a dialog plugin but no filesystem plugin, so the frontend can
+    learn a path and nothing more; the daemon does the reading, which means the
+    file lands on the same untrusted-input path as a paste."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        library_store.configure(storage_root=self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(library_store.configure, storage_root=None)
+        self._files = tempfile.TemporaryDirectory()
+        self.addCleanup(self._files.cleanup)
+
+    def _write(self, name, obj):
+        path = os.path.join(self._files.name, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(obj, fh)
+        return path
+
+    def test_reads_a_file_into_a_payload_the_ordinary_import_accepts(self):
+        path = self._write("one.json", {"houses": [_house("jlcpcb", "JLCPCB")]})
+
+        payload = library_store.read_house_files([path])
+        result = library_store.import_houses(payload)
+
+        self.assertEqual(result["imported"], ["jlcpcb"])
+
+    def test_several_files_merge_into_one_payload_so_the_user_is_asked_once(self):
+        a = self._write("a.json", {"houses": [_house("a", "A")]})
+        b = self._write("b.json", {"houses": [_house("b", "B")]})
+
+        payload = library_store.read_house_files([a, b])
+
+        self.assertEqual([h["house_id"] for h in payload["houses"]], ["a", "b"])
+
+    def test_the_same_house_in_two_chosen_files_is_not_imported_twice(self):
+        # The docs site offers all four in one file *and* one file per house,
+        # so picking both is an easy thing to do by accident. Reporting a
+        # collision between two files the user chose in the same breath would
+        # be asking them about a problem they did not have.
+        both = self._write("all.json", {"houses": [_house("a", "A"), _house("b", "B")]})
+        one = self._write("a.json", {"houses": [_house("a", "A revised")]})
+
+        payload = library_store.read_house_files([both, one])
+
+        self.assertEqual([h["house_id"] for h in payload["houses"]], ["b", "a"])
+        self.assertEqual(payload["houses"][-1]["house_name"], "A revised",
+                         "the later file wins rather than the earlier one")
+
+    def test_a_missing_file_says_so_rather_than_raising_something_opaque(self):
+        with self.assertRaises(library_store.SchemaValidationError) as ctx:
+            library_store.read_house_files([os.path.join(self._files.name, "nope.json")])
+        self.assertIn("no file at", str(ctx.exception))
+
+    def test_a_file_that_is_not_json_is_refused_by_name(self):
+        path = os.path.join(self._files.name, "notes.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("this is not json")
+
+        with self.assertRaises(library_store.SchemaValidationError) as ctx:
+            library_store.read_house_files([path])
+        self.assertIn("notes.json", str(ctx.exception))
+
+    def test_json_that_is_not_a_library_is_refused_before_anything_is_stored(self):
+        path = self._write("wrong.json", {"parts": []})
+
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.read_house_files([path])
+        self.assertEqual(library_store.list_houses(), [])
+
+    def test_an_absurdly_large_file_is_refused_without_being_read_in(self):
+        # A file picker that will read anything the user points it at is a way
+        # to hang the daemon. A house library is a few kilobytes.
+        path = os.path.join(self._files.name, "huge.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(" " * (2 << 20))
+
+        with self.assertRaises(library_store.SchemaValidationError) as ctx:
+            library_store.read_house_files([path])
+        self.assertIn("not one", str(ctx.exception))
+
+    def test_choosing_nothing_says_so(self):
+        with self.assertRaises(library_store.SchemaValidationError):
+            library_store.read_house_files([])
+
+    def test_a_malformed_house_inside_a_real_file_still_reaches_the_importer(self):
+        # read_house_files deliberately does not validate records -- that is
+        # import_houses' job, and duplicating it here would be two places to
+        # keep in step. What must not happen is the file being trusted because
+        # it parsed.
+        path = self._write("mixed.json", {"houses": [
+            _house("good", "Good"),
+            {"house_id": "bad", "house_name": "Bad", "min_drill": -1, "provenance": {}},
+        ]})
+
+        result = library_store.import_houses(library_store.read_house_files([path]))
+
+        self.assertEqual(result["imported"], ["good"])
+        self.assertEqual([r["house_id"] for r in result["rejected"]], ["bad"])
 
 
 if __name__ == "__main__":

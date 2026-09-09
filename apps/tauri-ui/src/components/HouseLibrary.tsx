@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 
 import type { CapabilityProfile } from '../lib/fabricationReview'
 import type { ImportReport } from '../lib/fabricationReview'
@@ -8,6 +9,7 @@ import {
   exportHouses,
   genericProfile,
   importHouses,
+  readHouseFiles,
   listHouses,
   resetHouse,
   saveHouse,
@@ -201,20 +203,42 @@ export function HouseLibrary({
     return parts.join(', ') + '.'
   }
 
+  /** One import path for a paste and for a file, because where the bytes came
+   *  from is the only difference. SPEC-342 §2.6: a collision is never resolved
+   *  silently -- nothing that collided was imported, and the user picks,
+   *  because only they know whether the copy they have is one they edited. */
+  async function importPayload(payload: unknown): Promise<string | null> {
+    const report = await importHouses(payload)
+    if (report.skipped_existing.length) {
+      setPending({ payload, collisions: report.skipped_existing, report })
+      return null
+    }
+    return describe(report)
+  }
+
   function onImport() {
     void run('Could not import', async () => {
       const text = await navigator.clipboard?.readText()
       if (!text) throw new Error('There was nothing on the clipboard to import.')
-      const payload = JSON.parse(text)
-      const report = await importHouses(payload)
-      // SPEC-342 §2.6: a collision is never resolved silently. Nothing that
-      // collided was imported; the user picks, because only they know whether
-      // the copy they already have is one they edited.
-      if (report.skipped_existing.length) {
-        setPending({ payload, collisions: report.skipped_existing, report })
-        return null
-      }
-      return describe(report)
+      return importPayload(JSON.parse(text))
+    })
+  }
+
+  /** Reported after downloading the houses from the docs site: "i don't see an
+   *  import that allows me to add the file(s) with house settings." Multiple
+   *  selection is allowed and merged into one payload, so choosing four files
+   *  asks about collisions once rather than four times. */
+  function onImportFiles() {
+    void run('Could not import', async () => {
+      const picked = await openDialog({
+        multiple: true,
+        title: 'Import board houses',
+        filters: [{ name: 'Board house', extensions: ['json'] }],
+      })
+      if (!picked) return null
+      const paths = Array.isArray(picked) ? picked : [picked]
+      if (!paths.length) return null
+      return importPayload(await readHouseFiles(paths))
     })
   }
 
@@ -475,6 +499,14 @@ export function HouseLibrary({
           disabled={busy}
         >
           Import from clipboard
+        </button>
+        <button
+          type="button"
+          className="text-xs text-fg-muted underline"
+          onClick={onImportFiles}
+          disabled={busy}
+        >
+          Import from file
         </button>
       </div>
     </div>

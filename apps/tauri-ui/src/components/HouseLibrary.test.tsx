@@ -9,6 +9,10 @@ const resetHouseMock = vi.fn()
 const exportHousesMock = vi.fn()
 const importHousesMock = vi.fn()
 const genericProfileMock = vi.fn()
+const readHouseFilesMock = vi.fn()
+const openDialogMock = vi.fn()
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: openDialogMock }))
 
 vi.mock('../lib/fabricationReview', () => ({
   listHouses: listHousesMock,
@@ -19,6 +23,7 @@ vi.mock('../lib/fabricationReview', () => ({
   exportHouses: exportHousesMock,
   importHouses: importHousesMock,
   genericProfile: genericProfileMock,
+  readHouseFiles: readHouseFilesMock,
 }))
 
 const { HouseLibrary } = await import('./HouseLibrary')
@@ -41,6 +46,7 @@ beforeEach(() => {
   for (const m of [
     listHousesMock, cloneHouseMock, saveHouseMock, deleteHouseMock,
     resetHouseMock, exportHousesMock, importHousesMock, genericProfileMock,
+    readHouseFilesMock, openDialogMock,
   ]) {
     m.mockReset()
   }
@@ -313,6 +319,57 @@ describe('HouseLibrary', () => {
     await waitFor(() => expect(importHousesMock).toHaveBeenCalledTimes(2))
     expect(importHousesMock.mock.calls[1][1]).toBe('rename')
     expect(await screen.findByText(/brought in alongside/)).toBeTruthy()
+  })
+
+  it('imports houses from files on disk, not only from the clipboard', async () => {
+    // Reported after downloading the four researched houses from the docs
+    // site: "i don't see an import that allows me to add the file(s) with
+    // house settings."
+    listHousesMock.mockResolvedValue([])
+    openDialogMock.mockResolvedValue(['/tmp/jlcpcb.json', '/tmp/oshpark.json'])
+    readHouseFilesMock.mockResolvedValue({ houses: [{ house_id: 'jlcpcb' }] })
+    importHousesMock.mockResolvedValue({
+      imported: ['jlcpcb', 'oshpark'], skipped_existing: [], renamed: [], rejected: [],
+    })
+    renderLibrary()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Import from file/ }))
+
+    await waitFor(() => expect(readHouseFilesMock).toHaveBeenCalled())
+    // Several files at once, merged by the daemon into one payload, so the
+    // collision question gets asked once rather than once per file.
+    expect(openDialogMock.mock.calls[0][0]).toMatchObject({ multiple: true })
+    expect(readHouseFilesMock).toHaveBeenCalledWith(['/tmp/jlcpcb.json', '/tmp/oshpark.json'])
+    expect(importHousesMock).toHaveBeenCalledWith({ houses: [{ house_id: 'jlcpcb' }] })
+  })
+
+  it('does nothing when the file picker is cancelled', async () => {
+    listHousesMock.mockResolvedValue([])
+    openDialogMock.mockResolvedValue(null)
+    renderLibrary()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Import from file/ }))
+
+    await waitFor(() => expect(openDialogMock).toHaveBeenCalled())
+    expect(readHouseFilesMock).not.toHaveBeenCalled()
+    expect(importHousesMock).not.toHaveBeenCalled()
+  })
+
+  it('asks about a collision from a file, the same as from a paste', async () => {
+    // The file is only where the bytes came from; it must not get a shortcut
+    // past the question SPEC-342 §2.6 exists to ask.
+    listHousesMock.mockResolvedValue([house()])
+    openDialogMock.mockResolvedValue('/tmp/acme.json')
+    readHouseFilesMock.mockResolvedValue({ houses: [{ house_id: 'acme' }] })
+    importHousesMock.mockResolvedValue({
+      imported: [], skipped_existing: ['acme'], renamed: [], rejected: [],
+    })
+    renderLibrary()
+
+    fireEvent.click(await screen.findByRole('button', { name: /Import from file/ }))
+
+    expect(await screen.findByText(/Nothing has been changed yet/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Keep both' })).toBeTruthy()
   })
 
   it('surfaces a failure instead of leaving the list looking unchanged', async () => {

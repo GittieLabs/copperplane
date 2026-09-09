@@ -2087,8 +2087,7 @@ def house_list() -> dict:
 
 def house_export(house_ids: list = None) -> dict:
     """The house.export route (SPEC-342 section 2.4). Returns the records; the
-    frontend writes the file, so the daemon never touches a path the user
-    picked."""
+    frontend puts them on the clipboard, so export never involves a path."""
     return library_store.export_houses(house_ids)
 
 
@@ -2104,6 +2103,21 @@ def house_import(payload: dict, on_collision: str = "report",
     return library_store.import_houses(
         payload, on_collision=on_collision, overwrite=overwrite
     )
+
+
+def house_read_files(paths: list) -> dict:
+    """The house.read_files route: turn chosen file paths into an import payload.
+
+    The daemon reads the file because the frontend cannot. The app ships the
+    dialog plugin but no filesystem plugin, so a picker gives the UI a path and
+    nothing else -- reported as "i don't see an import that allows me to add
+    the file(s) with house settings" after downloading them from the docs site.
+
+    This deliberately does not import. It returns the payload, which then goes
+    through the ordinary `house.import` route, so a file gets the same
+    untrusted-input validation and the same collision question as a paste. The
+    only thing a file changes is where the bytes came from."""
+    return library_store.read_house_files(paths)
 
 
 def house_reset(house_id: str) -> dict:
@@ -2545,6 +2559,7 @@ def _build_routes() -> dict:
             routes["house.clone"] = house_clone
             routes["house.export"] = house_export
             routes["house.import"] = house_import
+            routes["house.read_files"] = house_read_files
             routes["house.reset"] = house_reset
     if kicad_bridge is not None and freecad_bridge is not None:
         routes["kicad.get_component_heights"] = kicad_get_component_heights

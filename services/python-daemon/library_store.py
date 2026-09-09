@@ -1397,6 +1397,68 @@ def export_houses(house_ids: list = None) -> dict:
 COLLISION_MODES = ("report", "overwrite", "rename")
 
 
+#: A house library is a handful of small records. Anything meaningfully larger
+#: than the whole researched set is not one, and reading it into memory to find
+#: that out is how a file picker turns into a way to hang the daemon.
+_MAX_HOUSE_FILE_BYTES = 1 << 20
+
+
+def read_house_files(paths: list) -> dict:
+    """Read one or more exported-library files off disk into a single payload.
+
+    The daemon reads the file because the UI cannot: the app ships the dialog
+    plugin but no filesystem plugin, so the frontend can learn a path and
+    nothing more. Reading here also means a downloaded file goes through
+    exactly the same untrusted-input path as a pasted one -- `import_houses`
+    does the validating, and this does not get to skip it by being a file.
+
+    Merging into one payload is deliberate. Picking four files should ask about
+    collisions once, not four times, and the answer the user gives should apply
+    to the set they chose."""
+    if not paths:
+        raise SchemaValidationError("No file was chosen.")
+
+    houses = []
+    seen = set()
+    for path in paths:
+        if not isinstance(path, str) or not path:
+            raise SchemaValidationError(f"Not a file path: {path!r}")
+        if not os.path.isfile(path):
+            raise SchemaValidationError(f"There is no file at {path}.")
+        size = os.path.getsize(path)
+        if size > _MAX_HOUSE_FILE_BYTES:
+            raise SchemaValidationError(
+                f"{os.path.basename(path)} is {size // 1024} KB. A board-house "
+                f"file is a few kilobytes; this is not one."
+            )
+        try:
+            with open(path, encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise SchemaValidationError(
+                f"{os.path.basename(path)} is not readable as JSON: {exc}"
+            ) from exc
+
+        if not isinstance(payload, dict) or not isinstance(payload.get("houses"), list):
+            raise SchemaValidationError(
+                f"{os.path.basename(path)} does not look like an exported "
+                f"board-house library: it has no 'houses' list."
+            )
+
+        for entry in payload["houses"]:
+            # Two chosen files can name the same house -- the all-four download
+            # plus a single one, say. Last wins rather than importing it twice
+            # and reporting a collision against the user's own choice.
+            house_id = entry.get("house_id") if isinstance(entry, dict) else None
+            if house_id and house_id in seen:
+                houses = [h for h in houses if h.get("house_id") != house_id]
+            if house_id:
+                seen.add(house_id)
+            houses.append(entry)
+
+    return {"schema_version": 1, "houses": houses}
+
+
 def import_houses(payload: dict, on_collision: str = "report",
                   overwrite: bool = False) -> dict:
     """Read a set of houses back, treating the file as untrusted.

@@ -177,6 +177,16 @@ export interface ImportReport {
  *  and imports nothing that collides; the user then picks. */
 export type CollisionMode = 'report' | 'overwrite' | 'rename'
 
+/** Turn chosen file paths into an import payload.
+ *
+ *  The daemon reads the file because the frontend cannot: the app ships the
+ *  dialog plugin but no filesystem plugin, so a picker yields a path and
+ *  nothing else. Returns a payload for `importHouses`, so a file goes through
+ *  the same validation and the same collision question as a paste. */
+export async function readHouseFiles(paths: string[]): Promise<unknown> {
+  return call<unknown>('house.read_files', { paths })
+}
+
 export async function importHouses(
   payload: unknown,
   onCollision: CollisionMode = 'report',
