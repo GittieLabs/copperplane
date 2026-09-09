@@ -1630,13 +1630,26 @@ tracking, no quizzing, and no tutor tab.
 *Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-210, SPEC-309 ·
 *Surface:* [SPEC-340](apps/tauri-ui/specs/SPEC-340-ordering-this-board-from-a-real-house.md)
 
-**Built and merged daemon-side** (PR #414) by
-[CTX-114.1](services/python-daemon/context/CTX-114.1-sidecar-rules-and-verification.md):
-the verified `.kicad_dru` generator, the capability profile record with per-field
-provenance, and three routes. Verified against the frozen sidecar, not just from source — 4 findings
-becoming 27 on the tutorial board. **No user can reach any of it**, because there is no UI; under
-this repo's own "verify as the user" norm the feature is not verified, and `SPEC-340` is what closes
-that. The spec stays Draft until it does.
+**Built, merged, and used by a person.** `CTX-114.1` (PR #414) built the verified `.kicad_dru`
+generator, the capability profile record with per-field provenance, and the routes, checked against
+the frozen sidecar rather than from source. `SPEC-340`'s `CTX-340.1` (PR #416) and `CTX-340.2`
+(PR #417) then made it reachable and survived four rounds of real click-through.
+
+Every defect that mattered was found by using it, not by the suite: a check that rendered nothing
+when a house was chosen before a board; a third overlapping DRC surface on one tab; findings the
+daemon discarded while the UI said "13 more not shown"; and a persistence route that raised on every
+call while 890 tests agreed it worked, because all of them mocked it.
+
+The most serious was found by answering a question rather than hunting a bug. A sidecar rule
+**replaces** the board's own constraint instead of adding to it, so a house limit looser than the
+user's own setting silently switched off a check they already had — measured as four real errors
+going to zero. The shipped generic profile was looser than KiCad's defaults on two of nine fields,
+so it was live. Fixed in `CTX-340.2`: no rule is ever written that the project's own setting already
+beats, and the fields where that happens are reported rather than silently skipped.
+
+Stays `Draft` because §2.9's largest open question is untouched: **real numbers for real houses**.
+Nothing bundled is attributed to a named vendor, deliberately — inventing figures a maker might
+order against is not a placeholder. `SPEC-342` covers the library that would hold them.
 
 The first pack, and the lowest-bar proof in the product for a novice. Today a board is checked
 against nobody's process: on a first board, DRC enforces KiCad's permissive defaults, so a clean
