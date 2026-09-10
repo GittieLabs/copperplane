@@ -24,6 +24,13 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+# `.venv/` does not match this: the name is different, and the pattern never
+# applied. `services/python-daemon/.build-venv/` is the interpreter
+# `freeze_sidecar.py` builds the shipped sidecar from (CLAUDE.md Trap 3), it is
+# ~8,700 files, and it has been committed by accident twice -- both times by a
+# `git add services/python-daemon` sweeping up a directory rather than naming
+# files. Naming files is the discipline; this is the guard for when it slips.
+.build-venv/
 *.egg-info/
 
 # PyInstaller (SPEC-401/CTX-401.1): daemon.spec's own real build output --
