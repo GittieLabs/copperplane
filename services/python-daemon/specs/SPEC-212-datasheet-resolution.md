@@ -1,11 +1,11 @@
 ---
 id: SPEC-212
-title: "Datasheet Resolution for Parts Nobody Publishes Individually"
-status: Draft
+title: "Datasheet Resolution for Parts Nobody Publishes Individually (DECLINED)"
+status: Deprecated
 type: Feature
 created: 2026-09-10
 last_updated: 2026-09-10
-target_version: v0.7.0
+target_version: n/a
 location: "services/python-daemon/specs/SPEC-212-datasheet-resolution.md"
 parent_spec: "SPEC-203-supplier-api-integration.md"
 child_specs: []
@@ -14,9 +14,30 @@ user_facing: true
 
 # SPEC-212: Datasheet Resolution for Parts Nobody Publishes Individually
 
-> **This reopens exactly one paragraph of `SPEC-203`, and nothing else.** That spec is a tombstone
-> and stays one. It ends with: *"If this project ever does need distributor data, TME is the
-> starting point and everything else is a distant second."* This is that circumstance.
+> **Declined 2026-09-10, the day it was written. Kept for the measurement in §1, not the plan.**
+>
+> This reopened exactly one paragraph of `SPEC-203` — TME, datasheets only — because that spec ends
+> with *"If this project ever does need distributor data, TME is the starting point."* The
+> circumstance was real. The answer is still no:
+>
+> > *"i don't want to deal with licenses or having users use their own vendor api keys."*
+>
+> That rules out the entire approach rather than an implementation detail of it. §2.3 of `SPEC-203`
+> is the *only* reason any distributor API is usable here, and it works by requiring the user to
+> hold their own key — remove that and there is nothing left to build. `SPEC-203` §2.2's other
+> vendors were never available at any price.
+>
+> **What is kept is §1's measurement**, which stands regardless: guessed datasheet URLs resolve 3 of
+> 3 for an IC and 0 of 3 for passives, and no prompt fixes it. That is a real defect with a real
+> cause, and it now needs a fix that involves no vendor account at all.
+>
+> **The fix taken instead** is `SPEC-203` §3's own row for this: *"Open this part at a distributor"
+> → `SPEC-307` — a constructed deep link. No API, no key, compliant everywhere."* Applied to
+> datasheets: when the guess fails, hand the user a working search rather than a dead link. That
+> needs no terms review, no key, and no relationship with anybody.
+>
+> **What would reopen this:** not a better implementation. Only a source of per-part datasheet URLs
+> that needs no user-held credential — which, per `SPEC-203` §2.2, does not currently exist.
 
 ## 1. Executive Summary & Goals
 

@@ -1719,7 +1719,7 @@ nothing on stderr — so every write must be followed by a verification run. A r
 against the tutorial board yields **27** findings rather than hundreds, and the three headline ones
 all land on D1, the same component `SPEC-113` is built around.
 
-#### [SPEC-212](services/python-daemon/specs/SPEC-212-datasheet-resolution.md) — Datasheet Resolution for Parts Nobody Publishes Individually — Draft, written 2026-09-10
+#### [SPEC-212](services/python-daemon/specs/SPEC-212-datasheet-resolution.md) — Datasheet Resolution for Parts Nobody Publishes Individually — ❌ DECLINED 2026-09-10, the day it was written
 *Module:* `services/python-daemon` · *Depends on:* SPEC-306 · *Parent:* SPEC-203
 
 **Reopens exactly one paragraph of the retired `SPEC-203`, and nothing else.** That spec ends with
@@ -1960,8 +1960,10 @@ version already shipping: current-milestone debt, not new work.
 *   `SPEC-320` / `SPEC-404` — managed sign-in and hosted access. Waiting on real users testing the
     self-managed app first, so the metering is shaped by what people do rather than by a guess.
 *   `SPEC-341` — declined after measurement; see the tombstone at the top of that spec.
-*   `SPEC-212` — written 2026-09-10 and deliberately blocked: it cannot be built until a human has
-    re-read TME's API terms. `SPEC-203` §2.3's reading is second-hand here.
+*   `SPEC-212` — declined the day it was written. TME is usable only because the user holds their
+    own key, and the maintainer ruled out vendor keys and licence review outright, which removes the
+    approach rather than an implementation detail. Its measurement is kept and the defect it found
+    is being fixed without any vendor account, via `SPEC-203` §3's constructed-deep-link row.
 *   `SPEC-403` — cross-platform verification. Real, and the largest standing gap in what this
     project can honestly claim: Windows and Linux live paths are still CI-only.
 
