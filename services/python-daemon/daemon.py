@@ -123,6 +123,13 @@ except Exception:
     library_store = None
 
 try:
+    import project_stage
+except Exception:
+    logger.exception("project_stage failed to import -- project.stage will be unavailable")
+    _note_degraded("project_stage", "project.stage")
+    project_stage = None
+
+try:
     import tool_registry
 except Exception:
     logger.exception("tool_registry failed to import -- agent.dispatch_tool will be unavailable")
@@ -1031,6 +1038,31 @@ def project_suggest_parts(name: str = None, brief: str = None) -> dict:
         model=CONFIG.get("llm_model"),
         app_config=CONFIG,
     )
+
+
+def project_stage_reading(name: str) -> dict:
+    """The project.stage route (SPEC-343 §2.4).
+
+    Gathers the staleness the record cannot compute for itself -- a review or a
+    consideration set is stale relative to a file on disk, so this needs the
+    filesystem while `project_stage.read` deliberately does not.
+
+    Best-effort on each area: a review whose staleness cannot be determined must
+    not cost the user the whole reading. `SPEC-343` §3 -- a guided surface that
+    is wrong once is worse than none, and refusing to answer is a smaller error
+    than answering from a partial gather while implying it was complete."""
+    project = library_store.load_project(name)
+
+    stale = []
+    for area in ("schematic", "pcb", "enclosure"):
+        try:
+            review = library_store.get_project_review_result(name, area)
+        except Exception:  # noqa: BLE001 -- one unreadable area is not a failed reading
+            continue
+        if review and review.get("stale_reason"):
+            stale.append(area)
+
+    return project_stage.read(project, stale_areas=stale)
 
 
 def project_add_part_reference(project_name: str, part_id: str) -> dict:
@@ -2668,6 +2700,7 @@ def _build_routes() -> dict:
         routes["project.rename"] = project_rename
         routes["project.set_intent"] = project_set_intent
         routes["project.set_intent_fields"] = project_set_intent_fields
+
         routes["project.set_check_result"] = project_set_check_result
         routes["project.add_part_reference"] = project_add_part_reference
         routes["project.set_footprint_override"] = project_set_footprint_override
@@ -2698,6 +2731,13 @@ def _build_routes() -> dict:
         routes["kicad.search_footprints"] = kicad_search_footprints
     if kicad_write is not None and library_store is not None:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
+    if project_stage is not None and library_store is not None:
+        # Both modules, per CTX-210.1's lesson: a route registered on one guard
+        # exists whenever that one imports and fails with a bare AttributeError
+        # when the other does not. daemon.ready reports degraded modules, and an
+        # honestly absent route is what that report is about.
+        routes["project.stage"] = project_stage_reading
+
     if component_pipeline is not None and library_store is not None:
         # SPEC-328. Registered HERE rather than beside the other `project.*`
         # routes because it needs BOTH modules: the project record for the

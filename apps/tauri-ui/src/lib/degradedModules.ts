@@ -38,6 +38,11 @@ const _WHAT_IS_LOST: Record<string, string> = {
     'Finding symbol and footprint mismatches — the checks KiCad does not make. '
     + 'Reviews still run and still report everything ERC and DRC found.',
 
+  project_stage:
+    'Saying where a project stands and what would move it forward. '
+    + 'Every tab still works exactly as it does now — the Overview tab simply '
+    + 'stops summarising them.',
+
   capability_profile:
     'Recording what your board house can actually build. '
     + 'Board checks still run against KiCad’s own default rules.',
