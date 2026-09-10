@@ -29,11 +29,11 @@ logger = logging.getLogger(__name__)
 # KiCad-write side of this same boundary.
 _NM_PER_MM = 1_000_000
 
-# SPEC-109 §2: a footprint is a recognized mounting hole when it comes from
-# KiCad's own standard MountingHole library, or carries that library's
-# default H<digits> reference-designator convention -- not a one-off
-# heuristic invented here.
-_MOUNTING_HOLE_REF_PATTERN = re.compile(r"^H\d+$")
+# SPEC-109 §2's convention now lives in `kicad_board`, which needs no kipy, so
+# the live path and the file-reading path share one definition instead of two
+# that can drift. Re-exported under the old name; the two call sites below
+# already had the library check written out beside it.
+from kicad_board import _MOUNTING_HOLE_REF_PATTERN  # noqa: E402
 
 # SPEC-311: a real kipy Footprint3DModel.filename uses KiCad's own
 # "${VAR}/relative/path" convention (e.g.

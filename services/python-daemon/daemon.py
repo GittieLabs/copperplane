@@ -489,10 +489,25 @@ def freecad_generate_enclosure(
             # Omitted means "no volume and no model" -- a component nothing
             # can say the height of. A modelled one is not missing from the
             # preview, so counting it as omitted would raise a false alarm.
+            #
+            # Mounting holes are excluded, reusing SPEC-109 §2's own
+            # recognition rule. CTX-311.15 already found this once on the
+            # neighbouring height route: a screw hole was never going to have
+            # a height, and the enclosure represents it as standoff geometry
+            # instead. Counting four of them among "6 components are missing,
+            # add a height in the Components tab" is advice about four things
+            # that cannot take one, and a warning whose items are mostly
+            # unactionable teaches people to skip it.
+            drawn = {p["reference"] for p in placeholders}
+            by_reference = {c.get("reference"): c for c in read["components"]}
             volumes_skipped = sum(
                 1 for e in envelopes
                 if e.get("source") != "model"
-                and not any(p["reference"] == e.get("reference") for p in placeholders)
+                and e.get("reference") not in drawn
+                and not kicad_board.is_mounting_hole(
+                    (by_reference.get(e.get("reference")) or {}).get("footprint", ""),
+                    e.get("reference") or "",
+                )
             )
         except Exception as exc:  # noqa: BLE001 -- never at the cost of the enclosure
             logger.warning("could not build component volumes: %s", exc)

@@ -22,6 +22,7 @@ So this reads the file. Nothing can be excluded from it by an export
 setting, because there is no export.
 """
 import os
+import re
 
 
 class BoardReadError(Exception):
@@ -98,6 +99,34 @@ def value(node):
         if isinstance(item, tuple):
             return item[1]
     return None
+
+
+# SPEC-109 §2's own convention, kept in one place: a footprint is a recognized
+# mounting hole when it comes from KiCad's own standard MountingHole library,
+# or carries that library's default H<digits> reference-designator convention.
+# Lives here rather than in `kicad_bridge` because that module needs `kipy`
+# importable and the file-reading path does not.
+_MOUNTING_HOLE_REF_PATTERN = re.compile(r"^H\d+$")
+
+
+def is_mounting_hole(footprint_id: str, reference: str) -> bool:
+    """A screw hole, not a part standing on the board.
+
+    `CTX-311.15` found this once already, from a real click-through: the
+    height-derivation route reported a board's unannotated MountingHole
+    footprints as "missing a 3D model" -- technically true and misleading,
+    because a screw hole was never going to have one, and the enclosure
+    represents it separately as standoff geometry.
+
+    `CTX-326.4` repeated it. The placeholder preview counted four mounting
+    holes among "6 components are missing ... add a height in the Components
+    tab", which is advice about four things that cannot have a height. A
+    warning whose items are mostly unactionable teaches people to skip it.
+    """
+    library = (footprint_id or "").split(":")[0].lower()
+    return "mountinghole" in library or bool(
+        _MOUNTING_HOLE_REF_PATTERN.match(reference or "")
+    )
 
 
 def read_board_footprints(pcb_path: str) -> list:
