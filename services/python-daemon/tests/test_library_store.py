@@ -600,6 +600,10 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
         # CTX-340.2: `check_display` backfills to {} instead, following
         # `footprint_overrides` -- an absent key and an empty dict both mean
         # "no check result kept yet", so callers need no None-handling.
+        # CTX-328.1: `intent_fields` likewise -- an absent object and an empty
+        # one both mean "nothing asked yet". The three-state distinction this
+        # family needs (never asked / asked-and-unknown / answered) lives
+        # inside the object, per field, not in whether the object exists.
         self.assertEqual(
             loaded,
             {
@@ -611,6 +615,7 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
                 "footprint_overrides": {},
                 "fabrication_profile": None,
                 "check_display": {},
+                "intent_fields": {},
                 "notes": None,
             },
         )
@@ -2352,3 +2357,122 @@ class ReviewPersistenceTests(LibraryStoreTestCase):
         project = store.load_project("P")
         self.assertIn("schematic", project["last_results"])
         self.assertIn("schematic", project["last_reviews"])
+
+
+class TestProjectIntentFields(LibraryStoreTestCase):
+    """SPEC-328 Phase 2 / SPEC-210 §2.5: the structured half of intent.
+
+    The property everything else rests on is that there are THREE states, not
+    two. `SPEC-210` §2.5 wants an explicit "I do not know" on `current_budget`
+    to trigger an estimate from the parts on the board -- and a blank cannot
+    trigger anything, because a blank is indistinguishable from a question
+    nobody put.
+    """
+
+    # TEST-001
+    def test_001_the_structured_fields_round_trip(self):
+        store.save_project({"name": "p"})
+        store.set_project_intent_fields("p", {
+            "board_stage": "being_sold",
+            "environment": "outdoors",
+            "input_supply": {"source": "battery", "nominal_volts": 3.7},
+            "current_budget": {"milliamps": 120},
+        })
+
+        fields = store.load_project("p")["intent_fields"]
+        self.assertEqual(fields["board_stage"], "being_sold")
+        self.assertEqual(fields["environment"], "outdoors")
+        self.assertEqual(fields["input_supply"], {"source": "battery", "nominal_volts": 3.7})
+        self.assertEqual(fields["current_budget"], {"milliamps": 120})
+
+    # TEST-002
+    def test_002_unknown_is_a_stored_value_not_an_absent_one(self):
+        store.save_project({"name": "p"})
+        store.set_project_intent_fields("p", {"current_budget": store.UNKNOWN})
+
+        fields = store.load_project("p")["intent_fields"]
+        self.assertEqual(fields["current_budget"], "unknown", "asked, and the user did not know")
+        self.assertNotIn("environment", fields, "never asked at all")
+
+    def test_setting_a_field_to_null_returns_it_to_never_asked(self):
+        """Removing an answer is not the same as answering 'unknown'. Both are
+        reachable, and collapsing them would destroy the estimate trigger."""
+        store.save_project({"name": "p"})
+        store.set_project_intent_fields("p", {"board_stage": "for_me"})
+        store.set_project_intent_fields("p", {"board_stage": None})
+
+        self.assertNotIn("board_stage", store.load_project("p")["intent_fields"])
+
+    def test_answers_merge_rather_than_replace(self):
+        """A clarifying conversation asks one thing at a time. A replacing
+        write would erase every earlier answer the moment a second question
+        came back on its own."""
+        store.save_project({"name": "p"})
+        store.set_project_intent_fields("p", {"board_stage": "for_others"})
+        store.set_project_intent_fields("p", {"environment": "enclosed"})
+
+        fields = store.load_project("p")["intent_fields"]
+        self.assertEqual(fields["board_stage"], "for_others")
+        self.assertEqual(fields["environment"], "enclosed")
+
+    # TEST-003
+    def test_003_a_project_written_before_these_fields_existed_still_loads(self):
+        store.save_project({"name": "old"})
+        path = store._project_pointer_path("old")
+        with open(path, encoding="utf-8") as fh:
+            record = json.load(fh)
+        record.pop("intent_fields", None)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(record, fh)
+
+        loaded = store.load_project("old")
+        self.assertEqual(loaded["intent_fields"], {},
+                         "an absent object and an empty one mean the same thing: nothing asked")
+
+    # TEST-004
+    def test_004_a_bad_value_is_refused_at_store_time_not_read_time(self):
+        store.save_project({"name": "p"})
+        for bad in [
+            {"board_stage": "for_the_lols"},
+            {"environment": 3},
+            {"input_supply": {"source": "solar", "nominal_volts": 5}},
+            {"input_supply": {"source": "usb", "nominal_volts": -1}},
+            {"current_budget": {"milliamps": 0}},
+            {"current_budget": 500},
+        ]:
+            with self.assertRaises(store.SchemaValidationError, msg=f"accepted {bad!r}"):
+                store.set_project_intent_fields("p", bad)
+
+        self.assertEqual(store.load_project("p")["intent_fields"], {},
+                         "nothing invalid reached disk")
+
+    def test_an_unrecognised_field_name_is_refused_rather_than_ignored(self):
+        """The only writer is this app, so an unexpected key is a caller bug,
+        not user data. Silently ignoring it makes a field the user believes
+        they answered and nothing reads."""
+        store.save_project({"name": "p"})
+        with self.assertRaises(store.SchemaValidationError):
+            store.set_project_intent_fields("p", {"bord_stage": "for_me"})
+
+    def test_a_known_source_with_no_voltage_is_allowed(self):
+        """Knowing it is USB-powered without knowing, or caring, that USB is
+        5V is a real state. Refusing it would force a guess into the one field
+        whose point is not guessing."""
+        store.save_project({"name": "p"})
+        store.set_project_intent_fields("p", {"input_supply": {"source": "usb", "nominal_volts": None}})
+
+        self.assertEqual(
+            store.load_project("p")["intent_fields"]["input_supply"],
+            {"source": "usb", "nominal_volts": None},
+        )
+
+    def test_the_free_text_intent_is_untouched_by_the_fields(self):
+        """The sentence is what the user wrote; the fields are what was asked
+        and answered. One must never overwrite the other."""
+        store.save_project({"name": "p"})
+        store.set_project_intent("p", "a battery-powered temperature logger")
+        store.set_project_intent_fields("p", {"board_stage": "for_me"})
+
+        loaded = store.load_project("p")
+        self.assertEqual(loaded["intent"], "a battery-powered temperature logger")
+        self.assertEqual(loaded["intent_fields"]["board_stage"], "for_me")

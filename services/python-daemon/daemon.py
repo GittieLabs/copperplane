@@ -995,6 +995,20 @@ def project_set_intent(name: str, intent: str) -> dict:
     return library_store.set_project_intent(name, intent)
 
 
+def project_set_intent_fields(name: str, fields: dict) -> dict:
+    """The project.set_intent_fields route (SPEC-328 Phase 2, SPEC-210 §2.5).
+
+    The structured half of intent, beside the free-text sentence rather than
+    replacing it: the sentence is what the user wrote, the fields are what was
+    asked and answered.
+
+    Merges, so a clarifying conversation can answer one thing at a time
+    without erasing what it already learned. A field set to `null` is removed,
+    returning it to "never asked" -- which is deliberately not the same as
+    `"unknown"`, the value that records having been asked."""
+    return library_store.set_project_intent_fields(name, fields)
+
+
 def project_add_part_reference(project_name: str, part_id: str) -> dict:
     """CTX-304.3 (SPEC-304 §2): thin wrapper, matching `project_save_artifact`'s
     own `project_name`-first-argument shape. Synchronous, fast local file
@@ -2629,6 +2643,7 @@ def _build_routes() -> dict:
         routes["project.list_removed"] = project_list_removed
         routes["project.rename"] = project_rename
         routes["project.set_intent"] = project_set_intent
+        routes["project.set_intent_fields"] = project_set_intent_fields
         routes["project.set_check_result"] = project_set_check_result
         routes["project.add_part_reference"] = project_add_part_reference
         routes["project.set_footprint_override"] = project_set_footprint_override
