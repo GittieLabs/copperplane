@@ -72,6 +72,50 @@ user_facing: true
 
 ## 2. System Architecture & Design Choices
 
+### 2.0 Measured 2026-09-10: there is enough to compute on, and the netlist is why
+
+`CTX-210.1` Phase 1 asked the question this whole family stands on before modelling anything: does a
+real project hold enough computable signal to trigger a consideration at all? If it does not, every
+consideration is a `judgement`, a judgement may not be raised unprompted (§1's initiative rule), and
+this is the chat surface that already exists wearing a framework's clothes.
+
+**It does, decisively — but not from the sources this spec assumed.** Measured against the
+maintainer's own board.
+
+What the app holds today, from the real routes:
+
+| source | carries | connectivity |
+| :--- | :--- | :--- |
+| `kicad_list_board_components` | reference, footprint, value, position, rotation, courtyard, has_model, dnp | **none** |
+| `kicad_list_schematic_components` | the above plus `lib_id` and `pin_count` | **none** |
+| `structural_checks` | pin count against pad count | n/a |
+| `intent_fields` (`CTX-328.1`) | `board_stage`, `input_supply`, `current_budget`, `environment` | n/a |
+| ERC / DRC / `fabrication_profile` | existing findings and limits | indirect |
+
+Two findings change the shape of this spec.
+
+**First: `lib_id` is a functional taxonomy and nobody was using it as one.** The eleven symbols on
+that board read `Device:LED`, `Device:R`, `Switch:SW_Push`, `power:+5V`, `power:GND`,
+`MCU_Module:Arduino_UNO_R3`, `Mechanical:MountingHole`. That is KiCad's own classification of what a
+part *is*, sitting in a file the app already parses. It is a **computed** fact in §2.1's sense —
+read, not inferred — and it makes presence-and-count triggers available immediately. §1's own worked
+example needs exactly two facts, *"you are powering this from USB"* and *"you have twelve LEDs"*, and
+**both are computable today**: the second from `lib_id`, the first from `input_supply`.
+
+**Second, and larger: full pin-level connectivity is one command away, and nothing in the app uses
+it.** `kicad-cli sch export netlist --format kicadxml` returns every net with its `ref.pin` nodes —
+33 nets on that board, including `Net-(D1-A)` joining `D1.2` to `R1.1`. That is precisely the *"does
+this LED have a series resistor"* fact, and it is a file fact rather than a model's opinion.
+
+The app does not read it. `kicad_cli.py` has no netlist function, and neither the board reader nor
+the schematic reader carries a net. So topology-class considerations are **not blocked, they are
+unbuilt** — one `kicad-cli` call and an XML parse, not a research problem.
+
+**What this settles.** The `computed` class is real and much wider than presence-and-count. It
+reaches connectivity, which is what `SPEC-211`'s power path needs and what would otherwise have made
+that spec unbuildable. Nothing here is descoped; the netlist read becomes a prerequisite this
+context did not know it had.
+
 ### 2.1 The record
 
 A **consideration** is the unit. The proposed shape, to be settled during implementation:
