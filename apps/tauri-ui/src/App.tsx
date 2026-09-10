@@ -386,8 +386,21 @@ function App() {
     setView({ kind: 'project', name, area: 'overview' })
   }
 
+  /* Carries a timestamp, not just the term. Sending the same term twice --
+     a user going back for the same category -- must re-run rather than look
+     broken, and a bare string cannot express "the same value, again". */
+  const [searchSeed, setSearchSeed] = useState<{ term: string; at: number } | null>(null)
+
   function handleSelectArea(area: Area) {
     setView((prev) => (prev?.kind === 'project' ? { ...prev, area } : prev))
+  }
+
+  /* SPEC-328 §5: "Each entry can be carried straight into the existing part
+     search." App owns this rather than Overview, because App is what knows
+     Components is a sibling tab -- Overview should not have to. */
+  function handleCarryToSearch(searchTerm: string) {
+    setSearchSeed({ term: searchTerm, at: Date.now() })
+    handleSelectArea('components')
   }
 
   /* SPEC-337: this sets the project FOLDER. It does not link a KiCad project,
@@ -943,10 +956,19 @@ function App() {
              * own still-unbuilt footprint/connection-guidance work, which
              * will eventually join SchematicAdvisor here. */}
             <div data-testid="overview-area" className={view.area === 'overview' ? 'w-full' : 'hidden'}>
-              <Overview projectName={view.name} project={currentProject} onProjectUpdated={setCurrentProject} />
+              <Overview
+                projectName={view.name}
+                project={currentProject}
+                onProjectUpdated={setCurrentProject}
+                onCarryToSearch={handleCarryToSearch}
+              />
             </div>
             <div data-testid="components-area" className={view.area === 'components' ? 'w-full' : 'hidden'}>
-              <ComponentDiscovery projectName={view.name} currentProject={currentProject} />
+              <ComponentDiscovery
+                projectName={view.name}
+                currentProject={currentProject}
+                searchSeed={searchSeed}
+              />
             </div>
             <div data-testid="schematic-area" className={view.area === 'schematic' ? 'w-full' : 'hidden'}>
               <SchematicAdvisor projectName={view.name} menuCommand={menuCommand} />

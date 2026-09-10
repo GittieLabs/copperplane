@@ -2668,7 +2668,6 @@ def _build_routes() -> dict:
         routes["project.rename"] = project_rename
         routes["project.set_intent"] = project_set_intent
         routes["project.set_intent_fields"] = project_set_intent_fields
-        routes["project.suggest_parts"] = project_suggest_parts
         routes["project.set_check_result"] = project_set_check_result
         routes["project.add_part_reference"] = project_add_part_reference
         routes["project.set_footprint_override"] = project_set_footprint_override
@@ -2700,6 +2699,16 @@ def _build_routes() -> dict:
     if kicad_write is not None and library_store is not None:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
     if component_pipeline is not None and library_store is not None:
+        # SPEC-328. Registered HERE rather than beside the other `project.*`
+        # routes because it needs BOTH modules: the project record for the
+        # brief, and the pipeline for the agent. Registered on library_store
+        # alone, it existed whenever a project could be loaded and failed with
+        # a bare "'NoneType' object has no attribute 'suggest_parts'" the
+        # moment component_pipeline was degraded -- found by driving the real
+        # daemon, not by reading the code. A route that is present and broken
+        # is worse than one that is honestly absent: `daemon.ready` reports
+        # degraded modules, and an absent route is what that report is about.
+        routes["project.suggest_parts"] = project_suggest_parts
         routes["kicad.generate_connection_guidance"] = kicad_generate_connection_guidance
         routes["kicad.suggest_footprint_query"] = kicad_suggest_footprint_query
     if datasheet_guidance is not None and library_store is not None:

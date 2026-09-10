@@ -619,3 +619,48 @@ describe('ComponentDiscovery: CTX-318.6 Generate directly from a part number', (
     screen.getByRole('button', { name: "Can't find it via search? Generate directly from a part number…" })
   })
 })
+
+describe('ComponentDiscovery: SPEC-328 carrying a suggestion over', () => {
+  it('runs a search carried over from the Overview tab, not just filling the box', async () => {
+    /* SPEC-328 §5: "Each entry can be carried straight into the existing part
+     * search." A user who clicked "Search for this" has already asked --
+     * making them click Search again would be asking twice. */
+    searchComponentsMock.mockResolvedValue([
+      { part_number: 'DS3231', manufacturer: 'Maxim', package: 'SOIC-16',
+        datasheet_url: 'https://e.invalid/d.pdf', confidence: 'high', rationale: 'r' },
+    ])
+
+    render(
+      <ComponentDiscovery projectName="test-project" searchSeed={{ term: 'RTC module I2C', at: 1 }} />,
+    )
+
+    await waitFor(() => expect(searchComponentsMock).toHaveBeenCalledWith('RTC module I2C'))
+    expect(await screen.findByText('DS3231')).toBeTruthy()
+  })
+
+  it('re-runs when the same category is carried over twice', async () => {
+    /* The seed carries a timestamp, not just a term. A user going back to
+     * Overview and clicking the same suggestion again must get a search, not
+     * a component that decides nothing changed. */
+    searchComponentsMock.mockResolvedValue([])
+
+    const { rerender } = render(
+      <ComponentDiscovery projectName="test-project" searchSeed={{ term: 'RTC module I2C', at: 1 }} />,
+    )
+    await waitFor(() => expect(searchComponentsMock).toHaveBeenCalledTimes(1))
+
+    rerender(
+      <ComponentDiscovery projectName="test-project" searchSeed={{ term: 'RTC module I2C', at: 2 }} />,
+    )
+    await waitFor(() => expect(searchComponentsMock).toHaveBeenCalledTimes(2))
+  })
+
+  it('does nothing when no suggestion was carried over', async () => {
+    render(<ComponentDiscovery projectName="test-project" />)
+
+    // No seed, no search. Asserted directly rather than by waiting on some
+    // other mock -- what this test is about is that nothing ran.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(searchComponentsMock).not.toHaveBeenCalled()
+  })
+})

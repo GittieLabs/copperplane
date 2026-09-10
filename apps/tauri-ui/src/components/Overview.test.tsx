@@ -7,6 +7,7 @@ const dispatchToolMock = vi.fn()
 const loadConversationMock = vi.fn()
 const appendConversationTurnMock = vi.fn()
 const setProjectIntentMock = vi.fn()
+const suggestPartsMock = vi.fn()
 
 vi.mock('../lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
@@ -24,6 +25,10 @@ vi.mock('../lib/projects', () => ({
 // so Overview's tests stay focused on its own wiring (does it mount
 // AgentChat with the real scope/area/targets) and never need to mock
 // AgentChat's own internal chat.* IPC calls.
+vi.mock('../lib/suggestedParts', () => ({
+  suggestParts: (...args: unknown[]) => suggestPartsMock(...args),
+}))
+
 vi.mock('./AgentChat', () => ({
   AgentChat: ({
     area,
@@ -80,6 +85,7 @@ beforeEach(() => {
   loadConversationMock.mockReset().mockResolvedValue([])
   appendConversationTurnMock.mockReset().mockResolvedValue(undefined)
   setProjectIntentMock.mockReset()
+  suggestPartsMock.mockReset()
 })
 
 async function renderOverview(project: { name: string; intent?: string | null } | null = { name: 'weather-pcb' }) {
@@ -257,5 +263,131 @@ describe('Overview: CTX-318.5 project intent editor', () => {
 
     await waitFor(() => screen.getByRole('button', { name: 'Add' }))
     expect(screen.queryByPlaceholderText(/I want to build/)).toBeNull()
+  })
+})
+
+describe('Overview: SPEC-328 suggested parts', () => {
+  const READY = {
+    ready: true,
+    question: null,
+    suggestions: [
+      { category: 'real-time clock', search_term: 'RTC module I2C', why: 'So the log has timestamps.' },
+      { category: 'low-dropout regulator', search_term: '3.3V LDO low quiescent', why: 'To run a month on one charge.' },
+    ],
+    rejected: [],
+    caveat: 'These are kinds of component to start from, not parts to order.',
+  }
+
+  async function renderWith(project: Record<string, unknown>, onCarryToSearch?: (t: string) => void) {
+    render(
+      <Overview
+        projectName="weather-pcb"
+        project={project as never}
+        onCarryToSearch={onCarryToSearch}
+      />,
+    )
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+  }
+
+  it('offers nothing until the user has said what they are building', async () => {
+    // SPEC-328 §3: "An empty Overview tab is not a crisis." There is nothing
+    // to suggest from, so there is nothing to offer.
+    await renderWith({ name: 'weather-pcb', intent: null })
+
+    expect(screen.queryByRole('button', { name: 'Suggest parts' })).toBeNull()
+  })
+
+  // TEST-007
+  it('007_asks through the surface that is already there, not a new one', async () => {
+    await renderWith({ name: 'weather-pcb', intent: 'a battery-powered temperature logger' })
+    suggestPartsMock.mockResolvedValue(READY)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest parts' }))
+
+    expect(await screen.findByText('real-time clock')).toBeTruthy()
+    expect(screen.getByText('So the log has timestamps.')).toBeTruthy()
+    expect(suggestPartsMock).toHaveBeenCalledWith('weather-pcb')
+  })
+
+  it('renders the caveat from the record rather than its own copy', async () => {
+    // SPEC-328 §3's framing travels with the data. If this component retyped
+    // it, a second surface rendering the same record would lose it.
+    await renderWith({ name: 'weather-pcb', intent: 'a logger' })
+    suggestPartsMock.mockResolvedValue({ ...READY, caveat: 'CAVEAT FROM THE RECORD' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest parts' }))
+
+    expect(await screen.findByText('CAVEAT FROM THE RECORD')).toBeTruthy()
+  })
+
+  // TEST-008
+  it('008_carries a suggestion into the existing part search', async () => {
+    const onCarryToSearch = vi.fn()
+    await renderWith({ name: 'weather-pcb', intent: 'a logger' }, onCarryToSearch)
+    suggestPartsMock.mockResolvedValue(READY)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest parts' }))
+    await screen.findByText('real-time clock')
+    fireEvent.click(screen.getAllByRole('button', { name: 'Search for this' })[0])
+
+    // The SEARCH TERM, not the category -- "real-time clock" is what to call
+    // it, "RTC module I2C" is what finds one.
+    expect(onCarryToSearch).toHaveBeenCalledWith('RTC module I2C')
+  })
+
+  it('shows a vague brief as a question, never as an empty list', async () => {
+    // CTX-328.1 Phase 1 measured this as the real behaviour for "a robot".
+    // Rendering an empty list beside the question would make the question
+    // look like a footnote on a result.
+    await renderWith({ name: 'weather-pcb', intent: 'a robot' })
+    suggestPartsMock.mockResolvedValue({
+      ready: false, question: 'What should the robot actually do?',
+      suggestions: [], rejected: [], caveat: 'c',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest parts' }))
+
+    expect(await screen.findByText('What should the robot actually do?')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Search for this' })).toBeNull()
+  })
+
+  it('says how many suggestions were left out, rather than quietly filtering', async () => {
+    await renderWith({ name: 'weather-pcb', intent: 'a logger' })
+    suggestPartsMock.mockResolvedValue({
+      ...READY, rejected: [{ value: 'DS3231', reason: 'looks like a specific part number' }],
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest parts' }))
+
+    expect(await screen.findByText(/1 suggestion was left out/)).toBeTruthy()
+  })
+
+  it('surfaces a failure instead of looking like it found nothing', async () => {
+    await renderWith({ name: 'weather-pcb', intent: 'a logger' })
+    suggestPartsMock.mockRejectedValue(new Error('no provider configured'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Suggest parts' }))
+
+    expect(await screen.findByText('no provider configured')).toBeTruthy()
+  })
+
+  // TEST-009
+  it('009_marks suggestions advisory once a real KiCad project is attached', async () => {
+    /* SPEC-328 §2: "Once a real KiCad project is attached, the parts list is
+     * at best advisory and at worst contradicts what is actually on the
+     * board." The board is the thing that exists; this list is what someone
+     * intended before it did. */
+    await renderWith({
+      name: 'weather-pcb', intent: 'a logger',
+      kicad_project_path: '/real/weather.kicad_pro',
+    })
+
+    expect(await screen.findByText(/not what is on your board/)).toBeTruthy()
+  })
+
+  it('says nothing about the board when no KiCad project is attached', async () => {
+    await renderWith({ name: 'weather-pcb', intent: 'a logger' })
+
+    expect(screen.queryByText(/not what is on your board/)).toBeNull()
   })
 })
