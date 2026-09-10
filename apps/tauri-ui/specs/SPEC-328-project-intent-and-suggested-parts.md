@@ -1,7 +1,7 @@
 ---
 id: SPEC-328
 title: "Project Intent & Suggested Parts"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-05
 last_updated: 2026-09-05
