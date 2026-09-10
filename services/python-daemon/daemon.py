@@ -1009,6 +1009,30 @@ def project_set_intent_fields(name: str, fields: dict) -> dict:
     return library_store.set_project_intent_fields(name, fields)
 
 
+def project_suggest_parts(name: str = None, brief: str = None) -> dict:
+    """The project.suggest_parts route (SPEC-328).
+
+    Takes the project's own stored intent when `name` is given, so the surface
+    does not have to re-send what the user already typed, and falls back to an
+    explicit `brief` for someone who has not saved a project yet -- SPEC-328's
+    user "arrives with an idea and no files".
+
+    Async: a real LLM call."""
+    intent_fields = None
+    if name:
+        project = library_store.load_project(name)
+        brief = brief or project.get("intent")
+        intent_fields = project.get("intent_fields") or None
+    return component_pipeline.suggest_parts(
+        brief,
+        intent_fields=intent_fields,
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
+    )
+
+
 def project_add_part_reference(project_name: str, part_id: str) -> dict:
     """CTX-304.3 (SPEC-304 §2): thin wrapper, matching `project_save_artifact`'s
     own `project_name`-first-argument shape. Synchronous, fast local file
@@ -2644,6 +2668,7 @@ def _build_routes() -> dict:
         routes["project.rename"] = project_rename
         routes["project.set_intent"] = project_set_intent
         routes["project.set_intent_fields"] = project_set_intent_fields
+        routes["project.suggest_parts"] = project_suggest_parts
         routes["project.set_check_result"] = project_set_check_result
         routes["project.add_part_reference"] = project_add_part_reference
         routes["project.set_footprint_override"] = project_set_footprint_override
@@ -2724,6 +2749,9 @@ ASYNC_ROUTES = {
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
     "datasheet.read_pages", "library.render_symbol_preview", "library.render_footprint_preview",
     "chat.send", "chat.review", "context.rebuild_index",
+    # SPEC-328: a real LLM call. Sync routes run inline in the request path,
+    # so this would block every other request while the model thinks.
+    "project.suggest_parts",
     # SPEC-324: both reach a vendor over the network. Sync routes run
     # inline in the request path, so leaving these out would block every
     # other request while a slow or hanging provider is waited on -- the

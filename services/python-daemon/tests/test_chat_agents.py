@@ -1956,3 +1956,122 @@ class TestEnclosureFitFallback(ChatAgentsTestCase):
 
         self.assertTrue(findings)
         self.assertIn("shorter than the parts need", findings[0]["title"])
+
+
+class TestSuggestedParts(unittest.TestCase):
+    """SPEC-328 Phase 3: a suggestion has to be actionable, and honest.
+
+    `CTX-328.1` Phase 1 measured the model holding SPEC-328 §1's first non-goal
+    -- "Not part selection" -- under direct pressure. A rule that held in eight
+    samples is not a guarantee, and the prompt was the only thing enforcing it.
+    These are the floor underneath it.
+    """
+
+    def _validated(self, response):
+        import component_pipeline
+        return component_pipeline._validate_suggestions(response)
+
+    def _entry(self, **over):
+        entry = {"category": "real-time clock", "search_term": "RTC module I2C",
+                 "why": "So the log has timestamps."}
+        entry.update(over)
+        return entry
+
+    # TEST-005
+    def test_005_a_bare_part_number_is_dropped_and_reported(self):
+        result = self._validated({"ready": True, "suggestions": [
+            self._entry(),
+            self._entry(category="DS3231", search_term="DS3231"),
+        ]})
+
+        self.assertEqual([s["category"] for s in result["suggestions"]], ["real-time clock"])
+        self.assertEqual(len(result["rejected"]), 1)
+        self.assertIn("part number", result["rejected"][0]["reason"])
+
+    def test_005_a_part_number_hidden_in_the_search_term_is_caught_too(self):
+        """The back door: a respectable category with a specific part as the
+        thing the user is sent to search for."""
+        result = self._validated({"ready": True, "suggestions": [
+            self._entry(category="LiPo charging IC", search_term="MCP73831"),
+        ]})
+
+        self.assertEqual(result["suggestions"], [])
+        self.assertEqual(result["rejected"][0]["value"], "MCP73831")
+
+    def test_005_real_categories_are_not_false_positives(self):
+        """The floor has to leave real answers alone. Every one of these came
+        out of `CTX-328.1` Phase 1's real measurement, so a rule that rejected
+        them would reject the feature working correctly."""
+        real = ["real-time clock", "3.3V LDO regulator", "digital temperature sensor I2C",
+                "microSD card breakout SPI", "ESP32 development board",
+                "low-power microcontroller", "waterproof cable gland for sensor wire"]
+        result = self._validated({"ready": True, "suggestions": [
+            self._entry(category=c, search_term=c) for c in real
+        ]})
+
+        self.assertEqual(len(result["suggestions"]), len(real))
+        self.assertEqual(result["rejected"], [])
+
+    def test_005_a_generic_logic_part_is_deliberately_not_caught(self):
+        """`74HC595` and `2N3904` are generic functions available from many
+        manufacturers, which is much closer to a category than to "order this
+        exact thing". Telling those apart from a manufacturer part number by
+        pattern is not reliably possible, so the floor does not try -- and this
+        pins that as a decision rather than leaving it to look like an
+        oversight when someone finds it later."""
+        result = self._validated({"ready": True, "suggestions": [
+            self._entry(category="8-bit shift register", search_term="74HC595"),
+        ]})
+
+        self.assertEqual(len(result["suggestions"]), 1)
+
+    # TEST-006
+    def test_006_the_caveat_is_on_the_record_not_only_in_the_ui(self):
+        """SPEC-328 §3: "the honest framing is 'a starting point to check'". A
+        caller rendering these another way -- a chat reply, a report, an agent
+        reading them back -- must not be able to drop it by not knowing."""
+        for response in [
+            {"ready": True, "suggestions": [self._entry()]},
+            {"ready": False, "question": "What does the robot do?"},
+        ]:
+            result = self._validated(response)
+            self.assertIn("not parts to order", result["caveat"])
+
+    def test_a_not_ready_answer_never_carries_a_list(self):
+        """Rule 4's failure mode: the caller renders the list and the question
+        becomes decoration. If it is not ready, the question IS the answer."""
+        result = self._validated({
+            "ready": False, "question": "What should the robot do?",
+            "suggestions": [self._entry()],
+        })
+
+        self.assertEqual(result["suggestions"], [])
+        self.assertEqual(result["question"], "What should the robot do?")
+
+    def test_a_not_ready_answer_with_nothing_to_ask_is_refused(self):
+        import component_pipeline
+        with self.assertRaises(component_pipeline.ComponentValidationError):
+            self._validated({"ready": False, "suggestions": []})
+
+    def test_an_entry_missing_its_reason_is_dropped_and_reported(self):
+        """`why` is not decoration -- it is what makes a category actionable
+        rather than a word the user now has to go and research."""
+        result = self._validated({"ready": True, "suggestions": [
+            self._entry(), {"category": "voltage regulator", "search_term": "LDO"},
+        ]})
+
+        self.assertEqual(len(result["suggestions"]), 1)
+        self.assertIn("missing why", result["rejected"][0]["reason"])
+
+    def test_a_malformed_response_fails_closed(self):
+        import component_pipeline
+        for bad in [None, [], {"suggestions": []}, {"ready": "yes"}]:
+            with self.assertRaises(component_pipeline.ComponentValidationError, msg=repr(bad)):
+                self._validated(bad)
+
+    def test_an_empty_brief_is_refused_before_any_llm_call(self):
+        """Spending a paid call to be told nothing was typed is a waste the
+        caller can prevent, and the error should say what to do."""
+        import component_pipeline
+        with self.assertRaises(component_pipeline.ComponentValidationError):
+            component_pipeline.suggest_parts("   ")
