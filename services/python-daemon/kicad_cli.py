@@ -17,6 +17,8 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from datetime import datetime, timezone
+from xml.etree import ElementTree
 
 
 class KicadCliUnavailableError(Exception):
@@ -205,6 +207,91 @@ def export_schematic_bom(sch_path: str) -> list:
                 "dnp": bool((row.get("DNP") or "").strip()),
             })
     return components
+
+
+def export_netlist(sch_path: str) -> dict:
+    """Real pin-level connectivity, read from the FILE (`SPEC-210` §2.0).
+
+    `CTX-210.1` Phase 1 measured that nothing in this app held connectivity:
+    neither component reader carries a net, and `kicad_board` reads footprints
+    only. That looked like a blocker for the whole considerations family, since
+    a `computed` claim about a circuit needs to know what is joined to what --
+    and `SPEC-211`'s power path is nothing but connectivity.
+
+    It is one command. `kicad-cli sch export netlist --format kicadxml` works on
+    a closed `.kicad_sch`, same as `export_schematic_bom` above and for the same
+    reasons -- no GUI, no IPC, no running KiCad.
+
+    Returns `{"nets": [{"name", "nodes": [{"reference", "pin", "function"}]}],
+    "read_at"}`. A net's nodes are what makes a claim nameable: `SPEC-210` §2.2
+    requires every consideration to name something real, and `D1.2 joins R1.1`
+    is exactly that.
+
+    **`kicadxml` and not the default `kicadsexpr`**, deliberately: the XML shape
+    is stable across the versions this app supports and parses with the standard
+    library, where the s-expression netlist would need a second parser beside
+    `kicad_board`'s.
+
+    Fails loudly on an unrecognised shape rather than returning zero nets, the
+    same rule `export_schematic_bom` states: a board's nets never legitimately
+    number zero, so an empty list would be a silent wrong answer -- and here it
+    would read as "nothing is connected", which is the most alarming possible
+    way to be wrong.
+    """
+    cli = find_kicad_cli()
+    if not os.path.exists(sch_path):
+        raise KicadCliError(f"Schematic file does not exist: {sch_path}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = os.path.join(tmpdir, "netlist.xml")
+        result = subprocess.run(
+            [cli, "sch", "export", "netlist", "--format", "kicadxml",
+             "--output", out, sch_path],
+            capture_output=True, text=True, timeout=120,
+        )
+        if not os.path.exists(out):
+            raise KicadCliError(
+                f"kicad-cli produced no netlist (exit {result.returncode}): "
+                f"{result.stderr.strip()}"
+            )
+        try:
+            root = ElementTree.parse(out).getroot()
+        except ElementTree.ParseError as exc:
+            raise KicadCliError(f"kicad-cli's netlist is not readable as XML: {exc}") from exc
+
+    container = root.find("nets")
+    if container is None:
+        raise KicadCliError(
+            "kicad-cli's netlist has no <nets> element. This KiCad version's "
+            "netlist format is not the one this app knows how to read."
+        )
+
+    nets = []
+    for net in container.findall("net"):
+        nodes = [
+            {
+                "reference": node.get("ref"),
+                "pin": node.get("pin"),
+                # KiCad labels a pin's electrical type -- power_in, output,
+                # passive. SPEC-210 needs it: "this power pin" is a different
+                # claim from "this pin", and the difference is the file's, not
+                # an inference of ours.
+                "function": node.get("pintype") or node.get("pinfunction"),
+            }
+            for node in net.findall("node")
+            if node.get("ref") and node.get("pin")
+        ]
+        if nodes:
+            nets.append({"name": net.get("name") or "", "nodes": nodes})
+
+    if not nets:
+        raise KicadCliError(
+            "kicad-cli returned a netlist with no nets at all. A schematic with "
+            "components always has nets, so this is a format this app cannot "
+            "read rather than a schematic with nothing connected."
+        )
+
+    return {"nets": nets, "read_at": datetime.now(timezone.utc).isoformat()}
 
 
 def run_erc(sch_path: str) -> dict:

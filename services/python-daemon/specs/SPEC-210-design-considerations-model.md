@@ -116,6 +116,60 @@ reaches connectivity, which is what `SPEC-211`'s power path needs and what would
 that spec unbuildable. Nothing here is descoped; the netlist read becomes a prerequisite this
 context did not know it had.
 
+### 2.0.1 Measured 2026-09-10: the board carries geometry, and the calculators are the bridge
+
+Raised by the maintainer while looking at KiCad's own Calculator Tools: *"kicad offers a series of
+calculators, that i don't understand, that seem useful to a user if they understand how to use them
+and when. and useful if the app needs them as well. would these tie into what we get from the
+netlists?"*
+
+They do, and the answer changes what a pack is.
+
+**The board file carries more than connectivity.** Each routed segment is
+`(width …) (layer …) (net "…")` with real endpoints, so per-net width, layer and length are all
+computed facts. Measured on the maintainer's board:
+
+| net | routed | width |
+| :--- | ---: | :--- |
+| `GND` | 21.50 mm | 0.2 mm |
+| `Net-(A1-D3)` | 38.99 mm | 0.2 mm |
+| `Net-(D1-A)` | 16.59 mm | 0.2 mm |
+| `Net-(A1-D2)` | 5.46 mm | 0.2 mm |
+
+**What is missing is current, and it is missing from the files, not from the parser.** Nothing in the
+schematic or the board says how much current flows anywhere. That is not a gap to close with better
+reading; it is a fact nobody has written down yet.
+
+**KiCad's calculators are the standards formulas that turn geometry into an answer** — track width
+and electrical spacing from IPC-2221, via current, fusing current, the regulator divider. They are
+deterministic and they have a citable source, which makes them precisely this spec's `cited` class,
+and they belong in §2.1's `arithmetic` field: *"where a claim rests on a calculation, the calculation
+itself, shown."*
+
+So the loop closes, and the shape of it is the argument for this whole family:
+
+1.  **Netlist** — `+5V` reaches these pins. *computed*
+2.  **Board** — routed at 0.2 mm on `F.Cu`, 21.5 mm long. *computed*
+3.  **Question** — how much current does this board draw? *the user answers, and the answer becomes
+    stated intent*
+4.  **Calculator** — the standard's minimum width for that current and temperature rise. *cited*
+5.  **Comparison** — a claim about this board, with its arithmetic shown.
+
+**Step 3 is why the question mechanism is not decoration.** §1 already says the question is the
+interesting output shape; this is the concrete reason. The calculators cannot run without a current,
+the files do not contain one, and asking is the only honest way to get it. §1's own worked example —
+*"You are powering this from USB and you have twelve LEDs. What is your total current budget?"* — is
+exactly step 3, and it exists to unlock exactly step 4.
+
+**A pack is therefore three things, not two:** a trigger, a formula, and a shown calculation. That is
+a correction to the shape §2.1 implies, where `arithmetic` reads as an optional extra rather than
+the point.
+
+**One constraint, stated before anyone builds on this.** A trace-width number is a `cited` claim and
+its constants must be read from the standard, never recalled. §3 says the first time this app is
+confidently wrong about a board the user understands better than it does, the whole family is spent
+— and a plausible-looking formula with a misremembered exponent is the most likely way to spend it.
+
 ### 2.1 The record
 
 A **consideration** is the unit. The proposed shape, to be settled during implementation:

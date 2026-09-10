@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -444,3 +445,99 @@ class TestRealSchematicParity(unittest.TestCase):
         self.assertIn("schematic_parity", report)
         types = [v.get("type") for v in report["violations"]]
         self.assertNotIn("footprint_symbol_mismatch", types)
+
+
+class TestExportNetlist(unittest.TestCase):
+    """SPEC-210 §2.0 / CTX-210.1: real pin-level connectivity.
+
+    `CTX-210.1` Phase 1 found nothing in this app held connectivity -- neither
+    component reader carries a net, `kicad_board` reads footprints only -- which
+    looked like a blocker for the whole considerations family, since a computed
+    claim about a circuit needs to know what is joined to what. It is one
+    kicad-cli command.
+    """
+
+    _FIXTURE = os.path.join(os.path.dirname(__file__), "fixtures", "parity_match.kicad_sch")
+
+    def setUp(self):
+        if not _find_real_kicad_cli():
+            self.skipTest("kicad-cli not found on this machine.")
+
+    def test_reads_real_nets_with_their_nodes(self):
+        result = kicad_cli.export_netlist(self._FIXTURE)
+
+        self.assertGreater(len(result["nets"]), 0)
+        self.assertTrue(result["read_at"])
+        for net in result["nets"]:
+            self.assertIsInstance(net["name"], str)
+            for node in net["nodes"]:
+                self.assertTrue(node["reference"], "a node with no reference names nothing")
+                self.assertTrue(node["pin"])
+
+    def test_a_node_names_something_real_which_is_the_whole_safety_property(self):
+        """SPEC-210 §2.2: no consideration exists without a trigger that names
+        something real. `R1.1` is nameable; a net with anonymous endpoints is
+        not, and would let a claim be made about nothing in particular."""
+        result = kicad_cli.export_netlist(self._FIXTURE)
+        refs = {n["reference"] for net in result["nets"] for n in net["nodes"]}
+
+        self.assertIn("R1", refs)
+
+    def test_pin_electrical_function_survives(self):
+        """KiCad labels a pin power_in, passive, bidirectional. SPEC-210 needs
+        it: "this power pin" is a different claim from "this pin", and the
+        distinction is the file's rather than an inference of ours."""
+        result = kicad_cli.export_netlist(self._FIXTURE)
+        functions = {n["function"] for net in result["nets"] for n in net["nodes"]}
+
+        self.assertTrue(any(f for f in functions), "no pin carried an electrical type")
+
+    def test_a_missing_file_raises_rather_than_returning_nothing(self):
+        with self.assertRaises(kicad_cli.KicadCliError):
+            kicad_cli.export_netlist("/nope/does_not_exist.kicad_sch")
+
+
+class TestExportNetlistShape(unittest.TestCase):
+    """The loud-failure rules, without needing kicad-cli installed.
+
+    Zero nets is the dangerous return here: it reads as "nothing on your board
+    is connected", which is the most alarming possible way to be silently
+    wrong. Same rule `export_schematic_bom` states for an unrecognised BOM."""
+
+    def _run_with_netlist(self, xml: str):
+        def fake_run(cmd, **kwargs):
+            out = cmd[cmd.index("--output") + 1]
+            with open(out, "w", encoding="utf-8") as handle:
+                handle.write(xml)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with patch.object(kicad_cli, "find_kicad_cli", return_value="/fake/kicad-cli"), \
+             patch("os.path.exists", return_value=True), \
+             patch("subprocess.run", side_effect=fake_run):
+            return kicad_cli.export_netlist("/fake/x.kicad_sch")
+
+    def test_a_netlist_with_no_nets_element_fails_loudly(self):
+        with self.assertRaises(kicad_cli.KicadCliError) as ctx:
+            self._run_with_netlist("<export><components/></export>")
+        self.assertIn("<nets>", str(ctx.exception))
+
+    def test_zero_nets_fails_loudly_rather_than_reading_as_nothing_connected(self):
+        with self.assertRaises(kicad_cli.KicadCliError) as ctx:
+            self._run_with_netlist("<export><nets></nets></export>")
+        self.assertIn("no nets at all", str(ctx.exception))
+
+    def test_unparseable_xml_fails_loudly(self):
+        with self.assertRaises(kicad_cli.KicadCliError) as ctx:
+            self._run_with_netlist("<export><nets>")
+        self.assertIn("not readable as XML", str(ctx.exception))
+
+    def test_a_node_with_no_reference_is_dropped_not_carried_as_none(self):
+        """A node naming nothing cannot anchor a claim, so it must not reach a
+        caller looking like one."""
+        result = self._run_with_netlist(
+            '<export><nets><net name="GND">'
+            '<node ref="R1" pin="1" pintype="passive"/>'
+            '<node pin="2"/>'
+            '</net></nets></export>'
+        )
+        self.assertEqual([n["reference"] for n in result["nets"][0]["nodes"]], ["R1"])
