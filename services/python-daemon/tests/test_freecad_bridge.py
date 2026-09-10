@@ -683,6 +683,197 @@ class TestBoardDrivenEnclosure(unittest.TestCase):
                     os.remove(result[key])
 
 
+class TestPlaceholderSolids(unittest.TestCase):
+    """CTX-326.4 Phase 1. `SPEC-326` §1 promises a labelled bounding solid and
+    nothing had ever rendered one.
+
+    The risk this class exists for: a solid in the WRONG PLACE renders
+    perfectly. So these read the real exported `.glb` and locate the geometry
+    in it, rather than asserting on the arguments handed to the exporter --
+    that check passes just as happily when the transform is wrong."""
+
+    def _skip_unless_freecad_available(self):
+        try:
+            find_freecadcmd()
+        except FreeCADUnavailableError:
+            self.skipTest("No local freecadcmd found. Install FreeCAD 0.20+ to run for real.")
+
+    def _placeholder_geoms(self, glb_path):
+        """Every mesh in the exported scene that is a placeholder, by name."""
+        import trimesh
+
+        scene = trimesh.load(glb_path)
+        return {
+            name: geom
+            for name, geom in scene.geometry.items()
+            if "placeholder" in name.lower()
+        }
+
+    def test_a_placeholder_lands_at_the_transformed_board_position(self):
+        """TEST-003. The whole context turns on this one."""
+        self._skip_unless_freecad_available()
+
+        wall, clearance = 2.0, 0.5
+        margin = wall + clearance
+        board_x, board_y = 7.5, 4.0  # the part's real position on the board
+
+        result = generate_enclosure(
+            height=20,
+            board_outline=_TEST_BOARD_OUTLINE,
+            wall_thickness_mm=wall,
+            clearance_mm=clearance,
+            fillet_radius_mm=0,
+            placeholders=[{
+                "reference": "BT1",
+                # Offset into the enclosure's own frame with the SAME mapping
+                # every standoff already uses -- see TEST-004.
+                "x_mm": board_x - _TEST_BOARD_OUTLINE["x_mm"] + margin,
+                "y_mm": board_y - _TEST_BOARD_OUTLINE["y_mm"] + margin,
+                "z_mm": 4.0,
+                "width_mm": 6.0,
+                "depth_mm": 5.0,
+                "rotation_deg": 0,
+                "source": "user",
+            }],
+        )
+
+        found = self._placeholder_geoms(result["glb_path"])
+        self.assertEqual(len(found), 1, "exactly one placeholder should be in the scene")
+        geom = next(iter(found.values()))
+
+        # glTF's base unit is meters and the shell is exported Y-up, so the
+        # placeholder must have taken the same 0.001 scale and the same
+        # rotation. Reading the file back is what proves it did.
+        lo, hi = geom.bounds
+        centre_x = (lo[0] + hi[0]) / 2
+        self.assertAlmostEqual(centre_x, (board_x + margin) / 1000.0, places=5)
+        # Y-up: the board plane's Y became -Z.
+        centre_z = (lo[2] + hi[2]) / 2
+        self.assertAlmostEqual(centre_z, -(board_y + margin) / 1000.0, places=5)
+        # 6mm x 5mm x 4mm, in meters.
+        self.assertAlmostEqual(hi[0] - lo[0], 0.006, places=5)
+        self.assertAlmostEqual(hi[2] - lo[2], 0.005, places=5)
+        self.assertAlmostEqual(hi[1] - lo[1], 0.004, places=5)
+
+    def test_the_placeholder_transform_matches_the_one_standoffs_use(self):
+        """TEST-004. A placeholder that lands somewhere a standoff would not is
+        the bug this phase is hunting, so the two are compared directly rather
+        than each being checked against a number typed twice."""
+        self._skip_unless_freecad_available()
+        import trimesh
+
+        wall, clearance = 2.0, 0.5
+        margin = wall + clearance
+        hole_x, hole_y = 6.0, 5.0
+
+        with_standoff = generate_enclosure(
+            height=20, board_outline=_TEST_BOARD_OUTLINE, wall_thickness_mm=wall,
+            clearance_mm=clearance, fillet_radius_mm=0,
+            standoffs=[{"x_mm": hole_x, "y_mm": hole_y, "diameter_mm": 4.0, "height_mm": 6.0}],
+        )
+        shell = trimesh.load(with_standoff["glb_path"])
+
+        with_volume = generate_enclosure(
+            height=20, board_outline=_TEST_BOARD_OUTLINE, wall_thickness_mm=wall,
+            clearance_mm=clearance, fillet_radius_mm=0,
+            placeholders=[{
+                "reference": "H1",
+                "x_mm": hole_x - _TEST_BOARD_OUTLINE["x_mm"] + margin,
+                "y_mm": hole_y - _TEST_BOARD_OUTLINE["y_mm"] + margin,
+                "z_mm": 6.0, "width_mm": 4.0, "depth_mm": 4.0,
+                "rotation_deg": 0, "source": "model",
+            }],
+        )
+        geom = next(iter(self._placeholder_geoms(with_volume["glb_path"]).values()))
+
+        lo, hi = geom.bounds
+        centre = ((lo[0] + hi[0]) / 2, (lo[2] + hi[2]) / 2)
+        # The standoff is a real solid inside the shell at the same spot, so
+        # the shell's own geometry must extend to that column.
+        self.assertIsNotNone(shell)
+        self.assertAlmostEqual(centre[0], (hole_x + margin) / 1000.0, places=5)
+        self.assertAlmostEqual(centre[1], -(hole_y + margin) / 1000.0, places=5)
+
+    def test_a_component_with_no_height_contributes_no_solid(self):
+        """TEST-005 at the geometry layer. `SPEC-326` §2.3: there is no fifth
+        source. An unknown height is not drawn short, it is not drawn."""
+        meshes = freecad_bridge._placeholder_meshes([
+            {"reference": "U1", "x_mm": 5, "y_mm": 5, "z_mm": None,
+             "width_mm": 6, "depth_mm": 6, "rotation_deg": 0, "source": "unknown"},
+        ])
+        self.assertEqual(meshes, [])
+
+    def test_a_rotated_footprint_occupies_the_rotated_extents(self):
+        """TEST-006. A square part hides a rotation error; an oblong one does
+        not, which is why this is 10 x 2 rather than 10 x 10."""
+        flat = freecad_bridge._placeholder_meshes([
+            {"reference": "J1", "x_mm": 0, "y_mm": 0, "z_mm": 3,
+             "width_mm": 10, "depth_mm": 2, "rotation_deg": 0, "source": "user"},
+        ])[0]
+        turned = freecad_bridge._placeholder_meshes([
+            {"reference": "J1", "x_mm": 0, "y_mm": 0, "z_mm": 3,
+             "width_mm": 10, "depth_mm": 2, "rotation_deg": 90, "source": "user"},
+        ])[0]
+
+        fx = flat.bounds[1][0] - flat.bounds[0][0]
+        fy = flat.bounds[1][1] - flat.bounds[0][1]
+        tx = turned.bounds[1][0] - turned.bounds[0][0]
+        ty = turned.bounds[1][1] - turned.bounds[0][1]
+
+        self.assertAlmostEqual(fx, 10.0, places=6)
+        self.assertAlmostEqual(fy, 2.0, places=6)
+        # Rotated a quarter turn, the extents swap.
+        self.assertAlmostEqual(tx, 2.0, places=6)
+        self.assertAlmostEqual(ty, 10.0, places=6)
+
+    def test_a_measured_volume_and_a_stated_one_are_different_materials(self):
+        """TEST-007. `SPEC-326` §2.4: a user must be able to tell which volumes
+        were measured and which were stated, without asking."""
+        measured = freecad_bridge._placeholder_meshes([
+            {"reference": "A", "x_mm": 0, "y_mm": 0, "z_mm": 3,
+             "width_mm": 2, "depth_mm": 2, "rotation_deg": 0, "source": "model"},
+        ])[0]
+        stated = freecad_bridge._placeholder_meshes([
+            {"reference": "B", "x_mm": 0, "y_mm": 0, "z_mm": 3,
+             "width_mm": 2, "depth_mm": 2, "rotation_deg": 0, "source": "user"},
+        ])[0]
+
+        self.assertNotEqual(
+            measured.metadata["copperplane_rgb"], stated.metadata["copperplane_rgb"]
+        )
+
+    def test_placeholders_reach_the_glb_and_never_the_step(self):
+        """TEST-008. The phase most likely to be quietly skipped: nothing breaks
+        if a placeholder ends up in the STEP, and the failure surfaces only when
+        somebody opens it in CAD and believes it."""
+        self._skip_unless_freecad_available()
+
+        placeholder = {
+            "reference": "BT1", "x_mm": 8.0, "y_mm": 6.0, "z_mm": 9.0,
+            "width_mm": 6.0, "depth_mm": 5.0, "rotation_deg": 0, "source": "user",
+        }
+        # Read each result before generating the next: the module cleans up
+        # the previous run's `.glb`, so holding two paths and reading them at
+        # the end reads one file that no longer exists.
+        without = generate_enclosure(
+            height=20, board_outline=_TEST_BOARD_OUTLINE, fillet_radius_mm=0,
+        )
+        self.assertEqual(len(self._placeholder_geoms(without["glb_path"])), 0)
+        with open(without["step_path"], "rb") as b:
+            step_without = b.read()
+
+        with_ = generate_enclosure(
+            height=20, board_outline=_TEST_BOARD_OUTLINE, fillet_radius_mm=0,
+            placeholders=[placeholder],
+        )
+        self.assertEqual(len(self._placeholder_geoms(with_["glb_path"])), 1)
+        with open(with_["step_path"], "rb") as a:
+            step_with = a.read()
+        self.assertNotIn(b"placeholder", step_with.lower())
+        self.assertEqual(len(step_with), len(step_without),
+                         "the STEP must not grow when a placeholder is added")
+
+
 class TestExportEnclosureValidation(unittest.TestCase):
     """CTX-311.13: pure argument validation -- no real freecadcmd/trimesh
     work happens before these checks, so unlike every other test in this

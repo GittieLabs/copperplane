@@ -13,6 +13,7 @@ from kicad_board import BoardReadError, read_board_footprints
 _FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 _MATCH = os.path.join(_FIXTURES_DIR, 'parity_match.kicad_pcb')
 _EMPTY = os.path.join(_FIXTURES_DIR, 'empty_board.kicad_pcb')
+_ROTATED = os.path.join(_FIXTURES_DIR, 'rotated_board.kicad_pcb')
 
 
 class TestReadBoardFootprints(unittest.TestCase):
@@ -29,6 +30,34 @@ class TestReadBoardFootprints(unittest.TestCase):
         out yet. One of the maintainer's own four projects is in exactly that
         state, so this is not a hypothetical."""
         self.assertEqual([], read_board_footprints(_EMPTY))
+
+    def test_reads_the_footprints_own_position_not_a_pads(self):
+        """CTX-326.4 Phase 1. A footprint's pads, properties and graphics each
+        carry an `at` of their own, relative to the footprint -- and R1's
+        first nested one is its Reference at (0, -2). Taking that instead
+        would put a placeholder solid at the board origin, which renders
+        perfectly and is wrong."""
+        found = read_board_footprints(_MATCH)
+
+        self.assertEqual(found[0]["x_mm"], 100.0)
+        self.assertEqual(found[0]["y_mm"], 100.0)
+
+    def test_an_unrotated_footprint_reads_as_zero_rather_than_missing(self):
+        """KiCad omits the third value entirely when a footprint is not
+        rotated, so absent means zero. There is no unknown-rotation state to
+        represent, and defaulting to None would make every caller handle one
+        that cannot occur."""
+        found = read_board_footprints(_MATCH)
+
+        self.assertEqual(found[0]["rotation_deg"], 0.0)
+
+    def test_reads_a_real_rotation(self):
+        by_ref = {f["reference"]: f for f in read_board_footprints(_ROTATED)}
+
+        self.assertEqual(by_ref["SW1"]["rotation_deg"], 90.0)
+        self.assertEqual((by_ref["SW1"]["x_mm"], by_ref["SW1"]["y_mm"]), (110.5, 105.25))
+        # ... and the unrotated one beside it is unaffected.
+        self.assertEqual(by_ref["R1"]["rotation_deg"], 0.0)
 
     def test_003_a_missing_file_raises_a_clean_error(self):
         with self.assertRaises(BoardReadError):

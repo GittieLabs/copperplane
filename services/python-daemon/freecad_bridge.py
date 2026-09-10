@@ -273,6 +273,58 @@ _BODY_COLOR_RGB = (148, 163, 184)  # slate-400 -- the enclosure shell's outer su
 _BODY_INNER_COLOR_RGB = (241, 245, 249)  # slate-50 -- the cavity's own inner walls/floor
 _LID_COLOR_RGB = (249, 115, 22)  # orange-500 -- a real, high-contrast accent for the lid
 
+# SPEC-326 §2.4: a placeholder must be tellable from real geometry without
+# asking. Two colors, not one, because §2.3's sources are not equally
+# trustworthy and the spec asks the user to see which is which: a height read
+# off a real STEP model is measured, a height somebody typed is stated.
+_MEASURED_VOLUME_RGB = (56, 189, 248)  # sky-400 -- height came off a real model
+_STATED_VOLUME_RGB = (250, 204, 21)  # yellow-400 -- height was supplied, not measured
+
+
+def _placeholder_meshes(placeholders: list) -> list:
+    """Rectangular clearance volumes, in the enclosure's own mm frame.
+
+    Built with trimesh rather than FreeCAD deliberately. These are
+    axis-aligned boxes at known positions; a headless FreeCAD round trip
+    buys nothing, and keeping them out of the shell's solid is what lets
+    Phase 3 give them their own material and keeps them out of the STEP
+    entirely. `SPEC-326`'s second non-goal is that a placeholder must never
+    be mistaken for a model, and the surest way to honour that in a
+    fabrication artifact is for it not to be in one.
+
+    Each placeholder is `{x_mm, y_mm, z_mm, width_mm, depth_mm,
+    rotation_deg, source}` where x/y are already offset into the enclosure's
+    frame by the caller -- the same `x - board_outline["x_mm"] + margin`
+    mapping every standoff uses.
+
+    Sits on the floor: a part is mounted on the board, so the box's base is
+    at the floor and it extends upward, rather than being centred on it.
+    """
+    meshes = []
+    for p in placeholders or []:
+        w, d, h = p["width_mm"], p["depth_mm"], p["z_mm"]
+        if not (w and d and h):
+            # SPEC-326 §2.3: there is no default height. A volume with no
+            # height is not drawn short, it is not drawn.
+            continue
+        box = trimesh.creation.box(extents=(w, d, h))
+        transform = trimesh.transformations.translation_matrix(
+            (p["x_mm"], p["y_mm"], p.get("floor_mm", 0.0) + h / 2)
+        )
+        rotation = p.get("rotation_deg") or 0.0
+        if rotation:
+            transform = transform @ trimesh.transformations.rotation_matrix(
+                math.radians(rotation), [0, 0, 1]
+            )
+        box.apply_transform(transform)
+        rgb = _MEASURED_VOLUME_RGB if p.get("source") == "model" else _STATED_VOLUME_RGB
+        box.metadata["name"] = f"placeholder:{p.get('reference') or '?'}:{p.get('source', 'unknown')}"
+        box.metadata["copperplane_placeholder"] = True
+        box.metadata["copperplane_rgb"] = rgb
+        meshes.append(box)
+    return meshes
+
+
 
 def _split_inner_outer_faces(mesh: trimesh.Trimesh) -> tuple:
     """Classifies every triangle of a real hollow-shell mesh as facing the
@@ -310,6 +362,7 @@ def _split_inner_outer_faces(mesh: trimesh.Trimesh) -> tuple:
 
 def _export_glb(
     stl_path: str, glb_path: str, base_color_rgb: tuple, inner_color_rgb: tuple = None,
+    placeholders: list = None,
 ) -> None:
     """Converts a real FreeCAD-exported `.stl` to a real, correctly
     scaled, correctly oriented, and correctly colored `.glb` -- the one
@@ -388,15 +441,32 @@ def _export_glb(
     # produce two real groups from that, so fall back to the single-
     # material path rather than split nothing from nothing; there is no
     # real interior surface to give a distinct color to on a solid box.
+    # SPEC-326 §2.4. Built in the enclosure's own mm/Z-up frame and then put
+    # through the SAME rotation and the SAME 0.001 scale as the shell above --
+    # not a second copy of either. This function's own docstring gives the
+    # reason: both corrections live in one place precisely so a second mesh
+    # cannot drift out of step with the first. A placeholder a thousand times
+    # too large, or lying on its side, would render without complaint.
+    volume_meshes = []
+    for box in _placeholder_meshes(placeholders):
+        rgb = box.metadata["copperplane_rgb"]
+        box.apply_transform(_Y_UP_ROTATION)
+        box.apply_scale(0.001)
+        box.visual = trimesh.visual.TextureVisuals(material=_matte_material(rgb))
+        volume_meshes.append(box)
+
     if inner_color_rgb is None or len(inner_faces) == 0 or len(outer_faces) == 0:
         mesh.visual = trimesh.visual.TextureVisuals(material=_matte_material(base_color_rgb))
-        mesh.export(glb_path)
+        if not volume_meshes:
+            mesh.export(glb_path)
+            return
+        trimesh.Scene([mesh, *volume_meshes]).export(glb_path)
         return
 
     outer_mesh, inner_mesh = mesh.submesh([outer_faces, inner_faces], append=False)
     outer_mesh.visual = trimesh.visual.TextureVisuals(material=_matte_material(base_color_rgb))
     inner_mesh.visual = trimesh.visual.TextureVisuals(material=_matte_material(inner_color_rgb))
-    trimesh.Scene([outer_mesh, inner_mesh]).export(glb_path)
+    trimesh.Scene([outer_mesh, inner_mesh, *volume_meshes]).export(glb_path)
 
 
 def generate_enclosure(
@@ -412,6 +482,7 @@ def generate_enclosure(
     lid_thickness_mm: float = None,
     timeout_s: float = 30.0,
     cancel_event=None,
+    placeholders: list = None,
 ) -> dict:
     """Runs a headless FreeCAD subprocess that builds a parametric box
     enclosure and returns `{"glb_path": ..., "step_path": ...}`.
@@ -593,7 +664,14 @@ def generate_enclosure(
                 f"file: {stderr_data.strip()}"
             )
 
-        _export_glb(stl_path, glb_path, _BODY_COLOR_RGB, inner_color_rgb=_BODY_INNER_COLOR_RGB)
+        # SPEC-326 §2.4: preview only. `placeholders` reaches the `.glb` and
+        # deliberately never the `.step` -- the STEP is the fabrication
+        # artifact, and a stated envelope inside it opens in any CAD tool as
+        # ordinary solid geometry with nothing to mark it as a guess.
+        _export_glb(
+            stl_path, glb_path, _BODY_COLOR_RGB,
+            inner_color_rgb=_BODY_INNER_COLOR_RGB, placeholders=placeholders,
+        )
 
         # SPEC-301 §3's flagged known debt: nothing previously deleted a
         # generated .glb (harmless in a self-cleaning OS temp dir, a real

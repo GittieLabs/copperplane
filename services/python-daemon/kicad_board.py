@@ -103,7 +103,8 @@ def value(node):
 def read_board_footprints(pcb_path: str) -> list:
     """Every footprint physically on the board, in file order.
 
-    Each entry is {reference, footprint, value, layer} -- `footprint` being
+    Each entry is {reference, footprint, value, layer, x_mm, y_mm,
+    rotation_deg} -- `footprint` being
     the full `Library:Name` id, the same shape `list_schematic_components`
     reports, so the two are directly comparable.
 
@@ -132,6 +133,14 @@ def read_board_footprints(pcb_path: str) -> list:
             "footprint": value(node),
             "value": None,
             "layer": None,
+            # SPEC-326 §2.4 needs somewhere to put a placeholder solid, and
+            # a volume in the wrong place renders perfectly. `rotation_deg`
+            # defaults to 0 rather than None: KiCad omits the third value
+            # entirely for an unrotated footprint, so absent means zero here
+            # and there is no "unknown rotation" state to represent.
+            "x_mm": None,
+            "y_mm": None,
+            "rotation_deg": 0.0,
         }
         for child in node:
             if not isinstance(child, list):
@@ -139,6 +148,24 @@ def read_board_footprints(pcb_path: str) -> list:
             kind = sym(child)
             if kind == "layer" and entry["layer"] is None:
                 entry["layer"] = value(child)
+            elif kind == "at" and entry["x_mm"] is None:
+                # Only the footprint's OWN `at`. Pads, texts and graphics
+                # each carry one too, relative to the footprint -- and they
+                # are nested deeper, so iterating this node's direct
+                # children is what keeps them out. Guarded on `is None` as
+                # well, so the first one wins if that ever stops being true.
+                coords = [i[1] for i in child[1:] if isinstance(i, tuple)]
+                try:
+                    entry["x_mm"] = float(coords[0])
+                    entry["y_mm"] = float(coords[1])
+                    if len(coords) > 2:
+                        entry["rotation_deg"] = float(coords[2])
+                except (IndexError, ValueError):
+                    # A malformed `at` leaves the position unknown rather
+                    # than defaulting to the origin, which would put a
+                    # placeholder in a corner of the board and look
+                    # deliberate.
+                    entry["x_mm"], entry["y_mm"] = None, None
             elif kind in ("property", "fp_text"):
                 # Two spellings, both live. Modern boards carry
                 # `(property "Reference" "BT1" ...)`; boards written before
