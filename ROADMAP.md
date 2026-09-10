@@ -1652,6 +1652,29 @@ favour of `pdfplumber` (MIT).
 
 ---
 
+#### [SPEC-343](apps/tauri-ui/specs/SPEC-343-the-guided-path.md) — The Guided Path — Draft, written 2026-09-10
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-210, SPEC-328, SPEC-339 · *Parent:* SPEC-300
+
+The spec that joins the vertical slices. Every stage of this product is strong alone and nothing
+connects them: *"we are making the assumptions that a project exists with a schematic that adheres
+to the goal that also has a matching pcb ... we also need to provide an option that would start from
+scratch, understand the goal, provides real guidance to get started and remembers where we left
+off."*
+
+**Two of `SPEC-300`'s rules settle most of it.** A conversation surface may never advance a stage, so
+the guided path cannot be chat. The stage machine is a DAG and every stage is directly enterable, so
+nothing is hidden and nothing is locked. What is left is a *reading* of the project on Overview,
+beside the tabs rather than in front of them.
+
+**Its central rule: the trigger is the timing.** `SPEC-210` §2.2 already forbids a consideration
+without a trigger, so no separate timing rule is needed — say it when the trigger becomes true, not
+when the topic becomes relevant. Front-loading everything at intent time means saying all of it in
+its vaguest form before any of it is actionable.
+
+Stage is **computed, never declared**, and the non-linear flow reports itself: `CTX-210.1`'s
+staleness makes *"you edited the schematic, so the PCB check is behind"* a computed fact rather than
+something the user has to tell the app.
+
 #### [SPEC-113](services/python-daemon/specs/SPEC-113-structural-consistency-checks.md) — Structural Consistency Checks — ✅ done ([CTX-113.1](services/python-daemon/context/CTX-113.1-structural-consistency-checks.md), [CTX-113.2](apps/tauri-ui/context/CTX-113.2-findings-of-our-own-look-like-it.md), [CTX-113.3](services/python-daemon/context/CTX-113.3-a-freeze-that-loses-the-check.md)) 2026-09-10
 *Module:* `services/python-daemon` + `apps/tauri-ui` · *Parent:* SPEC-000
 
