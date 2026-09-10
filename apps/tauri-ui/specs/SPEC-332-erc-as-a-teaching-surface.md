@@ -1,7 +1,7 @@
 ---
 id: SPEC-332
 title: "ERC as a Teaching Surface"
-status: In-Progress
+status: Completed
 type: Feature
 created: 2026-09-03
 last_updated: 2026-09-03
@@ -14,7 +14,26 @@ user_facing: true
 
 # SPEC-332: ERC as a Teaching Surface
 
-> **Still open, 2026-09-03:** whether `kicadGlossary`'s flat list and `SPEC-334`'s compositional `packageGlossary` should share a module. Everything else in §2 is settled and delivered by `CTX-332.1`.
+> **Closed 2026-09-10. Settled: they should not share a module.** Everything else in §2 was
+> delivered by `CTX-332.1`.
+>
+> `kicadGlossary` is a **lookup over a closed set** — KiCad's own ERC and DRC message vocabulary,
+> where a term is either in the list or it is not. `packageGlossary` is a **compositional decoder**
+> that reads meaning out of name fragments, which is how `CTX-334.2` covers 88% of the 15,433
+> footprints KiCad ships from 33 entries and 11 prefix letters. Merging them means either flattening
+> the second into a list, which throws away exactly that, or giving the first machinery it has no
+> use for.
+>
+> They also do not meet in the UI: `kicadGlossary` feeds `ViolationsList`, explaining a finding in
+> place; `packageGlossary` feeds `GlossaryList` and `FootprintDetail`. Two shapes that look similar
+> on paper, no shared render path, and no caller that wants both at once.
+>
+> **The deeper reason to leave them apart is that `SPEC-210` owns this question.** Its whole thesis
+> is that adding a second and third subject area should be *"a data file and a trigger rather than a
+> rebuild"*. Merging two explanation sources now — before the spec that defines how they compose
+> exists — would be guessing at that abstraction from a sample of two, and guessing wrong is more
+> expensive than waiting. If `SPEC-210` lands and wants one registry, it can have both; that is a
+> cheap move from here and an expensive one to undo.
 
 ## 1. Executive Summary & Goals
 

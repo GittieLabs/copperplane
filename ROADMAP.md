@@ -1652,6 +1652,29 @@ favour of `pdfplumber` (MIT).
 
 ---
 
+#### [SPEC-113](services/python-daemon/specs/SPEC-113-structural-consistency-checks.md) — Structural Consistency Checks — ✅ done ([CTX-113.1](services/python-daemon/context/CTX-113.1-structural-consistency-checks.md), [CTX-113.2](apps/tauri-ui/context/CTX-113.2-findings-of-our-own-look-like-it.md), [CTX-113.3](services/python-daemon/context/CTX-113.3-a-freeze-that-loses-the-check.md)) 2026-09-10
+*Module:* `services/python-daemon` + `apps/tauri-ui` · *Parent:* SPEC-000
+
+Computes the class of defect ERC and DRC cannot see, deterministically, from files the app already
+reads — the tutorial's own D1, a two-pin `Device:LED` symbol carrying a four-pin RGB footprint.
+
+**The principle the whole teaching family is built on, in this spec's own words:** *"The model's job
+should be to explain a finding, exactly as it already does for ERC and DRC output, never to notice
+it."* `SPEC-210` exists to generalise exactly that. `CTX-113.3` is worth reading on its own — a
+freeze that silently lost the check.
+
+#### [SPEC-332](apps/tauri-ui/specs/SPEC-332-erc-as-a-teaching-surface.md) — ERC as a Teaching Surface — ✅ done ([CTX-332.1](apps/tauri-ui/context/CTX-332.1-erc-parity.md)) 2026-09-10
+*Module:* `apps/tauri-ui` · *Depends on:* SPEC-113 · *Parent:* SPEC-300
+
+Translates KiCad's ERC vocabulary for a maker rather than a PCB engineer. The entry that earns the
+most is `power_pin_not_driven`: the schematic is usually correct and missing only a `PWR_FLAG`,
+which is a KiCad convention rather than an electrical fact — so a maker reads "not driven" and hunts
+for a wiring fault that is not there.
+
+Its last open question is settled as **no**: `kicadGlossary` and `packageGlossary` do not share a
+module. One is a lookup over a closed set, the other a compositional decoder, and `SPEC-210` owns
+how explanation sources compose. See that spec's header.
+
 #### [SPEC-210](services/python-daemon/specs/SPEC-210-design-considerations-model.md) — Design Considerations: Model & Discipline — Draft
 
 *Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-113, SPEC-319, SPEC-328
@@ -1942,9 +1965,10 @@ blocking it.
 
 The list above is `M0`-era and is kept for the record. What is actually next, in order:
 
-1.  **`SPEC-332` — ERC as a Teaching Surface.** Raised above its neighbours by the maintainer:
-    *"i want the erc teaching surface with a higher priority than the other 2 specs."* It is also
-    the dependency `SPEC-334` names, so this order is forced as well as chosen.
+1.  ~~**`SPEC-332` — ERC as a Teaching Surface.**~~ ✅ done 2026-09-10. Its last open question —
+    whether `kicadGlossary` and `packageGlossary` share a module — is settled as **no**, and the
+    reasoning is in that spec's header: `SPEC-210` owns how explanation sources compose, and
+    merging two of them before that spec exists is guessing at the abstraction from a sample of two.
 2.  ~~**`SPEC-334` — Footprint Literacy & Component Detail.**~~ ✅ done 2026-09-09. Its second open
     question — disambiguating part-search results — was deliberately deferred to `SPEC-306` rather
     than carried here; see that spec's header for why.
