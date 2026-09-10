@@ -961,6 +961,7 @@ function App() {
                 project={currentProject}
                 onProjectUpdated={setCurrentProject}
                 onCarryToSearch={handleCarryToSearch}
+                onGoToArea={handleSelectArea}
               />
             </div>
             <div data-testid="components-area" className={view.area === 'components' ? 'w-full' : 'hidden'}>

@@ -8,6 +8,7 @@ const loadConversationMock = vi.fn()
 const appendConversationTurnMock = vi.fn()
 const setProjectIntentMock = vi.fn()
 const suggestPartsMock = vi.fn()
+const projectStageMock = vi.fn()
 
 vi.mock('../lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
@@ -25,6 +26,10 @@ vi.mock('../lib/projects', () => ({
 // so Overview's tests stay focused on its own wiring (does it mount
 // AgentChat with the real scope/area/targets) and never need to mock
 // AgentChat's own internal chat.* IPC calls.
+vi.mock('../lib/projectStage', () => ({
+  projectStage: (...args: unknown[]) => projectStageMock(...args),
+}))
+
 vi.mock('../lib/suggestedParts', () => ({
   suggestParts: (...args: unknown[]) => suggestPartsMock(...args),
 }))
@@ -86,6 +91,7 @@ beforeEach(() => {
   appendConversationTurnMock.mockReset().mockResolvedValue(undefined)
   setProjectIntentMock.mockReset()
   suggestPartsMock.mockReset()
+  projectStageMock.mockReset().mockRejectedValue(new Error('no reading by default'))
 })
 
 async function renderOverview(project: { name: string; intent?: string | null } | null = { name: 'weather-pcb' }) {
@@ -389,5 +395,82 @@ describe('Overview: SPEC-328 suggested parts', () => {
     await renderWith({ name: 'weather-pcb', intent: 'a logger' })
 
     expect(screen.queryByText(/not what is on your board/)).toBeNull()
+  })
+})
+
+
+describe('Overview: SPEC-343 where you are', () => {
+  function reading(over: Record<string, unknown> = {}) {
+    return {
+      state: 'nothing_checked', action: 'Check the schematic', area: 'schematic',
+      evidence: 'a linked project with nothing checked yet', stale_areas: [],
+      ...over,
+    }
+  }
+
+  async function renderWith(readingValue: unknown, onGoToArea?: (a: string) => void) {
+    projectStageMock.mockResolvedValue(readingValue)
+    render(
+      <Overview
+        projectName="weather-pcb"
+        project={{ name: 'weather-pcb', intent: 'a logger' } as never}
+        onGoToArea={onGoToArea as never}
+      />,
+    )
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+  }
+
+  // TEST-005
+  it('005_offers a link and never navigates by itself', async () => {
+    /* SPEC-300's boundary -- nothing "decides which screen the user is on" --
+     * applies here even though this is not an AI surface, because a user
+     * cannot tell the difference between an app that moved them and an agent
+     * that did. */
+    const onGoToArea = vi.fn()
+    await renderWith(reading(), onGoToArea)
+
+    const action = await screen.findByRole('button', { name: 'Check the schematic' })
+    expect(onGoToArea).not.toHaveBeenCalled()
+
+    fireEvent.click(action)
+    expect(onGoToArea).toHaveBeenCalledWith('schematic')
+  })
+
+  it('leads with the reading, not the action', async () => {
+    // CTX-343.1 Phase 1: four of six actions are "press the button on the tab
+    // this points at". The sentence is what no tab can say.
+    await renderWith(reading({
+      state: 'regressed', action: 'Re-check the pcb', area: 'pcb', stale_areas: ['pcb'],
+      evidence: 'pcb changed since it was last checked',
+    }))
+
+    expect(await screen.findByText(/Your pcb changed after it was last checked/)).toBeTruthy()
+  })
+
+  it('shows the evidence, so a wrong reading is debuggable by whoever sees it', async () => {
+    await renderWith(reading({ evidence: 'because I said so' }))
+
+    expect(await screen.findByText('because I said so')).toBeTruthy()
+  })
+
+  it('offers no action in the complete state, and congratulates nobody', async () => {
+    /* SPEC-343 §2.6 leaves open what to say when nothing is wrong, and §3 warns
+     * generic praise is worse than silence. Until that is settled it states the
+     * fact and stops. */
+    await renderWith(reading({ state: 'complete', action: null, area: null,
+                               evidence: 'everything has been checked' }))
+
+    expect(await screen.findByText(/all been checked/)).toBeTruthy()
+    expect(screen.queryByText(/well done|great|nice work|looks good/i)).toBeNull()
+  })
+
+  it('renders nothing at all when the reading cannot be computed', async () => {
+    // Advisory. A reading that fails must not take the Overview tab with it.
+    projectStageMock.mockRejectedValue(new Error('daemon unavailable'))
+    render(<Overview projectName="weather-pcb" project={{ name: 'weather-pcb' } as never} />)
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+
+    expect(screen.queryByText('Where you are')).toBeNull()
+    expect(screen.queryByText(/daemon unavailable/)).toBeNull()
   })
 })

@@ -9,6 +9,8 @@ import {
 } from '../lib/projects'
 import { AgentChat } from './AgentChat'
 import { suggestParts, type SuggestionResult } from '../lib/suggestedParts'
+import { projectStage, type StageReading } from '../lib/projectStage'
+import type { Area } from '../lib/areas'
 
 type Status = 'pending' | 'done' | 'error'
 
@@ -57,6 +59,7 @@ export function Overview({
   project,
   onProjectUpdated,
   onCarryToSearch,
+  onGoToArea,
 }: {
   projectName: string
   project: Project | null
@@ -65,6 +68,8 @@ export function Overview({
    *  search." Owned by App, which is what knows about area tabs -- Overview
    *  should not have to know that Components is a sibling tab. */
   onCarryToSearch?: (searchTerm: string) => void
+  /** SPEC-343: the same reason. Overview names a destination; App moves. */
+  onGoToArea?: (area: Area) => void
 }) {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -151,6 +156,10 @@ export function Overview({
           reproduced locally in roughly one full-suite run in eight --
           probe output at the failure read "startEditing clicked" and then
           "reset effect ran". A remount has no such window. */}
+      {/* SPEC-343 §2.1: beside the existing cards, never in front of the tabs.
+          First, because it is the sentence that says whether anything else on
+          this page is the thing to look at. */}
+      <WhereYouAre projectName={projectName} project={project} onGoToArea={onGoToArea} />
       <IntentEditor
         key={projectName}
         projectName={projectName}
@@ -317,6 +326,94 @@ function IntentEditor({
       )}
     </div>
   )
+}
+
+/** Where this project stands -- `SPEC-343` §2.4, rendered.
+ *
+ *  **The sentence is the feature.** `CTX-343.1` Phase 1 measured that four of
+ *  six next actions are "go to the tab this points at and press the button
+ *  already on it" -- but *"your schematic changed after the PCB check"* is
+ *  something no tab can say, because no tab knows about two stages at once.
+ *  So the reading leads and the action is a convenience attached to it.
+ *
+ *  It never navigates. The action is a button the user presses; `SPEC-300`'s
+ *  boundary -- nothing "decides which screen the user is on" -- applies here
+ *  even though this is not an AI surface, because a user cannot tell the
+ *  difference between an app that moved them and an agent that did. */
+function WhereYouAre({
+  projectName,
+  project,
+  onGoToArea,
+}: {
+  projectName: string
+  project: Project | null
+  onGoToArea?: (area: Area) => void
+}) {
+  const [reading, setReading] = useState<StageReading | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setReading(null)
+    projectStage(projectName)
+      .then((r) => { if (!cancelled) setReading(r) })
+      // Advisory. A reading that cannot be computed must not take the Overview
+      // tab down with it -- SPEC-343 §3: a guided surface that is wrong once is
+      // worse than none, and one that breaks the page is worse still.
+      .catch(() => { if (!cancelled) setReading(null) })
+    return () => { cancelled = true }
+    // Re-read whenever the record changes underneath us: a saved intent or a
+    // linked project moves the reading, and a stale one is the bug this whole
+    // surface exists to avoid having.
+  }, [projectName, project?.intent, project?.kicad_project_path])
+
+  if (!reading) return null
+
+  return (
+    <div className="flex flex-col gap-1 rounded border border-line bg-surface p-3 text-sm">
+      <p className="text-xs font-medium uppercase text-fg-muted">Where you are</p>
+      <div className="flex items-baseline justify-between gap-3">
+        <p className="text-sm text-fg-bright">{sentenceFor(reading)}</p>
+        {reading.action && reading.area && (
+          <button
+            type="button"
+            className="shrink-0 text-xs text-fg-tertiary underline hover:text-fg-bright"
+            onClick={() => onGoToArea?.(reading.area as Area)}
+          >
+            {reading.action}
+          </button>
+        )}
+      </div>
+      {/* SPEC-343 §3 and CTX-343.1 Phase 2: a wrong reading must be debuggable
+          by the person seeing it, not only by whoever wrote the ranking. */}
+      <p className="text-xs text-fg-tertiary">{reading.evidence}</p>
+    </div>
+  )
+}
+
+/** One sentence, in the user's terms rather than the state machine's.
+ *
+ *  `complete` deliberately does not congratulate anyone. `SPEC-343` §2.6 leaves
+ *  open what to say when nothing is wrong and §3 warns that generic praise is
+ *  worse than silence, so this states the fact and stops. */
+function sentenceFor(reading: StageReading): string {
+  switch (reading.state) {
+    case 'no_goal':
+      return "You haven't said what you're building yet — everything here answers generically without it."
+    case 'no_files':
+      return 'No KiCad project is linked yet, so there is nothing to check against.'
+    case 'regressed':
+      return `Your ${reading.stale_areas.join(' and ')} changed after it was last checked.`
+    case 'nothing_checked':
+      return 'Nothing has been checked yet.'
+    case 'board_only':
+      return 'The schematic has been checked. The board has not.'
+    case 'schematic_only':
+      return 'The board has been checked. The schematic has not.'
+    case 'both_checked':
+      return 'Schematic and board are both checked.'
+    case 'complete':
+      return 'Schematic, board and enclosure have all been checked.'
+  }
 }
 
 /** SPEC-328 Phase 4 and 5: what kinds of part this project needs.
