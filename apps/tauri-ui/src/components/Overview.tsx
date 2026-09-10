@@ -4,6 +4,7 @@ import {
   appendConversationTurn,
   loadConversation,
   setProjectIntent,
+  setProjectGuidedPath,
   type ConversationTurn,
   type Project,
 } from '../lib/projects'
@@ -159,7 +160,12 @@ export function Overview({
       {/* SPEC-343 §2.1: beside the existing cards, never in front of the tabs.
           First, because it is the sentence that says whether anything else on
           this page is the thing to look at. */}
-      <WhereYouAre projectName={projectName} project={project} onGoToArea={onGoToArea} />
+      <WhereYouAre
+        projectName={projectName}
+        project={project}
+        onGoToArea={onGoToArea}
+        onProjectUpdated={onProjectUpdated}
+      />
       <IntentEditor
         key={projectName}
         projectName={projectName}
@@ -344,16 +350,21 @@ function WhereYouAre({
   projectName,
   project,
   onGoToArea,
+  onProjectUpdated,
 }: {
   projectName: string
   project: Project | null
   onGoToArea?: (area: Area) => void
+  onProjectUpdated?: (project: Project) => void
 }) {
   const [reading, setReading] = useState<StageReading | null>(null)
 
   useEffect(() => {
     let cancelled = false
     setReading(null)
+    // Off means gone, so do not spend a route call computing a reading nobody
+    // will see.
+    if (project?.guided_path === false) return
     projectStage(projectName)
       .then((r) => { if (!cancelled) setReading(r) })
       // Advisory. A reading that cannot be computed must not take the Overview
@@ -364,13 +375,42 @@ function WhereYouAre({
     // Re-read whenever the record changes underneath us: a saved intent or a
     // linked project moves the reading, and a stale one is the bug this whole
     // surface exists to avoid having.
-  }, [projectName, project?.intent, project?.kicad_project_path])
+  }, [projectName, project?.intent, project?.kicad_project_path, project?.guided_path])
+
+  /* SPEC-343 §5, and §2.6 settled: OFF MEANS GONE, not diminished. The way
+     back is a single quiet line where the card was -- if turning it off left
+     no trace, the setting would be unfindable by exactly the user who most
+     needs to undo it. */
+  if (project && project.guided_path === false) {
+    return (
+      <button
+        type="button"
+        className="self-start text-xs text-fg-tertiary underline hover:text-fg-bright"
+        onClick={() => void setProjectGuidedPath(projectName, true)
+          .then((updated: Project) => onProjectUpdated?.(updated))
+          .catch(() => undefined)}
+      >
+        Show where this project stands
+      </button>
+    )
+  }
 
   if (!reading) return null
 
   return (
     <div className="flex flex-col gap-1 rounded border border-line bg-surface p-3 text-sm">
-      <p className="text-xs font-medium uppercase text-fg-muted">Where you are</p>
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-xs font-medium uppercase text-fg-muted">Where you are</p>
+        <button
+          type="button"
+          className="shrink-0 text-xs text-fg-tertiary hover:text-fg-bright"
+          onClick={() => void setProjectGuidedPath(projectName, false)
+            .then((updated: Project) => onProjectUpdated?.(updated))
+            .catch(() => undefined)}
+        >
+          Hide
+        </button>
+      </div>
       <div className="flex items-baseline justify-between gap-3">
         <p className="text-sm text-fg-bright">{sentenceFor(reading)}</p>
         {reading.action && reading.area && (

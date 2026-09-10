@@ -620,6 +620,8 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
                 # record and an empty one both mean "no pack has run yet". The
                 # user state that must survive a re-run lives inside it.
                 "considerations": {},
+                # CTX-343.1 Phase 4: on unless the project says otherwise.
+                "guided_path": True,
                 "notes": None,
             },
         )
@@ -2596,3 +2598,45 @@ class TestProjectConsiderations(LibraryStoreTestCase):
         os.remove(source)
 
         self.assertEqual(store.get_project_considerations("p")["stale_reason"], "source_missing")
+
+
+class TestGuidedPathToggle(LibraryStoreTestCase):
+    """SPEC-343 §5 and §2.6's settled default."""
+
+    def test_it_is_on_when_a_project_has_never_said_otherwise(self):
+        """The default is not a coin toss. The people this surface is for are
+        the ones who will not go looking for a setting to switch it on:
+        defaulting off costs them the whole feature, defaulting on costs a
+        second-time user one click, and it is one sentence."""
+        store.save_project({"name": "p"})
+        self.assertTrue(store.load_project("p")["guided_path"])
+
+    def test_it_round_trips_off_and_back_on(self):
+        store.save_project({"name": "p"})
+        store.set_project_guided_path("p", False)
+        self.assertFalse(store.load_project("p")["guided_path"])
+        store.set_project_guided_path("p", True)
+        self.assertTrue(store.load_project("p")["guided_path"])
+
+    def test_a_non_boolean_is_refused(self):
+        store.save_project({"name": "p"})
+        with self.assertRaises(store.SchemaValidationError):
+            store.set_project_guided_path("p", "yes")
+
+    def test_it_is_per_project_not_per_install(self):
+        """SPEC-343 §5: a maker part-way through one board has different needs
+        from the same person starting another."""
+        store.save_project({"name": "a"})
+        store.save_project({"name": "b"})
+        store.set_project_guided_path("a", False)
+
+        self.assertFalse(store.load_project("a")["guided_path"])
+        self.assertTrue(store.load_project("b")["guided_path"])
+
+    def test_turning_it_off_touches_nothing_else(self):
+        store.save_project({"name": "p", "intent": "a logger"})
+        store.set_project_guided_path("p", False)
+
+        loaded = store.load_project("p")
+        self.assertEqual(loaded["intent"], "a logger")
+        self.assertEqual(loaded["intent_fields"], {})

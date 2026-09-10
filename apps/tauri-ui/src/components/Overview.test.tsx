@@ -9,6 +9,7 @@ const appendConversationTurnMock = vi.fn()
 const setProjectIntentMock = vi.fn()
 const suggestPartsMock = vi.fn()
 const projectStageMock = vi.fn()
+const setProjectGuidedPathMock = vi.fn()
 
 vi.mock('../lib/ipc', () => ({
   submitJob: (...args: unknown[]) => submitJobMock(...args),
@@ -19,6 +20,7 @@ vi.mock('../lib/projects', () => ({
   loadConversation: (...args: unknown[]) => loadConversationMock(...args),
   appendConversationTurn: (...args: unknown[]) => appendConversationTurnMock(...args),
   setProjectIntent: (...args: unknown[]) => setProjectIntentMock(...args),
+  setProjectGuidedPath: (...args: unknown[]) => setProjectGuidedPathMock(...args),
 }))
 
 // CTX-318.5: AgentChat has its own dedicated test file (AgentChat.test.tsx)
@@ -92,6 +94,7 @@ beforeEach(() => {
   setProjectIntentMock.mockReset()
   suggestPartsMock.mockReset()
   projectStageMock.mockReset().mockRejectedValue(new Error('no reading by default'))
+  setProjectGuidedPathMock.mockReset().mockResolvedValue({ name: 'weather-pcb' })
 })
 
 async function renderOverview(project: { name: string; intent?: string | null } | null = { name: 'weather-pcb' }) {
@@ -472,5 +475,64 @@ describe('Overview: SPEC-343 where you are', () => {
 
     expect(screen.queryByText('Where you are')).toBeNull()
     expect(screen.queryByText(/daemon unavailable/)).toBeNull()
+  })
+})
+
+
+describe('Overview: SPEC-343 the toggle', () => {
+  const READING = {
+    state: 'nothing_checked', action: 'Check the schematic', area: 'schematic',
+    evidence: 'nothing checked yet', stale_areas: [],
+  }
+
+  async function renderWith(project: Record<string, unknown>) {
+    projectStageMock.mockResolvedValue(READING)
+    render(<Overview projectName="weather-pcb" project={project as never} />)
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+  }
+
+  // TEST-006
+  it('006_turning it off leaves Overview as it was', async () => {
+    /* SPEC-343 §2.6, settled: off means GONE, not diminished. A user who
+     * switches something off and gets a smaller version of it is being
+     * negotiated with. */
+    await renderWith({ name: 'weather-pcb', intent: 'a logger', guided_path: false })
+
+    expect(screen.queryByText('Where you are')).toBeNull()
+    expect(screen.queryByText('Nothing has been checked yet.')).toBeNull()
+    // The intent editor -- the rest of Overview -- is untouched.
+    expect(screen.getByText("What you're building")).toBeTruthy()
+  })
+
+  it('leaves a way back, because an unfindable setting is not a setting', async () => {
+    await renderWith({ name: 'weather-pcb', intent: 'a logger', guided_path: false })
+
+    fireEvent.click(screen.getByRole('button', { name: /Show where this project stands/ }))
+
+    await waitFor(() => expect(setProjectGuidedPathMock).toHaveBeenCalledWith('weather-pcb', true))
+  })
+
+  it('does not spend a route call on a reading nobody will see', async () => {
+    await renderWith({ name: 'weather-pcb', intent: 'a logger', guided_path: false })
+
+    expect(projectStageMock).not.toHaveBeenCalled()
+  })
+
+  it('is on when the project has never said otherwise', async () => {
+    /* The default is not a coin toss: the people this is for are the ones who
+     * will not go looking for a setting to switch it on. Defaulting off costs
+     * them the whole feature; defaulting on costs a second-time user one click. */
+    await renderWith({ name: 'weather-pcb', intent: 'a logger' })
+
+    expect(await screen.findByText('Where you are')).toBeTruthy()
+  })
+
+  it('hides on request', async () => {
+    await renderWith({ name: 'weather-pcb', intent: 'a logger', guided_path: true })
+    await screen.findByText('Where you are')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
+
+    await waitFor(() => expect(setProjectGuidedPathMock).toHaveBeenCalledWith('weather-pcb', false))
   })
 })

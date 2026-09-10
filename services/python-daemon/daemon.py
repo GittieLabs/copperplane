@@ -1040,6 +1040,11 @@ def project_suggest_parts(name: str = None, brief: str = None) -> dict:
     )
 
 
+def project_set_guided_path(name: str, enabled: bool) -> dict:
+    """The project.set_guided_path route (SPEC-343 §5)."""
+    return library_store.set_project_guided_path(name, enabled)
+
+
 def project_stage_reading(name: str) -> dict:
     """The project.stage route (SPEC-343 §2.4).
 
@@ -2700,6 +2705,7 @@ def _build_routes() -> dict:
         routes["project.rename"] = project_rename
         routes["project.set_intent"] = project_set_intent
         routes["project.set_intent_fields"] = project_set_intent_fields
+        routes["project.set_guided_path"] = project_set_guided_path
 
         routes["project.set_check_result"] = project_set_check_result
         routes["project.add_part_reference"] = project_add_part_reference
