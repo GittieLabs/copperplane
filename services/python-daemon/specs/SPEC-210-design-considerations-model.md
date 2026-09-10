@@ -72,6 +72,104 @@ user_facing: true
 
 ## 2. System Architecture & Design Choices
 
+### 2.0 Measured 2026-09-10: there is enough to compute on, and the netlist is why
+
+`CTX-210.1` Phase 1 asked the question this whole family stands on before modelling anything: does a
+real project hold enough computable signal to trigger a consideration at all? If it does not, every
+consideration is a `judgement`, a judgement may not be raised unprompted (§1's initiative rule), and
+this is the chat surface that already exists wearing a framework's clothes.
+
+**It does, decisively — but not from the sources this spec assumed.** Measured against the
+maintainer's own board.
+
+What the app holds today, from the real routes:
+
+| source | carries | connectivity |
+| :--- | :--- | :--- |
+| `kicad_list_board_components` | reference, footprint, value, position, rotation, courtyard, has_model, dnp | **none** |
+| `kicad_list_schematic_components` | the above plus `lib_id` and `pin_count` | **none** |
+| `structural_checks` | pin count against pad count | n/a |
+| `intent_fields` (`CTX-328.1`) | `board_stage`, `input_supply`, `current_budget`, `environment` | n/a |
+| ERC / DRC / `fabrication_profile` | existing findings and limits | indirect |
+
+Two findings change the shape of this spec.
+
+**First: `lib_id` is a functional taxonomy and nobody was using it as one.** The eleven symbols on
+that board read `Device:LED`, `Device:R`, `Switch:SW_Push`, `power:+5V`, `power:GND`,
+`MCU_Module:Arduino_UNO_R3`, `Mechanical:MountingHole`. That is KiCad's own classification of what a
+part *is*, sitting in a file the app already parses. It is a **computed** fact in §2.1's sense —
+read, not inferred — and it makes presence-and-count triggers available immediately. §1's own worked
+example needs exactly two facts, *"you are powering this from USB"* and *"you have twelve LEDs"*, and
+**both are computable today**: the second from `lib_id`, the first from `input_supply`.
+
+**Second, and larger: full pin-level connectivity is one command away, and nothing in the app uses
+it.** `kicad-cli sch export netlist --format kicadxml` returns every net with its `ref.pin` nodes —
+33 nets on that board, including `Net-(D1-A)` joining `D1.2` to `R1.1`. That is precisely the *"does
+this LED have a series resistor"* fact, and it is a file fact rather than a model's opinion.
+
+The app does not read it. `kicad_cli.py` has no netlist function, and neither the board reader nor
+the schematic reader carries a net. So topology-class considerations are **not blocked, they are
+unbuilt** — one `kicad-cli` call and an XML parse, not a research problem.
+
+**What this settles.** The `computed` class is real and much wider than presence-and-count. It
+reaches connectivity, which is what `SPEC-211`'s power path needs and what would otherwise have made
+that spec unbuildable. Nothing here is descoped; the netlist read becomes a prerequisite this
+context did not know it had.
+
+### 2.0.1 Measured 2026-09-10: the board carries geometry, and the calculators are the bridge
+
+Raised by the maintainer while looking at KiCad's own Calculator Tools: *"kicad offers a series of
+calculators, that i don't understand, that seem useful to a user if they understand how to use them
+and when. and useful if the app needs them as well. would these tie into what we get from the
+netlists?"*
+
+They do, and the answer changes what a pack is.
+
+**The board file carries more than connectivity.** Each routed segment is
+`(width …) (layer …) (net "…")` with real endpoints, so per-net width, layer and length are all
+computed facts. Measured on the maintainer's board:
+
+| net | routed | width |
+| :--- | ---: | :--- |
+| `GND` | 21.50 mm | 0.2 mm |
+| `Net-(A1-D3)` | 38.99 mm | 0.2 mm |
+| `Net-(D1-A)` | 16.59 mm | 0.2 mm |
+| `Net-(A1-D2)` | 5.46 mm | 0.2 mm |
+
+**What is missing is current, and it is missing from the files, not from the parser.** Nothing in the
+schematic or the board says how much current flows anywhere. That is not a gap to close with better
+reading; it is a fact nobody has written down yet.
+
+**KiCad's calculators are the standards formulas that turn geometry into an answer** — track width
+and electrical spacing from IPC-2221, via current, fusing current, the regulator divider. They are
+deterministic and they have a citable source, which makes them precisely this spec's `cited` class,
+and they belong in §2.1's `arithmetic` field: *"where a claim rests on a calculation, the calculation
+itself, shown."*
+
+So the loop closes, and the shape of it is the argument for this whole family:
+
+1.  **Netlist** — `+5V` reaches these pins. *computed*
+2.  **Board** — routed at 0.2 mm on `F.Cu`, 21.5 mm long. *computed*
+3.  **Question** — how much current does this board draw? *the user answers, and the answer becomes
+    stated intent*
+4.  **Calculator** — the standard's minimum width for that current and temperature rise. *cited*
+5.  **Comparison** — a claim about this board, with its arithmetic shown.
+
+**Step 3 is why the question mechanism is not decoration.** §1 already says the question is the
+interesting output shape; this is the concrete reason. The calculators cannot run without a current,
+the files do not contain one, and asking is the only honest way to get it. §1's own worked example —
+*"You are powering this from USB and you have twelve LEDs. What is your total current budget?"* — is
+exactly step 3, and it exists to unlock exactly step 4.
+
+**A pack is therefore three things, not two:** a trigger, a formula, and a shown calculation. That is
+a correction to the shape §2.1 implies, where `arithmetic` reads as an optional extra rather than
+the point.
+
+**One constraint, stated before anyone builds on this.** A trace-width number is a `cited` claim and
+its constants must be read from the standard, never recalled. §3 says the first time this app is
+confidently wrong about a board the user understands better than it does, the whole family is spent
+— and a plausible-looking formula with a misremembered exponent is the most likely way to spend it.
+
 ### 2.1 The record
 
 A **consideration** is the unit. The proposed shape, to be settled during implementation:
