@@ -9,7 +9,8 @@ last_updated: 2026-08-18
 target_version: n/a
 location: "services/python-daemon/specs/SPEC-203-supplier-api-integration.md"
 parent_spec: "../../../specs/SPEC-000-architecture-overview.md"
-child_specs: []
+child_specs:
+  - "SPEC-212-datasheet-resolution.md"
 ---
 
 # SPEC-203: Supplier API Integration — RETIRED, NOT BUILT

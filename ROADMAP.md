@@ -1719,6 +1719,22 @@ nothing on stderr — so every write must be followed by a verification run. A r
 against the tutorial board yields **27** findings rather than hundreds, and the three headline ones
 all land on D1, the same component `SPEC-113` is built around.
 
+#### [SPEC-212](services/python-daemon/specs/SPEC-212-datasheet-resolution.md) — Datasheet Resolution for Parts Nobody Publishes Individually — Draft, written 2026-09-10
+*Module:* `services/python-daemon` · *Depends on:* SPEC-306 · *Parent:* SPEC-203
+
+**Reopens exactly one paragraph of the retired `SPEC-203`, and nothing else.** That spec ends with
+*"If this project ever does need distributor data, TME is the starting point"*, and this is that
+circumstance.
+
+Measured 2026-09-10 through the app's own `cache_datasheet`: guessed datasheet URLs resolve **3 of
+3** for `ATtiny85` and **0 of 3** for both a 220R resistor and a 0.1uF capacitor. No prompt fixes
+it — a passive's datasheet is a family document and there is no per-part URL to guess. `SPEC-328`
+made it visible by sending users to search for categories rather than for ICs they already named.
+
+`SPEC-203` §2.1's finding is untouched: distributor APIs still contribute nothing for pins,
+footprints or design guidance. This takes only the datasheet URL, only from TME, only where the
+guess cannot work. **Blocked on a human re-reading TME's terms** — see §3.
+
 #### [SPEC-211](services/python-daemon/specs/SPEC-211-power-path-review.md) — The Power Path Review — Draft
 
 *Module:* `services/python-daemon` + `apps/tauri-ui` · *Depends on:* SPEC-210, SPEC-205, SPEC-328
@@ -1944,6 +1960,8 @@ version already shipping: current-milestone debt, not new work.
 *   `SPEC-320` / `SPEC-404` — managed sign-in and hosted access. Waiting on real users testing the
     self-managed app first, so the metering is shaped by what people do rather than by a guess.
 *   `SPEC-341` — declined after measurement; see the tombstone at the top of that spec.
+*   `SPEC-212` — written 2026-09-10 and deliberately blocked: it cannot be built until a human has
+    re-read TME's API terms. `SPEC-203` §2.3's reading is second-hand here.
 *   `SPEC-403` — cross-platform verification. Real, and the largest standing gap in what this
     project can honestly claim: Windows and Linux live paths are still CI-only.
 
