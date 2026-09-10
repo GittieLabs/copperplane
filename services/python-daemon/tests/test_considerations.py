@@ -239,3 +239,54 @@ class TestPackQuietness(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRealPack(unittest.TestCase):
+    """SPEC-210 §3's bar: measurement against a real board with its false
+    positives counted, not plausibility.
+
+    Both fixtures are real files run through the real kicad-cli. The broken one
+    is committed on purpose, because §3 names that as a real work item: without
+    it a pack can only be tested when a user happens to have the bug.
+    """
+
+    _BROKEN = os.path.join(os.path.dirname(__file__), "fixtures", "led_no_resistor.kicad_sch")
+
+    def setUp(self):
+        import kicad_cli
+        if not kicad_cli.__dict__.get("find_kicad_cli"):
+            self.skipTest("kicad_cli unavailable")
+        try:
+            kicad_cli.find_kicad_cli()
+        except Exception:
+            self.skipTest("kicad-cli not found on this machine.")
+
+    def _nets(self, path):
+        import kicad_cli
+        return kicad_cli.export_netlist(path)["nets"]
+
+    def test_the_pack_raises_on_a_board_broken_on_purpose(self):
+        import consideration_packs as packs
+        raised = packs.run(self._nets(self._BROKEN))
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["id"], "led_without_series_resistor")
+        self.assertEqual(raised[0]["trigger"]["ref"], "+5V", "the ANODE's net, not the cathode's")
+
+    def test_the_cathode_net_stays_silent_on_the_same_broken_board(self):
+        """The regression that matters. The first version of this rule fired on
+        the ground net because an LED's cathode sits there -- a claim that was
+        false about a board that was correct. It must stay false-free even on a
+        board that IS broken."""
+        import consideration_packs as packs
+        raised = packs.run(self._nets(self._BROKEN))
+
+        self.assertNotIn("GND", [c["trigger"]["ref"] for c in raised])
+
+    def test_only_one_pack_is_registered_and_that_is_deliberate(self):
+        """A second pack was written, run against a real board, and withdrawn
+        the same hour -- it could not tell a supply rail from ground, because
+        KiCad marks both `power_in`. The registry records the outcome; the
+        module records why."""
+        import consideration_packs as packs
+        self.assertEqual(len(packs.PACKS["power"]), 1)

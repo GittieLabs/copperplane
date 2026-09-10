@@ -1197,6 +1197,9 @@ def _backfill_project_intent(record: dict) -> dict:
     # this family needs lives INSIDE the object, per-field, not in whether the
     # object exists.
     record.setdefault("intent_fields", {})
+    # SPEC-210: `{}` rather than `None`, following `check_display` -- an absent
+    # record and an empty one both mean "no pack has run yet".
+    record.setdefault("considerations", {})
     return record
 
 
@@ -1822,6 +1825,136 @@ def get_project_review_result(name: str, area: str) -> dict | None:
                 stale_reason = "source_changed"
 
     return {**stored, "stale_reason": stale_reason}
+
+
+# --- Considerations (SPEC-210) -----------------------------------------
+# SPEC-210 section 2.6 asked whether these live under `last_results` beside
+# check results or in their own store, and said SPEC-113 left the same question
+# open for structural findings so the two should be answered together.
+#
+# **Their own key, and the reason is not tidiness.** `last_results` is
+# regenerated wholesale by each check run and capped for an LLM context window.
+# A consideration carries the USER's state -- answered, dismissed with a reason
+# -- and must survive the next run of the pack that raised it. Storing it
+# somewhere that gets overwritten and truncated would lose exactly the thing
+# section 2.3 says buys "not asking twice", and it would lose it silently.
+def set_project_considerations(
+    name: str, considerations: list, source_path: str = None,
+) -> dict:
+    """Store what a pack raised, without discarding what the user already said.
+
+    Merged by consideration id, and **the stored state always wins**. A pack
+    re-running must not un-dismiss a question the user has already answered:
+    that is section 2.3's whole point, and getting it wrong turns the feature
+    into the thing that asks the same question every time you open the project.
+
+    A consideration that a re-run no longer raises is DROPPED. It was true of a
+    design that has changed, and keeping it would mean carrying a claim nothing
+    can currently justify -- the opposite of section 2.2's trigger rule.
+    """
+    stored = {c["id"]: c for c in (load_project(name).get("considerations") or {}).get("items", [])}
+    merged = []
+    for raised in considerations:
+        previous = stored.get(raised["id"])
+        if previous:
+            merged.append({
+                **raised,
+                "state": previous.get("state", raised.get("state")),
+                "state_reason": previous.get("state_reason"),
+                "raised_at": previous.get("raised_at", raised.get("raised_at")),
+            })
+        else:
+            merged.append(raised)
+
+    record = {"items": merged, "stored_at": datetime.now(timezone.utc).isoformat()}
+    if source_path and os.path.exists(source_path):
+        # SPEC-210 section 2.6: reuse SPEC-339's staleness rather than inventing
+        # a second one. A dismissal is only trustworthy while the design it was
+        # about is the design on disk.
+        record["source"] = _file_identity(source_path)
+
+    project = load_project(name)
+    project["considerations"] = record
+    return save_project(project)
+
+
+def get_project_considerations(name: str) -> dict:
+    """What was raised, with whether the design has moved since.
+
+    `stale_reason` is computed at read time and never stored, matching
+    `get_project_review_result` exactly -- a stored staleness flag is a claim
+    about a file, and files change without anyone telling this app.
+
+    A stale set is returned, labelled, and left alone. Re-running a pack is
+    cheap here, unlike a review, but re-running it *automatically* would hide
+    that the answer changed, and the user asking is what makes them read it.
+    """
+    record = load_project(name).get("considerations") or {}
+    items = record.get("items", [])
+
+    stale_reason = None
+    source = record.get("source") or {}
+    path = source.get("path")
+    if path and not os.path.exists(path):
+        stale_reason = "source_missing"
+    elif path:
+        stat = os.stat(path)
+        if stat.st_size != source.get("size") or stat.st_mtime != source.get("mtime"):
+            if content_hash_of_file(path) != source.get("content_hash"):
+                stale_reason = "source_changed"
+
+    return {
+        "items": items,
+        "stored_at": record.get("stored_at"),
+        "stale_reason": stale_reason,
+    }
+
+
+def set_consideration_state(
+    name: str, consideration_id: str, state: str, reason: str = None,
+) -> dict:
+    """Record what the user did with a consideration.
+
+    A dismissal needs a reason, per SPEC-210 section 2.3. Not bureaucracy: a
+    dismissal with no reason is indistinguishable from one made by accident,
+    and the reason is what lets the app tell the user later why this stopped
+    being asked.
+    """
+    considerations = _considerations_module()
+    if state not in considerations.STATES:
+        raise SchemaValidationError(
+            f"'{state}' is not a consideration state. Expected one of "
+            f"{', '.join(considerations.STATES)}."
+        )
+    if state == considerations.DISMISSED and not (reason or "").strip():
+        raise SchemaValidationError(
+            "Dismissing a consideration needs a reason -- otherwise it cannot "
+            "be told apart from one dismissed by accident, and the app can "
+            "never say why it stopped asking."
+        )
+
+    project = load_project(name)
+    record = project.get("considerations") or {}
+    items = record.get("items", [])
+    for item in items:
+        if item.get("id") == consideration_id:
+            item["state"] = state
+            item["state_reason"] = reason
+            break
+    else:
+        raise SchemaValidationError(
+            f"No consideration {consideration_id!r} has been raised for this project."
+        )
+
+    project["considerations"] = {**record, "items": items}
+    return save_project(project)
+
+
+def _considerations_module():
+    """Imported lazily, like `_capability_profile` and for the same reason:
+    `library_store` must keep loading when a sibling module cannot."""
+    import considerations
+    return considerations
 
 
 def add_project_part_reference(project_name: str, part_id: str) -> dict:

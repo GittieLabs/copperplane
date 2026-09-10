@@ -616,6 +616,10 @@ class TestProjectDirectoryLink(LibraryStoreTestCase):
                 "fabrication_profile": None,
                 "check_display": {},
                 "intent_fields": {},
+                # CTX-210.1 Phase 4: `{}` following `check_display` -- an absent
+                # record and an empty one both mean "no pack has run yet". The
+                # user state that must survive a re-run lives inside it.
+                "considerations": {},
                 "notes": None,
             },
         )
@@ -2476,3 +2480,119 @@ class TestProjectIntentFields(LibraryStoreTestCase):
         loaded = store.load_project("p")
         self.assertEqual(loaded["intent"], "a battery-powered temperature logger")
         self.assertEqual(loaded["intent_fields"]["board_stage"], "for_me")
+
+
+class TestProjectConsiderations(LibraryStoreTestCase):
+    """SPEC-210 §2.3 and §2.6: state that survives the next run of the pack.
+
+    SPEC-210 §2.6 asked whether these live under `last_results` beside check
+    results or in their own store. Their own, and not for tidiness:
+    `last_results` is regenerated wholesale by each check run and capped for an
+    LLM context window, while a consideration carries the USER's state and must
+    survive the pack re-running. Storing it there would lose exactly the thing
+    §2.3 buys -- "not asking twice" -- and lose it silently.
+    """
+
+    def _c(self, cid="copperplane.x", state="raised"):
+        return {"id": cid, "type": cid, "domain": "power", "claim_class": "computed",
+                "trigger": {"kind": "net", "ref": "Net-(D1-A)"}, "source": None,
+                "arithmetic": None, "explanation": "e", "state": state,
+                "raised_at": "2026-09-10T00:00:00+00:00"}
+
+    def test_a_project_with_no_pack_run_reads_as_empty_not_missing(self):
+        store.save_project({"name": "p"})
+        got = store.get_project_considerations("p")
+        self.assertEqual(got["items"], [])
+        self.assertIsNone(got["stale_reason"])
+
+    # TEST-006
+    def test_006_an_answered_question_is_not_asked_again(self):
+        """§2.3's second purpose. A pack re-running must not un-dismiss what the
+        user already decided -- get this wrong and the feature becomes the thing
+        that asks the same question every time you open the project."""
+        store.save_project({"name": "p"})
+        store.set_project_considerations("p", [self._c()])
+        store.set_consideration_state("p", "copperplane.x", "dismissed", "not on this board")
+
+        # The pack runs again and raises the same thing, freshly, as `raised`.
+        store.set_project_considerations("p", [self._c()])
+
+        item = store.get_project_considerations("p")["items"][0]
+        self.assertEqual(item["state"], "dismissed", "the user's answer must win over a re-run")
+        self.assertEqual(item["state_reason"], "not on this board")
+
+    def test_a_consideration_a_rerun_no_longer_raises_is_dropped(self):
+        """It was true of a design that has changed. Keeping it would mean
+        carrying a claim nothing can currently justify, which is the opposite
+        of §2.2's trigger rule."""
+        store.save_project({"name": "p"})
+        store.set_project_considerations("p", [self._c("copperplane.a"), self._c("copperplane.b")])
+        store.set_project_considerations("p", [self._c("copperplane.a")])
+
+        self.assertEqual([i["id"] for i in store.get_project_considerations("p")["items"]],
+                         ["copperplane.a"])
+
+    def test_dismissing_without_a_reason_is_refused(self):
+        """A dismissal with no reason cannot be told apart from one made by
+        accident, and the app can never say why it stopped asking."""
+        store.save_project({"name": "p"})
+        store.set_project_considerations("p", [self._c()])
+        with self.assertRaises(store.SchemaValidationError):
+            store.set_consideration_state("p", "copperplane.x", "dismissed", "  ")
+
+    def test_a_state_that_is_not_a_state_is_refused(self):
+        store.save_project({"name": "p"})
+        store.set_project_considerations("p", [self._c()])
+        with self.assertRaises(store.SchemaValidationError):
+            store.set_consideration_state("p", "copperplane.x", "probably fine")
+
+    def test_setting_the_state_of_something_never_raised_is_refused(self):
+        store.save_project({"name": "p"})
+        with self.assertRaises(store.SchemaValidationError):
+            store.set_consideration_state("p", "copperplane.never", "satisfied")
+
+    def test_a_design_change_marks_the_set_stale_rather_than_rerunning_it(self):
+        """§2.6: reuse SPEC-339's staleness rather than inventing a second one.
+        A dismissal is only trustworthy while the design it was about is the
+        design on disk."""
+        import time
+        source = os.path.join(self._tmpdir.name, "board.kicad_sch")
+        with open(source, "w", encoding="utf-8") as fh:
+            fh.write("(kicad_sch original)")
+
+        store.save_project({"name": "p"})
+        store.set_project_considerations("p", [self._c()], source_path=source)
+        self.assertIsNone(store.get_project_considerations("p")["stale_reason"])
+
+        time.sleep(0.01)
+        with open(source, "w", encoding="utf-8") as fh:
+            fh.write("(kicad_sch changed materially)")
+
+        self.assertEqual(store.get_project_considerations("p")["stale_reason"], "source_changed")
+
+    def test_a_rewrite_that_changed_nothing_does_not_mark_it_stale(self):
+        """KiCad rewrites files it did not alter. SPEC-339 learned this: the
+        stat disagreeing is a question, not a verdict."""
+        import time
+        source = os.path.join(self._tmpdir.name, "board.kicad_sch")
+        with open(source, "w", encoding="utf-8") as fh:
+            fh.write("(kicad_sch same)")
+
+        store.save_project({"name": "p"})
+        store.set_project_considerations("p", [self._c()], source_path=source)
+
+        time.sleep(0.01)
+        with open(source, "w", encoding="utf-8") as fh:
+            fh.write("(kicad_sch same)")
+
+        self.assertIsNone(store.get_project_considerations("p")["stale_reason"])
+
+    def test_a_deleted_source_says_so_distinctly(self):
+        source = os.path.join(self._tmpdir.name, "board.kicad_sch")
+        with open(source, "w", encoding="utf-8") as fh:
+            fh.write("(kicad_sch x)")
+        store.save_project({"name": "p"})
+        store.set_project_considerations("p", [self._c()], source_path=source)
+        os.remove(source)
+
+        self.assertEqual(store.get_project_considerations("p")["stale_reason"], "source_missing")
