@@ -48,6 +48,41 @@ user_facing: true
 
 ## 2. System Architecture & Design Choices
 
+### 2.0 Measured 2026-09-10: the reading is unambiguous, and the action is the thin part
+
+`CTX-343.1` Phase 1 tested §2.4's claim before anything was built on it, on two halves that fail
+differently: is the reading unambiguous, and is there a real next action.
+
+**The reading is unambiguous almost everywhere.** Enumerating the state space — intent, linked
+project, schematic checked, board checked, enclosure, staleness — **2 of 64 combinations** are
+ambiguous, and they are the same state: *nothing has been checked at all*, where both "check the
+schematic" and "check the board" are equally defensible. Every other state has one defensible
+reading.
+
+**The next action is thin, and that is the finding.** Four of the six actions are *"go to the tab
+this points at and press the button already on it"*: check the schematic, check the board, generate
+an enclosure, re-run what is behind. Only two — say what you are building, and link a KiCad project —
+are things the user could not already be looking at.
+
+**But the reading is not thin, and that is where the value is.** *"Your schematic changed after the
+PCB check"* is something **no tab can say**, because no tab knows about two stages at once. Overview
+is the only surface positioned to know it.
+
+So the honest shape is the reverse of what §5 implies: **a "where am I" line is the feature, and
+"what's next" is a convenience attached to it.** That is smaller than a guided path and it is the
+part that could not be built anywhere else.
+
+**One ordering problem this exposed, and it is `SPEC-343` §2.6's open question made concrete.**
+Staleness reaches 32 of 64 combinations — half the space — because a stale check currently outranks
+everything. That is wrong at least once: a project where the user never said what they are building
+*and* has a stale check should say the first, not the second. Ranking is a real decision, not a
+detail, and `SPEC-210` §2.6 left the same question open. Answer both together.
+
+**Sample weakness, stated rather than discovered later.** Only three real projects exist on the
+maintainer's machine and two are in near-identical states, so the state space was enumerated rather
+than sampled. Enumeration proves the reading is *decidable*; it does not prove the states occur in
+the proportions a real user would hit.
+
 ### 2.1 Inherited from `SPEC-300`, not re-decided here
 
 Two of that spec's rules settle most of this one, and both are load-bearing:
