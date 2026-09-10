@@ -1,7 +1,7 @@
 ---
 id: SPEC-326
 title: "Component Volume Placeholders"
-status: In-Progress
+status: Completed
 type: Feature
 created: 2026-09-01
 last_updated: 2026-09-03
@@ -15,7 +15,22 @@ user_facing: true
 
 # SPEC-326: Component Volume Placeholders
 
-> **Still open, 2026-09-03:** the labelled bounding solid this spec's §1 promises — *"A footprint with no resolvable model gets a labelled bounding solid, a clearance proxy, never presented as a real model"* — is **not built**. `CTX-326.1` measures courtyards, `CTX-326.2` recommends an interior height and `CTX-326.3` made the board the source of truth, but nothing renders placeholder geometry in the 3D view. The source-of-truth question the roadmap also listed here *is* settled, by `CTX-326.3`.
+> **Closed 2026-09-09 by `CTX-326.4`.** The labelled bounding solid §1 promises is built: a
+> clearance volume per component, positioned from the board's own `at`, sized from the
+> courtyard, and only ever as tall as one of §2.3's sources says. `CTX-326.1` measures
+> courtyards, `CTX-326.2` recommends an interior height, `CTX-326.3` made the board the source
+> of truth, and `CTX-326.4` renders it.
+>
+> **Preview only, deliberately.** Volumes reach the `.glb` and never the `.step`. The STEP is
+> the fabrication artifact, and a stated envelope inside it opens in any CAD tool as ordinary
+> solid geometry with nothing marking it a guess — §1's second non-goal. Because the boxes are
+> built with `trimesh` and never enter the solid FreeCAD builds, that is structural rather than
+> a rule anyone has to remember.
+>
+> **A component with no height gets no volume**, per §2.3. On the maintainer's own tutorial
+> board that is six of eight, so how many are missing is reported next to how many are shown —
+> a preview with two parts in it and nothing said reads as a finished picture of a nearly
+> empty board.
 
 ## 1. Executive Summary & Goals
 

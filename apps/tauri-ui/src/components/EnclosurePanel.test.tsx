@@ -13,6 +13,7 @@ const getComponentHeightsMock = vi.fn()
 const componentEnvelopesMock = vi.fn()
 const linkedProjectBoardMock = vi.fn()
 const setProjectCheckResultMock = vi.fn()
+const loadProjectMock = vi.fn()
 
 vi.mock('../lib/enclosure', () => ({
   generateEnclosure: (...args: unknown[]) => generateEnclosureMock(...args),
@@ -31,6 +32,7 @@ vi.mock('../lib/kicadProject', () => ({
 
 vi.mock('../lib/projects', () => ({
   setProjectCheckResult: (...args: unknown[]) => setProjectCheckResultMock(...args),
+  loadProject: (...args: unknown[]) => loadProjectMock(...args),
 }))
 
 vi.mock('../lib/boardAdvisor', () => ({
@@ -156,6 +158,7 @@ beforeEach(() => {
   // open-in-KiCad discovery path they were written for.
   linkedProjectBoardMock.mockReset().mockResolvedValue(null)
   setProjectCheckResultMock.mockReset().mockResolvedValue({ name: 'test-project' })
+  loadProjectMock.mockReset().mockResolvedValue({ name: 'test-project', component_heights: {} })
   pickPcbFileMock.mockReset()
   listOpenBoardsMock.mockReset().mockResolvedValue({ status: 'no_board_open' })
   openKicadMock.mockReset().mockResolvedValue(undefined)
@@ -325,6 +328,135 @@ describe('EnclosurePanel: Board mode -- list-first picker', () => {
     screen.getByText(/Fillet radius \(mm\)/)
     screen.getByText(/Standoff height \(mm\)/)
     screen.getByText(/rectangular box sized to your board's bounding box/)
+  })
+
+  it('measures with the heights the user actually supplied, not an empty set', async () => {
+    /* CTX-326.4. Found while wiring the volumes: this panel called
+     * componentEnvelopes(null, pcbPath, {}) -- a literal empty object -- so
+     * every height typed into the Components tab was ignored by the one
+     * surface that exists to use it. SPEC-326 §2.3's third source worked
+     * everywhere except here, and the recommended interior height was
+     * quietly too short for any board with an unmodelled part. */
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    loadProjectMock.mockResolvedValue({
+      name: 'test-project',
+      component_heights: { 'Battery:BatteryHolder_Keystone_3000': 20 },
+    })
+    componentEnvelopesMock.mockResolvedValue({
+      min_interior_height_mm: 20, tallest: { reference: 'BT1' },
+      measured: 1, stated: 1, unknown: 0, envelopes: [], components: [],
+    })
+
+    render(<EnclosurePanel projectName="test-project" />)
+
+    await waitFor(() => expect(componentEnvelopesMock).toHaveBeenCalled())
+    const supplied = componentEnvelopesMock.mock.calls[0][2]
+    expect(supplied).toEqual({ 'Battery:BatteryHolder_Keystone_3000': 20 })
+  })
+
+  it('asks for component volumes only when the user turns them on', async () => {
+    // SPEC-326 §2.4: off by default. The enclosure is what was asked for;
+    // boxes standing in for parts are a different picture.
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValue(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
+    expect(generateEnclosureMock.mock.calls[0][0].show_component_volumes).toBe(false)
+
+    fireEvent.click(screen.getByLabelText('Show component volumes'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalledTimes(2))
+    expect(generateEnclosureMock.mock.calls[1][0].show_component_volumes).toBe(true)
+  })
+
+  it('says how many volumes were shown and where each height came from', async () => {
+    // TEST-009.
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({
+      ...fakeResult,
+      component_volumes: {
+        shown: 2, from_package_dimensions: 0, from_you: 2, modelled: 3, omitted: 0,
+      },
+    })))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    expect(await screen.findByText(/2 component volumes drawn/)).toBeTruthy()
+    expect(screen.getByText(/2 from a height you entered/)).toBeTruthy()
+    // A modelled part is drawn as real geometry, never boxed -- SPEC-326
+    // §2.3's first source is "not a placeholder at all".
+    expect(screen.getByText(/3 components have a real 3D model/)).toBeTruthy()
+    // Never presented as a model of the part -- SPEC-326's second non-goal.
+    expect(screen.getByText(/not a\s+model of the part/)).toBeTruthy()
+  })
+
+  it('never boxes a component that already has a real 3D model', async () => {
+    /* Reported from the running app: "i don't see any volumes created." The
+     * toggle was off, but checking it would have shown the wrong thing --
+     * the only two volumes drawn on the maintainer's own board were D1 and
+     * R1, the only two parts with real models, while SW1 and the Arduino
+     * module A1 got nothing. SPEC-326 §2.3 source 1 says a real model is
+     * "Not a placeholder at all"; drawing a stated envelope over a measured
+     * one is the confusion §2.4 exists to prevent. */
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({
+      ...fakeResult,
+      component_volumes: {
+        shown: 0, from_package_dimensions: 0, from_you: 0, modelled: 2, omitted: 6,
+      },
+    })))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    // This is the real state of the tutorial board: nothing to draw, two
+    // parts already real, six with no height from any source.
+    expect(await screen.findByText(/No component volumes were drawn/)).toBeTruthy()
+    expect(screen.getByText(/2 components have a real 3D model/)).toBeTruthy()
+    expect(screen.getByText(/6 components are missing from this preview/)).toBeTruthy()
+  })
+
+  it('names the components missing from the preview, rather than looking complete', async () => {
+    /* TEST-010, and the whole reason `omitted` is reported. On the
+     * maintainer's own tutorial board it really is 2 shown of 8: a preview
+     * with two parts in it and no warning reads as a finished picture of a
+     * nearly empty board. */
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({
+      ...fakeResult,
+      component_volumes: {
+        shown: 2, from_package_dimensions: 0, from_you: 2, modelled: 0, omitted: 6,
+      },
+    })))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    expect(await screen.findByText(/6 components are missing from this preview/)).toBeTruthy()
+    expect(screen.getByText(/box may need to be taller than it looks/)).toBeTruthy()
+  })
+
+  it('says nothing about volumes when they were not asked for', async () => {
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve(fakeResult)))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    await waitFor(() => expect(generateEnclosureMock).toHaveBeenCalled())
+    // The checkbox that offers them is of course still there; what must be
+    // absent is any REPORT about volumes that were never drawn.
+    expect(screen.queryByText(/volumes? shown/i)).toBeNull()
+    expect(screen.queryByText(/missing from this preview/i)).toBeNull()
+    expect(screen.queryByText(/No component volumes could be drawn/i)).toBeNull()
   })
 
   it('submitting Board mode includes pcb_path, omits width/depth/project_name', async () => {

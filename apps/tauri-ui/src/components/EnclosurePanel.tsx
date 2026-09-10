@@ -16,7 +16,7 @@ import {
 } from '../lib/enclosure'
 import { listOpenBoards, openKicad, type BoardCandidate, type ListOpenBoardsResult } from '../lib/boardAdvisor'
 import { componentEnvelopes, linkedProjectBoard, type EnvelopeResult } from '../lib/kicadProject'
-import { setProjectCheckResult } from '../lib/projects'
+import { loadProject, setProjectCheckResult } from '../lib/projects'
 import { AgentChat } from './AgentChat'
 import { ReviewPanel } from './ReviewPanel'
 import { EnclosureViewer } from './EnclosureViewer'
@@ -112,6 +112,15 @@ export function EnclosurePanel({
      replaced by a measurement is not the "recommendation as override" that
      SPEC-326 §2 rules out: a value the user has typed is never overwritten. */
   const [measured, setMeasured] = useState<EnvelopeResult | null>(null)
+  /* SPEC-326 §2.5: heights the user typed into the components table, keyed by
+   * footprint. This panel used to measure with `{}` -- so every height a user
+   * had supplied was ignored by the one surface that exists to use it, and
+   * §2.3's third source was dead here while working everywhere else. */
+  const [suppliedHeights, setSuppliedHeights] = useState<Record<string, number>>({})
+  /* SPEC-326 §2.4: draw the clearance volumes. Off by default -- the enclosure
+   * is what the user asked to see, and boxes standing in for parts are a
+   * different picture that they should choose. */
+  const [showVolumes, setShowVolumes] = useState(false)
   const [heightTouched, setHeightTouched] = useState(false)
   const [boardParams, setBoardParams] = useState(_DEFAULT_BOARD_PARAMS)
 
@@ -187,7 +196,11 @@ export function EnclosurePanel({
     }
     void (async () => {
       try {
-        const result = await componentEnvelopes(null, pcbPath, {})
+        const supplied = (await loadProject(projectName).catch(() => null))
+          ?.component_heights ?? {}
+        if (cancelled) return
+        setSuppliedHeights(supplied)
+        const result = await componentEnvelopes(null, pcbPath, supplied)
         if (cancelled) return
         setMeasured(result)
         if (result.min_interior_height_mm != null) {
@@ -302,6 +315,8 @@ export function EnclosurePanel({
             pcb_path: pcbPath ?? undefined,
             lid,
             lid_thickness_mm: lid && lidThicknessMm !== '' ? lidThicknessMm : undefined,
+            show_component_volumes: showVolumes,
+            height_overrides: suppliedHeights,
           }
 
     try {
@@ -604,6 +619,17 @@ export function EnclosurePanel({
               />
               Add a lid
             </label>
+
+            {/* SPEC-326 §2.4 */}
+            <label className="flex items-center gap-2 text-xs text-fg-secondary">
+              <input
+                type="checkbox"
+                checked={showVolumes}
+                onChange={(e) => setShowVolumes(e.target.checked)}
+                disabled={running}
+              />
+              Show component volumes
+            </label>
             {lid && (
               <label className="flex flex-col gap-1 text-xs">
                 <span className="text-fg-secondary">
@@ -683,6 +709,54 @@ export function EnclosurePanel({
               No mounting holes were found on this board -- the enclosure has no standoffs. If this
               board really does have mounting holes, confirm they're real NPTH pads in KiCad.
             </p>
+          )}
+          {/* SPEC-326 §2.4. A volume is only ever drawn for a part with NO
+              model -- §2.3's first source is a real model, which is "not a
+              placeholder at all" and is already drawn as real geometry by the
+              board overlay. So this says three separate things: what was drawn,
+              what did not need drawing, and what could not be drawn. The last
+              is the one that matters and the easiest to leave out. */}
+          {result.component_volumes && (
+            <div className="flex flex-col gap-1">
+              <p className="text-sm text-fg-secondary">
+                {result.component_volumes.shown === 0
+                  ? 'No component volumes were drawn.'
+                  : `${result.component_volumes.shown} component volume${
+                      result.component_volumes.shown === 1 ? '' : 's'
+                    } drawn` +
+                    (result.component_volumes.from_you > 0
+                      ? ` — ${result.component_volumes.from_you} from a height you entered`
+                      : '') +
+                    (result.component_volumes.from_package_dimensions > 0
+                      ? ` — ${result.component_volumes.from_package_dimensions} from a package dimension`
+                      : '') +
+                    '.'}
+                {result.component_volumes.modelled > 0 && (
+                  ` ${result.component_volumes.modelled} component${
+                    result.component_volumes.modelled === 1 ? ' has' : 's have'
+                  } a real 3D model and ${
+                    result.component_volumes.modelled === 1 ? 'is' : 'are'
+                  } drawn as real geometry instead.`
+                )}
+              </p>
+              {result.component_volumes.shown > 0 && (
+                <p className="text-xs text-fg-tertiary">
+                  A volume is a clearance envelope read from the footprint&rsquo;s courtyard, not a
+                  model of the part. The courtyard can be smaller than the real body, so treat it as
+                  an approximation rather than a guarantee.
+                </p>
+              )}
+              {result.component_volumes.omitted > 0 && (
+                <p className="text-sm text-warning">
+                  {result.component_volumes.omitted} component
+                  {result.component_volumes.omitted === 1 ? ' is' : 's are'} missing from this
+                  preview because nothing states how tall
+                  {result.component_volumes.omitted === 1 ? ' it is' : ' they are'} — the box may
+                  need to be taller than it looks. Add a height in the Components tab to include
+                  {result.component_volumes.omitted === 1 ? ' it' : ' them'}.
+                </p>
+              )}
+            </div>
           )}
           <>
             <EnclosureViewer

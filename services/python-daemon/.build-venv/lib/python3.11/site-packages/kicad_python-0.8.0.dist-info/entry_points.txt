@@ -1,0 +1,2 @@
+[console_scripts]
+kicad-python-packager = kipy.packaging.cli:main

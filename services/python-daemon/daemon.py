@@ -399,6 +399,8 @@ def freecad_generate_enclosure(
     lid_thickness_mm: float = None,
     timeout_s: float = 30.0,
     cancel_event=None,
+    show_component_volumes: bool = False,
+    height_overrides: dict = None,
 ) -> dict:
     """The freecad.generate_enclosure route (SPEC-109, CTX-109.1;
     file-based mode added by SPEC-310, CTX-310.1): composes a real
@@ -468,11 +470,55 @@ def freecad_generate_enclosure(
         recognized_holes = [h for h in holes if h["recognized"]]
         unrecognized_holes = [h for h in holes if not h["recognized"]]
 
+    # SPEC-326 §2.4: the clearance volumes, when the caller asked for them and
+    # there is a board file to read positions from. Opt-in rather than always:
+    # a preview full of stated boxes is a different picture from the enclosure
+    # itself, and which one a user wants is theirs to choose.
+    #
+    # Best-effort by design. A placeholder is an aid to answering "will the lid
+    # close"; failing to produce one must never cost the user the enclosure
+    # they actually asked for.
+    placeholders, volumes_skipped = None, 0
+    if show_component_volumes and pcb_path and outline:
+        try:
+            read = kicad_list_board_components(pcb_path)
+            envelopes = component_envelopes(read["components"], height_overrides)["envelopes"]
+            placeholders = placeholders_for_enclosure(
+                read["components"], envelopes, outline, wall_thickness_mm + clearance_mm,
+            )
+            # Omitted means "no volume and no model" -- a component nothing
+            # can say the height of. A modelled one is not missing from the
+            # preview, so counting it as omitted would raise a false alarm.
+            #
+            # Mounting holes are excluded, reusing SPEC-109 §2's own
+            # recognition rule. CTX-311.15 already found this once on the
+            # neighbouring height route: a screw hole was never going to have
+            # a height, and the enclosure represents it as standoff geometry
+            # instead. Counting four of them among "6 components are missing,
+            # add a height in the Components tab" is advice about four things
+            # that cannot take one, and a warning whose items are mostly
+            # unactionable teaches people to skip it.
+            drawn = {p["reference"] for p in placeholders}
+            by_reference = {c.get("reference"): c for c in read["components"]}
+            volumes_skipped = sum(
+                1 for e in envelopes
+                if e.get("source") != "model"
+                and e.get("reference") not in drawn
+                and not kicad_board.is_mounting_hole(
+                    (by_reference.get(e.get("reference")) or {}).get("footprint", ""),
+                    e.get("reference") or "",
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 -- never at the cost of the enclosure
+            logger.warning("could not build component volumes: %s", exc)
+            placeholders = None
+
     result = generate_enclosure(
         height=height,
         width=width,
         depth=depth,
         board_outline=outline,
+        placeholders=placeholders,
         wall_thickness_mm=wall_thickness_mm,
         clearance_mm=clearance_mm,
         standoffs=[
@@ -491,6 +537,25 @@ def freecad_generate_enclosure(
         cancel_event=cancel_event,
     )
     result = {**result, "unrecognized_holes": unrecognized_holes}
+
+    # SPEC-326 §2.4, and the part most easily left out: a preview showing eight
+    # of ten parts looks complete. Reporting how many volumes are missing --
+    # and that the real minimum height may therefore be taller -- is what stops
+    # an incomplete picture reading as a finished one.
+    if placeholders is not None:
+        # A placeholder is never "measured" -- a measured component has a real
+        # model and is drawn as one. So the split that matters is where the
+        # STATED height came from: a package dimension carries §2.2's
+        # orientation caveat, a typed one carries the user's own judgement.
+        result["component_volumes"] = {
+            "shown": len(placeholders),
+            "from_package_dimensions": sum(
+                1 for p in placeholders if p["source"] == "package_dimensions"
+            ),
+            "from_you": sum(1 for p in placeholders if p["source"] == "user"),
+            "modelled": sum(1 for e in envelopes if e.get("source") == "model"),
+            "omitted": volumes_skipped,
+        }
     if outline is not None:
         # SPEC-311 §2: the pre-existing unrecognized_holes warning above
         # only ever fires for a board that has *some* NPTH pads, just
@@ -1310,6 +1375,12 @@ def kicad_list_board_components(pcb_path: str) -> dict:
             "reference": fp["reference"],
             "value": fp["value"],
             "footprint": fp["footprint"],
+            # SPEC-326 §2.4: where the part physically sits, so a placeholder
+            # volume can be put there. `pos_` prefixed because the resolved
+            # record also carries `courtyard`, whose own x_mm/y_mm are a size.
+            "pos_x_mm": fp["pos_x_mm"],
+            "pos_y_mm": fp["pos_y_mm"],
+            "rotation_deg": fp["rotation_deg"],
             # A board footprint carries no DNP flag of its own in the shape
             # the schematic BOM reports it, so this is stated as False
             # rather than guessed. SPEC-326 counts a DNP part's volume
@@ -1391,6 +1462,63 @@ def component_envelopes(components: list, height_overrides: dict = None) -> dict
         "stated": sum(1 for e in envelopes if e["source"] in ("package_dimensions", "user")),
         "unknown": sum(1 for e in envelopes if e["source"] == "unknown"),
     }
+
+
+def placeholders_for_enclosure(
+    components: list, envelopes: list, board_outline: dict, margin_mm: float,
+) -> list:
+    """Join a board read to its envelopes and produce placeable volumes.
+
+    `SPEC-326` §2.4. Three separate facts have to meet correctly for a volume
+    to be in the right place, and each comes from somewhere different:
+
+    *   **where** -- the footprint's own `at`, read off the board.
+    *   **how big in X and Y** -- the courtyard, read off the `.kicad_mod`.
+    *   **how tall** -- §2.3's ordered sources, and often none of them.
+
+    The offset is `x - board_outline["x_mm"] + margin_mm`, which is not a new
+    mapping: it is the one every standoff already uses to sit at its real hole
+    position. Reusing it is deliberate, because a placeholder landing somewhere
+    a standoff would not is precisely the bug worth guarding.
+
+    A component is skipped when any of the three is missing. Notably a missing
+    **height** is skipped rather than defaulted -- §2.3 has no fifth source,
+    and a guessed height fails as a physical object that does not fit. The
+    count of what was skipped is the caller's to report; an omitted volume that
+    nobody mentions makes a partial preview look complete.
+    """
+    by_reference = {c.get("reference"): c for c in components if c.get("reference")}
+    placeable = []
+    for envelope in envelopes:
+        component = by_reference.get(envelope.get("reference"))
+        if component is None:
+            continue
+        if component.get("pos_x_mm") is None or component.get("pos_y_mm") is None:
+            continue
+        if not envelope.get("x_mm") or not envelope.get("y_mm") or not envelope.get("z_mm"):
+            continue
+        # SPEC-326 §2.3, source 1, in its own words: a real STEP model is
+        # "Not a placeholder at all; SPEC-311's existing path." A component
+        # whose model resolves is already drawn as real geometry, so boxing it
+        # too draws a stated envelope over a measured one -- the exact
+        # confusion §2.4 exists to prevent, and on the maintainer's own board
+        # it meant the only two volumes drawn were the only two parts that did
+        # not need them.
+        if envelope.get("source") == "model":
+            continue
+        placeable.append({
+            "reference": envelope["reference"],
+            "x_mm": component["pos_x_mm"] - board_outline["x_mm"] + margin_mm,
+            "y_mm": component["pos_y_mm"] - board_outline["y_mm"] + margin_mm,
+            "z_mm": envelope["z_mm"],
+            # The courtyard's extents are a SIZE. Named width/depth here so
+            # they cannot be confused with the position above.
+            "width_mm": envelope["x_mm"],
+            "depth_mm": envelope["y_mm"],
+            "rotation_deg": component.get("rotation_deg") or 0.0,
+            "source": envelope.get("source", "unknown"),
+        })
+    return placeable
 
 
 def _explain_or_report_plainly(findings: list, check_type: str, **kwargs) -> dict:

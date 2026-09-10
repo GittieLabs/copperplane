@@ -22,6 +22,7 @@ So this reads the file. Nothing can be excluded from it by an export
 setting, because there is no export.
 """
 import os
+import re
 
 
 class BoardReadError(Exception):
@@ -100,10 +101,39 @@ def value(node):
     return None
 
 
+# SPEC-109 §2's own convention, kept in one place: a footprint is a recognized
+# mounting hole when it comes from KiCad's own standard MountingHole library,
+# or carries that library's default H<digits> reference-designator convention.
+# Lives here rather than in `kicad_bridge` because that module needs `kipy`
+# importable and the file-reading path does not.
+_MOUNTING_HOLE_REF_PATTERN = re.compile(r"^H\d+$")
+
+
+def is_mounting_hole(footprint_id: str, reference: str) -> bool:
+    """A screw hole, not a part standing on the board.
+
+    `CTX-311.15` found this once already, from a real click-through: the
+    height-derivation route reported a board's unannotated MountingHole
+    footprints as "missing a 3D model" -- technically true and misleading,
+    because a screw hole was never going to have one, and the enclosure
+    represents it separately as standoff geometry.
+
+    `CTX-326.4` repeated it. The placeholder preview counted four mounting
+    holes among "6 components are missing ... add a height in the Components
+    tab", which is advice about four things that cannot have a height. A
+    warning whose items are mostly unactionable teaches people to skip it.
+    """
+    library = (footprint_id or "").split(":")[0].lower()
+    return "mountinghole" in library or bool(
+        _MOUNTING_HOLE_REF_PATTERN.match(reference or "")
+    )
+
+
 def read_board_footprints(pcb_path: str) -> list:
     """Every footprint physically on the board, in file order.
 
-    Each entry is {reference, footprint, value, layer} -- `footprint` being
+    Each entry is {reference, footprint, value, layer, pos_x_mm,
+    pos_y_mm, rotation_deg} -- `footprint` being
     the full `Library:Name` id, the same shape `list_schematic_components`
     reports, so the two are directly comparable.
 
@@ -132,6 +162,21 @@ def read_board_footprints(pcb_path: str) -> list:
             "footprint": value(node),
             "value": None,
             "layer": None,
+            # SPEC-326 §2.4 needs somewhere to put a placeholder solid, and
+            # a volume in the wrong place renders perfectly.
+            #
+            # `pos_` prefixed rather than plain `x_mm`, because a resolved
+            # component record also carries `courtyard["x_mm"]` -- which is a
+            # SIZE, not a position. Two keys spelled the same in one record,
+            # meaning different things, joined together to place geometry, is
+            # the shape of the exact bug this context exists to avoid.
+            # `rotation_deg`
+            # defaults to 0 rather than None: KiCad omits the third value
+            # entirely for an unrotated footprint, so absent means zero here
+            # and there is no "unknown rotation" state to represent.
+            "pos_x_mm": None,
+            "pos_y_mm": None,
+            "rotation_deg": 0.0,
         }
         for child in node:
             if not isinstance(child, list):
@@ -139,6 +184,24 @@ def read_board_footprints(pcb_path: str) -> list:
             kind = sym(child)
             if kind == "layer" and entry["layer"] is None:
                 entry["layer"] = value(child)
+            elif kind == "at" and entry["pos_x_mm"] is None:
+                # Only the footprint's OWN `at`. Pads, texts and graphics
+                # each carry one too, relative to the footprint -- and they
+                # are nested deeper, so iterating this node's direct
+                # children is what keeps them out. Guarded on `is None` as
+                # well, so the first one wins if that ever stops being true.
+                coords = [i[1] for i in child[1:] if isinstance(i, tuple)]
+                try:
+                    entry["pos_x_mm"] = float(coords[0])
+                    entry["pos_y_mm"] = float(coords[1])
+                    if len(coords) > 2:
+                        entry["rotation_deg"] = float(coords[2])
+                except (IndexError, ValueError):
+                    # A malformed `at` leaves the position unknown rather
+                    # than defaulting to the origin, which would put a
+                    # placeholder in a corner of the board and look
+                    # deliberate.
+                    entry["pos_x_mm"], entry["pos_y_mm"] = None, None
             elif kind in ("property", "fp_text"):
                 # Two spellings, both live. Modern boards carry
                 # `(property "Reference" "BT1" ...)`; boards written before

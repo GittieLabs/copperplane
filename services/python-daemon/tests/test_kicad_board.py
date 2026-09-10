@@ -8,11 +8,12 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import kicad_board
-from kicad_board import BoardReadError, read_board_footprints
+from kicad_board import BoardReadError, is_mounting_hole, read_board_footprints
 
 _FIXTURES_DIR = os.path.join(os.path.dirname(__file__), 'fixtures')
 _MATCH = os.path.join(_FIXTURES_DIR, 'parity_match.kicad_pcb')
 _EMPTY = os.path.join(_FIXTURES_DIR, 'empty_board.kicad_pcb')
+_ROTATED = os.path.join(_FIXTURES_DIR, 'rotated_board.kicad_pcb')
 
 
 class TestReadBoardFootprints(unittest.TestCase):
@@ -29,6 +30,34 @@ class TestReadBoardFootprints(unittest.TestCase):
         out yet. One of the maintainer's own four projects is in exactly that
         state, so this is not a hypothetical."""
         self.assertEqual([], read_board_footprints(_EMPTY))
+
+    def test_reads_the_footprints_own_position_not_a_pads(self):
+        """CTX-326.4 Phase 1. A footprint's pads, properties and graphics each
+        carry an `at` of their own, relative to the footprint -- and R1's
+        first nested one is its Reference at (0, -2). Taking that instead
+        would put a placeholder solid at the board origin, which renders
+        perfectly and is wrong."""
+        found = read_board_footprints(_MATCH)
+
+        self.assertEqual(found[0]["pos_x_mm"], 100.0)
+        self.assertEqual(found[0]["pos_y_mm"], 100.0)
+
+    def test_an_unrotated_footprint_reads_as_zero_rather_than_missing(self):
+        """KiCad omits the third value entirely when a footprint is not
+        rotated, so absent means zero. There is no unknown-rotation state to
+        represent, and defaulting to None would make every caller handle one
+        that cannot occur."""
+        found = read_board_footprints(_MATCH)
+
+        self.assertEqual(found[0]["rotation_deg"], 0.0)
+
+    def test_reads_a_real_rotation(self):
+        by_ref = {f["reference"]: f for f in read_board_footprints(_ROTATED)}
+
+        self.assertEqual(by_ref["SW1"]["rotation_deg"], 90.0)
+        self.assertEqual((by_ref["SW1"]["pos_x_mm"], by_ref["SW1"]["pos_y_mm"]), (110.5, 105.25))
+        # ... and the unrotated one beside it is unaffected.
+        self.assertEqual(by_ref["R1"]["rotation_deg"], 0.0)
 
     def test_003_a_missing_file_raises_a_clean_error(self):
         with self.assertRaises(BoardReadError):
@@ -162,3 +191,38 @@ class TestRealBoards(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestIsMountingHole(unittest.TestCase):
+    """SPEC-109 §2's recognition convention, shared rather than re-invented.
+
+    `CTX-311.15` found the underlying problem once already: a screw hole
+    reported as "missing a 3D model" is technically true and misleading.
+    `CTX-326.4` repeated it -- four mounting holes counted among "6 components
+    are missing ... add a height in the Components tab", which is advice about
+    four things that cannot take a height."""
+
+    def test_kicads_own_mounting_hole_library(self):
+        self.assertTrue(is_mounting_hole("MountingHole:MountingHole_2.2mm_M2", "H1"))
+
+    def test_the_h_digits_reference_convention(self):
+        self.assertTrue(is_mounting_hole("Some:OtherFootprint", "H12"))
+
+    def test_a_footprint_whose_NAME_mentions_mounting_holes_is_not_one(self):
+        """The trap, and it is the biggest part on the maintainer's own board.
+
+        `Module:Arduino_UNO_R3_WithMountingHoles` has "MountingHoles" in its
+        footprint NAME and `Module` as its library. Matching the whole id would
+        drop the Arduino from the missing-height warning -- the one component
+        the warning most needs to name."""
+        self.assertFalse(
+            is_mounting_hole("Module:Arduino_UNO_R3_WithMountingHoles", "A1")
+        )
+
+    def test_ordinary_parts_are_not_mounting_holes(self):
+        self.assertFalse(is_mounting_hole("LED_THT:LED_D5.0mm-4_RGB", "D1"))
+        self.assertFalse(is_mounting_hole("Button_Switch_THT:KSA_Tactile_SPST", "SW1"))
+
+    def test_missing_values_do_not_raise(self):
+        self.assertFalse(is_mounting_hole("", ""))
+        self.assertFalse(is_mounting_hole(None, None))
