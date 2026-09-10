@@ -483,14 +483,21 @@ class TestExportNetlist(unittest.TestCase):
 
         self.assertIn("R1", refs)
 
-    def test_pin_electrical_function_survives(self):
-        """KiCad labels a pin power_in, passive, bidirectional. SPEC-210 needs
-        it: "this power pin" is a different claim from "this pin", and the
-        distinction is the file's rather than an inference of ours."""
-        result = kicad_cli.export_netlist(self._FIXTURE)
-        functions = {n["function"] for net in result["nets"] for n in net["nodes"]}
+    def test_pin_type_and_pin_function_are_kept_apart(self):
+        """Two different facts, and CTX-210.1 Phase 2 found that collapsing them
+        loses the one that matters most.
 
-        self.assertTrue(any(f for f in functions), "no pin carried an electrical type")
+        `type` is the electrical role -- power_in, passive, bidirectional.
+        `function` is the pin's NAME on that part -- `A_2` and `K_1` for an
+        LED's anode and cathode. A pack asking "does this LED have a series
+        resistor" needs the second: with only the first it fired on GND, because
+        the cathode is on ground and no resistor is."""
+        result = kicad_cli.export_netlist(self._FIXTURE)
+        nodes = [n for net in result["nets"] for n in net["nodes"]]
+
+        self.assertTrue(any(n["type"] for n in nodes), "no pin carried an electrical type")
+        self.assertIn("type", nodes[0])
+        self.assertIn("function", nodes[0], "the pin's own name must survive separately")
 
     def test_a_missing_file_raises_rather_than_returning_nothing(self):
         with self.assertRaises(kicad_cli.KicadCliError):

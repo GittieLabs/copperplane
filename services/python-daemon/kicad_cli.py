@@ -272,11 +272,17 @@ def export_netlist(sch_path: str) -> dict:
             {
                 "reference": node.get("ref"),
                 "pin": node.get("pin"),
-                # KiCad labels a pin's electrical type -- power_in, output,
-                # passive. SPEC-210 needs it: "this power pin" is a different
-                # claim from "this pin", and the difference is the file's, not
-                # an inference of ours.
-                "function": node.get("pintype") or node.get("pinfunction"),
+                # Two DIFFERENT facts, and collapsing them loses the one that
+                # matters most. `type` is the electrical role -- power_in,
+                # passive, bidirectional. `function` is the pin's NAME on that
+                # part: `A_2` and `K_1` for an LED's anode and cathode.
+                #
+                # Found by CTX-210.1 Phase 2, not by reading: a pack asking
+                # "does this LED have a series resistor" fired on GND, because
+                # the cathode is on ground and no resistor is. The rule needs
+                # the ANODE net, and only `pinfunction` says which that is.
+                "type": node.get("pintype"),
+                "function": node.get("pinfunction"),
             }
             for node in net.findall("node")
             if node.get("ref") and node.get("pin")
