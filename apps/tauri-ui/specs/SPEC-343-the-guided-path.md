@@ -162,6 +162,72 @@ extension here:
 So the two surfaces divide on a principle rather than on taste, and a new pack cannot accidentally
 make the app opinionated — the rule is enforced in `considerations.py`, not in this spec's prose.
 
+### 2.5.1 A description the user skipped, and a caveat that is not a nag
+
+*"It is completely plausible that the user doesn't give much thought to the project description or
+skips entirely. It's a hindrance that could make us less effective."*
+
+**On Overview.** Overview already says *"Not stated yet — agents answer generically until you add
+one"*, which states the fact and does not make the case. §2.4 computes `no_goal` as the earliest
+state, so the guided path's one sentence **is** the callout — it needs to argue the benefit rather
+than note the gap, and it must be **dismissible**, because a user who has decided not to describe
+their project should not be asked forever. A callout that cannot be dismissed becomes furniture, and
+furniture is not read.
+
+**On a response.** *"We might even consider adding a message to a chat response ... that could have
+given a better response if we knew what they are trying to build."*
+
+Permitted, and the reason matters: `SPEC-300` says a conversation surface may only produce an answer,
+and a caveat **about the basis of that answer** is still an answer. It advances nothing and moves
+nobody. It is the same class as `SPEC-306`'s `view datasheet (unverified)` — an honest note about
+what the answer rests on.
+
+Two disciplines stop it becoming a scold, and both are enforceable rather than editorial:
+
+*   **Only when it is true.** `chat_agents` resolves `project_intent` and passes it to four call
+    sites, so the app knows whether an answer was produced without it. Never said on a response that
+    would not have changed.
+*   **Once per conversation, not once per turn.** Repetition turns an honest caveat into nagging, and
+    the nagging is what makes a user stop reading the caveats that matter — including
+    `unverified` and *not confirmed*, which this product depends on being read.
+
+**And the rule that governs all of it:** we do not guess. *"I would have answered better knowing what
+you are building"* is honest. *"This looks like an LED blinker, shall I assume that?"* is the
+inference this family refuses to make, however confident it could be.
+
+### 2.5.2 When a field is unknown *and* underivable
+
+`SPEC-210` §2.5 says an explicit "I do not know" on `current_budget` *"triggers an estimate from the
+parts on the board, labelled as an estimate everywhere it is used."* **Measured 2026-09-10: on the
+maintainer's own board that estimate is not computable at all.**
+
+The schematic carries `R1` with `value='R'` and `D1` with `value='LED'` — the placeholder values
+KiCad ships, never set. With no resistance there is no current, and deriving one means inventing the
+value, which is the guess this family exists not to make. So *"the user does not know"* and *"the app
+cannot derive it"* are simultaneously true, on the board every other spec in this family is written
+about. That state is currently assumed away.
+
+**Four fallbacks, in order, and the app takes the first that works:**
+
+1.  **Ask, and let `unknown` be a real answer.** Built — `CTX-328.1` Phase 2 stores `unknown` as a
+    value distinct from never-asked, which is the whole reason that distinction exists.
+2.  **Bound it from the supply, which survives when the current does not.** `power:+5V` is a real
+    symbol on the schematic, so the rail voltage is a file fact, and a supply source bounds the
+    current a board can draw. That is enough for a worst-case trace-width check **stated as worst
+    case**. The bound itself is a `cited` claim and its numbers must be **read** from the USB
+    specification, never recalled — the same discipline §2.0.1 states for IPC-2221.
+3.  **Estimate from the parts, when the parts say anything.** Where values are set this works and
+    shows its arithmetic (`SPEC-210` §2.0.1). Where they are not, it must fail rather than assume.
+4.  **Say what would unblock it.** *"`R1` has no value"* is an absence that names something real, so
+    it is a legitimate consideration under §2.2 — and it converts *"we cannot help"* into *"set
+    `R1`'s value and this becomes answerable."* This is the first concrete case for §2.6's
+    absence-shaped triggers, and it is real on an actual board rather than hypothetical.
+
+**When all four fail, the honest answer is not a number.** A maker with a breadboard can measure the
+current. Telling them so is the app distinguishing what it can compute from what only the bench can
+say, which earns more trust than a figure with invented inputs — and is the same judgement `SPEC-212`
+made when it declined to guess a datasheet URL.
+
 ### 2.6 Telling, when the app may not interrupt
 
 Given §2.1, *telling* reduces to **it is there when they look, and something makes them look.** The
@@ -174,7 +240,12 @@ worth returning to*. It changes when their project changes, without them asking.
 
 *Open questions this spec must settle:*
 
-*   **Absence-shaped triggers, and this is where the value probably is.** What a novice is missing is
+*   **What the callout says, and when it stops.** §2.5.1 settles that it must be dismissible; it does
+    not settle whether dismissal is per project or forever, or whether a project that later gains a
+    schematic should ask once more now that there is something to be specific about.
+*   **Absence-shaped triggers, and this is where the value probably is.** §2.5.2 gives the first
+    concrete case — a component with no value, blocking a current estimate — which is real on the
+    maintainer's board rather than hypothetical. What a novice is missing is
     usually a part that is not there, so the trigger is an empty set rather than a present thing.
     `CTX-210.1` withdrew `power_pin_without_decoupling` because it could not distinguish a supply
     rail from ground — but the *shape* is legitimate and unresolved. An absence still has to name
