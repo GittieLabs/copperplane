@@ -39,8 +39,8 @@ class TestReadBoardFootprints(unittest.TestCase):
         perfectly and is wrong."""
         found = read_board_footprints(_MATCH)
 
-        self.assertEqual(found[0]["x_mm"], 100.0)
-        self.assertEqual(found[0]["y_mm"], 100.0)
+        self.assertEqual(found[0]["pos_x_mm"], 100.0)
+        self.assertEqual(found[0]["pos_y_mm"], 100.0)
 
     def test_an_unrotated_footprint_reads_as_zero_rather_than_missing(self):
         """KiCad omits the third value entirely when a footprint is not
@@ -55,7 +55,7 @@ class TestReadBoardFootprints(unittest.TestCase):
         by_ref = {f["reference"]: f for f in read_board_footprints(_ROTATED)}
 
         self.assertEqual(by_ref["SW1"]["rotation_deg"], 90.0)
-        self.assertEqual((by_ref["SW1"]["x_mm"], by_ref["SW1"]["y_mm"]), (110.5, 105.25))
+        self.assertEqual((by_ref["SW1"]["pos_x_mm"], by_ref["SW1"]["pos_y_mm"]), (110.5, 105.25))
         # ... and the unrotated one beside it is unaffected.
         self.assertEqual(by_ref["R1"]["rotation_deg"], 0.0)
 

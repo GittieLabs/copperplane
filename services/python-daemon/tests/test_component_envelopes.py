@@ -129,3 +129,78 @@ class TestComponentEnvelopes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPlaceholdersForEnclosure(unittest.TestCase):
+    """CTX-326.4 Phase 2: joining where a part is to how big it is.
+
+    Three facts have to meet correctly and each comes from somewhere
+    different -- position off the board, X/Y off the courtyard, Z from
+    `SPEC-326` §2.3's ordered sources. Getting the join wrong produces a
+    volume that renders perfectly somewhere it is not."""
+
+    OUTLINE = {"x_mm": 100.0, "y_mm": 80.0, "width_mm": 50.0, "height_mm": 40.0}
+
+    def _placeholders(self, components, envelopes, margin=2.5):
+        import daemon
+        return daemon.placeholders_for_enclosure(components, envelopes, self.OUTLINE, margin)
+
+    def test_position_is_offset_by_the_same_mapping_standoffs_use(self):
+        got = self._placeholders(
+            [{"reference": "BT1", "pos_x_mm": 110.0, "pos_y_mm": 90.0, "rotation_deg": 0}],
+            [{"reference": "BT1", "x_mm": 20.0, "y_mm": 20.0, "z_mm": 4.0, "source": "user"}],
+        )
+
+        # 110 - 100 + 2.5, and 90 - 80 + 2.5.
+        self.assertEqual((got[0]["x_mm"], got[0]["y_mm"]), (12.5, 12.5))
+
+    def test_courtyard_extents_become_width_and_depth_never_a_position(self):
+        """The record this reads carries `pos_x_mm` (a position) and an
+        envelope `x_mm` (a size). Two keys spelled almost the same, meaning
+        different things, joined to place geometry -- so this pins which is
+        which rather than trusting the naming to hold."""
+        got = self._placeholders(
+            [{"reference": "U1", "pos_x_mm": 130.0, "pos_y_mm": 100.0, "rotation_deg": 0}],
+            [{"reference": "U1", "x_mm": 7.5, "y_mm": 3.25, "z_mm": 2.0, "source": "model"}],
+        )
+
+        self.assertEqual(got[0]["width_mm"], 7.5)
+        self.assertEqual(got[0]["depth_mm"], 3.25)
+        self.assertEqual(got[0]["x_mm"], 32.5)
+
+    def test_a_component_with_no_height_is_omitted_not_defaulted(self):
+        got = self._placeholders(
+            [{"reference": "X1", "pos_x_mm": 110.0, "pos_y_mm": 90.0, "rotation_deg": 0}],
+            [{"reference": "X1", "x_mm": 5.0, "y_mm": 5.0, "z_mm": None, "source": "unknown"}],
+        )
+        self.assertEqual(got, [])
+
+    def test_a_component_with_no_courtyard_is_omitted(self):
+        got = self._placeholders(
+            [{"reference": "X1", "pos_x_mm": 110.0, "pos_y_mm": 90.0, "rotation_deg": 0}],
+            [{"reference": "X1", "x_mm": None, "y_mm": None, "z_mm": 4.0, "source": "user"}],
+        )
+        self.assertEqual(got, [])
+
+    def test_a_component_with_no_position_is_omitted_rather_than_put_at_the_origin(self):
+        """A malformed `at` must not become (0, 0). A volume in the corner of
+        the board looks deliberate and is not."""
+        got = self._placeholders(
+            [{"reference": "X1", "pos_x_mm": None, "pos_y_mm": None, "rotation_deg": 0}],
+            [{"reference": "X1", "x_mm": 5.0, "y_mm": 5.0, "z_mm": 4.0, "source": "user"}],
+        )
+        self.assertEqual(got, [])
+
+    def test_rotation_carries_through(self):
+        got = self._placeholders(
+            [{"reference": "SW1", "pos_x_mm": 110.0, "pos_y_mm": 90.0, "rotation_deg": 90}],
+            [{"reference": "SW1", "x_mm": 6.0, "y_mm": 3.0, "z_mm": 5.0, "source": "user"}],
+        )
+        self.assertEqual(got[0]["rotation_deg"], 90)
+
+    def test_an_envelope_with_no_matching_component_is_skipped_not_guessed(self):
+        got = self._placeholders(
+            [{"reference": "R1", "pos_x_mm": 110.0, "pos_y_mm": 90.0, "rotation_deg": 0}],
+            [{"reference": "GONE", "x_mm": 5.0, "y_mm": 5.0, "z_mm": 4.0, "source": "user"}],
+        )
+        self.assertEqual(got, [])
