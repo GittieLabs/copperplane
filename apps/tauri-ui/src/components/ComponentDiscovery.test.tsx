@@ -145,8 +145,13 @@ describe('ComponentDiscovery', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: /view datasheet/ }))
 
+    // CTX-306.8's two real guarantees, unchanged by SPEC-212's rework of the
+    // wording: the failure surfaces IN the app, and the invented URL is never
+    // handed to the browser. The "best guess" phrasing was replaced by an
+    // explanation of the actual cause plus a working search link -- see the
+    // SPEC-212 block at the end of this file.
     expect(await screen.findByText(/HTTP Error 404/)).toBeTruthy()
-    expect(screen.getByText(/best guess/)).toBeTruthy()
+    expect(screen.getByText(/one document per family rather than per part/)).toBeTruthy()
     expect(openMock).not.toHaveBeenCalled()
   })
 
@@ -662,5 +667,69 @@ describe('ComponentDiscovery: SPEC-328 carrying a suggestion over', () => {
     // other mock -- what this test is about is that nothing ran.
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(searchComponentsMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('ComponentDiscovery: SPEC-212 a datasheet that cannot resolve', () => {
+  const CANDIDATE = {
+    part_number: 'CFR-25JB-52-220R', manufacturer: 'Yageo', package: 'Axial (THT)',
+    datasheet_url: 'https://yageo.invalid/CFR-25JB-52-220R.pdf',
+    confidence: 'medium' as const, rationale: 'a 220R carbon film resistor',
+  }
+
+  it('replaces the dead link with a live one rather than a wall of red', async () => {
+    /* Reported from the running app: "part of this seems to work" -- every
+     * result carried a failed datasheet fetch. SPEC-212 measured why: 3 of 3
+     * resolve for an IC and 0 of 3 for passives, because a passive's
+     * datasheet is a family document with no per-part URL to guess. Offering
+     * the same button again invites a retry of something that cannot work. */
+    searchComponentsMock.mockResolvedValue([CANDIDATE])
+    cacheDatasheetMock.mockRejectedValue(new Error('HTTP Error 404: Not Found'))
+
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('220 ohm resistor')
+    await screen.findByText('CFR-25JB-52-220R')
+
+    fireEvent.click(screen.getByRole('button', { name: /view datasheet/ }))
+
+    const fallback = await screen.findByRole('button', { name: /search the web for this datasheet/ })
+    expect(fallback).toBeTruthy()
+    // Says why, in terms of the actual cause, not a stack trace.
+    expect(screen.getByText(/one document per family rather than per part/)).toBeTruthy()
+  })
+
+  it('opens a neutral search carrying the part number and manufacturer', async () => {
+    searchComponentsMock.mockResolvedValue([CANDIDATE])
+    cacheDatasheetMock.mockRejectedValue(new Error('HTTP Error 404: Not Found'))
+
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('220 ohm resistor')
+    await screen.findByText('CFR-25JB-52-220R')
+    fireEvent.click(screen.getByRole('button', { name: /view datasheet/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /search the web/ }))
+
+    await waitFor(() => expect(openMock).toHaveBeenCalled())
+    const url = decodeURIComponent(openMock.mock.calls.at(-1)![0] as string)
+    expect(url).toContain('CFR-25JB-52-220R')
+    expect(url).toContain('Yageo')
+    expect(url).toContain('datasheet')
+  })
+
+  it('leaves a datasheet that does resolve completely alone', async () => {
+    /* SPEC-212 §1: the guess works for ICs and costs nothing. This must not
+     * become a worse experience for the case that was already fine. */
+    searchComponentsMock.mockResolvedValue([
+      { ...CANDIDATE, part_number: 'ATtiny85-20PU', manufacturer: 'Microchip' },
+    ])
+    cacheDatasheetMock.mockResolvedValue('/cache/ATtiny85-20PU.pdf')
+
+    render(<ComponentDiscovery projectName="test-project" />)
+    search('ATtiny85')
+    await screen.findByText('ATtiny85-20PU')
+    fireEvent.click(screen.getByRole('button', { name: /view datasheet/ }))
+
+    await waitFor(() => expect(openMock).toHaveBeenCalledWith('/cache/ATtiny85-20PU.pdf'))
+    expect(screen.queryByRole('button', { name: /search the web/ })).toBeNull()
+    expect(screen.queryByText(/one document per family/)).toBeNull()
   })
 })

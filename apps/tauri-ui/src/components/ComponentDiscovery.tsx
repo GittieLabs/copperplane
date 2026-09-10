@@ -3,6 +3,7 @@ import { open } from '@tauri-apps/plugin-shell'
 import { useEffect, useState } from 'react'
 import { cacheDatasheet, searchComponents, type ComponentCandidate } from '../lib/components'
 import { searchFootprints, type FootprintCandidate } from '../lib/footprints'
+import { datasheetSearchUrl } from '../lib/datasheetSearch'
 import { listParts } from '../lib/library'
 import { loadPart, type SavedPart } from '../lib/partDetail'
 import type { Project } from '../lib/projects'
@@ -600,11 +601,38 @@ export function ComponentDiscovery({
                     ? 'checking datasheet…'
                     : 'view datasheet (unverified)'}
                 </button>
+                {/* SPEC-212: once the guess has failed, offering the same
+                    button again invites the user to retry something that
+                    cannot work. A passive's datasheet is a family document
+                    with no per-part URL to guess -- measured 0 of 3 for a
+                    220R resistor and a 0.1uF capacitor, against 3 of 3 for an
+                    IC. So the dead link is replaced by a live next step,
+                    which is SPEC-203 §3's constructed-deep-link row: no API,
+                    no key, nobody's terms to accept. */}
                 {datasheetError[candidate.part_number] && (
-                  <p className="text-xs text-danger">
-                    {datasheetError[candidate.part_number]} — this URL is the model's best guess at
-                    where the manufacturer hosts this document, not a checked fact.
-                  </p>
+                  <div className="flex flex-col gap-1">
+                    <p className="text-xs text-fg-muted">
+                      No datasheet at the address the model guessed. Manufacturers usually publish
+                      one document per family rather than per part, so for passives there is often
+                      no per-part URL to find.
+                    </p>
+                    {/* CTX-306.8's own point was that an invented URL must fail
+                        IN the app rather than silently in a browser. Kept, but
+                        subdued: the reason above is what a user needs, and this
+                        is what anyone diagnosing it needs. */}
+                    <p className="text-xs text-fg-tertiary">
+                      {datasheetError[candidate.part_number]}
+                    </p>
+                    <button
+                      type="button"
+                      className="self-start text-xs text-fg-tertiary underline"
+                      onClick={() => void handleOpen(
+                        datasheetSearchUrl(candidate.part_number, candidate.manufacturer),
+                      )}
+                    >
+                      search the web for this datasheet
+                    </button>
+                  </div>
                 )}
               </div>
               <button
