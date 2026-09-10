@@ -377,18 +377,49 @@ describe('EnclosurePanel: Board mode -- list-first picker', () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({
       ...fakeResult,
-      component_volumes: { shown: 3, measured: 2, stated: 1, omitted: 0 },
+      component_volumes: {
+        shown: 2, from_package_dimensions: 0, from_you: 2, modelled: 3, omitted: 0,
+      },
     })))
 
     render(<EnclosurePanel projectName="test-project" />)
     await waitFor(() => screen.getByText('board.kicad_pcb'))
     fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
 
-    expect(await screen.findByText(/3 component volumes shown/)).toBeTruthy()
-    expect(screen.getByText(/2 measured from a real 3D model/)).toBeTruthy()
-    expect(screen.getByText(/1 from a height you supplied/)).toBeTruthy()
+    expect(await screen.findByText(/2 component volumes drawn/)).toBeTruthy()
+    expect(screen.getByText(/2 from a height you entered/)).toBeTruthy()
+    // A modelled part is drawn as real geometry, never boxed -- SPEC-326
+    // §2.3's first source is "not a placeholder at all".
+    expect(screen.getByText(/3 components have a real 3D model/)).toBeTruthy()
     // Never presented as a model of the part -- SPEC-326's second non-goal.
     expect(screen.getByText(/not a\s+model of the part/)).toBeTruthy()
+  })
+
+  it('never boxes a component that already has a real 3D model', async () => {
+    /* Reported from the running app: "i don't see any volumes created." The
+     * toggle was off, but checking it would have shown the wrong thing --
+     * the only two volumes drawn on the maintainer's own board were D1 and
+     * R1, the only two parts with real models, while SW1 and the Arduino
+     * module A1 got nothing. SPEC-326 §2.3 source 1 says a real model is
+     * "Not a placeholder at all"; drawing a stated envelope over a measured
+     * one is the confusion §2.4 exists to prevent. */
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({
+      ...fakeResult,
+      component_volumes: {
+        shown: 0, from_package_dimensions: 0, from_you: 0, modelled: 2, omitted: 6,
+      },
+    })))
+
+    render(<EnclosurePanel projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Enclosure' }))
+
+    // This is the real state of the tutorial board: nothing to draw, two
+    // parts already real, six with no height from any source.
+    expect(await screen.findByText(/No component volumes were drawn/)).toBeTruthy()
+    expect(screen.getByText(/2 components have a real 3D model/)).toBeTruthy()
+    expect(screen.getByText(/6 components are missing from this preview/)).toBeTruthy()
   })
 
   it('names the components missing from the preview, rather than looking complete', async () => {
@@ -399,7 +430,9 @@ describe('EnclosurePanel: Board mode -- list-first picker', () => {
     listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
     generateEnclosureMock.mockResolvedValueOnce(fakeJobHandle(Promise.resolve({
       ...fakeResult,
-      component_volumes: { shown: 2, measured: 2, stated: 0, omitted: 6 },
+      component_volumes: {
+        shown: 2, from_package_dimensions: 0, from_you: 2, modelled: 0, omitted: 6,
+      },
     })))
 
     render(<EnclosurePanel projectName="test-project" />)

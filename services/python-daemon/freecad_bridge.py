@@ -274,11 +274,15 @@ _BODY_INNER_COLOR_RGB = (241, 245, 249)  # slate-50 -- the cavity's own inner wa
 _LID_COLOR_RGB = (249, 115, 22)  # orange-500 -- a real, high-contrast accent for the lid
 
 # SPEC-326 §2.4: a placeholder must be tellable from real geometry without
-# asking. Two colors, not one, because §2.3's sources are not equally
-# trustworthy and the spec asks the user to see which is which: a height read
-# off a real STEP model is measured, a height somebody typed is stated.
-_MEASURED_VOLUME_RGB = (56, 189, 248)  # sky-400 -- height came off a real model
-_STATED_VOLUME_RGB = (250, 204, 21)  # yellow-400 -- height was supplied, not measured
+# asking. Every placeholder is a STATED volume by definition -- §2.3's first
+# source is a real model, which is "not a placeholder at all" and is drawn as
+# real geometry instead. So the split that remains is where the stated height
+# came from, and the two are not equally trustworthy: a package dimension
+# carries §2.2's orientation caveat (a CR2032 read as 3.2mm thick when the cell
+# stands on edge and is really 20mm), while a typed one carries the user's own
+# judgement about their own part.
+_PACKAGE_VOLUME_RGB = (250, 204, 21)  # yellow-400 -- from a package dimension
+_SUPPLIED_VOLUME_RGB = (56, 189, 248)  # sky-400 -- a height the user entered
 
 
 def _placeholder_meshes(placeholders: list) -> list:
@@ -317,7 +321,7 @@ def _placeholder_meshes(placeholders: list) -> list:
                 math.radians(rotation), [0, 0, 1]
             )
         box.apply_transform(transform)
-        rgb = _MEASURED_VOLUME_RGB if p.get("source") == "model" else _STATED_VOLUME_RGB
+        rgb = _SUPPLIED_VOLUME_RGB if p.get("source") == "user" else _PACKAGE_VOLUME_RGB
         box.metadata["name"] = f"placeholder:{p.get('reference') or '?'}:{p.get('source', 'unknown')}"
         box.metadata["copperplane_placeholder"] = True
         box.metadata["copperplane_rgb"] = rgb

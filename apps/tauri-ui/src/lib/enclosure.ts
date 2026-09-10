@@ -64,8 +64,11 @@ export interface EnclosureResult {
    * something says otherwise. On the tutorial board it really is 2 of 8. */
   component_volumes?: {
     shown: number
-    measured: number
-    stated: number
+    from_package_dimensions: number
+    from_you: number
+    /** Components drawn as real geometry instead. SPEC-326 §2.3's first
+     * source is a real model, which is "not a placeholder at all". */
+    modelled: number
     omitted: number
   }
 }

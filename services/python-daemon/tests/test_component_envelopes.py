@@ -154,6 +154,32 @@ class TestPlaceholdersForEnclosure(unittest.TestCase):
         # 110 - 100 + 2.5, and 90 - 80 + 2.5.
         self.assertEqual((got[0]["x_mm"], got[0]["y_mm"]), (12.5, 12.5))
 
+    def test_a_component_with_a_real_model_gets_no_placeholder(self):
+        """SPEC-326 §2.3 source 1, in its own words: a real STEP model is
+        "Not a placeholder at all; SPEC-311's existing path."
+
+        Reported from the running app -- "i don't see any volumes created" --
+        and checking the toggle would have shown the wrong thing. On the
+        maintainer's own board the only two volumes drawn were D1 and R1, the
+        only two parts with real models, while SW1 and the Arduino module A1
+        got nothing. A stated envelope drawn over measured geometry is exactly
+        the confusion §2.4 exists to prevent."""
+        got = self._placeholders(
+            [{"reference": "D1", "pos_x_mm": 110.0, "pos_y_mm": 90.0, "rotation_deg": 0}],
+            [{"reference": "D1", "x_mm": 6.4, "y_mm": 6.4, "z_mm": 14.1, "source": "model"}],
+        )
+        self.assertEqual(got, [])
+
+    def test_a_supplied_height_on_an_unmodelled_part_does_get_one(self):
+        """The other half of the same rule: the parts that need a volume are
+        the ones with no model, and they are the point of the feature."""
+        got = self._placeholders(
+            [{"reference": "A1", "pos_x_mm": 110.0, "pos_y_mm": 90.0, "rotation_deg": 0}],
+            [{"reference": "A1", "x_mm": 68.6, "y_mm": 53.3, "z_mm": 15.0, "source": "user"}],
+        )
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["reference"], "A1")
+
     def test_courtyard_extents_become_width_and_depth_never_a_position(self):
         """The record this reads carries `pos_x_mm` (a position) and an
         envelope `x_mm` (a size). Two keys spelled almost the same, meaning
@@ -161,7 +187,7 @@ class TestPlaceholdersForEnclosure(unittest.TestCase):
         which rather than trusting the naming to hold."""
         got = self._placeholders(
             [{"reference": "U1", "pos_x_mm": 130.0, "pos_y_mm": 100.0, "rotation_deg": 0}],
-            [{"reference": "U1", "x_mm": 7.5, "y_mm": 3.25, "z_mm": 2.0, "source": "model"}],
+            [{"reference": "U1", "x_mm": 7.5, "y_mm": 3.25, "z_mm": 2.0, "source": "user"}],
         )
 
         self.assertEqual(got[0]["width_mm"], 7.5)

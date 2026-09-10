@@ -781,7 +781,7 @@ class TestPlaceholderSolids(unittest.TestCase):
                 "x_mm": hole_x - _TEST_BOARD_OUTLINE["x_mm"] + margin,
                 "y_mm": hole_y - _TEST_BOARD_OUTLINE["y_mm"] + margin,
                 "z_mm": 6.0, "width_mm": 4.0, "depth_mm": 4.0,
-                "rotation_deg": 0, "source": "model",
+                "rotation_deg": 0, "source": "user",
             }],
         )
         geom = next(iter(self._placeholder_geoms(with_volume["glb_path"]).values()))
@@ -827,11 +827,17 @@ class TestPlaceholderSolids(unittest.TestCase):
         self.assertAlmostEqual(ty, 10.0, places=6)
 
     def test_a_measured_volume_and_a_stated_one_are_different_materials(self):
-        """TEST-007. `SPEC-326` §2.4: a user must be able to tell which volumes
-        were measured and which were stated, without asking."""
+        """TEST-007. `SPEC-326` §2.4: a user must be able to tell where a
+        volume's height came from without asking.
+
+        Every placeholder is a stated volume -- §2.3's first source is a real
+        model, which is not a placeholder at all -- so the split that remains
+        is a package dimension (carrying §2.2's orientation caveat, the CR2032
+        read as 3.2mm when the cell stands on edge and is really 20mm) versus
+        a height the user typed about their own part."""
         measured = freecad_bridge._placeholder_meshes([
             {"reference": "A", "x_mm": 0, "y_mm": 0, "z_mm": 3,
-             "width_mm": 2, "depth_mm": 2, "rotation_deg": 0, "source": "model"},
+             "width_mm": 2, "depth_mm": 2, "rotation_deg": 0, "source": "package_dimensions"},
         ])[0]
         stated = freecad_bridge._placeholder_meshes([
             {"reference": "B", "x_mm": 0, "y_mm": 0, "z_mm": 3,

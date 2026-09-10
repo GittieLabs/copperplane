@@ -486,7 +486,14 @@ def freecad_generate_enclosure(
             placeholders = placeholders_for_enclosure(
                 read["components"], envelopes, outline, wall_thickness_mm + clearance_mm,
             )
-            volumes_skipped = len(envelopes) - len(placeholders)
+            # Omitted means "no volume and no model" -- a component nothing
+            # can say the height of. A modelled one is not missing from the
+            # preview, so counting it as omitted would raise a false alarm.
+            volumes_skipped = sum(
+                1 for e in envelopes
+                if e.get("source") != "model"
+                and not any(p["reference"] == e.get("reference") for p in placeholders)
+            )
         except Exception as exc:  # noqa: BLE001 -- never at the cost of the enclosure
             logger.warning("could not build component volumes: %s", exc)
             placeholders = None
@@ -521,10 +528,17 @@ def freecad_generate_enclosure(
     # and that the real minimum height may therefore be taller -- is what stops
     # an incomplete picture reading as a finished one.
     if placeholders is not None:
+        # A placeholder is never "measured" -- a measured component has a real
+        # model and is drawn as one. So the split that matters is where the
+        # STATED height came from: a package dimension carries §2.2's
+        # orientation caveat, a typed one carries the user's own judgement.
         result["component_volumes"] = {
             "shown": len(placeholders),
-            "measured": sum(1 for p in placeholders if p["source"] == "model"),
-            "stated": sum(1 for p in placeholders if p["source"] in ("package_dimensions", "user")),
+            "from_package_dimensions": sum(
+                1 for p in placeholders if p["source"] == "package_dimensions"
+            ),
+            "from_you": sum(1 for p in placeholders if p["source"] == "user"),
+            "modelled": sum(1 for e in envelopes if e.get("source") == "model"),
             "omitted": volumes_skipped,
         }
     if outline is not None:
@@ -1467,6 +1481,15 @@ def placeholders_for_enclosure(
         if component.get("pos_x_mm") is None or component.get("pos_y_mm") is None:
             continue
         if not envelope.get("x_mm") or not envelope.get("y_mm") or not envelope.get("z_mm"):
+            continue
+        # SPEC-326 §2.3, source 1, in its own words: a real STEP model is
+        # "Not a placeholder at all; SPEC-311's existing path." A component
+        # whose model resolves is already drawn as real geometry, so boxing it
+        # too draws a stated envelope over a measured one -- the exact
+        # confusion §2.4 exists to prevent, and on the maintainer's own board
+        # it meant the only two volumes drawn were the only two parts that did
+        # not need them.
+        if envelope.get("source") == "model":
             continue
         placeable.append({
             "reference": envelope["reference"],

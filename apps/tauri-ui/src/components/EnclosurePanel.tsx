@@ -710,26 +710,42 @@ export function EnclosurePanel({
               board really does have mounting holes, confirm they're real NPTH pads in KiCad.
             </p>
           )}
-          {/* SPEC-326 §2.4. `omitted` is the number that matters and the one
-              easiest to leave out: a preview showing two parts of eight reads
-              as a finished picture of a nearly empty board. On the tutorial
-              board it really is 2 of 8. */}
+          {/* SPEC-326 §2.4. A volume is only ever drawn for a part with NO
+              model -- §2.3's first source is a real model, which is "not a
+              placeholder at all" and is already drawn as real geometry by the
+              board overlay. So this says three separate things: what was drawn,
+              what did not need drawing, and what could not be drawn. The last
+              is the one that matters and the easiest to leave out. */}
           {result.component_volumes && (
             <div className="flex flex-col gap-1">
               <p className="text-sm text-fg-secondary">
                 {result.component_volumes.shown === 0
-                  ? 'No component volumes could be drawn.'
+                  ? 'No component volumes were drawn.'
                   : `${result.component_volumes.shown} component volume${
                       result.component_volumes.shown === 1 ? '' : 's'
-                    } shown — ${result.component_volumes.measured} measured from a real 3D model, ${
-                      result.component_volumes.stated
-                    } from a height you supplied.`}
+                    } drawn` +
+                    (result.component_volumes.from_you > 0
+                      ? ` — ${result.component_volumes.from_you} from a height you entered`
+                      : '') +
+                    (result.component_volumes.from_package_dimensions > 0
+                      ? ` — ${result.component_volumes.from_package_dimensions} from a package dimension`
+                      : '') +
+                    '.'}
+                {result.component_volumes.modelled > 0 && (
+                  ` ${result.component_volumes.modelled} component${
+                    result.component_volumes.modelled === 1 ? ' has' : 's have'
+                  } a real 3D model and ${
+                    result.component_volumes.modelled === 1 ? 'is' : 'are'
+                  } drawn as real geometry instead.`
+                )}
               </p>
-              <p className="text-xs text-fg-tertiary">
-                A volume is a clearance envelope read from the footprint&rsquo;s courtyard, not a
-                model of the part. The courtyard can be smaller than the real body, so treat it as
-                an approximation rather than a guarantee.
-              </p>
+              {result.component_volumes.shown > 0 && (
+                <p className="text-xs text-fg-tertiary">
+                  A volume is a clearance envelope read from the footprint&rsquo;s courtyard, not a
+                  model of the part. The courtyard can be smaller than the real body, so treat it as
+                  an approximation rather than a guarantee.
+                </p>
+              )}
               {result.component_volumes.omitted > 0 && (
                 <p className="text-sm text-warning">
                   {result.component_volumes.omitted} component
