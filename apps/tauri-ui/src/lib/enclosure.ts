@@ -24,6 +24,15 @@ export interface EnclosureParams {
   lid?: boolean
   /** Defaults to `wall_thickness_mm` on the daemon side when omitted. */
   lid_thickness_mm?: number
+  /** SPEC-326 §2.4: draw a clearance volume for each component the board
+   * gives a position and a height for. Opt-in, because a preview full of
+   * stated boxes is a different picture from the enclosure itself, and
+   * which one is wanted is the user's choice. File mode only -- positions
+   * come from the `.kicad_pcb`. */
+  show_component_volumes?: boolean
+  /** Heights the user supplied, keyed by footprint per SPEC-326 §2.5 --
+   * ten identical resistors are one decision, not ten. */
+  height_overrides?: Record<string, number>
 }
 
 /** Mirrors `freecad_generate_enclosure`'s real return shape.
@@ -48,6 +57,17 @@ export interface EnclosureResult {
   no_mounting_holes_found?: boolean
   lid_glb_path?: string
   lid_step_path?: string
+  /** SPEC-326 §2.4. Present only when volumes were asked for.
+   *
+   * `omitted` is the one that matters: a preview showing two parts of
+   * eight looks like a finished picture of a nearly empty board unless
+   * something says otherwise. On the tutorial board it really is 2 of 8. */
+  component_volumes?: {
+    shown: number
+    measured: number
+    stated: number
+    omitted: number
+  }
 }
 
 /** Thin delegation to the real async route -- no logic of its own,
