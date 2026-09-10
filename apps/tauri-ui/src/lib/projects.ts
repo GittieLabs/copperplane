@@ -33,6 +33,20 @@ import { dispatch } from './ipc'
  * validates/backfills it (`library_store.py`'s `_validate_project_intent`/
  * `_backfill_project_intent`, `CTX-206.1`) -- `null`/absent is a normal
  * state, not a degraded one, for every project that predates this field. */
+/** SPEC-328 Phase 2. `'unknown'` is a real answer everywhere it appears. */
+export type BoardStage = 'for_me' | 'for_others' | 'being_sold' | 'unknown'
+export type Environment = 'indoor_bench' | 'enclosed' | 'outdoors' | 'unknown'
+export type SupplySource = 'usb' | 'adapter' | 'battery' | 'host_board'
+
+export interface IntentFields {
+  board_stage?: BoardStage
+  environment?: Environment
+  /** `nominal_volts: null` is allowed and meaningful: knowing it is
+   * USB-powered without knowing, or caring, that USB is 5V. */
+  input_supply?: 'unknown' | { source: SupplySource; nominal_volts: number | null }
+  current_budget?: 'unknown' | { milliamps: number }
+}
+
 export interface Project {
   name: string
   schema_version?: number
@@ -48,6 +62,16 @@ export interface Project {
   parts?: string[]
   footprint_overrides?: Record<string, string>
   intent?: string | null
+  /** SPEC-328 Phase 2 / SPEC-210 §2.5: the structured half of intent, beside
+   * the free-text sentence rather than replacing it.
+   *
+   * Three states per field, and the middle one is the point: a key absent from
+   * the object was never asked, the literal `'unknown'` was asked and the user
+   * did not know, anything else was answered. SPEC-210 §2.5 wants an explicit
+   * "I do not know" on `current_budget` to TRIGGER an estimate from the parts
+   * on the board -- a blank cannot trigger anything, because a blank is
+   * indistinguishable from a question nobody put. */
+  intent_fields?: IntentFields
   /** SPEC-325 §2.1: the `.kicad_pro` this project is anchored to. The
    *  schematic and PCB are resolved from it, replacing "whatever board
    *  KiCad currently has open" -- which needed KiCad running, its API
@@ -262,4 +286,16 @@ export async function listRemovedProjects(): Promise<string[]> {
 export async function renameProject(name: string, newName: string): Promise<string> {
   const result = unwrap<{ name: string }>(await dispatch('project.rename', { name, new_name: newName }))
   return result.name
+}
+
+/** SPEC-328 Phase 2: merge answers into the structured half of intent.
+ *
+ * Merges rather than replaces, because a clarifying conversation answers one
+ * thing at a time. Passing `null` for a field removes it, returning it to
+ * "never asked" -- deliberately not the same as `'unknown'`. */
+export async function setProjectIntentFields(
+  name: string,
+  fields: Record<string, unknown>,
+): Promise<Project> {
+  return unwrap(await dispatch('project.set_intent_fields', { name, fields }))
 }

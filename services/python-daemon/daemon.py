@@ -995,6 +995,44 @@ def project_set_intent(name: str, intent: str) -> dict:
     return library_store.set_project_intent(name, intent)
 
 
+def project_set_intent_fields(name: str, fields: dict) -> dict:
+    """The project.set_intent_fields route (SPEC-328 Phase 2, SPEC-210 §2.5).
+
+    The structured half of intent, beside the free-text sentence rather than
+    replacing it: the sentence is what the user wrote, the fields are what was
+    asked and answered.
+
+    Merges, so a clarifying conversation can answer one thing at a time
+    without erasing what it already learned. A field set to `null` is removed,
+    returning it to "never asked" -- which is deliberately not the same as
+    `"unknown"`, the value that records having been asked."""
+    return library_store.set_project_intent_fields(name, fields)
+
+
+def project_suggest_parts(name: str = None, brief: str = None) -> dict:
+    """The project.suggest_parts route (SPEC-328).
+
+    Takes the project's own stored intent when `name` is given, so the surface
+    does not have to re-send what the user already typed, and falls back to an
+    explicit `brief` for someone who has not saved a project yet -- SPEC-328's
+    user "arrives with an idea and no files".
+
+    Async: a real LLM call."""
+    intent_fields = None
+    if name:
+        project = library_store.load_project(name)
+        brief = brief or project.get("intent")
+        intent_fields = project.get("intent_fields") or None
+    return component_pipeline.suggest_parts(
+        brief,
+        intent_fields=intent_fields,
+        secrets=CONFIG.get("secrets", {}),
+        provider=CONFIG.get("llm_provider"),
+        model=CONFIG.get("llm_model"),
+        app_config=CONFIG,
+    )
+
+
 def project_add_part_reference(project_name: str, part_id: str) -> dict:
     """CTX-304.3 (SPEC-304 §2): thin wrapper, matching `project_save_artifact`'s
     own `project_name`-first-argument shape. Synchronous, fast local file
@@ -2629,6 +2667,7 @@ def _build_routes() -> dict:
         routes["project.list_removed"] = project_list_removed
         routes["project.rename"] = project_rename
         routes["project.set_intent"] = project_set_intent
+        routes["project.set_intent_fields"] = project_set_intent_fields
         routes["project.set_check_result"] = project_set_check_result
         routes["project.add_part_reference"] = project_add_part_reference
         routes["project.set_footprint_override"] = project_set_footprint_override
@@ -2660,6 +2699,16 @@ def _build_routes() -> dict:
     if kicad_write is not None and library_store is not None:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
     if component_pipeline is not None and library_store is not None:
+        # SPEC-328. Registered HERE rather than beside the other `project.*`
+        # routes because it needs BOTH modules: the project record for the
+        # brief, and the pipeline for the agent. Registered on library_store
+        # alone, it existed whenever a project could be loaded and failed with
+        # a bare "'NoneType' object has no attribute 'suggest_parts'" the
+        # moment component_pipeline was degraded -- found by driving the real
+        # daemon, not by reading the code. A route that is present and broken
+        # is worse than one that is honestly absent: `daemon.ready` reports
+        # degraded modules, and an absent route is what that report is about.
+        routes["project.suggest_parts"] = project_suggest_parts
         routes["kicad.generate_connection_guidance"] = kicad_generate_connection_guidance
         routes["kicad.suggest_footprint_query"] = kicad_suggest_footprint_query
     if datasheet_guidance is not None and library_store is not None:
@@ -2709,6 +2758,9 @@ ASYNC_ROUTES = {
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
     "datasheet.read_pages", "library.render_symbol_preview", "library.render_footprint_preview",
     "chat.send", "chat.review", "context.rebuild_index",
+    # SPEC-328: a real LLM call. Sync routes run inline in the request path,
+    # so this would block every other request while the model thinks.
+    "project.suggest_parts",
     # SPEC-324: both reach a vendor over the network. Sync routes run
     # inline in the request path, so leaving these out would block every
     # other request while a slow or hanging provider is waited on -- the

@@ -32,8 +32,13 @@ type Status = 'idle' | 'searching' | 'error'
 export function ComponentDiscovery({
   projectName,
   currentProject,
+  searchSeed,
 }: {
   projectName: string
+  /** SPEC-328 §5: a category carried over from the Overview tab's suggestions.
+   *  Carries a timestamp so the same term twice re-runs rather than looking
+   *  broken. */
+  searchSeed?: { term: string; at: number } | null
   /** CTX-304.3: threaded straight through to `PartDetail`, matching
    * `Overview`'s own existing `project={currentProject}` pattern in
    * `App.tsx` -- so a successful "Save to Library" can also add a real
@@ -196,8 +201,23 @@ export function ComponentDiscovery({
     }
   }
 
+  /* SPEC-328 §5. Runs the search the Overview tab handed over, rather than
+     only filling the box: a user who clicked "Search for this" has already
+     asked, and making them click again would be asking twice. */
+  useEffect(() => {
+    if (!searchSeed?.term) return
+    setQuery(searchSeed.term)
+    void runSearch(searchSeed.term)
+    // Keyed on `at` as well as the term, so the same category twice re-runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchSeed?.term, searchSeed?.at])
+
   async function handleSearch() {
-    const trimmed = query.trim()
+    return runSearch(query)
+  }
+
+  async function runSearch(rawQuery: string) {
+    const trimmed = rawQuery.trim()
     if (!trimmed) return
 
     setStatus('searching')

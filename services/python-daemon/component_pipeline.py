@@ -23,6 +23,7 @@ daemon-owned global.
 """
 import asyncio
 import json
+import re
 import logging
 import os
 
@@ -346,6 +347,141 @@ def search_components(
     text = asyncio.run(_run_agent_and_close(executor, query, provider_client))
     candidates = _extract_json(text)
     return _validate_candidates(candidates)
+
+
+#: `SPEC-328` §1's first non-goal is "Not part selection", and `CTX-328.1`
+#: Phase 1 measured the model holding that line under direct pressure -- asked
+#: point-blank for exact part numbers, it declined. But a rule that held in
+#: eight samples is not a guarantee, and the prompt is the only thing enforcing
+#: it. This is the floor underneath it.
+#:
+#: **It is a floor, not a detector, and the difference matters.** Telling a
+#: manufacturer part number from a category by pattern is not reliably
+#: possible: `74HC595` is a generic logic part anyone may legitimately name,
+#: `ESP32` is a family, and a category like "3.3V LDO" contains digits. So this
+#: catches only the unambiguous shape -- a bare alphanumeric token, no spaces,
+#: containing digits, standing alone as the whole answer. `DS3231` and
+#: `ATtiny85` are caught; "real-time clock" and "ESP32 development board" are
+#: not, and are not meant to be.
+#:
+#: Anything it catches is dropped and REPORTED rather than silently removed or
+#: taken as grounds to discard the whole response: the other suggestions are
+#: still useful, and a caller that cannot see what was dropped cannot tell a
+#: clean answer from a filtered one.
+_BARE_PART_NUMBER = re.compile(r"^[A-Za-z][A-Za-z0-9]*\d[A-Za-z0-9\-/]*$")
+
+_SUGGESTION_REQUIRED_FIELDS = ("category", "search_term", "why")
+
+#: `SPEC-328` §3: "the honest framing is 'a starting point to check'". Carried
+#: on the record rather than left to UI copy, so a caller that renders these
+#: some other way -- a chat reply, a report, an agent reading them back --
+#: cannot drop the caveat by not knowing about it.
+SUGGESTION_CAVEAT = (
+    "These are kinds of component to start from, not parts to order. Nothing "
+    "here has been checked against a datasheet or a supplier."
+)
+
+
+def _looks_like_a_part_number(value: str) -> bool:
+    return bool(_BARE_PART_NUMBER.match((value or "").strip()))
+
+
+def _validate_suggestions(response) -> dict:
+    """`SPEC-328` Phase 3: a suggestion has to be actionable, and honest.
+
+    Actionable means a record rather than prose -- `SPEC-328` §5 requires each
+    entry be "carried straight into the existing part search", and prose cannot
+    be carried anywhere.
+
+    Honest means two things this enforces rather than describes: no part
+    numbers (see `_BARE_PART_NUMBER` for why that check is a floor), and the
+    starting-point caveat living on the record itself.
+    """
+    if not isinstance(response, dict):
+        raise ComponentValidationError("Suggestions response was not a JSON object.")
+
+    ready = response.get("ready")
+    if not isinstance(ready, bool):
+        raise ComponentValidationError("Suggestions response must state `ready` as a boolean.")
+
+    question = response.get("question") or None
+    raw = response.get("suggestions") or []
+    if not isinstance(raw, list):
+        raise ComponentValidationError("`suggestions` must be a list.")
+
+    if not ready:
+        # A not-ready answer that also carries a list is the failure mode rule 4
+        # exists to prevent: the caller renders the list and the question is
+        # decoration. The question is the answer, so the list goes.
+        if not question:
+            raise ComponentValidationError(
+                "A response that is not ready must say what it needs, in `question`."
+            )
+        return {"ready": False, "question": question, "suggestions": [],
+                "rejected": [], "caveat": SUGGESTION_CAVEAT}
+
+    suggestions, rejected = [], []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            rejected.append({"value": str(entry)[:80], "reason": "not an object"})
+            continue
+        missing = [f for f in _SUGGESTION_REQUIRED_FIELDS if not entry.get(f)]
+        if missing:
+            rejected.append({
+                "value": str(entry.get("category") or entry)[:80],
+                "reason": f"missing {', '.join(missing)}",
+            })
+            continue
+        offender = next(
+            (entry[f] for f in ("category", "search_term") if _looks_like_a_part_number(entry[f])),
+            None,
+        )
+        if offender is not None:
+            rejected.append({
+                "value": offender,
+                "reason": "looks like a specific part number, and this suggests kinds of part",
+            })
+            continue
+        suggestions.append({
+            "category": entry["category"],
+            "search_term": entry["search_term"],
+            "why": entry["why"],
+        })
+
+    return {"ready": True, "question": question, "suggestions": suggestions,
+            "rejected": rejected, "caveat": SUGGESTION_CAVEAT}
+
+
+def suggest_parts(
+    brief: str, intent_fields: dict = None, secrets: dict = None,
+    provider: str = None, model: str = None, app_config: dict = None,
+) -> dict:
+    """The project.suggest_parts route (`SPEC-328`).
+
+    A plain-language description in, the KINDS of component it needs out --
+    for the user `SPEC-328` §1 describes, who "arrives with an idea and no
+    files" and does not yet know the category names to search for.
+
+    `intent_fields` (`CTX-328.1` Phase 2) is passed through when present. A
+    battery project and a USB-powered one need different things, and using the
+    answers is the entire reason for having asked the questions.
+    """
+    if not (brief or "").strip():
+        raise ComponentValidationError("Describe what you are building first.")
+
+    secrets = secrets or {}
+    loader = ConfigLoader(_AGENTFLOW_DIR)
+    loader.load()
+    executor, provider_client = _build_agent_executor(
+        "suggested_parts", loader, secrets, provider, model, app_config=app_config,
+    )
+
+    prompt = brief.strip()
+    if intent_fields:
+        prompt += "\n\nWhat they have already told us:\n" + json.dumps(intent_fields, indent=2)
+
+    text = asyncio.run(_run_agent_and_close(executor, prompt, provider_client))
+    return _validate_suggestions(_extract_json(text))
 
 
 _GUIDANCE_REQUIRED_FIELDS = ("pin_guidance", "general_notes")

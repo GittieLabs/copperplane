@@ -29,9 +29,16 @@ class TestLoadAgentRoles(unittest.TestCase):
         synthetic fixture."""
         real_dir = Path(__file__).parent.parent / "agentflow" / "agents"
         roles = load_agent_roles(real_dir)
-        self.assertEqual(len(roles), 12)
+        # CTX-328.1 Phase 3 added `suggested_parts`, the thirteenth.
+        self.assertEqual(len(roles), 13)
         self.assertEqual(roles["chat_overview"]["model_role"], "fast")
         self.assertEqual(roles["component_extraction"]["model_role"], "reasoning")
+        # SPEC-328 §3 names this the surface most able to invent plausible
+        # nonsense, with no document to cite. `reasoning` rather than `fast`
+        # for that reason, and `strict_json` because the response is a record
+        # a caller acts on, not prose.
+        self.assertEqual(roles["suggested_parts"]["model_role"], "reasoning")
+        self.assertIn("strict_json", roles["suggested_parts"]["requires"])
 
     def test_003_a_valid_model_role_and_requires_are_parsed(self):
         _write_prompt_file(

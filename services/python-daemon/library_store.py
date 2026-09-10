@@ -1027,6 +1027,101 @@ def _validate_project_intent(project: dict) -> None:
         raise SchemaValidationError("Project.intent must be a string or null.")
 
 
+#: `SPEC-210` §2.5's fields, `SPEC-328` Phase 2. Every one accepts **unknown as
+#: a first-class value** rather than a blank, and that is not the same as never
+#: having been asked -- so there are three distinguishable states, not two:
+#:
+#:   * the key is absent from `intent_fields`  -> never asked
+#:   * the value is the string "unknown"       -> asked, and the user said so
+#:   * anything else                           -> answered
+#:
+#: The middle state is the one that earns its keep. `SPEC-210` §2.5 wants an
+#: explicit "I do not know" on `current_budget` to *trigger* an estimate from
+#: the parts on the board; a blank cannot trigger anything, because a blank is
+#: indistinguishable from a question nobody put.
+UNKNOWN = "unknown"
+
+_BOARD_STAGES = ("for_me", "for_others", "being_sold", UNKNOWN)
+_ENVIRONMENTS = ("indoor_bench", "enclosed", "outdoors", UNKNOWN)
+_SUPPLY_SOURCES = ("usb", "adapter", "battery", "host_board")
+
+
+def _validate_choice(name: str, value, allowed: tuple) -> None:
+    if value not in allowed:
+        raise SchemaValidationError(
+            f"Project.intent_fields.{name} must be one of {', '.join(allowed)} "
+            f"-- got {value!r}."
+        )
+
+
+def _validate_input_supply(value) -> None:
+    if value == UNKNOWN:
+        return
+    if not isinstance(value, dict):
+        raise SchemaValidationError(
+            "Project.intent_fields.input_supply must be 'unknown' or an object "
+            "with a source and a nominal voltage."
+        )
+    _validate_choice("input_supply.source", value.get("source"), _SUPPLY_SOURCES)
+    volts = value.get("nominal_volts")
+    # None is allowed and meaningful: the user knows it is USB-powered without
+    # knowing, or caring, that USB is 5V. Refusing that would force a guess
+    # into a field whose whole point is not guessing.
+    if volts is not None and (not isinstance(volts, (int, float)) or volts <= 0):
+        raise SchemaValidationError(
+            "Project.intent_fields.input_supply.nominal_volts must be a positive "
+            "number or null."
+        )
+
+
+def _validate_current_budget(value) -> None:
+    if value == UNKNOWN:
+        return
+    if not isinstance(value, dict) or not isinstance(value.get("milliamps"), (int, float)):
+        raise SchemaValidationError(
+            "Project.intent_fields.current_budget must be 'unknown' or an object "
+            "with a milliamps number."
+        )
+    if value["milliamps"] <= 0:
+        raise SchemaValidationError(
+            "Project.intent_fields.current_budget.milliamps must be positive."
+        )
+
+
+#: field name -> validator. A new subject area adds a row here; `SPEC-210`'s
+#: own goal is that growing this family is data rather than a rebuild.
+INTENT_FIELD_VALIDATORS = {
+    "board_stage": lambda v: _validate_choice("board_stage", v, _BOARD_STAGES),
+    "environment": lambda v: _validate_choice("environment", v, _ENVIRONMENTS),
+    "input_supply": _validate_input_supply,
+    "current_budget": _validate_current_budget,
+}
+
+
+def _validate_project_intent_fields(project: dict) -> None:
+    """`SPEC-328` §2, `SPEC-210` §2.5: the structured half of intent.
+
+    Strict about unrecognised keys, deliberately. The only writer is this app,
+    so an unexpected key is a bug in a caller rather than a user's data, and
+    this repo's standing preference is to validate at store time rather than
+    discover it at read time -- a silently-ignored typo becomes a field the
+    user believes they answered and nothing reads.
+    """
+    fields = project.get("intent_fields")
+    if fields is None:
+        return
+    if not isinstance(fields, dict):
+        raise SchemaValidationError("Project.intent_fields must be an object or null.")
+    for name, value in fields.items():
+        validator = INTENT_FIELD_VALIDATORS.get(name)
+        if validator is None:
+            raise SchemaValidationError(
+                f"Unknown project intent field {name!r}. Known fields: "
+                f"{', '.join(sorted(INTENT_FIELD_VALIDATORS))}."
+            )
+        validator(value)
+
+
 def _validate_project_fabrication_profile(project: dict) -> None:
     """CTX-340.1 Phase 1: validate at store time, not at review time.
 
@@ -1095,6 +1190,13 @@ def _backfill_project_intent(record: dict) -> dict:
     # all. Follows `intent`'s convention rather than `parts`'s for that reason.
     record.setdefault("fabrication_profile", None)
     record.setdefault("check_display", {})
+    # `{}` rather than `None`, following `footprint_overrides` rather than
+    # `intent`: an absent key and an empty object mean the same real thing --
+    # nothing has been asked yet -- so every caller's `.get(name)` lookup stays
+    # uniform regardless of how old the project is. The three-state distinction
+    # this family needs lives INSIDE the object, per-field, not in whether the
+    # object exists.
+    record.setdefault("intent_fields", {})
     return record
 
 
@@ -1112,6 +1214,7 @@ def save_project(project: dict) -> dict:
     if not name:
         raise SchemaValidationError("Project.name is required.")
     _validate_project_intent(project)
+    _validate_project_intent_fields(project)
     _validate_project_fabrication_profile(project)
     directory = project.get("directory")
     record = _backfill_project_intent({**project, "schema_version": 1})
@@ -1184,6 +1287,37 @@ def set_project_intent(name: str, intent: str) -> dict:
     the folder automatically, same as every other real field."""
     project = load_project(name)
     project["intent"] = intent
+    return save_project(project)
+
+
+def set_project_intent_fields(name: str, fields: dict) -> dict:
+    """`SPEC-328` Phase 2: merge answers into the structured half of intent.
+
+    Merges rather than replaces, because these get answered a few at a time --
+    a clarifying conversation asks one thing, then another, and a replacing
+    write would silently erase every earlier answer the moment a second
+    question came back on its own.
+
+    Passing `None` for a field **removes** it, returning that field to "never
+    asked". That is deliberately different from setting it to `"unknown"`,
+    which records that the user was asked and did not know. Collapsing the two
+    would destroy the distinction `SPEC-210` §2.5 depends on for its estimate
+    trigger.
+
+    Round-trips through `load_project`/`save_project` for the same reason
+    `set_project_intent` does -- it inherits the pointer/manifest routing
+    rather than re-deriving it.
+    """
+    if not isinstance(fields, dict):
+        raise SchemaValidationError("intent_fields must be an object.")
+    project = load_project(name)
+    merged = {**(project.get("intent_fields") or {})}
+    for key, value in fields.items():
+        if value is None:
+            merged.pop(key, None)
+        else:
+            merged[key] = value
+    project["intent_fields"] = merged
     return save_project(project)
 
 

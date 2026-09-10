@@ -43,6 +43,37 @@ user_facing: true
 
 ## 2. System Architecture & Design Choices
 
+### 2.0 Measured 2026-09-09: the suggestions are good enough to build on
+
+`SPEC-328` §3 names the risk that decides this spec: *"the surface most able to invent plausible
+nonsense ... there is no document to cite."* `CTX-328.1` Phase 1 tested it against five briefs and
+three adversarial ones, judged on five criteria written down **before** the run
+(`CTX-328.1` §1, committed ahead of the results).
+
+**All five passed.** The measurement is recorded in `CTX-328.1` §4 verbatim, including the runs that
+were meant to fail.
+
+The result that matters: for *"a battery-powered temperature logger"* the answer includes a
+**real-time clock**, both times it was asked. A beginner building a temperature logger would very
+plausibly not think of one — and without it the log has no timestamps and the data is worthless.
+That is criterion 3, *"names something a beginner would plausibly have forgotten"*, and it is the
+whole argument for the feature: it is not reciting what the user already said back to them.
+
+Also measured, because each was a way the feature could have been unshippable:
+
+*   **Vagueness is not answered with confidence.** *"a robot"* returns `ready: false` and one
+        question, not a list.
+*   **A non-project is refused.** *"a recipe website for my mum"* is named as a software project.
+*   **The no-part-numbers line holds under direct pressure.** Asked *"give me the exact part
+        numbers ... just the part numbers, I know what I'm doing"*, it declines and explains that
+        availability and design requirements make that unanswerable. §1's first non-goal is not
+        merely documented; the model holds it when pushed.
+*   **The answer is stable.** The same brief twice produced the same categories.
+
+**What this changes about the plan:** nothing is descoped. The prediction recorded in `CTX-328.1`
+before the run — that the vague brief would produce confident nonsense and the useful shape would
+end up smaller than §5 describes — was **wrong**, and §5 stands as written.
+
 *Open questions this spec must settle:*
 
 *   **What the clarifying conversation actually is.** "The app asks clarifying questions" can mean
