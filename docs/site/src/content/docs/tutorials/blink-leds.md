@@ -5,10 +5,11 @@ description: Walk a real Arduino shield through Copperplane — find what is wro
 
 This is a real board with real problems. Not a toy: an Arduino UNO shield with an
 RGB LED, a resistor, a tactile switch and four mounting holes. It has five errors
-on the PCB, two on the schematic, and two mistakes that **no KiCad check will
+on the PCB, two on the schematic, and several mistakes that **no KiCad check will
 ever report** — which turn out to be the most interesting things in it.
 
-You will need KiCad 9 or newer, and about twenty minutes.
+You will need KiCad 9 or newer, and about twenty minutes. **KiCad does not need
+to be running** — everything here reads the files.
 
 :::note[What you are looking at]
 The board is an Arduino shield: it sits on top of an UNO. If you have never made
@@ -44,6 +45,53 @@ The rail on the left holds your projects, your parts library, and Settings.
 Across the top of a project sit five tabs — **Overview**, **Components**,
 **Schematic**, **PCB**, **Enclosure** — which is roughly the order you would work
 in.
+
+## What it says before you ask
+
+Stay on **Overview**. You have run no check and asked no question, and it already
+has three things to say about this board.
+
+**One is a blocker dressed as a detail.**
+
+> R1 still has KiCad's placeholder value (R). Until it says what it actually is,
+> nothing here can work out what this circuit draws — and that is what a trace
+> width and a power budget both rest on.
+
+`R` is what KiCad puts there when you place a resistor and never come back. It is
+not an error to KiCad — the part is perfectly well-formed — but it is the reason
+several other questions about this board cannot be answered at all. Notice that
+the app says *which* questions rather than just complaining.
+
+**One is the sort of thing you find with a multimeter, three hours in.**
+
+> A1 pin 8 is its VIN pin, and you have the +5V rail on it. This part also
+> declares a 5V output pin of its own, which means VIN is the input that feeds
+> whatever makes that — so the two are not interchangeable. Its own 5V pin (pin
+> 5) is not connected to anything.
+
+`VIN` on an Arduino goes through the board's own regulator. Feeding it a
+regulated 5V leaves that regulator nothing to work with, and the 5V rail it
+produces comes out lower than 5V. The pin that actually *is* 5V — pin 5 — is
+sitting unconnected right next to it.
+
+Note the last sentence of that finding, which is a question rather than a
+verdict: *is +5V what you meant here?* The app cannot see inside the Arduino
+module. A different board might accept 5V on VIN quite happily, so it tells you
+what it can see and leaves the judgement with you.
+
+**And one is the board being right**, which you would otherwise never hear about:
+
+> D1's anode reaches R1 on Net-(D1-A) — that resistor is what stops the LED
+> drawing more current than the pin driving it can give.
+
+That is deliberate. A check that only ever speaks up when something is wrong
+teaches you nothing about the times you got it right, and "no findings" is
+indistinguishable from "nothing was looked at". Each of these also names what was
+**not** examined, so a quiet Overview is never mistaken for a finished board.
+
+None of the three is an ERC or DRC violation. Every one is read from your
+schematic's actual connectivity — which pin joins which net — and every number in
+them comes from your files rather than from a model's impression of your files.
 
 ## Read the board
 
@@ -113,9 +161,10 @@ depends on it.
 
 The remaining two findings are a different thing again.
 
-## The two findings KiCad never makes
+## Two more that KiCad never makes
 
-The last two findings on that list did not come from DRC. They read like this:
+The last two findings on that list did not come from DRC either. Like the three
+on Overview, they come from comparing things KiCad is happy to let disagree:
 
 > D1's symbol and footprint disagree about how many pins this part has. The
 > symbol `Device:LED` has 2; the footprint `LED_THT:LED_D5.0mm-4_RGB` has 4
@@ -146,6 +195,11 @@ consistently that happens not to exist.
 That is the gap this tool exists for. A checker tells you which rules you broke.
 Understanding what you actually *built* is a different question, and it is the
 one that costs you a board order.
+
+Five things on this board fall into that gap — R1's placeholder, the 5V rail on
+`VIN`, the two pin-count mismatches, and the LED resistor that was right all
+along. None is an ERC or DRC violation. All five are things you would want
+someone to mention before you spent forty dollars and a fortnight finding out.
 
 :::tip[Ask for more]
 The finding gives you the counts. If you want the consequence — what happens
@@ -210,9 +264,19 @@ real minimum may be taller rather than quietly treating an unmeasurable part as 
 
 ## What you have learned
 
-Five real errors, one non-error that would have cost you a board, and an
-enclosure that fits. More usefully: a way of reading check output that does not
-depend on already knowing what an annular ring is.
+Seven real errors between the board and the schematic, five more things that no
+rule checker reports, one of which was the board being right — and an enclosure
+that fits.
+
+More usefully, two habits. A way of reading check output that does not depend on
+already knowing what an annular ring is. And the difference between *"this breaks
+a rule"* and *"this will not do what you think"*, which is the question that
+actually costs you a board order.
+
+Everything on Overview happened without you asking. If you would rather it did
+not, the guided path is a toggle — off, it answers when asked and volunteers
+nothing. Nothing is hidden either way, and
+[what it notices](/copperplane/guides/what-it-notices/) covers the rest.
 
 Take the same pass over a board of your own. If something goes wrong — and on
 Windows or Linux especially, it might —
