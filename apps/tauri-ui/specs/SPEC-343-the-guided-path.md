@@ -1,7 +1,7 @@
 ---
 id: SPEC-343
 title: "The Guided Path"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-10
 last_updated: 2026-09-10
@@ -344,3 +344,22 @@ whose reasoning can be read back, which is worth having whatever this surface do
     shown beneath. They click the action, which takes them to the tab that already exists, or they
     ignore it entirely and use the tabs directly. Nothing is hidden from them, nothing happens
     without them, and the surface can be turned off for the project and back on at any point.
+
+---
+
+## 6. Shipped 2026-09-10 — and the one thing not verified
+
+Both contexts closed: [CTX-343.1](../context/CTX-343.1-where-am-i.md) built the reading, the
+toggle, the skipped description and absence-shaped triggers;
+[CTX-343.2](../context/CTX-343.2-what-you-got-right.md) built §2.7's reinforcement.
+
+**What is verified:** every route over real JSON-RPC against a linked project, the packs against a
+real board (`SPEC-210` §3 records the three that failed on first contact and why), and the full
+suite on both sides.
+
+**What is not:** nobody has used this surface as a novice would. The norm in `CLAUDE.md` —
+*"verify as the user, not just as the capability"* — is satisfied for the capability and not for
+the user, and `SPEC-302` is the reason that distinction is written down. §3's second constraint is
+the one this leaves open: the measure is whether a user takes the next action, and that cannot be
+read off a passing test. It needs the first real novice, which is what the self-managed testing
+round is for.
