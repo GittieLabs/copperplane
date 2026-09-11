@@ -4,21 +4,55 @@ Not published — this file is documentation for whoever is holding the camera, 
 for a reader of the site. Images themselves go in `public/images/` and are
 referenced from a page as `/copperplane/images/<name>.png`.
 
-## Every existing image has to be retaken
+## Status, 2026-09-11
 
-All six images currently in `public/images/` were captured on 2026-08-24 and are
-unusable, for two independent reasons:
+Eighteen images, all captured **2026-09-04**. Eleven are dead, four are probably
+fine, and the app has grown surfaces since that have never been photographed at
+all. Each claim below is tied to the commit that invalidated the shot, so this
+section can be re-derived rather than trusted.
 
-1. **The window title bar reads "Hardware Agent Studio".** That is the superseded
-   product name, live on the docs site right now. `test_readme_claims.py` fails
-   the build if that string appears in any page's prose; it cannot read a PNG,
-   which is exactly how this survived the rename.
-2. **They predate the brand colour** (`CTX-338.1`). Every primary button in them
-   is the old near-white/near-black accent, not Copperplane green, and the app
-   now shows the mark on its launch and welcome screens.
+### Dead: the component behind them changed
 
-They also show a different project (`test 1`, an NFC reader) rather than the
-tutorial project.
+| File | Invalidated by |
+| :--- | :--- |
+| `hero.png` | `SPEC-343` — Overview is a different screen now: the reading of where the project stands, the considerations callout, what you got right, the intent editor |
+| `welcome.png` | `CTX-338.1` — the Copperplane mark on the launch screen |
+| `no-project.png` | `CTX-338.1` — the same mark on the no-project landing |
+| `board-check.png` | `SPEC-340` — the board-house picker and the fabrication summary banner |
+| `board-check-explained.png` | `SPEC-340` — same, plus `ViolationsList` changes |
+| `schematic-erc.png` | `SPEC-340` — `SchematicAdvisor` and `ViolationsList` |
+| `component-search.png` | `SPEC-334` (KiCad's own libraries in results) and `SPEC-306` (a dead datasheet link became a live search) |
+| `part-detail.png` | `SPEC-334.2` glossary, `CTX-339.1` review persistence |
+| `enclosure.png` | `SPEC-326` — the labelled bounding solids |
+| `enclosure-3d.png` | `SPEC-326` — same |
+| `settings.png` | `SPEC-342` — the board-house library lives here now |
+
+**`welcome.png` and `no-project.png` are worth a note.** They were captured at
+**23:26** on 2026-09-04; `CTX-338.1`, the commit that put the mark on those two
+exact screens, landed at **23:39**. Thirteen minutes. The shots are of the
+screens the commit was about, taken just before it.
+
+### Probably fine — check, do not assume
+
+`guided-provider.png`, `guided-tools.png`, `new-project.png`,
+`new-project-review.png`, `schematic-check.png`, `design-guidance.png`,
+`ask-the-agent.png`. No component behind them has changed since the capture.
+Compare against the running app before keeping them.
+
+### Never captured: surfaces that did not exist on 2026-09-04
+
+These are the gap that matters, because the site cannot show the app's most
+distinctive feature at all.
+
+| Needed | What to set up |
+| :--- | :--- |
+| **Overview with considerations** | Link `Copperplane_Blink_LEDs`. It raises R1's placeholder value and the `+5V`-on-`VIN` finding with no setup at all. The most important missing shot on the list. |
+| **What you got right** | Same screen — D1's series resistor, with the "checked here" line visible underneath. Frame both together if they fit. |
+| **The guided-path toggle** | Same screen, showing that it can be turned off. |
+| **The intent editor** | Overview, with the supply and current-budget fields. Leave them empty; empty is the honest default state. |
+| **Board-house picker** | PCB tab with a house selected, so the banner shows what changed against the generic profile. |
+| **The board-house library** | Settings. Show more than one house, so the picker reads as a library rather than a setting. |
+| **KiCad's own libraries in search** | Components tab. A query returning both your saved parts and KiCad's own footprints, so the merge is visible. |
 
 ## Dark theme, everywhere
 
@@ -58,9 +92,11 @@ know about** -- check those yourself.
 Raw captures are gitignored wherever they land. The chosen ones get cropped
 into `docs/site/public/images/`.
 
-## All slots are filled
+## What each existing image shows
 
-Fifteen images, every one dark, every one from the tutorial project with a clean rail.
+Eighteen images, every one dark, every one from the tutorial project with a
+clean rail. Read this with the status section at the top — several of these are
+now historical records rather than current screens.
 
 | File | Shows |
 | :--- | :--- |
@@ -81,19 +117,6 @@ Fifteen images, every one dark, every one from the tutorial project with a clean
 | `design-guidance.png` | Guidance with expandable citations |
 | `enclosure.png` | The generation form with the measured height hint |
 | `enclosure-3d.png` | The generated enclosure with the board seated inside |
-
-## Two shots are stale as of SPEC-113
-
-`board-check.png` and `board-check-explained.png` were taken before the
-symbol/footprint check existed, so they show **three** findings where the tutorial
-now describes **five**. The two new ones are at the bottom of the list:
-
-*   D1 -- `Device:LED` has 2 pins, `LED_THT:LED_D5.0mm-4_RGB` has 4 numbered pads
-*   SW1 -- `Switch:SW_Push` has 2 pins, `KSA_Tactile_SPST` has 5 numbered pads
-
-Retake both against `Copperplane_Blink_LEDs` with the PCB check run. Make sure
-the frame includes the last two findings; they are the point of the section they
-illustrate. Nothing else about those shots needs to change.
 
 ## One capture was rejected
 
