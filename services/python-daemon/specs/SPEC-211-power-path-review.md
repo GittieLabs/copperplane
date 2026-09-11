@@ -1,7 +1,7 @@
 ---
 id: SPEC-211
 title: "The Power Path Review"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-09-07
 last_updated: 2026-09-10
@@ -284,8 +284,9 @@ cannot afford.
     having chosen IPC-2221.
 
 *   **Showing the arithmetic inline or on demand.** The sum is the teaching, so inline is likely
-    right, but four sums in one review is a wall. Still open, and now with something concrete behind
-    it: a consideration carries its calculation in `arithmetic`, so the surface can choose.
+    right, but four sums in one review is a wall. **Still open, and it leaves this spec rather than
+    closing with it** — every consideration now carries its calculation in `arithmetic`, so the
+    decision belongs to whoever renders it. `SPEC-343` owns that surface.
 *   ~~**The AMS1117 numbers in §1 are illustrative and unverified.**~~ **Closed 2026-09-08**: read
     off the datasheet and recorded in §1, including the copper-area caveat, which is now a UI
     requirement rather than an open question. The framing changed as a result — the ceiling (about
@@ -347,3 +348,42 @@ cannot afford.
     current it draws, with "I do not know" always available. The review then carries power findings
     that show their arithmetic in one line, say which number came from the user and which from a
     datasheet, and ask rather than assert wherever the app cannot see how the board is wired.
+
+
+---
+
+## 6. Shipped 2026-09-10 — and what is not behind it
+
+All five of §2.1's items ship, plus a sixth the list never anticipated, across three contexts:
+[CTX-211.1](../context/CTX-211.1-power-path.md) (dissipation, trace width, reverse polarity, and the
+module case), [CTX-211.2](../context/CTX-211.2-source-capability.md) (source capability) and
+[CTX-211.3](../context/CTX-211.3-absolute-maximum.md) (absolute maximum).
+
+**§1's headline sentence is not among them, and that is the most important line in this section.**
+The spec says the thing to put in front of the user is the ceiling — *"your 1A regulator is a 130mA
+regulator on this supply"*. That needs a thermal resistance, this app holds none for any part, and
+§2.0 item 8 records why inferring one was refused. What ships is the watts with a sentence saying
+why it is not a temperature. **The ceiling becomes reachable the day a part record carries a thermal
+resistance with provenance, and nothing here has to change for it to** — the calculation is already
+in every consideration's `arithmetic` field.
+
+**Verified:** every pack over real JSON-RPC against a linked project; the packs against five real
+boards with their false positives counted; the IPC-2221 relationship against KiCad's own Track Width
+calculator; the absolute-maximum parse against this library's two real part records, including the
+`RESET` pin rating that a naive parse reads instead of the supply maximum. And **the frozen sidecar**
+— `dist/` rebuilt and driven a real `project.considerations` request, returning all eight packs with
+no degraded modules, which settles whether PyInstaller bundles `power_path`.
+
+**Not verified, and each of these is a different kind of gap:**
+
+*   **No board available to this project exercises the two headline cases.** There is no discrete
+    linear regulator on any of the five, and no project links a part whose board it is actually on.
+    Both firing cases run against schematics authored for the test — real KiCad files read by real
+    `kicad-cli`, which proves the arithmetic and **not** the triggering. Every quiet case, by
+    contrast, is measured on real boards, and that asymmetry is the honest summary of this spec's
+    evidence: the silence is well tested, the speech is not.
+*   **Nobody has used any of it.** `CLAUDE.md`'s *"verify as the user, not just as the capability"*
+    is satisfied for the capability only. `SPEC-302` is why that distinction is written down.
+*   **The absolute-maximum parse rests on two part records.** Its safety comes from firing only on
+    exceedance — a bad parse is a visible false positive or silence, never a false reassurance — and
+    not from the parse being widely tested, because it is not.
