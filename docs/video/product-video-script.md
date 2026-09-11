@@ -11,19 +11,31 @@ script was written before any of that existed and guessed at all of them.
 ## The one story
 
 A maker has a working breadboard. They draw a real PCB. KiCad tells them what is
-wrong in a language they do not speak — and stays silent about the one thing that
+wrong in a language they do not speak — and stays silent about the things that
 would actually cost them a board order.
 
 Everything below serves that. If a shot does not, cut it.
 
-**The strongest ten seconds in this product is segment 5**, and it is the one no
-competitor can copy by adding a feature: the part that is wired correctly, passes
-every check, and was never going to work. Do not rush it.
+### What changed, and why the shape of the video changed with it
 
-It also got materially easier to shoot. Until `SPEC-113` the app only surfaced
-that mismatch if the viewer thought to ask for it, so the segment needed a
-question typed on camera. Now it is a finding in the list the previous segment
-already ran, and the beat is a scroll.
+The old arc was **run a check → have it explained → and here is the thing checks
+cannot see.** Every beat in it started with a click.
+
+The app does not work that way any more. Link a project and it has already read
+the schematic's connectivity and has things to say, before the viewer has asked
+for anything. **That is a better video than it is a feature**, because the
+strongest possible demonstration of "this is not a checker" is a screen that
+speaks with nobody touching the mouse.
+
+So there is a new segment 3, and it is the one to protect. Two segments now carry
+the argument rather than one:
+
+*   **Segment 3** — it spoke first. Nothing was clicked.
+*   **Segment 5** — the part that passes every check and was never going to work.
+
+Neither can be copied by adding a feature. Segment 5 is still the sharpest single
+idea; segment 3 is the one that lands earliest, on a viewer who has not yet
+decided to keep watching.
 
 ---
 
@@ -35,7 +47,11 @@ already ran, and the beat is a scroll.
 *   **Dark theme**, one window size, the rail showing only `Copperplane Blink LEDs`.
 *   Have both windows pre-arranged. Never record a window being dragged.
 *   Run each check once before recording so nothing shows a spinner you have to
-    cut around.
+    cut around. **Segment 3 is the exception** — its whole point is that nothing
+    was run. Link the project, let Overview settle, and shoot it as it arrives.
+*   Leave the project's supply and current fields **empty**. Empty is the honest
+    state for a board somebody just linked, and the findings in segment 3 do not
+    need them.
 *   Quit anything with notifications.
 
 ---
@@ -58,7 +74,7 @@ this muted.
 Six seconds is generous for a hook. If the board does not read as *a real thing
 somebody made* in the first two, reframe tighter.
 
-### 2 — The wall (0:06–0:14)
+### 2 — The wall (0:06–0:13)
 
 | | |
 | :--- | :--- |
@@ -69,36 +85,53 @@ somebody made* in the first two, reframe tighter.
 
 The discomfort is the point. Do not cut away early to be kind.
 
-### 3 — The same files, read differently (0:14–0:24)
+### 3 — It already knew (0:13–0:27)
 
 | | |
 | :--- | :--- |
-| **Capture** | Cut to Copperplane, project already linked, **PCB** tab. Click **Run Review**. Let the findings appear. |
-| **Must be legible** | The first finding's heading: *Four pads on D1 have too little copper ring around their drill holes*. |
-| **On screen** | `Same files. Same checks.` |
-| **Voiceover** | "Copperplane reads the same files. Runs the same checks. Then tells you what they mean." |
+| **Capture** | Cut to Copperplane, project **just linked**, sitting on **Overview**. Do not click anything. Let the findings be there when the cut lands. |
+| **Must be legible** | The `A1` finding: the `+5V` rail on the `VIN` pin, and the sentence saying A1's own 5V pin is not connected to anything. |
+| **On screen** | `Nothing was clicked.` |
+| **Voiceover** | "Copperplane has already read it. Your five-volt rail is going into the pin that feeds the Arduino's own regulator — and the pin that actually *is* five volts is sitting unconnected next to it. Nobody asked it to look." |
 
-KiCad reported that violation four times. Copperplane shows it once — that
-compression is what this segment has to land, and the first finding's heading is
-what carries it.
+**Shoot the cut so the cursor is visibly still.** The claim is that the app spoke
+first; a cursor drifting toward a button undercuts it in a way no caption can
+repair.
 
-**Do not put a findings count on screen.** The list is five findings now: three
-that explain DRC and two the next segment is about. Naming a number here sets up
-"three findings from five violations", which segment 5 then contradicts.
+**Do not narrate the finding as a verdict.** The app's own last line is a
+question — *is `+5V` what you meant here?* — because it cannot see inside the
+Arduino module, and a different board might accept it. That restraint is worth
+the two words it costs: "it asks." A tool that hedges where it should is more
+credible than one that never does, and this audience has been burned by the
+other kind.
 
-### 4 — What it means (0:24–0:36)
+There is a **second** finding on that screen, R1's placeholder value, and a
+**third** telling the viewer something the board got right. Both should be in
+frame. Neither is narrated — see the note after segment 5 about letting a viewer
+find things.
+
+### 4 — The same files, read differently (0:27–0:38)
 
 | | |
 | :--- | :--- |
-| **Capture** | Cursor rests on the annular finding. Slow scroll through the explanation. |
-| **Must be legible** | `0.085 mm` against `0.100 mm`, and the phrase about the plating cracking or the hole breaking loose. |
-| **On screen** | `0.085 mm of copper. The rule says 0.100.` |
-| **Voiceover** | "A plated hole needs a ring of copper around it. Yours is 0.085 millimetres where the rule says 0.100 — thin enough that the drill can break through it, on a board that looked fine in CAD." |
+| **Capture** | **PCB** tab. Click **Run Review**. Let the findings appear, then rest the cursor on the annular finding and scroll slowly through its explanation. |
+| **Must be legible** | The annular heading, then `0.085 mm` against `0.100 mm`, and the phrase about the plating cracking or the hole breaking loose. |
+| **On screen** | `Same files. Same checks.` then `0.085 mm of copper. The rule says 0.100.` |
+| **Voiceover** | "It runs the same checks KiCad does, on the same files, and then tells you what they mean. A plated hole needs a ring of copper around it. Yours is 0.085 millimetres where the rule says 0.100 — thin enough for the drill to break through, on a board that looked fine in CAD." |
 
-This is the segment that earns trust: it is specific, it names the part, and it
-says what physically goes wrong.
+This is the segment that earns trust: specific, names the part, says what
+physically goes wrong. It used to be two segments; segment 3 now carries the
+"it reads your files" idea, so this one only has to carry the explanation.
 
-### 5 — The thing KiCad cannot see (0:36–0:50)
+KiCad reports that annular violation **four times**. Copperplane compresses it.
+That compression is worth landing, and the heading carries it.
+
+**Do not put a findings count on screen**, and do not say one out loud. The
+explanation pass groups related violations, so the number on the list is not
+fixed between runs — a caption saying "three findings" can be contradicted by
+your own recording.
+
+### 5 — The thing KiCad cannot see (0:38–0:52)
 
 | | |
 | :--- | :--- |
@@ -124,7 +157,7 @@ seconds than the segment has. Do not crop it out of frame; just do not narrate
 it. A viewer noticing a second finding they were not told about reads as
 thoroughness.
 
-### 6 — The case (0:50–1:02)
+### 6 — The case (0:52–1:02)
 
 | | |
 | :--- | :--- |
@@ -136,7 +169,7 @@ thoroughness.
 That last clause is not filler. It is the difference between a tool you can trust
 with a board order and one you cannot.
 
-### 7 — Whose machine (1:02–1:10)
+### 7 — Whose machine (1:02–1:09)
 
 | | |
 | :--- | :--- |
@@ -145,7 +178,7 @@ with a board order and one you cannot.
 | **On screen** | `It reads your files. It doesn't take them over.` |
 | **Voiceover** | "It does not replace KiCad or FreeCAD. It reads what you made, explains what it finds, and hands the decision back to you." |
 
-### 8 — Close (1:10–1:15)
+### 8 — Close (1:09–1:15)
 
 | | |
 | :--- | :--- |
@@ -158,11 +191,12 @@ with a board order and one you cannot.
 
 ## The 60-second cut
 
-Drop segments 6 and 7. The arc still works: hook → wall → same files read
-differently → what it means → the thing KiCad cannot see → close. You lose the
+Drop segments 6 and 7. The arc still works: hook → wall → **it already knew** →
+same files read differently → the thing KiCad cannot see → close. You lose the
 enclosure, which is a feature; you keep the argument.
 
-Do not shorten segment 5 to save time. Shorten segment 4.
+Do not shorten segments 3 or 5 to save time. Shorten segment 4 — it is the one
+whose job the other two now partly do.
 
 ---
 
@@ -179,15 +213,26 @@ Do not shorten segment 5 to save time. Shorten segment 4.
 
 ## What to say if it is thirty seconds
 
-Hook, segment 5, close. The mismatch is the only segment that is unique to this
-product — everything else is *better*, that one is *different*.
+Hook, **segment 3**, segment 5, close. Two beats, not one, and the order matters:
+the app speaking first buys the attention that the mismatch then rewards.
+
+If it has to be a single beat, it is **segment 3** rather than segment 5 — which
+is a change from the previous version of this script, and worth saying why. The
+mismatch is the sharper idea, but it needs the viewer to already care about the
+difference between "breaks a rule" and "will not work". A screen that answers
+before anybody asks needs no setup at all.
+
+Everything else in this product is *better* than the alternative. Those two are
+*different*.
 
 ---
 
 ## Capture notes
 
 *   **Screen Studio**, following its own defaults for cursor smoothing. Turn the
-    automatic zoom **off** for segments 2 and 4 — it fights with reading.
+    automatic zoom **off** for segments 2 and 4 — it fights with reading. Turn it
+    off for segment 3 as well, and for a different reason: an automatic zoom is a
+    movement, and that segment's claim is that nothing moved.
 *   Record each segment separately. One continuous take invites a hunt for the
     good thirty seconds.
 *   Cursor speed: slow enough that a viewer's eye can follow it to the thing being
