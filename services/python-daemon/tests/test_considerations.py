@@ -819,3 +819,81 @@ class TestTraceWidthAndReversePolarity(unittest.TestCase):
         self.assertEqual(packs.reversible_power_input({
             "nets": self._bb8_nets(), "footprints": [],
         }), [])
+
+
+class TestCurrentBudgetAgainstSource(unittest.TestCase):
+    """`SPEC-211` §2.1 item 3 / `CTX-211.2` -- twelve LEDs off a USB port."""
+
+    def _intent(self, source, milliamps):
+        fields = {"input_supply": {"source": source, "nominal_volts": 5}}
+        if milliamps is not None:
+            fields["current_budget"] = {"milliamps": milliamps}
+        return {"intent_fields": fields}
+
+    def _run(self, source, milliamps):
+        import consideration_packs as packs
+        return packs.current_budget_against_source(self._intent(source, milliamps))
+
+    def test_a_usb_board_over_the_guarantee_is_raised_and_cites_the_standard(self):
+        raised = self._run("usb", 900)
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["claim_class"], "cited")
+        self.assertEqual(raised[0]["source"]["ref"], "USB 2.0 Specification")
+        self.assertEqual(raised[0]["arithmetic"]["result"], {"value": 400, "unit": "mA"})
+
+    def test_it_reports_a_guarantee_and_does_not_predict_a_failure(self):
+        """The failure mode this pack actually has.
+
+        Exceeding 500mA does not mean the board fails -- the charger on the
+        user's desk probably delivers two amps. A confident "this will not work"
+        about a board that works fine is `SPEC-211` §3's worst case, and it is
+        the easy thing to write here."""
+        explanation = self._run("usb", 900)[0]["explanation"]
+
+        self.assertIn("does not mean it will not run", explanation)
+        self.assertIn("some ports and not others", explanation)
+
+    def test_a_source_with_no_capability_this_app_holds_stays_silent(self):
+        # An adapter's capability is printed on the adapter, a battery's depends
+        # on the cell, and a host board's is a datasheet figure this app does not
+        # have. Inventing one is the assumed value §2.6 rules out.
+        for source in ("adapter", "battery", "host_board"):
+            self.assertEqual(self._run(source, 900), [], source)
+
+    def test_a_budget_inside_the_guarantee_is_reinforced_not_merely_ignored(self):
+        """`SPEC-343` §2.7: the reinforcement is the finding that was not raised."""
+        import considerations
+        raised = self._run("usb", 300)
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["state"], considerations.SATISFIED)
+        self.assertEqual(raised[0]["claim_class"], "cited")
+
+    def test_the_good_news_is_sourced_as_rigorously_as_the_bad(self):
+        """`considerations.cleared` builds a COMPUTED claim, and this figure is
+        USB's however it is being used -- so the satisfied case goes through
+        `make` directly with its source attached."""
+        self.assertEqual(
+            self._run("usb", 300)[0]["source"]["ref"], "USB 2.0 Specification"
+        )
+
+    def test_exactly_at_the_guarantee_fits(self):
+        import considerations
+        self.assertEqual(self._run("usb", 500)[0]["state"], considerations.SATISFIED)
+
+    def test_without_a_current_budget_it_asks_nothing(self):
+        # `regulator_dissipation` already asks for this number. Asking twice in
+        # one review is nagging.
+        self.assertEqual(self._run("usb", None), [])
+
+    def test_an_unknown_supply_raises_nothing(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.current_budget_against_source({
+            "intent_fields": {"input_supply": "unknown",
+                              "current_budget": {"milliamps": 900}},
+        }), [])
+
+    def test_a_project_with_no_intent_at_all_raises_nothing(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.current_budget_against_source({"intent_fields": {}}), [])
