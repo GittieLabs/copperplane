@@ -92,6 +92,81 @@ def led_series_resistor(nets: list) -> list:
 # rather than the netlist's flattened pin types. That is a real piece of work and
 # it belongs to whoever writes the second real pack, not to a footnote here.
 
+# --- Absence-shaped triggers (SPEC-343 §2.6) ---------------------------
+#
+# What a novice is missing is usually a part, or a number, that is not there.
+# So the trigger is an empty set rather than a present thing -- and `SPEC-210`
+# §2.2 still applies unchanged: it must name something real.
+#
+# **The rule that makes an absence sayable: it must be an absence OF something,
+# ON something the files name.** "No capacitor on `+5V`" names `+5V`. "`R1` has
+# no value" names `R1`. "No ESD protection" names nothing, so it is not said,
+# however true it might be.
+#
+# `CTX-343.1` Phase 5 measured the obvious version of this first and it was
+# badly wrong. KiCad writes a symbol's own name into its value property by
+# default, so "value equals the symbol name" looks like a perfect
+# never-set detector -- and on the maintainer's correct board it matches **all
+# eleven symbols**: `power:GND` whose value `GND` is right, four
+# `Mechanical:MountingHole` which have no value to set, and
+# `MCU_Module:Arduino_UNO_R3` whose value IS its part name.
+#
+# So the rule is narrowed to the only case where a value is an electrical
+# parameter that something downstream computes with. On the same board that
+# raises exactly one: `R1`.
+
+#: Symbols whose `value` is a number the app would calculate from. A closed
+#: list, not a prefix match: `Device:R_Potentiometer` is a resistor whose value
+#: means something different, and guessing from the name is how the eleven
+#: false positives above happened.
+_VALUE_IS_A_PARAMETER = {
+    "Device:R", "Device:R_Small", "Device:R_US",
+    "Device:C", "Device:C_Small", "Device:C_Polarized", "Device:C_Polarized_Small",
+    "Device:L", "Device:L_Small",
+}
+
+
+def component_without_value(symbols: list) -> list:
+    """A passive still carrying KiCad's placeholder value.
+
+    `computed`: the schematic states the symbol and states the value, and the
+    two being equal is a fact rather than an inference.
+
+    This is the absence that `SPEC-343` §2.5.2 found blocking a real answer. On
+    the maintainer's board `R1` is `Device:R` with value `R`, so there is no
+    resistance, so no current can be derived, so `SPEC-210` §2.5's promised
+    estimate cannot run. The consideration converts *"we cannot help"* into
+    *"set this and it becomes answerable"*, which is the whole argument for
+    absence-shaped triggers.
+    """
+    raised = []
+    for symbol in symbols:
+        lib_id = symbol.get("lib_id") or ""
+        if lib_id not in _VALUE_IS_A_PARAMETER:
+            continue
+        value = (symbol.get("value") or "").strip()
+        leaf = lib_id.split(":")[-1]
+        if value and value != leaf:
+            continue
+        reference = symbol.get("reference")
+        if not reference:
+            # No reference, nothing named, no consideration. SPEC-210 §2.2.
+            continue
+        raised.append(C.make(
+            id="component_without_value",
+            domain="power",
+            claim_class=C.COMPUTED,
+            trigger={"kind": "reference", "ref": reference, "lib_id": lib_id},
+            explanation=(
+                f"{reference} still has KiCad's placeholder value ({value or 'empty'}). "
+                f"Until it says what it actually is, nothing here can work out what this "
+                f"circuit draws — and that is what a trace width and a power budget both "
+                f"rest on."
+            ),
+        ))
+    return raised
+
+
 #: The registry. `SPEC-210`'s claim is that a new subject area is a row here
 #: plus a function, not a rebuild.
 #:
@@ -101,11 +176,20 @@ def led_series_resistor(nets: list) -> list:
 #: grounded in a stated fact -- see above. Cheap to add is not the same as safe
 #: to ship, and §3's bar is the second one.
 PACKS = {
-    "power": [led_series_resistor],
+    "power": [led_series_resistor, component_without_value],
 }
 
 
-def run(nets: list, domains: list = None) -> list:
+#: Which packs read which source. `led_series_resistor` needs the netlist;
+#: `component_without_value` needs the schematic's symbols. Declared rather than
+#: inferred from a signature, so a caller knows what to gather before running.
+PACK_INPUTS = {
+    "led_series_resistor": "nets",
+    "component_without_value": "symbols",
+}
+
+
+def run(nets: list, domains: list = None, symbols: list = None) -> list:
     """Every pack's considerations for this project.
 
     Order is by `SPEC-210` §2.6's third option -- *"would this have built
@@ -117,6 +201,7 @@ def run(nets: list, domains: list = None) -> list:
         if domains and domain not in domains:
             continue
         for pack in packs:
-            out.extend(pack(nets))
+            source = nets if PACK_INPUTS.get(pack.__name__) == "nets" else (symbols or [])
+            out.extend(pack(source))
     order = {C.COMPUTED: 0, C.CITED: 1, C.JUDGEMENT: 2}
     return sorted(out, key=lambda c: order.get(c["claim_class"], 9))

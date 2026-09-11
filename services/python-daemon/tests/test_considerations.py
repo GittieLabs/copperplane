@@ -283,10 +283,103 @@ class TestRealPack(unittest.TestCase):
 
         self.assertNotIn("GND", [c["trigger"]["ref"] for c in raised])
 
-    def test_only_one_pack_is_registered_and_that_is_deliberate(self):
-        """A second pack was written, run against a real board, and withdrawn
-        the same hour -- it could not tell a supply rail from ground, because
-        KiCad marks both `power_in`. The registry records the outcome; the
-        module records why."""
+    def test_the_withdrawn_pack_stays_withdrawn(self):
+        """`power_pin_without_decoupling` was written, run against a real board,
+        and withdrawn the same hour -- it could not tell a supply rail from
+        ground, because KiCad marks both `power_in`.
+
+        This originally asserted the pack count was 1, which pinned the wrong
+        thing: the decision was that THAT pack stays out, not that there is
+        exactly one pack forever. `CTX-343.1` Phase 5 added a second, legitimate
+        one and the count assertion failed for a reason that was not a
+        regression."""
         import consideration_packs as packs
-        self.assertEqual(len(packs.PACKS["power"]), 1)
+        registered = {p.__name__ for packs_list in packs.PACKS.values() for p in packs_list}
+
+        self.assertNotIn("power_pin_without_decoupling", registered)
+        self.assertIn("led_series_resistor", registered)
+
+
+class TestAbsenceShapedTriggers(unittest.TestCase):
+    """SPEC-343 §2.6 / CTX-343.1 Phase 5.
+
+    What a novice is missing is usually a part, or a number, that is not there,
+    so the trigger is an empty set. SPEC-210 §2.2 still applies unchanged: an
+    absence must be an absence OF something, ON something the files name.
+    """
+
+    def _sym(self, reference="R1", lib_id="Device:R", value="R"):
+        return {"reference": reference, "lib_id": lib_id, "value": value,
+                "footprint": None, "pin_count": 2}
+
+    def test_a_passive_with_kicads_placeholder_value_is_raised(self):
+        import consideration_packs as packs
+        out = packs.component_without_value([self._sym()])
+
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["trigger"]["ref"], "R1")
+        self.assertEqual(out[0]["claim_class"], "computed")
+
+    def test_a_passive_with_a_real_value_is_not(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.component_without_value([self._sym(value="220")]), [])
+
+    def test_the_eleven_false_positives_the_naive_rule_produced(self):
+        """The measurement that narrowed this rule, kept as the regression it is.
+
+        KiCad writes a symbol's own name into its value by default, so "value
+        equals symbol name" looks like a perfect never-set detector. On the
+        maintainer's correct board it matches ALL ELEVEN symbols -- power:GND
+        whose value GND is right, four mounting holes with no value to set, and
+        the Arduino whose value IS its part name.
+
+        Every symbol below satisfies the naive rule. None may be raised."""
+        import consideration_packs as packs
+        correct_board = [
+            self._sym("#PWR05", "power:GND", "GND"),
+            self._sym("#PWR04", "power:+5V", "+5V"),
+            self._sym("SW1", "Switch:SW_Push", "SW_Push"),
+            self._sym("H1", "Mechanical:MountingHole", "MountingHole"),
+            self._sym("H2", "Mechanical:MountingHole", "MountingHole"),
+            self._sym("A1", "MCU_Module:Arduino_UNO_R3", "Arduino_UNO_R3"),
+            self._sym("D1", "Device:LED", "LED"),
+        ]
+        for s in correct_board:
+            self.assertEqual((s["value"] or ""), (s["lib_id"] or "").split(":")[-1],
+                             f"{s['reference']} should satisfy the naive rule")
+
+        self.assertEqual(packs.component_without_value(correct_board), [],
+                         "none of these are missing a value that anything computes with")
+
+    def test_a_symbol_with_no_reference_names_nothing_and_is_skipped(self):
+        """SPEC-210 §2.2 holds for absences too: a claim anchored to nothing is
+        indistinguishable from a claim invented."""
+        import consideration_packs as packs
+        self.assertEqual(packs.component_without_value([self._sym(reference=None)]), [])
+
+    def test_an_empty_value_counts_as_missing(self):
+        import consideration_packs as packs
+        out = packs.component_without_value([self._sym(value="")])
+        self.assertEqual(len(out), 1)
+
+    def test_the_explanation_says_what_the_absence_blocks(self):
+        """SPEC-343 §2.5.2: the point of this consideration is converting "we
+        cannot help" into "set this and it becomes answerable". An absence that
+        does not say what it costs is just a complaint."""
+        import consideration_packs as packs
+        out = packs.component_without_value([self._sym()])
+
+        self.assertIn("draws", out[0]["explanation"])
+
+    def test_the_registry_names_which_source_each_pack_reads(self):
+        """Declared rather than inferred from a signature, so a caller knows
+        what to gather before running. One pack needs the netlist, the other
+        the schematic's symbols."""
+        import consideration_packs as packs
+        self.assertEqual(packs.PACK_INPUTS["led_series_resistor"], "nets")
+        self.assertEqual(packs.PACK_INPUTS["component_without_value"], "symbols")
+
+    def test_run_gives_each_pack_the_source_it_asked_for(self):
+        import consideration_packs as packs
+        out = packs.run([], symbols=[self._sym()])
+        self.assertEqual([c["id"] for c in out], ["component_without_value"])
