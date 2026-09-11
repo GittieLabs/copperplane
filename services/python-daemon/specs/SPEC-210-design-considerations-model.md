@@ -258,6 +258,25 @@ is settled is that they are structured fields, not prose to be re-parsed on ever
     a board the user understands better than it does, the whole family is spent. Every pack clears
     the same bar `SPEC-113` set, which is measurement against a real board with its false positives
     counted, not plausibility.
+
+    **Measured 2026-09-10, and the rate is the point: three packs were written from plausibility and
+    all three failed on first contact with a real board.**
+
+    | pack | what the plausible rule did on a *correct* board |
+    | :--- | :--- |
+    | `led_series_resistor` | fired on `GND` — the LED's cathode sits on ground and no resistor does |
+    | `power_pin_without_decoupling` | could not tell a supply rail from ground; KiCad marks both `power_in`. Withdrawn |
+    | `component_without_value` | matched **all eleven symbols**, including a net name, four mounting holes and the Arduino's part number |
+
+    Two of the three were salvaged by finding another **file fact** to key on — `pinfunction` naming
+    `A_2` and `K_1`, a closed list of symbols whose value is an electrical parameter. The third had
+    no fact to rest on and was removed.
+
+    So this is not a bar that packs usually clear and occasionally miss. **It is a bar that a rule
+    written from plausibility fails by default**, and the measurement that catches it is one command
+    against one board. Any pack that has not been run against a real design has not been written yet,
+    however reasonable it reads — and the reviewer's question is not *is this rule sound* but *what
+    did it do on a board that is fine*.
 *   **The person being taught is the person least able to check the teaching.** With a DRC finding
     the user can go and look. With an explanation of *why* something matters they have no
     independent check, which is why `general_practice` needs to become visible to the user rather
