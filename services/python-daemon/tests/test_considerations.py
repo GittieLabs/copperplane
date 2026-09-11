@@ -702,3 +702,120 @@ class TestRegulatorDissipation(unittest.TestCase):
             "symbols": [{"reference": "U1", "lib_id": "Regulator_Switching:LM2596-3.3"}],
             "intent_fields": {"current_budget": {"milliamps": 500}},
         }), [])
+
+
+class TestTraceWidthAndReversePolarity(unittest.TestCase):
+    """`SPEC-211` §2.1 items 4 and 5 / `CTX-211.1` Phase 6."""
+
+    def _tracks(self, width, net="+9V", layer="F.Cu"):
+        return [{"net": net, "width_mm": width, "layer": layer}]
+
+    def _bb8_nets(self):
+        return [
+            {"name": "Net-(J4-Pin_1)", "nodes": [
+                {"reference": "J4", "pin": "1", "function": None, "type": "passive"},
+                {"reference": "X1", "pin": "5V", "function": None, "type": "power_in"}]},
+            {"name": "GND", "nodes": [
+                {"reference": "J4", "pin": "2", "function": None, "type": "passive"}]},
+        ]
+
+    def test_a_supply_trace_too_narrow_for_the_stated_current_is_raised(self):
+        import consideration_packs as packs
+        raised = packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2),
+            "intent_fields": {"current_budget": {"milliamps": 2000}},
+        })
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["trigger"]["ref"], "+9V")
+        self.assertEqual(raised[0]["arithmetic"]["result"]["unit"], "mA")
+
+    def test_a_wide_enough_trace_is_left_alone(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2),
+            "intent_fields": {"current_budget": {"milliamps": 50}},
+        }), [])
+
+    def test_it_is_cited_and_names_the_standard_it_used(self):
+        """`SPEC-210` §2.1: a claim relaying someone else's fact says whose.
+        The arithmetic is ours; the relationship is IPC's."""
+        import consideration_packs as packs
+        raised = packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2),
+            "intent_fields": {"current_budget": {"milliamps": 2000}},
+        })[0]
+
+        self.assertEqual(raised["claim_class"], "cited")
+        self.assertEqual(raised["source"]["ref"], "IPC-2221")
+
+    def test_it_says_a_newer_standard_supersedes_the_one_it_used(self):
+        """`SPEC-211` §2.5, and not optional: presenting a superseded standard
+        as current is the confidently-wrong output this family cannot afford."""
+        import consideration_packs as packs
+        raised = packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2),
+            "intent_fields": {"current_budget": {"milliamps": 2000}},
+        })[0]
+
+        self.assertIn("IPC-2152", raised["explanation"])
+        self.assertIn("IPC-2152", raised["source"]["note"])
+
+    def test_it_says_the_copper_weight_is_an_assumption(self):
+        # No board measured states one, so this assumption is always in play.
+        import consideration_packs as packs
+        raised = packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2),
+            "intent_fields": {"current_budget": {"milliamps": 2000}},
+        })[0]
+
+        self.assertIn("1oz copper", raised["explanation"])
+        self.assertEqual(raised["arithmetic"]["inputs"]["copper"]["from"], "assumed")
+
+    def test_a_signal_net_is_never_checked_against_the_board_s_total(self):
+        """Only a supply rail can be said to carry the whole budget. What a
+        signal trace draws is something nothing here knows."""
+        import consideration_packs as packs
+        self.assertEqual(packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2, net="Net-(U2-THRES)"),
+            "intent_fields": {"current_budget": {"milliamps": 2000}},
+        }), [])
+
+    def test_an_unrouted_board_raises_nothing(self):
+        # Ordinary, not exceptional: two of five real boards have no segments.
+        import consideration_packs as packs
+        self.assertEqual(packs.trace_too_narrow_for_current({
+            "tracks": [], "intent_fields": {"current_budget": {"milliamps": 2000}},
+        }), [])
+
+    def test_without_a_current_budget_it_stays_quiet_rather_than_asking_again(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2), "intent_fields": {},
+        }), [])
+
+    def test_a_bare_two_pin_power_input_is_raised(self):
+        import consideration_packs as packs
+        raised = packs.reversible_power_input({
+            "nets": self._bb8_nets(),
+            "footprints": [{"reference": "J4", "footprint":
+                            "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"}],
+        })
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["trigger"]["ref"], "J4")
+        self.assertIn("X1 pin 5V", raised[0]["explanation"])
+
+    def test_a_keyed_power_input_is_left_alone(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.reversible_power_input({
+            "nets": self._bb8_nets(),
+            "footprints": [{"reference": "J4", "footprint":
+                            "Connector_BarrelJack:BarrelJack_Horizontal"}],
+        }), [])
+
+    def test_with_no_board_yet_it_raises_nothing(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.reversible_power_input({
+            "nets": self._bb8_nets(), "footprints": [],
+        }), [])

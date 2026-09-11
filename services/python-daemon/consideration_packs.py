@@ -375,6 +375,135 @@ def _dissipation_gap(out_volts, in_volts, milliamps):
         return "roughly how much current this board draws, which nothing has said yet"
     return None
 
+def trace_too_narrow_for_current(project: dict) -> list:
+    """A supply trace against what IPC-2221 says it carries -- §2.1 item 4.
+
+    `cited`, not `computed`, and the distinction is the point. The arithmetic is
+    ours; the relationship it computes is IPC's, and `SPEC-210` §2.1 says a claim
+    that relays someone else's fact must say whose. The `source` is the standard
+    by name, and `arithmetic` carries the sum so the user can check it in KiCad's
+    own Track Width calculator and get the same answer.
+
+    **Only the supply rails and grounds are checked**, because only they can be
+    said to carry the whole board's current. A signal trace carries whatever that
+    signal draws, which nothing here knows. Conservative in the direction §2.5
+    argues for, and stated in the explanation rather than assumed silently.
+
+    Copper weight is assumed to be 1oz when the board does not say, and it did
+    not say on any of the five real boards measured. The claim states that.
+    """
+    tracks = project.get("tracks") or []
+    if not tracks:
+        return []
+    milliamps = P.budget_milliamps(project.get("intent_fields"))
+    if milliamps is None:
+        # Nothing to compare against. `regulator_dissipation` already asks for
+        # this number, and asking twice in one review is nagging.
+        return []
+
+    narrowest = {}
+    for track in tracks:
+        net = track.get("net")
+        width = track.get("width_mm")
+        if not net or not width:
+            continue
+        if P.nominal_volts(net) is None and not P.is_ground(net):
+            continue
+        current = narrowest.get(net)
+        if current is None or width < current["width_mm"]:
+            narrowest[net] = {"width_mm": width, "layer": track.get("layer")}
+
+    raised = []
+    for net, track in sorted(narrowest.items()):
+        capacity_ma = P.ipc2221_current_amps(
+            track["width_mm"], track["layer"]
+        ) * 1000.0
+        if capacity_ma >= milliamps:
+            continue
+        raised.append(C.make(
+            id="trace_too_narrow_for_current",
+            domain="power",
+            claim_class=C.CITED,
+            trigger={"kind": "net", "ref": net, "width_mm": track["width_mm"]},
+            source={
+                "ref": "IPC-2221",
+                "title": "IPC-2221, Generic Standard on Printed Board Design",
+                "note": (
+                    "The same standard KiCad's own Track Width calculator uses, so "
+                    "this number can be checked there. IPC-2152 supersedes its "
+                    "trace-sizing charts and generally allows narrower traces for "
+                    "the same current."
+                ),
+            },
+            arithmetic={
+                "expression": "I = k * dT^0.44 * A^0.725",
+                "inputs": {
+                    "width": {"value": track["width_mm"], "unit": "mm", "from": "board"},
+                    "layer": {"value": track["layer"], "from": "board"},
+                    "copper": {"value": 1.0, "unit": "oz", "from": "assumed"},
+                    "rise": {"value": P.DEFAULT_RISE_C, "unit": "degC", "from": "assumed"},
+                },
+                "result": {"value": round(capacity_ma), "unit": "mA"},
+            },
+            explanation=(
+                f"The narrowest trace on {net} is {track['width_mm']:g}mm. By IPC-2221 "
+                f"that carries about {capacity_ma:.0f}mA for a 10 degC temperature rise, "
+                f"and you said this board draws {milliamps:g}mA. {net} is a supply net, so "
+                f"it is the one carrying that whole figure. Assumes 1oz copper, because "
+                f"this board does not state its copper weight. IPC-2152 replaced these "
+                f"charts and usually allows a narrower trace than this — IPC-2221 is used "
+                f"here because it is more conservative and because it is what KiCad's own "
+                f"Track Width calculator uses, so you can check this number there."
+            ),
+        ))
+    return raised
+
+
+def reversible_power_input(project: dict) -> list:
+    """A two-pin power input with nothing stopping it going in backwards.
+
+    `SPEC-211` §2.1 item 5. §2.4 called this *"a question until the connector's
+    role is confirmed, then a finding"* — and the netlist confirms the role, so
+    it is a finding. On `BB8-Breakout`, `Net-(J4-Pin_1)` carries J4 pin 1 and
+    `X1`'s `5V` power-in pin, while J4 pin 2 sits on ground. That is a power
+    input, proven, with nobody having been asked anything.
+
+    **Only a footprint this module positively recognises as reversible counts.**
+    A bare pin header or a screw terminal goes in either way round; a barrel
+    jack, a USB connector and a polarised JST housing do not. The list is
+    positive rather than negative on purpose: an unrecognised connector produces
+    silence, which is wrong in the direction that costs nothing.
+    """
+    nets = project.get("nets") or []
+    footprints = {
+        f.get("reference"): f.get("footprint") or ""
+        for f in (project.get("footprints") or []) if f.get("reference")
+    }
+    if not footprints:
+        return []
+
+    raised = []
+    for reference, pins in sorted(P.power_input_connectors(nets).items()):
+        footprint = footprints.get(reference)
+        if not footprint or not P.is_reversible_connector(footprint):
+            continue
+        raised.append(C.make(
+            id="reversible_power_input",
+            domain="power",
+            claim_class=C.COMPUTED,
+            trigger={"kind": "reference", "ref": reference,
+                     "footprint": footprint, "net": pins["supply_net"]},
+            explanation=(
+                f"{reference} is this board's power input — its pin {pins['supply_pin']} "
+                f"reaches {pins['fed']}, and pin {pins['ground_pin']} is ground. Its "
+                f"footprint is a plain two-pin header, which goes on either way round, "
+                f"and nothing on this board stops the supply arriving backwards. One "
+                f"reversed connection is usually the end of whatever is downstream. A "
+                f"keyed connector, or a diode in the input, is what normally prevents it."
+            ),
+        ))
+    return raised
+
 #: The registry. `SPEC-210`'s claim is that a new subject area is a row here
 #: plus a function, not a rebuild.
 #:
@@ -389,6 +518,8 @@ PACKS = {
         component_without_value,
         regulated_rail_into_module_input,
         regulator_dissipation,
+        trace_too_narrow_for_current,
+        reversible_power_input,
     ],
 }
 
@@ -404,11 +535,14 @@ PACK_INPUTS = {
     "component_without_value": "symbols",
     "regulated_rail_into_module_input": "nets",
     "regulator_dissipation": PROJECT,
+    "trace_too_narrow_for_current": PROJECT,
+    "reversible_power_input": PROJECT,
 }
 
 
 def run(nets: list, domains: list = None, symbols: list = None,
-        intent_fields: dict = None) -> list:
+        intent_fields: dict = None, tracks: list = None,
+        footprints: list = None) -> list:
     """Every pack's considerations for this project.
 
     Order is by `SPEC-210` §2.6's third option -- *"would this have built
@@ -426,6 +560,11 @@ def run(nets: list, domains: list = None, symbols: list = None,
         "nets": nets or [],
         "symbols": symbols or [],
         "intent_fields": intent_fields or {},
+        # Board-side inputs. Empty is ordinary rather than exceptional: a
+        # project with no PCB yet, or one nobody has routed, is the normal
+        # state early on -- two of five real boards have zero segments.
+        "tracks": tracks or [],
+        "footprints": footprints or [],
     }
     out = []
     for domain, packs in PACKS.items():

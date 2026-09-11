@@ -356,3 +356,95 @@ class TestSupplyResolution(unittest.TestCase):
         self.assertEqual(P.budget_milliamps({"current_budget": {"milliamps": 500}}), 500.0)
         self.assertIsNone(P.budget_milliamps({"current_budget": "unknown"}))
         self.assertIsNone(P.budget_milliamps({}))
+
+
+class TestIpc2221(unittest.TestCase):
+    """Phase 6. `SPEC-211` §2.5: name the standard, implement the formula."""
+
+    def test_it_agrees_with_kicad_s_own_track_width_calculator(self):
+        # 0.25mm, 1oz, external, 10 degC rise is about 0.87A in KiCad's PCB
+        # Calculator. Agreeing matters more than being precise: §2.5 chose
+        # IPC-2221 partly so a user who cross-checks gets the same answer.
+        amps = P.ipc2221_current_amps(0.25, "F.Cu")
+        self.assertAlmostEqual(amps, 0.87, delta=0.03)
+
+    def test_an_inner_layer_carries_about_half_as_much(self):
+        # k halves for an internal trace, which is buried in laminate and
+        # cannot shed heat to the air.
+        outer = P.ipc2221_current_amps(0.25, "F.Cu")
+        inner = P.ipc2221_current_amps(0.25, "In1.Cu")
+        self.assertAlmostEqual(inner / outer, 0.5, delta=0.001)
+
+    def test_both_outer_layers_count_as_external(self):
+        self.assertTrue(P.is_external_layer("F.Cu"))
+        self.assertTrue(P.is_external_layer("B.Cu"))
+        self.assertFalse(P.is_external_layer("In1.Cu"))
+
+    def test_heavier_copper_carries_more(self):
+        self.assertGreater(
+            P.ipc2221_current_amps(0.2, copper_oz=2),
+            P.ipc2221_current_amps(0.2, copper_oz=1),
+        )
+
+
+class TestReversibleConnector(unittest.TestCase):
+
+    def test_a_bare_header_or_terminal_is_reversible(self):
+        for footprint in (
+            "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical",
+            "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MPT-2.54mm_2pol",
+        ):
+            self.assertTrue(P.is_reversible_connector(footprint), footprint)
+
+    def test_an_unrecognised_connector_produces_silence_not_a_warning(self):
+        # Positive list on purpose. A false "your power can go in backwards" on
+        # a keyed JST is exactly the confident wrongness `SPEC-211` §3 forbids,
+        # and silence on an unknown costs nothing.
+        for footprint in (
+            "Connector_BarrelJack:BarrelJack_Horizontal",
+            "Connector_USB:USB_C_Receptacle_HRO_TYPE-C-31-M-12",
+            "Connector_JST:JST_PH_S2B-PH-K_1x02_P2.00mm_Horizontal",
+        ):
+            self.assertFalse(P.is_reversible_connector(footprint), footprint)
+
+
+class TestPowerInputConnectors(unittest.TestCase):
+    """The netlist confirms the connector's role, so nobody is asked."""
+
+    def _bb8_nets(self):
+        # The real shape of BB8-Breakout: J4 feeds X1's 5V pin, J1-J3 are
+        # motor outputs and a switch, and must not be mistaken for inputs.
+        return [
+            {"name": "Net-(J4-Pin_1)", "nodes": [
+                {"reference": "J4", "pin": "1", "function": None, "type": "passive"},
+                {"reference": "X1", "pin": "5V", "function": None, "type": "power_in"}]},
+            {"name": "GND", "nodes": [
+                {"reference": "J4", "pin": "2", "function": None, "type": "passive"},
+                {"reference": "J3", "pin": "2", "function": None, "type": "passive"},
+                {"reference": "X1", "pin": "GND", "function": None, "type": "power_out"}]},
+            {"name": "Net-(DRV1-OUT1)", "nodes": [
+                {"reference": "DRV1", "pin": "2", "function": None, "type": "output"},
+                {"reference": "J1", "pin": "1", "function": None, "type": "passive"}]},
+        ]
+
+    def test_the_connector_feeding_a_power_pin_is_the_power_input(self):
+        found = P.power_input_connectors(self._bb8_nets())
+
+        self.assertEqual(list(found), ["J4"])
+        self.assertEqual(found["J4"]["supply_pin"], "1")
+        self.assertEqual(found["J4"]["ground_pin"], "2")
+        self.assertEqual(found["J4"]["fed"], "X1 pin 5V")
+
+    def test_a_connector_carrying_a_signal_is_not_a_power_input(self):
+        self.assertNotIn("J1", P.power_input_connectors(self._bb8_nets()))
+
+    def test_a_connector_on_ground_alone_is_not_a_power_input(self):
+        self.assertNotIn("J3", P.power_input_connectors(self._bb8_nets()))
+
+    def test_a_chip_s_own_power_pin_does_not_make_it_a_connector(self):
+        self.assertEqual(P.power_input_connectors([
+            {"name": "+5V", "nodes": [
+                {"reference": "U1", "pin": "8", "function": "VCC_8", "type": "power_in"}]},
+            {"name": "GND", "nodes": [
+                {"reference": "U1", "pin": "1", "function": "GND_1", "type": "power_in"}]},
+        ]), {})

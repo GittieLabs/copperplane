@@ -219,8 +219,11 @@ Which items in §2.1 are findings and which are questions must be settled item b
 and not left to the implementation. Item 1 is a finding when the regulator's own record supplies both
 voltages. ~~Item 2 is a question.~~ **Item 2 is a finding as of 2026-09-10**, because the netlist
 proves the rail and the part's supply pin are one net; it degrades to a question only when the
-supply voltage itself is unknown. Item 5 is a question until the connector's role is confirmed, then
-a finding.
+supply voltage itself is unknown. ~~Item 5 is a question until the connector's role is confirmed, then
+a finding.~~ **Item 5 is a finding as of 2026-09-10, and nobody is asked.** The netlist confirms the
+connector's role on its own: on `BB8-Breakout`, `Net-(J4-Pin_1)` carries J4 pin 1 and `X1`'s `5V`
+power-in pin while J4 pin 2 sits on ground, which is what "this is the power input" means. The
+confirmation §2.4 expected to need a user turns out to be readable.
 
 ### 2.5 Trace width: the citation question, settled 2026-09-08
 
@@ -252,6 +255,13 @@ cannot afford.
     every part is that part, because this app holds no thermal data of any kind (§2.0 item 8). The
     answer is the explicit "cannot compare" rather than silence — the pack states the watts and says
     in one sentence why it is not stating a temperature.
+*   ~~**Trace width: which items cite and which compute.**~~ Settled in §2.5 and **implemented
+    2026-09-10**: `trace_too_narrow_for_current` is the family's first `cited` claim. The arithmetic
+    is ours and the relationship is IPC's, so it carries `source` naming IPC-2221, states that
+    IPC-2152 supersedes it, and says that 1oz copper is an assumption — no board measured states a
+    copper weight. Verified to agree with KiCad's own Track Width calculator, which is the point of
+    having chosen IPC-2221.
+
 *   **Showing the arithmetic inline or on demand.** The sum is the teaching, so inline is likely
     right, but four sums in one review is a wall. Still open, and now with something concrete behind
     it: a consideration carries its calculation in `arithmetic`, so the surface can choose.

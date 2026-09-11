@@ -323,3 +323,135 @@ def budget_milliamps(intent_fields: dict = None):
     if isinstance(budget, dict) and isinstance(budget.get("milliamps"), (int, float)):
         return float(budget["milliamps"])
     return None
+
+
+#: IPC-2221's trace-sizing relationship -- `SPEC-211` §2.5, settled 2026-09-08.
+#:
+#: **Name the standard, implement the formula, never reproduce the tables.** The
+#: precedent is KiCad itself: its PCB Calculator ships a Track Width tool whose
+#: documentation says it uses formulas from IPC-2221. A GPL tool in this exact
+#: domain names the standard and implements the relationship without
+#: republishing the standard's charts, and Copperplane can do the same. What it
+#: must not do is reproduce IPC's tables or ship the document.
+#:
+#:     I = k * dT^0.44 * A^0.725
+#:
+#: with `A` the cross-section in square mils, `dT` the allowed temperature rise
+#: in degrees C, and `k` 0.048 for an outer layer or 0.024 for an inner one --
+#: an inner trace is buried in laminate and cannot shed heat to the air.
+_IPC2221_K_EXTERNAL = 0.048
+_IPC2221_K_INTERNAL = 0.024
+_IPC2221_DT_EXPONENT = 0.44
+_IPC2221_AREA_EXPONENT = 0.725
+
+#: One ounce of copper spread over a square foot, in mils. The assumption this
+#: module makes when the board does not say -- and it usually does not: measured
+#: 2026-09-10, not one of the five real boards carries a stackup block with a
+#: copper weight in it. Every claim built on this must say it is an assumption.
+MILS_PER_OZ_COPPER = 1.378
+MM_PER_MIL = 0.0254
+
+#: The rise the answer is quoted at. KiCad's calculator defaults to 10 degC and
+#: so does this, so a user cross-checking there gets the same number back.
+DEFAULT_RISE_C = 10.0
+
+#: KiCad names its outer copper layers `F.Cu` and `B.Cu`. Anything else on a
+#: multi-layer board is buried.
+_EXTERNAL_LAYERS = frozenset({"F.Cu", "B.Cu"})
+
+
+def is_external_layer(layer: str) -> bool:
+    return (layer or "") in _EXTERNAL_LAYERS
+
+
+def ipc2221_current_amps(width_mm: float, layer: str = "F.Cu",
+                         copper_oz: float = 1.0,
+                         rise_c: float = DEFAULT_RISE_C) -> float:
+    """How much current this trace carries for a given temperature rise.
+
+    IPC-2221's own relationship, computed rather than looked up. Returns amps.
+
+    **IPC-2152 supersedes IPC-2221's trace-sizing charts** and generally permits
+    *narrower* traces for the same current, because it accounts for board
+    construction, copper weight and proximity to planes rather than resting on a
+    single stackup from decades ago. IPC-2221 is used here anyway for two
+    reasons stated in `SPEC-211` §2.5: conservative is the right direction to be
+    wrong in for a first board, and it is the basis KiCad's own calculator uses,
+    so a user who cross-checks gets the same answer. Any claim built on this
+    must say which standard it used **and** that a newer one exists — presenting
+    a superseded standard as the current one is exactly the confidently-wrong
+    output this family cannot afford.
+    """
+    thickness_mils = copper_oz * MILS_PER_OZ_COPPER
+    area_sq_mils = (width_mm / MM_PER_MIL) * thickness_mils
+    k = _IPC2221_K_EXTERNAL if is_external_layer(layer) else _IPC2221_K_INTERNAL
+    return k * (rise_c ** _IPC2221_DT_EXPONENT) * (area_sq_mils ** _IPC2221_AREA_EXPONENT)
+
+
+#: Footprints that go on either way round. **Positive list, deliberately.**
+#: A connector this module does not recognise produces silence rather than a
+#: warning, which is the direction of error that costs nothing -- `SPEC-211` §3
+#: wants an unknown to stay quiet, and a false "your power can go in backwards"
+#: on a keyed JST would be exactly the confident wrongness this family cannot
+#: afford. Matched on the footprint id, which is KiCad's own naming.
+_REVERSIBLE_FOOTPRINT_MARKERS = (
+    "PinHeader_1x02",
+    "PinSocket_1x02",
+    "Conn_01x02",
+    "TerminalBlock",
+    "screwterminal",
+)
+
+
+def is_reversible_connector(footprint_id: str) -> bool:
+    text = (footprint_id or "").lower()
+    return any(marker.lower() in text for marker in _REVERSIBLE_FOOTPRINT_MARKERS)
+
+
+def power_input_connectors(nets: list) -> dict:
+    """Connectors that feed this board, proven from connectivity.
+
+    A connector qualifies when one of its pins shares a net with some part's
+    `power_in` pin, and another of its pins is on ground. That is what "this is
+    the power input" means, and `SPEC-211` §2.4 assumed it had to be asked --
+    *"a question until the connector's role is confirmed"*. The netlist confirms
+    it, so nobody is asked.
+
+    Returns `{reference: {"supply_pin", "supply_net", "ground_pin", "fed"}}`,
+    where `fed` names the part and pin being powered, so the claim can say what
+    it is actually about.
+    """
+    by_reference = {}
+    for net in nets:
+        nodes = net.get("nodes", [])
+        net_name = net.get("name") or ""
+        if not _net_is_real(net_name):
+            continue
+        powered = [
+            n for n in nodes
+            if pin_role(n.get("type")) == "power_in"
+            and not is_ground(pin_name(n))
+        ]
+        ground = is_ground(net_name)
+        for node in nodes:
+            reference = node.get("reference") or ""
+            # KiCad's own reference convention: J for a connector, P for a
+            # plug. Checked because a part's OWN power pin sitting on the same
+            # net would otherwise make every chip look like a connector.
+            if not reference[:1] in ("J", "P") or reference.startswith("PWR"):
+                continue
+            entry = by_reference.setdefault(
+                reference,
+                {"supply_pin": None, "supply_net": None, "ground_pin": None, "fed": None},
+            )
+            if ground:
+                entry["ground_pin"] = entry["ground_pin"] or node.get("pin")
+            elif powered and entry["supply_pin"] is None:
+                target = powered[0]
+                entry["supply_pin"] = node.get("pin")
+                entry["supply_net"] = net_name
+                entry["fed"] = f"{target.get('reference')} pin {target.get('pin')}"
+    return {
+        reference: entry for reference, entry in by_reference.items()
+        if entry["supply_pin"] and entry["ground_pin"]
+    }

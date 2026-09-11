@@ -224,3 +224,58 @@ def read_board_footprints(pcb_path: str) -> list:
             "file contains some. The board format has probably changed."
         )
     return found
+
+
+def read_board_tracks(pcb_path: str) -> list:
+    """Every routed copper segment on the board -- `SPEC-211` §2.1 item 4.
+
+    Each entry is `{net, width_mm, layer}`. Enough for a trace-width check and
+    nothing more; the geometry is deliberately dropped, because this answers
+    *"is this net's narrowest trace wide enough"* and never *"where does it go"*.
+
+    **An empty list is a real, ordinary answer here**, unlike
+    `read_board_footprints` above, and the difference is worth stating because
+    the two functions sit next to each other and look alike. A board with no
+    footprints is a board this module failed to read. A board with no tracks is
+    a board nobody has routed yet, which is the normal state of a schematic that
+    was pushed to PCB an hour ago -- measured 2026-09-10, two of five real boards
+    in this project have zero segments.
+
+    A missing file still raises, because that is a caller's mistake either way.
+    """
+    if not os.path.exists(pcb_path):
+        raise BoardReadError(f"Board file does not exist: {pcb_path}")
+
+    with open(pcb_path, encoding="utf-8") as f:
+        text = f.read()
+
+    top = parse(text)
+    if not top or sym(top[0]) != "kicad_pcb":
+        raise BoardReadError(f"Not a KiCad board file: {pcb_path}")
+
+    found = []
+    for node in top[0]:
+        if not isinstance(node, list) or sym(node) != "segment":
+            continue
+        entry = {"net": None, "width_mm": None, "layer": None}
+        for field in node:
+            if not isinstance(field, list):
+                continue
+            key = sym(field)
+            if key == "width":
+                try:
+                    entry["width_mm"] = float(value(field))
+                except (TypeError, ValueError):
+                    entry["width_mm"] = None
+            elif key == "layer":
+                entry["layer"] = value(field)
+            elif key == "net":
+                # KiCad writes the net NAME here in the versions this app
+                # supports. Older files carry a numeric id indexing a separate
+                # net table; a digit-only value is that, and is not a name this
+                # module may pretend to resolve.
+                raw = value(field)
+                entry["net"] = None if raw is None or str(raw).isdigit() else str(raw)
+        if entry["width_mm"]:
+            found.append(entry)
+    return found
