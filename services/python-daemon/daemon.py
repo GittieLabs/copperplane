@@ -123,6 +123,24 @@ except Exception:
     library_store = None
 
 try:
+    # Imported here as well as reached through `chat_agents`, because
+    # project.considerations reads schematic symbols directly and a route must
+    # not depend on another module's import succeeding for its own needs.
+    import structural_checks
+except Exception:
+    logger.exception("structural_checks failed to import -- project.considerations will be unavailable")
+    structural_checks = None
+
+try:
+    import considerations
+    import consideration_packs
+except Exception:
+    logger.exception("considerations failed to import -- project.considerations will be unavailable")
+    _note_degraded("considerations", "project.considerations")
+    considerations = None
+    consideration_packs = None
+
+try:
     import project_stage
 except Exception:
     logger.exception("project_stage failed to import -- project.stage will be unavailable")
@@ -1043,6 +1061,47 @@ def project_suggest_parts(name: str = None, brief: str = None) -> dict:
 def project_set_guided_path(name: str, enabled: bool) -> dict:
     """The project.set_guided_path route (SPEC-343 §5)."""
     return library_store.set_project_guided_path(name, enabled)
+
+
+def project_considerations(name: str) -> dict:
+    """The project.considerations route (SPEC-343 §2.7).
+
+    Runs the packs against this project's schematic and returns both halves:
+    what needs attention, and what a pack checked and found correct.
+
+    **Both halves, in one call, deliberately.** `SPEC-343` §2.7's reinforcement
+    is the finding that was NOT raised, so computing them separately would mean
+    running every pack twice to get two views of one answer.
+
+    `checked` names the packs that actually ran. That is what makes the "what
+    was not checked" line honest and keeps it honest: it is derived from the
+    registry rather than written once and left to rot as packs are added.
+
+    Async: a `kicad-cli` netlist export.
+    """
+    project = library_store.load_project(name)
+    pro_path = project.get("kicad_project_path")
+    if not pro_path:
+        return {"needs_attention": [], "cleared": [], "checked": [],
+                "source_path": None, "reason": "no KiCad project is linked"}
+
+    files = kicad_project.resolve_project(pro_path)
+    sch_path = files.get("schematic_path")
+    if not sch_path:
+        return {"needs_attention": [], "cleared": [], "checked": [],
+                "source_path": None, "reason": "this project has no schematic"}
+
+    nets = kicad_cli.export_netlist(sch_path)["nets"]
+    symbols = structural_checks.read_schematic_symbols(sch_path)
+    raised = consideration_packs.run(nets, symbols=symbols)
+
+    return {
+        "needs_attention": considerations.raisable(raised),
+        "cleared": considerations.cleared_items(raised),
+        "checked": sorted(consideration_packs.PACK_INPUTS),
+        "source_path": sch_path,
+        "reason": None,
+    }
 
 
 def project_stage_reading(name: str) -> dict:
@@ -2737,6 +2796,16 @@ def _build_routes() -> dict:
         routes["kicad.search_footprints"] = kicad_search_footprints
     if kicad_write is not None and library_store is not None:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
+    if (considerations is not None and library_store is not None
+            and kicad_cli is not None and kicad_project is not None
+            and structural_checks is not None):
+        # Four modules, because it needs all four: the project record, the
+        # project resolver, the netlist export and the schematic reader.
+        # CTX-210.1's lesson -- a route registered on fewer guards than it needs
+        # exists whenever those import and fails with a bare AttributeError when
+        # the others do not.
+        routes["project.considerations"] = project_considerations
+
     if project_stage is not None and library_store is not None:
         # Both modules, per CTX-210.1's lesson: a route registered on one guard
         # exists whenever that one imports and fails with a bare AttributeError
@@ -2804,6 +2873,8 @@ ASYNC_ROUTES = {
     "kicad.get_component_heights", "kicad.export_board_glb", "datasheet.generate_guidance",
     "datasheet.read_pages", "library.render_symbol_preview", "library.render_footprint_preview",
     "chat.send", "chat.review", "context.rebuild_index",
+    # SPEC-343: spawns a kicad-cli netlist export.
+    "project.considerations",
     # SPEC-328: a real LLM call. Sync routes run inline in the request path,
     # so this would block every other request while the model thinks.
     "project.suggest_parts",

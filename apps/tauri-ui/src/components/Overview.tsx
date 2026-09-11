@@ -11,6 +11,7 @@ import {
 import { AgentChat } from './AgentChat'
 import { suggestParts, type SuggestionResult } from '../lib/suggestedParts'
 import { projectStage, type StageReading } from '../lib/projectStage'
+import { projectConsiderations, type ConsiderationsResult } from '../lib/considerations'
 import type { Area } from '../lib/areas'
 
 type Status = 'pending' | 'done' | 'error'
@@ -166,6 +167,8 @@ export function Overview({
         onGoToArea={onGoToArea}
         onProjectUpdated={onProjectUpdated}
       />
+      {/* SPEC-343 §2.7: beside the reading, never instead of it. */}
+      <WhatYouGotRight projectName={projectName} />
       <IntentEditor
         key={projectName}
         projectName={projectName}
@@ -426,6 +429,55 @@ function WhereYouAre({
       {/* SPEC-343 §3 and CTX-343.1 Phase 2: a wrong reading must be debuggable
           by the person seeing it, not only by whoever wrote the ranking. */}
       <p className="text-xs text-fg-tertiary">{reading.evidence}</p>
+    </div>
+  )
+}
+
+/** `SPEC-343` §2.7: what a pack checked and found correct, and what nobody
+ *  checked at all.
+ *
+ *  **Not praise.** `SPEC-210` §2.3 says telling a user their design is good is
+ *  worthless unless the app knows what the bad version would have been — and a
+ *  silent pack knows exactly that. This shows the finding that was NOT raised,
+ *  naming their parts.
+ *
+ *  One at a time, per §2.7: the `complete` state is where a finished project
+ *  sits forever, and a wall of *"here is everything that is fine"* is the
+ *  overload this spec exists to avoid. */
+function WhatYouGotRight({ projectName }: { projectName: string }) {
+  const [result, setResult] = useState<ConsiderationsResult | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setResult(null)
+    projectConsiderations(projectName)
+      .then((r) => { if (!cancelled) setResult(r) })
+      // Advisory, like the reading above it. Teaching that cannot be computed
+      // must not take the Overview tab down with it.
+      .catch(() => { if (!cancelled) setResult(null) })
+    return () => { cancelled = true }
+  }, [projectName])
+
+  const first = result?.cleared?.[0]
+  if (!result || !first) return null
+
+  return (
+    <div className="flex flex-col gap-1 rounded border border-line bg-surface p-3 text-sm">
+      <p className="text-xs font-medium uppercase text-fg-muted">What you got right</p>
+      <p className="text-sm text-fg-bright">{first.explanation}</p>
+      {result.cleared.length > 1 && (
+        <p className="text-xs text-fg-tertiary">
+          and {result.cleared.length - 1} other{result.cleared.length > 2 ? 's' : ''} like it.
+        </p>
+      )}
+      {/* SPEC-343 §2.7's third constraint. This state is exactly where a novice
+          mistakes "checked" for "correct", so the boundary goes beside the
+          reinforcement rather than instead of it. The list is what actually
+          ran, so it cannot drift out of date as packs are added. */}
+      <p className="text-xs text-fg-tertiary">
+        Checked here: {result.checked.join(', ').replace(/_/g, ' ')}. Nothing on this page knows
+        whether the circuit does what you intended — that is still yours to decide.
+      </p>
     </div>
   )
 }
