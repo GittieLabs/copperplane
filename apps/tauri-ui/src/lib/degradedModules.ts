@@ -38,6 +38,11 @@ const _WHAT_IS_LOST: Record<string, string> = {
     'Finding symbol and footprint mismatches — the checks KiCad does not make. '
     + 'Reviews still run and still report everything ERC and DRC found.',
 
+  considerations:
+    'Teaching what a design got right and what it is missing. '
+    + 'Every check still runs and still reports what it found — this is the '
+    + 'explaining on top of them.',
+
   project_stage:
     'Saying where a project stands and what would move it forward. '
     + 'Every tab still works exactly as it does now — the Overview tab simply '

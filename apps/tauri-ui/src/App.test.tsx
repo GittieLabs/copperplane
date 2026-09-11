@@ -102,6 +102,19 @@ vi.mock('./lib/projects', () => ({
   appendConversationTurn: (...args: unknown[]) => appendConversationTurnMock(...args),
 }))
 
+// SPEC-343: the Overview guidance calls these on mount. Stubbed here because
+// App's own tests are about chat and navigation -- unmocked, `projectStage`
+// and `projectConsiderations` consume the queued `submitJob`/`dispatch`
+// responses those tests set up for themselves, and the chat reply they assert
+// on never arrives.
+vi.mock('./lib/considerations', () => ({
+  projectConsiderations: vi.fn().mockRejectedValue(new Error('not under test here')),
+}))
+
+vi.mock('./lib/projectStage', () => ({
+  projectStage: vi.fn().mockRejectedValue(new Error('not under test here')),
+}))
+
 vi.mock('./lib/settings', () => ({
   getCapabilities: (...args: unknown[]) => getCapabilitiesMock(...args),
   getConfig: (...args: unknown[]) => getConfigMock(...args),

@@ -9,6 +9,7 @@ const appendConversationTurnMock = vi.fn()
 const setProjectIntentMock = vi.fn()
 const suggestPartsMock = vi.fn()
 const projectStageMock = vi.fn()
+const projectConsiderationsMock = vi.fn()
 const setProjectGuidedPathMock = vi.fn()
 
 vi.mock('../lib/ipc', () => ({
@@ -28,6 +29,10 @@ vi.mock('../lib/projects', () => ({
 // so Overview's tests stay focused on its own wiring (does it mount
 // AgentChat with the real scope/area/targets) and never need to mock
 // AgentChat's own internal chat.* IPC calls.
+vi.mock('../lib/considerations', () => ({
+  projectConsiderations: (...args: unknown[]) => projectConsiderationsMock(...args),
+}))
+
 vi.mock('../lib/projectStage', () => ({
   projectStage: (...args: unknown[]) => projectStageMock(...args),
 }))
@@ -95,6 +100,7 @@ beforeEach(() => {
   suggestPartsMock.mockReset()
   projectStageMock.mockReset().mockRejectedValue(new Error('no reading by default'))
   setProjectGuidedPathMock.mockReset().mockResolvedValue({ name: 'weather-pcb' })
+  projectConsiderationsMock.mockReset().mockRejectedValue(new Error('none by default'))
 })
 
 async function renderOverview(project: { name: string; intent?: string | null } | null = { name: 'weather-pcb' }) {
@@ -534,5 +540,84 @@ describe('Overview: SPEC-343 the toggle', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
 
     await waitFor(() => expect(setProjectGuidedPathMock).toHaveBeenCalledWith('weather-pcb', false))
+  })
+})
+
+
+describe('Overview: SPEC-343 what you got right', () => {
+  function cleared(over: Record<string, unknown> = {}) {
+    return {
+      id: 'led_series_resistor', type: 'copperplane.led_series_resistor',
+      domain: 'power', claim_class: 'computed', state: 'satisfied',
+      trigger: { kind: 'net', ref: 'Net-(D1-A)', parts: 'D1' },
+      explanation: "D1's anode reaches R1 on Net-(D1-A) — that resistor is what stops the LED "
+        + 'drawing more current than the pin driving it can give.',
+      ...over,
+    }
+  }
+
+  async function renderWith(result: unknown) {
+    projectConsiderationsMock.mockResolvedValue(result)
+    render(<Overview projectName="weather-pcb" project={{ name: 'weather-pcb' } as never} />)
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+  }
+
+  // TEST-006
+  it('006_shows one cleared item and what was not checked', async () => {
+    await renderWith({
+      needs_attention: [], cleared: [cleared()],
+      checked: ['component_without_value', 'led_series_resistor'],
+      source_path: '/x.kicad_sch', reason: null,
+    })
+
+    expect(await screen.findByText(/D1's anode reaches R1/)).toBeTruthy()
+    // The boundary, beside the reinforcement rather than instead of it.
+    expect(screen.getByText(/does what you intended/)).toBeTruthy()
+    expect(screen.getByText(/led series resistor/)).toBeTruthy()
+  })
+
+  it('shows one at a time, and counts the rest', async () => {
+    /* SPEC-343 §2.7's first constraint. The complete state is where a finished
+     * project sits forever, and a wall of "here is everything that is fine" is
+     * the overload this spec exists to avoid. */
+    await renderWith({
+      needs_attention: [], cleared: [cleared(), cleared({ id: 'b' }), cleared({ id: 'c' })],
+      checked: ['led_series_resistor'], source_path: '/x.kicad_sch', reason: null,
+    })
+
+    await screen.findByText(/D1's anode reaches R1/)
+    expect(screen.getByText(/and 2 others like it/)).toBeTruthy()
+  })
+
+  it('says nothing at all when no pack cleared anything', async () => {
+    /* SPEC-343 §2.7's second constraint: a pack whose trigger was absent has
+     * taught nothing, so there is nothing to say and nothing is said. */
+    await renderWith({
+      needs_attention: [], cleared: [], checked: ['led_series_resistor'],
+      source_path: '/x.kicad_sch', reason: null,
+    })
+
+    expect(screen.queryByText('What you got right')).toBeNull()
+  })
+
+  it('never congratulates -- it explains', async () => {
+    /* The same assertion shape as the complete state's: catch the tempting
+     * wrong answer rather than pin today's right one. */
+    await renderWith({
+      needs_attention: [], cleared: [cleared()],
+      checked: ['led_series_resistor'], source_path: '/x.kicad_sch', reason: null,
+    })
+
+    await screen.findByText(/D1's anode reaches R1/)
+    expect(screen.queryByText(/well done|nice work|great job|looks good|perfect/i)).toBeNull()
+  })
+
+  it('stays quiet when the packs cannot run', async () => {
+    projectConsiderationsMock.mockRejectedValue(new Error('no schematic'))
+    render(<Overview projectName="weather-pcb" project={{ name: 'weather-pcb' } as never} />)
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+
+    expect(screen.queryByText('What you got right')).toBeNull()
+    expect(screen.queryByText(/no schematic/)).toBeNull()
   })
 })

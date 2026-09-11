@@ -383,3 +383,77 @@ class TestAbsenceShapedTriggers(unittest.TestCase):
         import consideration_packs as packs
         out = packs.run([], symbols=[self._sym()])
         self.assertEqual([c["id"] for c in out], ["component_without_value"])
+
+
+class TestClearedItems(unittest.TestCase):
+    """SPEC-343 §2.7: a silent pack is the reinforcement.
+
+    SPEC-210 §2.3 sets a bar generic praise cannot clear -- telling a user their
+    design is good is worthless unless the app knows what the bad version would
+    have been. It does know: that is exactly what a silent pack is.
+    """
+
+    def _net(self, name, nodes):
+        return {"name": name, "nodes": nodes}
+
+    def _node(self, ref, pin="1", function=None, type_="passive"):
+        return {"reference": ref, "pin": pin, "function": function, "type": type_}
+
+    def test_a_pack_reports_what_it_cleared_and_why(self):
+        import consideration_packs as packs
+        out = packs.led_series_resistor([
+            self._net("Net-(D1-A)", [self._node("D1", "2", "A_2"), self._node("R1")]),
+        ])
+
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["state"], C.SATISFIED)
+        self.assertIn("D1", out[0]["explanation"])
+        self.assertIn("R1", out[0]["explanation"])
+        # It teaches rather than congratulating.
+        self.assertIn("current", out[0]["explanation"])
+
+    def test_a_pack_whose_trigger_is_absent_says_nothing(self):
+        """SPEC-343 §2.7's second constraint. A board with no LEDs has learned
+        nothing from "no LED is missing a resistor" -- true, useless, and
+        faintly absurd."""
+        import consideration_packs as packs
+        out = packs.led_series_resistor([
+            self._net("GND", [self._node("A1", "7", "GND_7", "power_in")]),
+        ])
+
+        self.assertEqual(out, [])
+
+    def test_a_cleared_item_is_never_raised_as_needing_attention(self):
+        c = C.cleared(id="x", domain="power", trigger={"kind": "net", "ref": "N"},
+                      explanation="fine")
+        self.assertEqual(C.raisable([c]), [])
+        self.assertEqual(C.raisable([c], asked=True), [])
+
+    def test_cleared_items_are_found_by_their_own_accessor(self):
+        """Kept apart rather than filtered at each call site: the whole point is
+        that these read differently, and a caller who has to remember to
+        separate them will one day not."""
+        needs = C.make(id="y", domain="power", claim_class=C.COMPUTED,
+                       trigger={"kind": "net", "ref": "M"}, explanation="problem")
+        fine = C.cleared(id="x", domain="power", trigger={"kind": "net", "ref": "N"},
+                         explanation="fine")
+
+        self.assertEqual([c["id"] for c in C.cleared_items([needs, fine])], ["x"])
+        self.assertEqual([c["id"] for c in C.raisable([needs, fine])], ["y"])
+
+    def test_a_cleared_item_with_nothing_to_name_is_refused(self):
+        """SPEC-210 §2.2 holds for reinforcement too. Praise anchored to nothing
+        is the generic praise §3 says is worse than silence."""
+        with self.assertRaises(C.ConsiderationError):
+            C.cleared(id="x", domain="power", trigger={}, explanation="looks good")
+
+    def test_the_cathode_net_is_not_cleared_either(self):
+        """The GND false positive's mirror image, and an easy one to ship: a net
+        carrying only a cathode has no anode to have cleared, so praising it
+        would be as wrong as flagging it was."""
+        import consideration_packs as packs
+        out = packs.led_series_resistor([
+            self._net("GND", [self._node("D1", "1", "K_1"), self._node("A1", "7", None, "power_in")]),
+        ])
+
+        self.assertEqual(out, [])
