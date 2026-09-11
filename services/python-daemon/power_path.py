@@ -133,3 +133,123 @@ def regulators(symbols: list) -> list:
             "output_volts": output_volts(lib_id),
         })
     return found
+
+
+#: Ground, identified by NAME and never by pin type.
+#:
+#: **Pin type cannot do this job, measured 2026-09-10.** A ground pin is typed
+#: `power_in` on `Arduino_UNO_R3` and `Adafruit-Feather-ESP32-S3`, and
+#: `power_out` on `XIAO_ESP32-S3` -- the same electrical node, opposite
+#: declarations, on three boards in the same project. Any rule that reads
+#: "power_in means a supply input" silently treats every Arduino's ground as
+#: one, and the finding it builds is about the wrong pin.
+_GROUND_NAMES = frozenset({
+    "GND", "AGND", "DGND", "GNDA", "GNDD", "GNDPWR", "GNDREF", "VSS", "VSSA",
+    "EARTH", "COMMON",
+})
+
+#: Names that state a ROLE rather than a voltage. `VIN` is the unregulated
+#: input, `VBUS` happens to be 5V by USB convention and `VBAT` is whatever the
+#: cell is -- none of them is a number this module may assert.
+_ROLE_ONLY_NAMES = frozenset({
+    "VIN", "VBUS", "VBAT", "VCC", "VDD", "VDDA", "VVCC", "PWR", "POWER", "V+",
+})
+
+#: KiCad's pin names carry a `_<pin number>` suffix on a module symbol:
+#: `+5V_5`, `3V3_4`, `VIN_8`. Strip it before reading a name.
+_PIN_NUMBER_SUFFIX = re.compile(r"_\d+$")
+
+#: `3V3` and `1V8` -- the V-as-decimal-point convention, and the common form.
+_V_AS_POINT = re.compile(r"^\+?(\d+)V(\d+)$")
+#: `5V`, `3.3V`, `+9V`.
+_PLAIN_VOLTS = re.compile(r"^\+?(\d+(?:\.\d+)?)V$")
+
+
+def pin_name(node: dict) -> str:
+    """What a netlist node's pin is CALLED, upper-cased.
+
+    `pinfunction` where the symbol supplies one, and the pin number where it
+    does not. **The fallback is not defensive coding.** `XIAO_ESP32-S3` has no
+    `pinfunction` on any pin, and its pins are *numbered* `5V`, `3V3` and `GND`
+    -- so a rule keyed only on `pinfunction` reads nothing at all from that
+    board, silently, and looks like a board with no power pins.
+    """
+    raw = node.get("function") or node.get("pin") or ""
+    return _PIN_NUMBER_SUFFIX.sub("", str(raw).strip()).upper()
+
+
+def is_ground(name: str) -> bool:
+    return name.strip().upper().lstrip("/") in _GROUND_NAMES
+
+
+def nominal_volts(name: str):
+    """The voltage a rail or pin NAME states, or `None` if it states none.
+
+    `None` for `VIN`, `VBUS`, `VCC` and friends. Those are roles, and a USB
+    `VBUS` being 5V in practice is not the same kind of fact as a net the user
+    labelled `+5V` -- one is this module reciting a convention, the other is
+    reading what is written on the schematic.
+    """
+    text = (name or "").strip().upper().lstrip("/")
+    if not text or text in _ROLE_ONLY_NAMES or is_ground(text):
+        return None
+    match = _V_AS_POINT.match(text)
+    if match:
+        return float(f"{match.group(1)}.{match.group(2)}")
+    match = _PLAIN_VOLTS.match(text)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def module_power_pins(nets: list) -> dict:
+    """Per reference, the non-ground power pins a schematic declares.
+
+    Returns `{reference: {"supplies": [...], "outputs": [...]}}`, each entry
+    `{"pin", "name", "net", "volts", "net_volts"}` -- see the comment below on
+    why a pin carries two voltages and which one means what. A part appears only if it has at least
+    one of each, which is the shape of a thing that takes power in and makes a
+    different rail out of it -- a dev board module, in practice, on every board
+    measured.
+    """
+    found = {}
+    for net in nets:
+        for node in net.get("nodes", []):
+            role = pin_role(node.get("type"))
+            if role not in ("power_in", "power_out"):
+                continue
+            name = pin_name(node)
+            if is_ground(name):
+                continue
+            reference = node.get("reference")
+            if not reference:
+                continue
+            entry = found.setdefault(reference, {"supplies": [], "outputs": []})
+            bucket = "supplies" if role == "power_in" else "outputs"
+            net_name = net.get("name") or ""
+            entry[bucket].append({
+                "pin": node.get("pin"),
+                "name": name,
+                "net": net_name,
+                # TWO voltages, and reading the wrong one makes this whole pack
+                # silent. `volts` is what the PIN declares -- what the module
+                # says it makes on an output. `net_volts` is what the RAIL is
+                # labelled -- what the user says they are feeding it.
+                #
+                # A supply pin is named for its role (`VIN`) and so has no
+                # voltage of its own; all its information is in the net. An
+                # output pin is the reverse. Caught by running against a real
+                # board, where the pack found nothing on the one case it was
+                # written for.
+                "volts": nominal_volts(name),
+                "net_volts": nominal_volts(net_name),
+            })
+    return {
+        ref: entry for ref, entry in found.items()
+        if entry["supplies"] and entry["outputs"]
+    }
+
+
+def _net_is_real(net_name: str) -> bool:
+    """KiCad names an unconnected pin's net `unconnected-(REF-PIN-PadN)`."""
+    return bool(net_name) and not net_name.startswith("unconnected-")

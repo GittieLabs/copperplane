@@ -457,3 +457,147 @@ class TestClearedItems(unittest.TestCase):
         ])
 
         self.assertEqual(out, [])
+
+
+class TestModuleInputPack(unittest.TestCase):
+    """`SPEC-211` §2.0 / `CTX-211.1` Phase 5 -- the pack that speaks about the
+    boards this project actually has.
+
+    None of the five carries a discrete linear regulator, so the regulator a
+    maker really does have is the one inside the dev board. This pack reasons
+    only from what the symbol declares, because the app does not hold the
+    Arduino's datasheet and must not pretend otherwise.
+    """
+
+    def _node(self, ref, pin, function, type_):
+        return {"reference": ref, "pin": pin, "function": function, "type": type_}
+
+    def _module(self, rail, supply_pin="VIN_8", outputs=(("5", "+5V_5", None),)):
+        nets = [
+            {"name": rail, "nodes": [self._node("A1", "8", supply_pin, "power_in")]},
+            {"name": "GND", "nodes": [self._node("A1", "7", "GND_7", "power_in")]},
+        ]
+        for pin, function, net in outputs:
+            nets.append({
+                "name": net or f"unconnected-(A1-{function}-Pad{pin})",
+                "nodes": [self._node("A1", pin, function, "power_out+no_connect")],
+            })
+        return nets
+
+    def test_a_rail_matching_the_module_s_own_output_is_raised(self):
+        import consideration_packs as packs
+        raised = packs.regulated_rail_into_module_input(self._module("+5V"))
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["id"], "regulated_rail_into_module_input")
+        self.assertEqual(raised[0]["trigger"]["ref"], "+5V")
+
+    def test_a_rail_with_headroom_is_left_alone(self):
+        import consideration_packs as packs
+        # 9V into a module that makes 5V is the ordinary, correct arrangement.
+        self.assertEqual(
+            packs.regulated_rail_into_module_input(self._module("+9V")), []
+        )
+
+    def test_it_asks_rather_than_asserts(self):
+        """`SPEC-211` §2.4's surviving shape, and §3's worst case avoided.
+
+        The app cannot see inside the module. A buck-boost would accept 5V on
+        VIN quite happily, so a flat "this is wrong" would be confidently wrong
+        on a real design."""
+        import consideration_packs as packs
+        explanation = packs.regulated_rail_into_module_input(self._module("+5V"))[0]["explanation"]
+
+        self.assertIn("?", explanation)
+
+    def test_it_claims_no_number_it_cannot_source(self):
+        """Every figure in the explanation must appear in the schematic.
+
+        The Arduino's real VIN minimum is a datasheet fact this app does not
+        hold, and `SPEC-211` §3 says an unknown produces silence, not a
+        plausible number."""
+        import re
+        import consideration_packs as packs
+        explanation = packs.regulated_rail_into_module_input(self._module("+5V"))[0]["explanation"]
+        # Voltage-shaped figures only. A reference designator's digit is not a
+        # claim about anything, and an earlier version of this test failed on
+        # the `1` in `A1` -- which was the test being wrong, not the pack.
+        volts = set(re.findall(r"(\d+(?:\.\d+)?)\s*V\b", explanation))
+
+        # 5V is on the schematic twice over: the rail is labelled `+5V` and the
+        # module declares a `+5V` output pin. Nothing else may be stated.
+        self.assertEqual(volts, {"5"}, f"unsourced voltages: {volts - {'5'}}")
+        self.assertNotIn("7V", explanation, "the Arduino's VIN minimum is not ours to state")
+
+    def test_an_unconnected_output_pin_is_mentioned_and_a_connected_one_is_not(self):
+        import consideration_packs as packs
+        spare = packs.regulated_rail_into_module_input(self._module("+5V"))[0]
+        self.assertIn("not connected", spare["explanation"])
+
+        used = packs.regulated_rail_into_module_input(
+            self._module("+5V", outputs=(("5", "+5V_5", "Net-(A1-+5V)"),))
+        )[0]
+        self.assertNotIn("not connected", used["explanation"])
+
+    def test_an_unconnected_supply_pin_raises_nothing(self):
+        import consideration_packs as packs
+        # Real: the Feather's VBUS. An unconnected input is not being fed at all.
+        self.assertEqual(packs.regulated_rail_into_module_input([
+            {"name": "unconnected-(AF1-VBUS-Pad24)",
+             "nodes": [self._node("AF1", "24", "VBUS_24", "power_in+no_connect")]},
+            {"name": "Net-(N1-CS)",
+             "nodes": [self._node("AF1", "2", "3.3V_2", "power_out")]},
+        ]), [])
+
+
+class TestModuleInputPackOnRealBoards(unittest.TestCase):
+    """The regression that matters, per `SPEC-210` §3 and `CTX-211.1` Phase 1.
+
+    The heuristic this pack replaced returned three parts across five boards and
+    every one was a false positive. So what needs pinning is not that the pack
+    fires -- it is that it stays quiet on every board we can actually check, and
+    speaks on exactly the one that earns it.
+    """
+
+    _BOARDS = {
+        "Blink_LEDs": "/Users/keithelliott/repos/PCBs/Copperplane_Tutorials/"
+                      "Copperplane_Blink_LEDs/Copperplane_Blink_LEDs.kicad_sch",
+        "NFC_ESP32": "/Users/keithelliott/repos/PCBs/NFC_Reader_ESP32/"
+                     "NFC_Reader_ESP32.kicad_sch",
+        "MacroPad": "/Users/keithelliott/repos/PCBs/MacroPad/MacroPad.kicad_sch",
+        "Hello_Blinky": "/Users/keithelliott/repos/PCBs/Hello_World_Blinky/"
+                        "Hello_World_Blinky/Hello_World_Blinky.kicad_sch",
+        "BB8": "/Users/keithelliott/repos/PCBs/BB8-Breakout/bb8-breakout/"
+               "bb8-breakout.kicad_sch",
+    }
+
+    def setUp(self):
+        import kicad_cli
+        try:
+            kicad_cli.find_kicad_cli()
+        except Exception:
+            self.skipTest("kicad-cli not found on this machine.")
+        missing = [n for n, p in self._BOARDS.items() if not os.path.exists(p)]
+        if missing:
+            self.skipTest(f"boards not on this machine: {', '.join(missing)}")
+
+    def _raised(self, path):
+        import kicad_cli
+        import consideration_packs as packs
+        return packs.regulated_rail_into_module_input(
+            kicad_cli.export_netlist(path)["nets"]
+        )
+
+    def test_it_speaks_on_the_one_board_that_earns_it(self):
+        raised = self._raised(self._BOARDS["Blink_LEDs"])
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["trigger"]["ref"], "+5V")
+        self.assertEqual(raised[0]["trigger"]["reference"], "A1")
+        self.assertEqual(raised[0]["trigger"]["pin"], "8")
+
+    def test_it_stays_silent_on_every_other_real_board(self):
+        for name, path in self._BOARDS.items():
+            if name == "Blink_LEDs":
+                continue
+            self.assertEqual(self._raised(path), [], f"false positive on {name}")

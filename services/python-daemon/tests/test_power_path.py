@@ -189,3 +189,105 @@ class TestAgainstKicadsRealLibrary(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPinNaming(unittest.TestCase):
+    """Phase 5. What a power pin is called, across three symbol conventions."""
+
+    def test_a_pin_function_is_read_with_kicad_s_number_suffix_stripped(self):
+        self.assertEqual(P.pin_name({"function": "+5V_5", "pin": "5"}), "+5V")
+
+    def test_a_pin_number_is_the_name_when_the_symbol_gives_no_function(self):
+        # Real: every XIAO_ESP32-S3 pin. A rule keyed only on `pinfunction`
+        # reads nothing from that board and looks like a board with no power.
+        self.assertEqual(P.pin_name({"function": None, "pin": "3V3"}), "3V3")
+
+    def test_a_role_named_pin_keeps_its_role(self):
+        self.assertEqual(P.pin_name({"function": "VIN_8", "pin": "8"}), "VIN")
+
+
+class TestGroundAndVoltageNames(unittest.TestCase):
+
+    def test_ground_is_recognised_by_name_across_conventions(self):
+        for name in ("GND", "gnd", "VSS", "AGND", "/GND"):
+            self.assertTrue(P.is_ground(name), name)
+
+    def test_a_supply_rail_is_not_ground(self):
+        for name in ("+5V", "VIN", "3V3"):
+            self.assertFalse(P.is_ground(name), name)
+
+    def test_the_v_as_decimal_point_convention_is_read(self):
+        self.assertEqual(P.nominal_volts("3V3"), 3.3)
+        self.assertEqual(P.nominal_volts("+3V3"), 3.3)
+        self.assertEqual(P.nominal_volts("1V8"), 1.8)
+
+    def test_a_plain_voltage_is_read_with_or_without_a_sign_or_path(self):
+        self.assertEqual(P.nominal_volts("+5V"), 5.0)
+        self.assertEqual(P.nominal_volts("/5V"), 5.0)
+        self.assertEqual(P.nominal_volts("3.3V"), 3.3)
+        self.assertEqual(P.nominal_volts("+9V"), 9.0)
+
+    def test_a_role_name_states_no_voltage_and_is_not_guessed(self):
+        # VBUS is 5V by USB convention. Reciting a convention is not the same
+        # kind of fact as reading a net the user labelled, and this module is
+        # only allowed the second kind.
+        for name in ("VIN", "VBUS", "VBAT", "VCC", "VDD"):
+            self.assertIsNone(P.nominal_volts(name), name)
+
+    def test_ground_states_no_voltage(self):
+        self.assertIsNone(P.nominal_volts("GND"))
+
+
+class TestModulePowerPins(unittest.TestCase):
+
+    def _node(self, ref, pin, function, type_):
+        return {"reference": ref, "pin": pin, "function": function, "type": type_}
+
+    def _arduino_nets(self):
+        # The real shape of Copperplane_Blink_LEDs, including the two details
+        # that broke earlier attempts: GND typed `power_in`, and the module's
+        # own +5V pin left unconnected.
+        return [
+            {"name": "+5V", "nodes": [self._node("A1", "8", "VIN_8", "power_in")]},
+            {"name": "GND", "nodes": [self._node("A1", "7", "GND_7", "power_in")]},
+            {"name": "unconnected-(A1-+5V-Pad5)",
+             "nodes": [self._node("A1", "5", "+5V_5", "power_out+no_connect")]},
+            {"name": "unconnected-(A1-3V3-Pad4)",
+             "nodes": [self._node("A1", "4", "3V3_4", "power_out+no_connect")]},
+        ]
+
+    def test_ground_is_excluded_even_though_it_is_typed_power_in(self):
+        pins = P.module_power_pins(self._arduino_nets())
+        self.assertEqual([s["name"] for s in pins["A1"]["supplies"]], ["VIN"])
+
+    def test_a_supply_pin_carries_the_rail_s_voltage_not_the_pin_s(self):
+        # The bug this pack shipped with for one run. A supply pin is named for
+        # its role and has no voltage of its own; all of it is in the net.
+        supply = P.module_power_pins(self._arduino_nets())["A1"]["supplies"][0]
+        self.assertIsNone(supply["volts"], "VIN states no voltage")
+        self.assertEqual(supply["net_volts"], 5.0, "the +5V rail does")
+
+    def test_an_output_pin_carries_the_voltage_its_own_name_states(self):
+        outputs = P.module_power_pins(self._arduino_nets())["A1"]["outputs"]
+        self.assertEqual(
+            sorted(o["volts"] for o in outputs), [3.3, 5.0]
+        )
+
+    def test_a_part_with_only_supplies_is_not_a_module(self):
+        # An NE555 takes power in and makes no rail. Nothing here applies to it.
+        self.assertEqual(P.module_power_pins([
+            {"name": "+9V", "nodes": [self._node("U2", "8", "VCC_8", "power_in")]},
+            {"name": "GND", "nodes": [self._node("U2", "1", "GND_1", "power_in")]},
+        ]), {})
+
+    def test_ground_typed_power_out_is_still_excluded(self):
+        # Real, and the reason type cannot identify ground: the XIAO declares
+        # its ground pin `power_out` where the Arduino declares its `power_in`.
+        pins = P.module_power_pins([
+            {"name": "Net-(J4-Pin_1)",
+             "nodes": [self._node("X1", "5V", None, "power_in")]},
+            {"name": "GND", "nodes": [self._node("X1", "GND", None, "power_out")]},
+            {"name": "unconnected-(X1-Pad3V3)",
+             "nodes": [self._node("X1", "3V3", None, "power_out+no_connect")]},
+        ])
+        self.assertEqual([o["name"] for o in pins["X1"]["outputs"]], ["3V3"])

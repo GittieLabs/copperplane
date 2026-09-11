@@ -19,6 +19,7 @@ almost nothing. Where a rule cannot be grounded in a stated fact it is a
 """
 
 import considerations as C
+import power_path as P
 
 #: KiCad's own pin-name convention for a diode: anode `A`, cathode `K`. Read
 #: from `pinfunction`, which is the symbol's own labelling rather than a guess
@@ -186,6 +187,77 @@ def component_without_value(symbols: list) -> list:
     return raised
 
 
+def regulated_rail_into_module_input(nets: list) -> list:
+    """A module is being fed the voltage it makes itself -- `SPEC-211` §2.0.
+
+    **This is the pack that speaks about the boards this project actually has.**
+    `CTX-211.1` Phase 1 measured that none of the five carries a discrete linear
+    regulator, so the regulator every maker's first board really does have is
+    the one inside the dev board they plugged into. `SPEC-211` §1's arithmetic
+    applies to it exactly; what does not apply is the datasheet, because this
+    app does not hold the Arduino's.
+
+    So the claim is built from what the SYMBOL declares and nothing else. A part
+    with a `VIN` pin and a separate `+5V` pin is telling us, in the schematic,
+    that those are different pins with different jobs. Connecting a rail
+    labelled `+5V` to the first one is worth asking about, and asking needs no
+    datasheet at all.
+
+    **It asks rather than asserts**, which is `SPEC-211` §2.4's shape and the
+    part of §2.4 that survived the netlist landing. The app cannot see inside
+    the module. A buck-boost converter would accept 5V on `VIN` quite happily,
+    so a flat "this is wrong" would be confidently wrong on a real design --
+    §3's named worst case. What the app can see is that the user connected a
+    rail to the input pin while the pin that makes that same voltage sits
+    unconnected, and that is a question worth putting.
+
+    `computed`: every fact is read from the file. The net name, the pin names,
+    the pin roles and which pins are unconnected are all in the netlist.
+    """
+    raised = []
+    for reference, pins in sorted(P.module_power_pins(nets).items()):
+        made = [o for o in pins["outputs"] if o["volts"] is not None]
+        if not made:
+            continue
+        highest = max(o["volts"] for o in made)
+        for supply in pins["supplies"]:
+            rail = supply["net_volts"]
+            if rail is None or not P._net_is_real(supply["net"]):
+                continue
+            if rail > highest:
+                # Headroom above everything the module makes. Nothing to say.
+                continue
+            same = [o for o in made if o["volts"] == rail]
+            spare = [o for o in same if not P._net_is_real(o["net"])]
+            also = ""
+            if spare:
+                pin_list = " and ".join(f"pin {o['pin']}" for o in spare)
+                also = (
+                    f" Its own {rail:g}V pin ({pin_list}) is not connected to "
+                    f"anything."
+                )
+            raised.append(C.make(
+                id="regulated_rail_into_module_input",
+                domain="power",
+                claim_class=C.COMPUTED,
+                trigger={
+                    "kind": "net",
+                    "ref": supply["net"],
+                    "reference": reference,
+                    "pin": supply["pin"],
+                },
+                explanation=(
+                    f"{reference} pin {supply['pin']} is its {supply['name']} pin, and you "
+                    f"have the {supply['net']} rail on it. This part also declares a "
+                    f"{highest:g}V output pin of its own, which means {supply['name']} is "
+                    f"the input that feeds whatever makes that — so the two are not "
+                    f"interchangeable.{also} A supply going into {supply['name']} normally "
+                    f"has to sit above the voltage the board produces from it. Is "
+                    f"{supply['net']} what you meant here?"
+                ),
+            ))
+    return raised
+
 #: The registry. `SPEC-210`'s claim is that a new subject area is a row here
 #: plus a function, not a rebuild.
 #:
@@ -195,7 +267,11 @@ def component_without_value(symbols: list) -> list:
 #: grounded in a stated fact -- see above. Cheap to add is not the same as safe
 #: to ship, and §3's bar is the second one.
 PACKS = {
-    "power": [led_series_resistor, component_without_value],
+    "power": [
+        led_series_resistor,
+        component_without_value,
+        regulated_rail_into_module_input,
+    ],
 }
 
 
@@ -205,6 +281,7 @@ PACKS = {
 PACK_INPUTS = {
     "led_series_resistor": "nets",
     "component_without_value": "symbols",
+    "regulated_rail_into_module_input": "nets",
 }
 
 
