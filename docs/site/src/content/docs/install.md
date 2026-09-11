@@ -207,13 +207,23 @@ Expect rough edges, and please
 Neither is bundled. Both are separate programs you install yourself.
 
 **[KiCad](https://www.kicad.org/) 9 or newer** — required for anything involving
-a real board: footprint library search, injecting a footprint, ERC and DRC,
-reading a board outline. Version 9 is the floor because that is where KiCad's
-IPC API became stable.
+a real board. Most of that works on the **files**, with KiCad closed: ERC and
+DRC run through `kicad-cli`, the command-line tool inside your KiCad
+installation, and reading a schematic's parts, its connectivity and a board's
+footprints and outline is all file parsing. Version 9 is the floor because it is
+the version this has been built and tested against.
 
-You also need KiCad's IPC server switched on, which it is not by default:
-**Preferences → Plugins → Enable KiCad API**. Without it the app can see KiCad
-is installed but cannot talk to it.
+**KiCad's IPC server is optional**, and it is off by default:
+**Preferences → Plugins → Enable KiCad API**. Switch it on if you want the four
+things that genuinely need a live session:
+
+- injecting a footprint into the board you have open
+- picking a board from what KiCad currently has open, rather than linking a project
+- resolving a footprint's 3D model, which the enclosure preview uses
+- generating an enclosure from the live board rather than from a project file
+
+Everything else — every check, every part lookup, every design consideration —
+reads files and does not care whether KiCad is running.
 
 **[FreeCAD](https://www.freecad.org/) 0.20 or newer** — required only for
 generating enclosures. Everything else works without it.

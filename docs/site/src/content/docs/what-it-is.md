@@ -71,10 +71,10 @@ on.
   into an open board works; symbols need a KiCad version whose IPC API supports
   schematic documents, which does not exist yet. Symbol *export* to a
   `.kicad_sym` library works today.
-- **Reading your schematic's contents.** KiCad's live IPC has no path-resolution
-  call for schematic documents at all — confirmed against the real API, not
-  assumed. ERC therefore needs you to pick the file; DRC can target whatever
-  board you have open.
+- **Telling you a rail is wrong when no rail is drawn.** The app reads what your
+  schematic says. If a net is unlabelled, or a part's value is still KiCad's
+  placeholder, it will say so and say what becomes answerable once you set it —
+  but it cannot infer the number for you.
 - **Windows and Linux builds.** They compile and their test suites run in CI on
   all three platforms, but no release publishes them yet, and the live CAD
   integration has never been verified anywhere but one Mac.

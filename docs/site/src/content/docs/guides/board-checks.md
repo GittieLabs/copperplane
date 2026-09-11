@@ -29,13 +29,15 @@ the rule means, why it fired on your board, and what would typically fix it.
 
 ## ERC, on a schematic
 
-Open the **Schematic** tab and **pick the schematic file**. You have to choose it
-explicitly, every time.
+Open the **Schematic** tab. If your project has a KiCad project linked, the app
+resolves the schematic from that project file and checks it — **KiCad does not
+need to be running here either.**
 
-That is not laziness. KiCad's live API can resolve the path of an open board but
-has no equivalent call for an open schematic — the API returns "no handler
-available", confirmed by testing against the real thing. Until KiCad adds it,
-there is no way to know which schematic you are looking at.
+If nothing is linked, you pick the file. That is the one place the old
+constraint still shows: KiCad's live API can resolve the path of an open board
+but has no equivalent call for an open schematic, confirmed by testing against
+the real thing. Linking a project sidesteps it entirely, which is why linking is
+worth doing once.
 
 ## Reading the results
 
@@ -52,9 +54,25 @@ KiCad was configured with, which is not the same as the board being correct.
 It will not fix anything. No auto-correction, no rule editing, no writing to
 your board. It reads and explains; you edit in KiCad.
 
-There is also no AI review of your schematic yet — nothing that looks at the
-whole design and volunteers concerns. That is real planned work, not something
-available today.
+## What it notices that KiCad does not
+
+ERC and DRC answer *"does this break a rule KiCad was configured with?"* They do
+not answer *"is this a good idea?"*, and a first board usually fails on the
+second question while passing the first.
+
+So alongside the rule checks, the app reads your schematic's actual connectivity
+— which pin joins which net — and raises a small number of **design
+considerations**: a regulator dropping more voltage than its package will shed
+as heat, a supply trace narrower than the current you said the board draws, a
+two-pin power header that goes in either way round, a dev board being fed the
+voltage it makes itself.
+
+Each one names something real on your board, shows its arithmetic, and says
+where every number came from — your schematic, your answer, or a datasheet page.
+They are on the **Overview** tab, and [the guide to what the app teaches][t]
+covers how they choose their moment.
+
+[t]: /copperplane/guides/what-it-notices/
 
 ## If it cannot run
 

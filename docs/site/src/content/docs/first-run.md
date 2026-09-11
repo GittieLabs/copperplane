@@ -78,10 +78,11 @@ install yourself, and it is explicit about which features need which:
 | Generate an enclosure | **FreeCAD 0.20+** |
 | Browse the app, read your library, change settings | Nothing |
 
-KiCad also needs its IPC server switched on for the live-connection features,
-which it is not by default: **Preferences → Plugins → Enable KiCad API**. Without
-it Copperplane can see KiCad is installed but cannot talk to it. Most features
-read files on disk and do not care.
+**Most of what the app does reads files on disk**, with KiCad closed — the
+checks, your schematic's connectivity, the parts on your board. KiCad's IPC
+server is only needed for a handful of live-session features, and it is off by
+default: **Preferences → Plugins → Enable KiCad API**.
+[The install page lists exactly which features want it](/copperplane/install/).
 
 ## Then start here
 

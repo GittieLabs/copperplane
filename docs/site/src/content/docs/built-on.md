@@ -21,32 +21,40 @@ neither; you install them yourself.
 
 ## How it talks to KiCad
 
-Over **KiCad's own IPC API**, the Protocol Buffer interface that became stable
-in KiCad 9. That is why 9 is the minimum. The app connects to a running KiCad
-instance as a client, the same way any other API consumer would.
+Mostly it does not. **It reads your files**, with KiCad closed.
 
-You have to switch that API on — it is off by default. **Preferences → Plugins →
-Enable KiCad API**.
+Two mechanisms, and the first is the one that matters:
 
-What that connection is used for:
+**`kicad-cli`**, the command-line tool inside your KiCad installation, run
+against a saved file. ERC, DRC, the netlist that gives pin-level connectivity,
+and board geometry export all go this way. Live IPC has no ERC/DRC call at all —
+confirmed by reading the API definitions, not assumed — so the CLI was never a
+fallback; it is the real path.
+
+Alongside it, the app **parses the `.kicad_pcb` and `.kicad_sch` files
+directly** for what the CLI does not expose: the footprints on a board, their
+positions, the symbols in a schematic and their library ids.
+
+**KiCad's own IPC API** — the Protocol Buffer interface that became stable in
+KiCad 9 — is the second mechanism, and it is optional. It is off by default
+(**Preferences → Plugins → Enable KiCad API**) and it is used for the things that
+genuinely require a live session:
 
 - Reading the footprint libraries configured on your machine, including the
   ~150 that ship inside KiCad itself
-- Reading a board's outline and mounting holes
+- Resolving a footprint's 3D model file, for the enclosure preview
 - Injecting a footprint into an open board, as a real transaction that either
   commits or rolls back, and only after you confirm
 
-Separately, the app shells out to **`kicad-cli`**, the command-line tool inside
-your KiCad installation, for ERC and DRC and for exporting board geometry. Live
-IPC has no ERC/DRC call at all — confirmed by reading the API definitions, not
-assumed — so the CLI is the real path.
-
-### One real limitation
+### One real upstream gap, and how it is worked around
 
 KiCad's live API can resolve the path of an open **board**, but has no
-equivalent for an open **schematic** — the call simply is not implemented. So
-DRC can target whatever board you have open, while ERC needs you to pick the
-schematic file yourself. That is a genuine upstream gap, not a shortcut here.
+equivalent for an open **schematic** — the call simply is not implemented.
+
+That used to mean picking the schematic file by hand every time. It no longer
+does: linking a KiCad project gives the app the `.kicad_pro` path, and the
+schematic is its sibling. The upstream gap is real and still there; it stopped
+being the user's problem.
 
 ## How it talks to FreeCAD
 
