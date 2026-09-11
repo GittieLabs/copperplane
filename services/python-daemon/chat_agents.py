@@ -1016,6 +1016,52 @@ def _make_turn(
     }
 
 
+#: `SPEC-343` §2.5.1. Appended to a reply that would genuinely have been better
+#: with a stated intent -- never a guess at what the project is.
+INTENT_CAVEAT = (
+    "I don't know what you're building, so this answer is generic. Saying so on "
+    "the Overview tab lets me answer about your project instead of about boards "
+    "in general."
+)
+
+
+def _intent_caveat_for(project_name: str | None, scope: str, scope_id: str) -> str | None:
+    """The caveat, when it is true and has not already been said.
+
+    `SPEC-343` §2.5.1 permits this: `SPEC-300` says a conversation surface may
+    only produce an answer, and a caveat about the BASIS of that answer is still
+    an answer -- the same class as `SPEC-306`'s *view datasheet (unverified)*.
+
+    Two disciplines, both enforced here rather than left to editing:
+
+    *   **Only when it is true.** Every area's context block carries
+        `project_intent`, so an absent intent genuinely made the answer more
+        generic. No project, no caveat -- a scratch conversation has nothing to
+        be specific about.
+    *   **Once per conversation, not once per turn.** Repetition turns an honest
+        caveat into nagging, and the nagging is what makes a user stop reading
+        the caveats that matter -- including *unverified* and *not confirmed*,
+        which this product depends on being read.
+    """
+    if not project_name:
+        return None
+    try:
+        project = library_store.load_project(project_name)
+    except Exception:  # noqa: BLE001 -- a caveat is never worth failing a reply for
+        return None
+    if project.get("intent"):
+        return None
+
+    try:
+        history = library_store.load_thread(scope, scope_id) or []
+    except Exception:  # noqa: BLE001
+        return None
+    if any(INTENT_CAVEAT in (turn.get("content") or "") for turn in history):
+        return None
+
+    return INTENT_CAVEAT
+
+
 def send(
     scope: str, scope_id: str, area: str, message: str, project_name: str | None = None,
     secrets: dict | None = None, provider: str | None = None, model: str | None = None,
@@ -1052,8 +1098,14 @@ def send(
         _dispatch(area, scope, scope_id, project_name, message, history, secrets, provider, model, config=config)
     )
 
+    # SPEC-343 §2.5.1: computed BEFORE this turn is appended, so "once per
+    # conversation" means the turns that existed when the user asked -- not
+    # including the reply we are about to write it into.
+    caveat = _intent_caveat_for(project_name, scope, scope_id)
+    text = f"{result['text']}\n\n{caveat}" if caveat else result["text"]
+
     assistant_turn = _make_turn(
-        role="assistant", content=result["text"], agent=result["agent"],
+        role="assistant", content=text, agent=result["agent"],
         sources=result["sources"], sources_dropped=result["sources_dropped"],
         general_practice=result["general_practice"], tool_calls=result["tool_calls"],
         provenance=result["provenance"],
