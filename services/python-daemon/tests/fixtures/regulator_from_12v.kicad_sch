@@ -1,0 +1,60 @@
+(kicad_sch
+	(version 20231120)
+	(generator "hardware-agent-studio")
+	(uuid "00000000-0000-0000-0000-0000000000c2")
+	(paper "A4")
+	(lib_symbols
+		(symbol "Regulator_Linear:AMS1117-3.3"
+			(pin_names (offset 0.254)) (in_bom yes) (on_board yes)
+			(property "Reference" "U" (at -3.81 5.08 0) (effects (font (size 1.27 1.27))))
+			(property "Value" "AMS1117-3.3" (at 0 5.08 0) (effects (font (size 1.27 1.27))))
+			(symbol "AMS1117-3.3_0_1"
+				(rectangle (start -5.08 -5.08) (end 5.08 3.81)
+					(stroke (width 0.254) (type default)) (fill (type background))))
+			(symbol "AMS1117-3.3_1_1"
+				(pin power_in line (at 0 -7.62 90) (length 2.54) (name "GND" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+				(pin power_out line (at 7.62 0 180) (length 2.54) (name "VO" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))
+				(pin power_in line (at -7.62 0 0) (length 2.54) (name "VI" (effects (font (size 1.27 1.27)))) (number "3" (effects (font (size 1.27 1.27)))))))
+		(symbol "power:GND"
+			(power) (pin_numbers hide) (pin_names (offset 0) hide) (in_bom no) (on_board yes)
+			(property "Reference" "#PWR" (at 0 -6.35 0) (effects (font (size 1.27 1.27)) hide))
+			(property "Value" "GND" (at 0 -3.81 0) (effects (font (size 1.27 1.27))))
+			(symbol "GND_0_1"
+				(polyline (pts (xy 0 0) (xy 0 -1.27))
+					(stroke (width 0) (type default)) (fill (type none))))
+			(symbol "GND_1_1"
+				(pin power_in line (at 0 0 270) (length 0) hide (name "GND" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))))
+		(symbol "power:+12V"
+			(power) (pin_numbers hide) (pin_names (offset 0) hide) (in_bom no) (on_board yes)
+			(property "Reference" "#PWR" (at 0 -3.81 0) (effects (font (size 1.27 1.27)) hide))
+			(property "Value" "+12V" (at 0 3.556 0) (effects (font (size 1.27 1.27))))
+			(symbol "+12V_0_1"
+				(polyline (pts (xy 0 0) (xy 0 1.27))
+					(stroke (width 0) (type default)) (fill (type none))))
+			(symbol "+12V_1_1"
+				(pin power_in line (at 0 0 90) (length 0) hide (name "+12V" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27))))))))
+	(symbol (lib_id "Regulator_Linear:AMS1117-3.3") (at 100 100 0) (unit 1)
+		(in_bom yes) (on_board yes) (dnp no)
+		(uuid "00000000-0000-0000-0000-0000000000d1")
+		(property "Reference" "U1" (at 100 92 0) (effects (font (size 1.27 1.27))))
+		(property "Value" "AMS1117-3.3" (at 100 108 0) (effects (font (size 1.27 1.27))))
+		(property "Footprint" "Package_TO_SOT_SMD:SOT-223-3_TabPin2" (at 100 100 0) (effects (font (size 1.27 1.27)) hide))
+		(pin "1" (uuid "00000000-0000-0000-0000-0000000000e1"))
+		(pin "2" (uuid "00000000-0000-0000-0000-0000000000e2"))
+		(pin "3" (uuid "00000000-0000-0000-0000-0000000000e3")))
+	(symbol (lib_id "power:+12V") (at 92.38 100 90) (unit 1)
+		(in_bom no) (on_board yes) (dnp no)
+		(uuid "00000000-0000-0000-0000-0000000000d2")
+		(property "Reference" "#PWR01" (at 92.38 96.19 0) (effects (font (size 1.27 1.27)) hide))
+		(property "Value" "+12V" (at 92.38 96.444 0) (effects (font (size 1.27 1.27))))
+		(pin "1" (uuid "00000000-0000-0000-0000-0000000000e4")))
+	(symbol (lib_id "power:GND") (at 100 107.62 0) (unit 1)
+		(in_bom no) (on_board yes) (dnp no)
+		(uuid "00000000-0000-0000-0000-0000000000d3")
+		(property "Reference" "#PWR02" (at 100 113.97 0) (effects (font (size 1.27 1.27)) hide))
+		(property "Value" "GND" (at 100 111.43 0) (effects (font (size 1.27 1.27))))
+		(pin "1" (uuid "00000000-0000-0000-0000-0000000000e5")))
+	(wire (pts (xy 92.38 100) (xy 92.38 100))
+		(stroke (width 0) (type default)) (uuid "00000000-0000-0000-0000-0000000000f1"))
+	(wire (pts (xy 100 107.62) (xy 100 107.62))
+		(stroke (width 0) (type default)) (uuid "00000000-0000-0000-0000-0000000000f2")))

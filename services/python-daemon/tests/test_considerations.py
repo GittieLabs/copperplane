@@ -457,3 +457,365 @@ class TestClearedItems(unittest.TestCase):
         ])
 
         self.assertEqual(out, [])
+
+
+class TestModuleInputPack(unittest.TestCase):
+    """`SPEC-211` §2.0 / `CTX-211.1` Phase 5 -- the pack that speaks about the
+    boards this project actually has.
+
+    None of the five carries a discrete linear regulator, so the regulator a
+    maker really does have is the one inside the dev board. This pack reasons
+    only from what the symbol declares, because the app does not hold the
+    Arduino's datasheet and must not pretend otherwise.
+    """
+
+    def _node(self, ref, pin, function, type_):
+        return {"reference": ref, "pin": pin, "function": function, "type": type_}
+
+    def _module(self, rail, supply_pin="VIN_8", outputs=(("5", "+5V_5", None),)):
+        nets = [
+            {"name": rail, "nodes": [self._node("A1", "8", supply_pin, "power_in")]},
+            {"name": "GND", "nodes": [self._node("A1", "7", "GND_7", "power_in")]},
+        ]
+        for pin, function, net in outputs:
+            nets.append({
+                "name": net or f"unconnected-(A1-{function}-Pad{pin})",
+                "nodes": [self._node("A1", pin, function, "power_out+no_connect")],
+            })
+        return nets
+
+    def test_a_rail_matching_the_module_s_own_output_is_raised(self):
+        import consideration_packs as packs
+        raised = packs.regulated_rail_into_module_input(self._module("+5V"))
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["id"], "regulated_rail_into_module_input")
+        self.assertEqual(raised[0]["trigger"]["ref"], "+5V")
+
+    def test_a_rail_with_headroom_is_left_alone(self):
+        import consideration_packs as packs
+        # 9V into a module that makes 5V is the ordinary, correct arrangement.
+        self.assertEqual(
+            packs.regulated_rail_into_module_input(self._module("+9V")), []
+        )
+
+    def test_it_asks_rather_than_asserts(self):
+        """`SPEC-211` §2.4's surviving shape, and §3's worst case avoided.
+
+        The app cannot see inside the module. A buck-boost would accept 5V on
+        VIN quite happily, so a flat "this is wrong" would be confidently wrong
+        on a real design."""
+        import consideration_packs as packs
+        explanation = packs.regulated_rail_into_module_input(self._module("+5V"))[0]["explanation"]
+
+        self.assertIn("?", explanation)
+
+    def test_it_claims_no_number_it_cannot_source(self):
+        """Every figure in the explanation must appear in the schematic.
+
+        The Arduino's real VIN minimum is a datasheet fact this app does not
+        hold, and `SPEC-211` §3 says an unknown produces silence, not a
+        plausible number."""
+        import re
+        import consideration_packs as packs
+        explanation = packs.regulated_rail_into_module_input(self._module("+5V"))[0]["explanation"]
+        # Voltage-shaped figures only. A reference designator's digit is not a
+        # claim about anything, and an earlier version of this test failed on
+        # the `1` in `A1` -- which was the test being wrong, not the pack.
+        volts = set(re.findall(r"(\d+(?:\.\d+)?)\s*V\b", explanation))
+
+        # 5V is on the schematic twice over: the rail is labelled `+5V` and the
+        # module declares a `+5V` output pin. Nothing else may be stated.
+        self.assertEqual(volts, {"5"}, f"unsourced voltages: {volts - {'5'}}")
+        self.assertNotIn("7V", explanation, "the Arduino's VIN minimum is not ours to state")
+
+    def test_an_unconnected_output_pin_is_mentioned_and_a_connected_one_is_not(self):
+        import consideration_packs as packs
+        spare = packs.regulated_rail_into_module_input(self._module("+5V"))[0]
+        self.assertIn("not connected", spare["explanation"])
+
+        used = packs.regulated_rail_into_module_input(
+            self._module("+5V", outputs=(("5", "+5V_5", "Net-(A1-+5V)"),))
+        )[0]
+        self.assertNotIn("not connected", used["explanation"])
+
+    def test_an_unconnected_supply_pin_raises_nothing(self):
+        import consideration_packs as packs
+        # Real: the Feather's VBUS. An unconnected input is not being fed at all.
+        self.assertEqual(packs.regulated_rail_into_module_input([
+            {"name": "unconnected-(AF1-VBUS-Pad24)",
+             "nodes": [self._node("AF1", "24", "VBUS_24", "power_in+no_connect")]},
+            {"name": "Net-(N1-CS)",
+             "nodes": [self._node("AF1", "2", "3.3V_2", "power_out")]},
+        ]), [])
+
+
+class TestModuleInputPackOnRealBoards(unittest.TestCase):
+    """The regression that matters, per `SPEC-210` §3 and `CTX-211.1` Phase 1.
+
+    The heuristic this pack replaced returned three parts across five boards and
+    every one was a false positive. So what needs pinning is not that the pack
+    fires -- it is that it stays quiet on every board we can actually check, and
+    speaks on exactly the one that earns it.
+    """
+
+    _BOARDS = {
+        "Blink_LEDs": "/Users/keithelliott/repos/PCBs/Copperplane_Tutorials/"
+                      "Copperplane_Blink_LEDs/Copperplane_Blink_LEDs.kicad_sch",
+        "NFC_ESP32": "/Users/keithelliott/repos/PCBs/NFC_Reader_ESP32/"
+                     "NFC_Reader_ESP32.kicad_sch",
+        "MacroPad": "/Users/keithelliott/repos/PCBs/MacroPad/MacroPad.kicad_sch",
+        "Hello_Blinky": "/Users/keithelliott/repos/PCBs/Hello_World_Blinky/"
+                        "Hello_World_Blinky/Hello_World_Blinky.kicad_sch",
+        "BB8": "/Users/keithelliott/repos/PCBs/BB8-Breakout/bb8-breakout/"
+               "bb8-breakout.kicad_sch",
+    }
+
+    def setUp(self):
+        import kicad_cli
+        try:
+            kicad_cli.find_kicad_cli()
+        except Exception:
+            self.skipTest("kicad-cli not found on this machine.")
+        missing = [n for n, p in self._BOARDS.items() if not os.path.exists(p)]
+        if missing:
+            self.skipTest(f"boards not on this machine: {', '.join(missing)}")
+
+    def _raised(self, path):
+        import kicad_cli
+        import consideration_packs as packs
+        return packs.regulated_rail_into_module_input(
+            kicad_cli.export_netlist(path)["nets"]
+        )
+
+    def test_it_speaks_on_the_one_board_that_earns_it(self):
+        raised = self._raised(self._BOARDS["Blink_LEDs"])
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["trigger"]["ref"], "+5V")
+        self.assertEqual(raised[0]["trigger"]["reference"], "A1")
+        self.assertEqual(raised[0]["trigger"]["pin"], "8")
+
+    def test_it_stays_silent_on_every_other_real_board(self):
+        for name, path in self._BOARDS.items():
+            if name == "Blink_LEDs":
+                continue
+            self.assertEqual(self._raised(path), [], f"false positive on {name}")
+
+
+class TestRegulatorDissipation(unittest.TestCase):
+    """`SPEC-211` §2.1 item 1 / `CTX-211.1` Phase 3 -- the lead case."""
+
+    _FIXTURE = os.path.join(
+        os.path.dirname(__file__), "fixtures", "regulator_from_12v.kicad_sch"
+    )
+
+    def setUp(self):
+        import kicad_cli
+        try:
+            kicad_cli.find_kicad_cli()
+        except Exception:
+            self.skipTest("kicad-cli not found on this machine.")
+
+    def _run(self, intent):
+        import kicad_cli
+        import structural_checks
+        import consideration_packs as packs
+        return packs.regulator_dissipation({
+            "nets": kicad_cli.export_netlist(self._FIXTURE)["nets"],
+            "symbols": structural_checks.read_schematic_symbols(self._FIXTURE),
+            "intent_fields": intent,
+        })
+
+    def test_the_spec_s_own_worked_example_comes_out_of_the_real_pipeline(self):
+        """`SPEC-211` §1: 12V to 3.3V at half an amp is 4.35W.
+
+        Through real kicad-cli on a real .kicad_sch, not hand-built dicts --
+        though the file is one authored for this test, because no board
+        available to this project has a discrete regulator at all."""
+        raised = self._run({"current_budget": {"milliamps": 500}})
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["id"], "regulator_dissipation")
+        self.assertEqual(raised[0]["arithmetic"]["result"], {"value": 4.35, "unit": "W"})
+
+    def test_every_number_says_where_it_came_from(self):
+        """`SPEC-211` §2.2. An unlabelled estimate is the confidently-wrong
+        output that spends this family's credibility."""
+        inputs = self._run({"current_budget": {"milliamps": 500}})[0]["arithmetic"]["inputs"]
+
+        self.assertEqual(inputs["Vin"]["from"], "rail")
+        self.assertEqual(inputs["Vin"]["ref"], "+12V")
+        self.assertEqual(inputs["Vout"]["from"], "symbol")
+        self.assertEqual(inputs["Iout"]["from"], "intent")
+
+    def test_it_states_watts_and_refuses_to_state_a_temperature(self):
+        """The spec corrected rather than implemented.
+
+        `SPEC-211` §1 wants the ceiling -- "your 1A regulator is a 130mA
+        regulator on this supply" -- which needs a thermal resistance. This app
+        holds no thermal data for any part and no numeric datasheet field of any
+        kind, so §2.6's "never an assumed value" decides it."""
+        explanation = self._run({"current_budget": {"milliamps": 500}})[0]["explanation"]
+
+        self.assertIn("4.35W", explanation)
+        for invented in ("degC", "°C", "88", "125", "150"):
+            self.assertNotIn(invented, explanation)
+
+    def test_a_missing_current_names_that_one_thing_and_not_a_list(self):
+        raised = self._run({})
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["id"], "regulator_dissipation_unanswerable")
+        self.assertIn("how much current", raised[0]["explanation"])
+
+    def test_an_explicit_unknown_is_treated_as_no_answer(self):
+        raised = self._run({"current_budget": "unknown"})
+
+        self.assertEqual(raised[0]["id"], "regulator_dissipation_unanswerable")
+
+    def test_a_board_with_no_regulator_raises_nothing(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.regulator_dissipation({
+            "nets": [], "symbols": [{"reference": "R1", "lib_id": "Device:R"}],
+            "intent_fields": {"current_budget": {"milliamps": 500}},
+        }), [])
+
+    def test_an_adjustable_regulator_says_so_rather_than_guessing_its_output(self):
+        import consideration_packs as packs
+        raised = packs.regulator_dissipation({
+            "nets": [{"name": "+12V", "nodes": [{"reference": "U1", "pin": "3",
+                                                 "function": "VI_3", "type": "power_in"}]}],
+            "symbols": [{"reference": "U1", "lib_id": "Regulator_Linear:AMS1117"}],
+            "intent_fields": {"current_budget": {"milliamps": 500}},
+        })
+
+        self.assertEqual(raised[0]["id"], "regulator_dissipation_unanswerable")
+        self.assertIn("adjustable", raised[0]["explanation"])
+
+    def test_a_switching_regulator_is_never_given_this_arithmetic(self):
+        """It is the FIX this pack recommends, not the problem."""
+        import consideration_packs as packs
+        self.assertEqual(packs.regulator_dissipation({
+            "nets": [{"name": "+12V", "nodes": [{"reference": "U1", "pin": "3",
+                                                 "function": "VI_3", "type": "power_in"}]}],
+            "symbols": [{"reference": "U1", "lib_id": "Regulator_Switching:LM2596-3.3"}],
+            "intent_fields": {"current_budget": {"milliamps": 500}},
+        }), [])
+
+
+class TestTraceWidthAndReversePolarity(unittest.TestCase):
+    """`SPEC-211` §2.1 items 4 and 5 / `CTX-211.1` Phase 6."""
+
+    def _tracks(self, width, net="+9V", layer="F.Cu"):
+        return [{"net": net, "width_mm": width, "layer": layer}]
+
+    def _bb8_nets(self):
+        return [
+            {"name": "Net-(J4-Pin_1)", "nodes": [
+                {"reference": "J4", "pin": "1", "function": None, "type": "passive"},
+                {"reference": "X1", "pin": "5V", "function": None, "type": "power_in"}]},
+            {"name": "GND", "nodes": [
+                {"reference": "J4", "pin": "2", "function": None, "type": "passive"}]},
+        ]
+
+    def test_a_supply_trace_too_narrow_for_the_stated_current_is_raised(self):
+        import consideration_packs as packs
+        raised = packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2),
+            "intent_fields": {"current_budget": {"milliamps": 2000}},
+        })
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["trigger"]["ref"], "+9V")
+        self.assertEqual(raised[0]["arithmetic"]["result"]["unit"], "mA")
+
+    def test_a_wide_enough_trace_is_left_alone(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2),
+            "intent_fields": {"current_budget": {"milliamps": 50}},
+        }), [])
+
+    def test_it_is_cited_and_names_the_standard_it_used(self):
+        """`SPEC-210` §2.1: a claim relaying someone else's fact says whose.
+        The arithmetic is ours; the relationship is IPC's."""
+        import consideration_packs as packs
+        raised = packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2),
+            "intent_fields": {"current_budget": {"milliamps": 2000}},
+        })[0]
+
+        self.assertEqual(raised["claim_class"], "cited")
+        self.assertEqual(raised["source"]["ref"], "IPC-2221")
+
+    def test_it_says_a_newer_standard_supersedes_the_one_it_used(self):
+        """`SPEC-211` §2.5, and not optional: presenting a superseded standard
+        as current is the confidently-wrong output this family cannot afford."""
+        import consideration_packs as packs
+        raised = packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2),
+            "intent_fields": {"current_budget": {"milliamps": 2000}},
+        })[0]
+
+        self.assertIn("IPC-2152", raised["explanation"])
+        self.assertIn("IPC-2152", raised["source"]["note"])
+
+    def test_it_says_the_copper_weight_is_an_assumption(self):
+        # No board measured states one, so this assumption is always in play.
+        import consideration_packs as packs
+        raised = packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2),
+            "intent_fields": {"current_budget": {"milliamps": 2000}},
+        })[0]
+
+        self.assertIn("1oz copper", raised["explanation"])
+        self.assertEqual(raised["arithmetic"]["inputs"]["copper"]["from"], "assumed")
+
+    def test_a_signal_net_is_never_checked_against_the_board_s_total(self):
+        """Only a supply rail can be said to carry the whole budget. What a
+        signal trace draws is something nothing here knows."""
+        import consideration_packs as packs
+        self.assertEqual(packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2, net="Net-(U2-THRES)"),
+            "intent_fields": {"current_budget": {"milliamps": 2000}},
+        }), [])
+
+    def test_an_unrouted_board_raises_nothing(self):
+        # Ordinary, not exceptional: two of five real boards have no segments.
+        import consideration_packs as packs
+        self.assertEqual(packs.trace_too_narrow_for_current({
+            "tracks": [], "intent_fields": {"current_budget": {"milliamps": 2000}},
+        }), [])
+
+    def test_without_a_current_budget_it_stays_quiet_rather_than_asking_again(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.trace_too_narrow_for_current({
+            "tracks": self._tracks(0.2), "intent_fields": {},
+        }), [])
+
+    def test_a_bare_two_pin_power_input_is_raised(self):
+        import consideration_packs as packs
+        raised = packs.reversible_power_input({
+            "nets": self._bb8_nets(),
+            "footprints": [{"reference": "J4", "footprint":
+                            "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"}],
+        })
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["trigger"]["ref"], "J4")
+        self.assertIn("X1 pin 5V", raised[0]["explanation"])
+
+    def test_a_keyed_power_input_is_left_alone(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.reversible_power_input({
+            "nets": self._bb8_nets(),
+            "footprints": [{"reference": "J4", "footprint":
+                            "Connector_BarrelJack:BarrelJack_Horizontal"}],
+        }), [])
+
+    def test_with_no_board_yet_it_raises_nothing(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.reversible_power_input({
+            "nets": self._bb8_nets(), "footprints": [],
+        }), [])

@@ -1093,7 +1093,30 @@ def project_considerations(name: str) -> dict:
 
     nets = kicad_cli.export_netlist(sch_path)["nets"]
     symbols = structural_checks.read_schematic_symbols(sch_path)
-    raised = consideration_packs.run(nets, symbols=symbols)
+    # `SPEC-211`'s dissipation needs what the user told us as well as what the
+    # files say -- an output voltage from the symbol, an input voltage from the
+    # net, and a current from `intent_fields`. No two of the three live in the
+    # same place, which is why the pack takes the whole project.
+    # The board, where there is one. `SPEC-211`'s trace-width and
+    # reverse-polarity packs read copper and footprints, and a project with no
+    # PCB yet -- or one nobody has routed -- is ordinary rather than an error,
+    # so both degrade to empty rather than failing the whole review.
+    tracks, footprints = [], []
+    pcb_path = files.get("pcb_path")
+    if pcb_path and os.path.exists(pcb_path):
+        try:
+            tracks = kicad_board.read_board_tracks(pcb_path)
+            footprints = kicad_board.read_board_footprints(pcb_path)
+        except Exception:
+            logger.exception(
+                "could not read %s -- power packs that need copper will stay quiet",
+                pcb_path,
+            )
+
+    raised = consideration_packs.run(
+        nets, symbols=symbols, intent_fields=project.get("intent_fields"),
+        tracks=tracks, footprints=footprints,
+    )
 
     return {
         "needs_attention": considerations.raisable(raised),
@@ -2798,12 +2821,14 @@ def _build_routes() -> dict:
         routes["kicad.generate_footprint_from_part"] = kicad_generate_footprint_from_part
     if (considerations is not None and library_store is not None
             and kicad_cli is not None and kicad_project is not None
-            and structural_checks is not None):
-        # Four modules, because it needs all four: the project record, the
-        # project resolver, the netlist export and the schematic reader.
-        # CTX-210.1's lesson -- a route registered on fewer guards than it needs
-        # exists whenever those import and fails with a bare AttributeError when
-        # the others do not.
+            and structural_checks is not None and kicad_board is not None):
+        # Five modules, because it needs all five: the project record, the
+        # project resolver, the netlist export, the schematic reader and -- as
+        # of `SPEC-211`'s trace-width and reverse-polarity packs -- the board
+        # reader. CTX-210.1's lesson, which this route has now had to learn
+        # twice: a route registered on fewer guards than it needs exists
+        # whenever those import and fails with a bare AttributeError when the
+        # others do not.
         routes["project.considerations"] = project_considerations
 
     if project_stage is not None and library_store is not None:
