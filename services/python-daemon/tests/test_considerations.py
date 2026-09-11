@@ -897,3 +897,85 @@ class TestCurrentBudgetAgainstSource(unittest.TestCase):
     def test_a_project_with_no_intent_at_all_raises_nothing(self):
         import consideration_packs as packs
         self.assertEqual(packs.current_budget_against_source({"intent_fields": {}}), [])
+
+
+class TestSupplyExceedsAbsoluteMaximum(unittest.TestCase):
+    """`SPEC-211` §2.1 item 2 / `CTX-211.3` -- the literal fry case."""
+
+    _FRY = os.path.join(os.path.dirname(__file__), "fixtures", "attiny_on_12v.kicad_sch")
+    _ATTINY = [{"quote": "Voltage on RESET with respect to Ground......-0.5V to +13.0V", "page": 161},
+               {"quote": "Maximum Operating Voltage............................................6.0V", "page": 161}]
+
+    def setUp(self):
+        import kicad_cli
+        try:
+            kicad_cli.find_kicad_cli()
+        except Exception:
+            self.skipTest("kicad-cli not found on this machine.")
+
+    def _run(self, parts, path=None):
+        import kicad_cli
+        import structural_checks
+        import consideration_packs as packs
+        path = path or self._FRY
+        return packs.supply_exceeds_absolute_maximum({
+            "nets": kicad_cli.export_netlist(path)["nets"],
+            "symbols": structural_checks.read_schematic_symbols(path),
+            "parts": parts,
+        })
+
+    def test_a_twelve_volt_rail_on_a_six_volt_part_is_raised(self):
+        """`SPEC-211` §1's own example, through the real pipeline."""
+        raised = self._run([{"part_id": "ATTINY85-20PU",
+                             "absolute_maximum_ratings": self._ATTINY}])
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["claim_class"], "cited")
+        self.assertEqual(raised[0]["arithmetic"]["result"], {"value": 6.0, "unit": "V"})
+
+    def test_the_datasheet_row_is_shown_not_summarised_away(self):
+        """The only thing making this extraction defensible is that the user can
+        see the row the number came from and judge it."""
+        raised = self._run([{"part_id": "ATTINY85-20PU",
+                             "absolute_maximum_ratings": self._ATTINY}])[0]
+
+        self.assertIn("Maximum Operating Voltage", raised["explanation"])
+        self.assertIn("page 161", raised["explanation"])
+        self.assertIn("if it is the wrong row, this finding is wrong with it",
+                      raised["explanation"])
+
+    def test_a_rail_within_the_rating_raises_nothing(self):
+        raised = self._run([{"part_id": "ATTINY85-20PU", "absolute_maximum_ratings": [
+            {"quote": "Maximum Operating Voltage......20.0V", "page": 161}]}])
+
+        self.assertEqual(raised, [])
+
+    def test_a_part_with_no_absolute_maximum_quotes_raises_nothing(self):
+        self.assertEqual(
+            self._run([{"part_id": "ATTINY85-20PU", "absolute_maximum_ratings": []}]), []
+        )
+
+    def test_a_part_not_on_this_board_raises_nothing(self):
+        self.assertEqual(self._run([{"part_id": "NE555", "absolute_maximum_ratings": [
+            {"quote": "V Supply voltage(2) 3 V", "page": 4}]}]), [])
+
+    def test_a_project_linking_no_parts_raises_nothing(self):
+        self.assertEqual(self._run([]), [])
+
+    def test_it_never_reassures_only_ever_warns(self):
+        """The asymmetry that makes the extraction safe.
+
+        A parse reading too LOW is a visible false positive beside the quote
+        that contradicts it. A parse reading too HIGH is silence -- what this
+        app did before the pack existed. There is no path to a false "you are
+        fine", which is the failure `SPEC-211` §3 actually forbids."""
+        import considerations
+        raised = self._run([{"part_id": "ATTINY85-20PU",
+                             "absolute_maximum_ratings": self._ATTINY}])
+
+        self.assertTrue(all(c["state"] != considerations.SATISFIED for c in raised))
+        self.assertEqual(self._run([{"part_id": "ATTINY85-20PU",
+                                     "absolute_maximum_ratings": [
+                                         {"quote": "Maximum Operating Voltage......20.0V",
+                                          "page": 161}]}]), [],
+                         "a rail inside the rating produces silence, not a reassurance")

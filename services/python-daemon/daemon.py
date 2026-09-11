@@ -1113,9 +1113,27 @@ def project_considerations(name: str) -> dict:
                 pcb_path,
             )
 
+    # `SPEC-211` §2.1 item 2 compares a rail against a part's own datasheet
+    # maximum, so the packs need the library records this project links. Only
+    # the absolute-maximum quotes are handed over: a pack stays a pure function
+    # over data, and a whole Part record carries a great deal that is none of
+    # its business.
+    parts = []
+    for part_id in project.get("parts") or []:
+        try:
+            record = library_store.load_part(part_id)
+        except Exception:
+            logger.exception("could not load part %s for the power packs", part_id)
+            continue
+        categories = (record.get("design_guidance") or {}).get("categories") or {}
+        parts.append({
+            "part_id": record.get("part_id") or part_id,
+            "absolute_maximum_ratings": categories.get("absolute_maximum_ratings") or [],
+        })
+
     raised = consideration_packs.run(
         nets, symbols=symbols, intent_fields=project.get("intent_fields"),
-        tracks=tracks, footprints=footprints,
+        tracks=tracks, footprints=footprints, parts=parts,
     )
 
     return {
