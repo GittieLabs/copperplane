@@ -504,6 +504,87 @@ def reversible_power_input(project: dict) -> list:
         ))
     return raised
 
+#: The USB figure's citation, shared by both halves of the pack below so the
+#: reinforcement is sourced exactly as rigorously as the warning. `SPEC-210`
+#: §2.1's rule is about the claim class, not about whether the news is good.
+_USB_SOURCE = {
+    "ref": "USB 2.0 Specification",
+    "title": "USB 2.0 Specification, bus-powered device power budgeting",
+    "note": (
+        "A configured high-power bus-powered device may draw five unit loads of "
+        "100mA at 5V. Chargers and USB-C sources with power delivery supply more, "
+        "and hubs or older ports often do not."
+    ),
+}
+
+
+def current_budget_against_source(project: dict) -> list:
+    """What the board draws against what its supply guarantees -- §2.1 item 3.
+
+    *"Twelve LEDs off a USB port."*
+
+    **It reports a guarantee, never a prediction.** Exceeding USB's 500mA does
+    not mean the board fails -- the charger on the user's desk probably delivers
+    two amps. It means the board has stopped being portable between the things
+    they might plug it into, which is true where *"this will not work"* would be
+    false, and the second sentence is the one a novice would remember.
+
+    `cited` in both directions, including when the news is good. The
+    `considerations.cleared` helper builds a `computed` claim, and this figure is
+    USB's rather than ours however it is being used, so the satisfied case is
+    built through `make` directly with its source attached.
+    """
+    headroom = P.usb_headroom(project.get("intent_fields"))
+    if headroom is None:
+        return []
+
+    drawn = headroom["milliamps"]
+    guaranteed = headroom["guaranteed"]
+    trigger = {"kind": "intent_field", "ref": "input_supply", "source": "usb"}
+
+    if headroom["fits"]:
+        return [C.make(
+            id="current_budget_against_source",
+            domain="power",
+            claim_class=C.CITED,
+            trigger=trigger,
+            source=_USB_SOURCE,
+            state=C.SATISFIED,
+            explanation=(
+                f"You said this board runs from USB and draws about {drawn:g}mA. A USB "
+                f"port has to be able to supply {guaranteed:g}mA, so it fits with room "
+                f"to spare — this board will run off any USB port you find rather than "
+                f"only off the charger you happen to own."
+            ),
+        )]
+
+    return [C.make(
+        id="current_budget_against_source",
+        domain="power",
+        claim_class=C.CITED,
+        trigger=trigger,
+        source=_USB_SOURCE,
+        arithmetic={
+            "expression": "drawn - guaranteed",
+            "inputs": {
+                "drawn": {"value": drawn, "unit": "mA", "from": "intent",
+                          "ref": "current_budget"},
+                "guaranteed": {"value": guaranteed, "unit": "mA", "from": "cited",
+                               "ref": "USB 2.0 Specification"},
+            },
+            "result": {"value": round(drawn - guaranteed), "unit": "mA"},
+        },
+        explanation=(
+            f"You said this board runs from USB and draws about {drawn:g}mA. A USB port "
+            f"is only required to supply {guaranteed:g}mA, so you are {drawn - guaranteed:g}mA "
+            f"over what the standard guarantees. That does not mean it will not run: a "
+            f"phone charger usually delivers far more, and a USB-C supply more still. It "
+            f"means it will run from some ports and not others — a hub or an older laptop "
+            f"port is where it would stop working, and that is a miserable fault to chase "
+            f"later. Worth knowing now rather than finding out."
+        ),
+    )]
+
 #: The registry. `SPEC-210`'s claim is that a new subject area is a row here
 #: plus a function, not a rebuild.
 #:
@@ -520,6 +601,7 @@ PACKS = {
         regulator_dissipation,
         trace_too_narrow_for_current,
         reversible_power_input,
+        current_budget_against_source,
     ],
 }
 
@@ -537,6 +619,7 @@ PACK_INPUTS = {
     "regulator_dissipation": PROJECT,
     "trace_too_narrow_for_current": PROJECT,
     "reversible_power_input": PROJECT,
+    "current_budget_against_source": PROJECT,
 }
 
 

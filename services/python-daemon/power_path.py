@@ -455,3 +455,45 @@ def power_input_connectors(nets: list) -> dict:
         reference: entry for reference, entry in by_reference.items()
         if entry["supply_pin"] and entry["ground_pin"]
     }
+
+
+#: What a USB port is REQUIRED to supply to a configured high-power device:
+#: five unit loads of 100mA at 5V. `SPEC-211` §2.1 item 3's whole story --
+#: *"twelve LEDs off a USB port"* -- turns on this number.
+#:
+#: **It is a guarantee, not a prediction**, and the difference is the entire
+#: design of the pack built on it. A phone charger will happily deliver two
+#: amps; a hub or an older laptop port will not go past this. So exceeding it
+#: does not mean the board fails, it means the board has stopped being portable
+#: between the things a user might plug it into -- which is a true statement
+#: where "this will not work" would be a false one.
+USB2_GUARANTEED_MA = 500.0
+
+_USB = "usb"
+
+
+def usb_headroom(intent_fields: dict = None):
+    """Compare a stated current budget against what USB guarantees.
+
+    Returns `{"milliamps", "guaranteed", "fits"}`, or `None` when this does not
+    apply -- which is most of the time, and deliberately.
+
+    **Only `usb` has a number this app can honestly hold.** An adapter's
+    capability is printed on the adapter, a battery's depends on the cell, and a
+    host board's is a datasheet figure for a regulator this app does not hold
+    (`SPEC-211` §2.0 item 8 measured that it holds no thermal or rating data at
+    all). Inventing a limit for those would be the assumed value §2.6 rules out,
+    so they get silence.
+    """
+    fields = intent_fields or {}
+    supply = fields.get("input_supply")
+    if not isinstance(supply, dict) or supply.get("source") != _USB:
+        return None
+    milliamps = budget_milliamps(fields)
+    if milliamps is None:
+        return None
+    return {
+        "milliamps": milliamps,
+        "guaranteed": USB2_GUARANTEED_MA,
+        "fits": milliamps <= USB2_GUARANTEED_MA,
+    }
