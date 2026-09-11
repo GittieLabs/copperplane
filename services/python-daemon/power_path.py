@@ -497,3 +497,107 @@ def usb_headroom(intent_fields: dict = None):
         "guaranteed": USB2_GUARANTEED_MA,
         "fits": milliamps <= USB2_GUARANTEED_MA,
     }
+
+
+#: Labels that mean *the supply rail's* absolute maximum, as opposed to some
+#: other pin's. Matched against the quote's own text.
+#:
+#: **The label is doing all the work, and without it this is dangerous.**
+#: Measured 2026-09-10 against the two real parts in this library. A naive
+#: "find a voltage in the absolute-maximum section" parse reads the ATTINY85's
+#:
+#:     Voltage on RESET with respect to Ground......-0.5V to +13.0V
+#:
+#: and produces **13V for a part whose supply maximum is 6.0V** -- a pin rating
+#: standing in for the rail, more than double, and wrong in the direction that
+#: says a 12V supply is fine. That is exactly `SPEC-211` §1's fry case getting
+#: the answer backwards, and §2.3 predicted it.
+_SUPPLY_MAX_LABELS = (
+    "supply voltage",
+    "maximum operating voltage",
+    "operating voltage",
+    "vcc",
+    "vdd",
+    "vin",
+)
+
+#: Labels that rule a quote OUT even when a supply label also appears in it.
+#: A pin's rating is not the rail's, however the row is worded.
+_NOT_SUPPLY_LABELS = ("on reset", "input voltage", "output", "per i/o", "current")
+
+#: A table of contents' dot leaders run the label into the number:
+#: `Maximum Operating Voltage.........6.0V`. Without stripping them the number
+#: comes back as `............6.0`.
+_DOT_LEADERS = re.compile(r"\.{2,}")
+_VOLTAGE = re.compile(r"(\d+(?:\.\d+)?)\s*V\b")
+
+#: A supply maximum outside this range is this module having misread something.
+#: Deliberately generous -- the point is to reject a temperature or a milliamp
+#: figure that happened to sit next to a `V`, not to second-guess a datasheet.
+_PLAUSIBLE_MAX_VOLTS = (1.0, 60.0)
+
+
+def supply_maximum_from_quotes(quotes: list):
+    """A part's absolute maximum SUPPLY voltage, read from datasheet quotes.
+
+    Returns `{"volts", "quote", "page"}` or `None`, and `None` is the common
+    answer. The quote it came from travels with the number so every claim built
+    on this can show its working, which is the only thing that makes an
+    extraction like this defensible at all.
+
+    **This is the extraction `SPEC-211` §2.3 warned about, built anyway, and the
+    reason it is safe is the asymmetry in how the pack uses it** -- not any
+    confidence in the parse. A claim is only ever emitted when the rail
+    *exceeds* this number. So a parse that reads too LOW produces a visible false
+    positive, shown next to the datasheet quote that contradicts it, which the
+    user can dismiss. A parse that reads too HIGH produces silence, which is
+    exactly what this app did yesterday. There is no path from a bad parse to a
+    false reassurance, and false reassurance is the failure §3 actually forbids.
+    """
+    for item in quotes or []:
+        raw = (item.get("quote") or "")
+        text = _DOT_LEADERS.sub(" ", raw).strip()
+        lowered = text.lower()
+        if any(bad in lowered for bad in _NOT_SUPPLY_LABELS):
+            continue
+        if not any(good in lowered for good in _SUPPLY_MAX_LABELS):
+            continue
+        found = [float(v) for v in _VOLTAGE.findall(text)]
+        low, high = _PLAUSIBLE_MAX_VOLTS
+        found = [v for v in found if low <= v <= high]
+        if not found:
+            continue
+        # The largest plausible figure on the row. An absolute-maximum row that
+        # carries a range (`-0.5V to +6.0V`) means the top of it.
+        return {"volts": max(found), "quote": raw, "page": item.get("page")}
+    return None
+
+
+#: A part id shorter than this is too generic to match a symbol on without
+#: matching half the board as well.
+_MIN_PART_ID_MATCH = 4
+
+
+def symbol_matches_part(symbol: dict, part_id: str) -> bool:
+    """Whether a schematic symbol is this library part.
+
+    Matched on the symbol's own name, case-insensitively, in either direction:
+    the part `NE555` is drawn as `Timer:NE555P`, and `ATTINY85-20PU` as
+    `MCU_Microchip_ATtiny:ATtiny85-20PU`. Prefix rather than substring, and a
+    length floor, because a two-character part id would otherwise claim every
+    symbol on the board.
+    """
+    part = (part_id or "").strip().lower()
+    if len(part) < _MIN_PART_ID_MATCH:
+        return False
+    leaf = ((symbol.get("lib_id") or "").split(":")[-1]).strip().lower()
+    value = (symbol.get("value") or "").strip().lower()
+    return any(
+        name and (name.startswith(part) or part.startswith(name))
+        for name in (leaf, value)
+    )
+
+
+def supply_pins(reference: str, nets: list) -> list:
+    """A part's own non-ground supply pins, with the rail on each."""
+    return power_pins_by_reference(nets).get(reference, {}).get("supplies", [])

@@ -160,22 +160,25 @@ paying attention.
 
 ### 2.1 What is in the pack
 
-> **Status 2026-09-10, after `CTX-211.1` and `CTX-211.2`.** Four of the five ship, plus a sixth
-> case this list did not anticipate. **Item 2 does not**, and this note exists because a contents
-> list that reads as though everything landed is how a later session concludes the pack is finished.
+> **Status 2026-09-10.** All five ship, plus a sixth case this list did not anticipate. Kept as a
+> table rather than deleted, because knowing *which context built what* is the thing a later session
+> needs and the item numbers alone do not say.
 >
 > | Item | State |
 > | :--- | :--- |
 > | 1. Linear regulator dissipation | **Ships**, as watts rather than §1's ceiling — see §2.0 item 8 |
-> | 2. Input voltage against an absolute maximum | **Not built.** Needs a numeric maximum; `SPEC-205` holds quotes |
+> | 2. Input voltage against an absolute maximum | **Ships** — `CTX-211.3`, and the quote travels with the number |
 > | 3. Current budget against the source's capability | **Ships**, for USB only — `CTX-211.2` |
 > | 4. Trace width against current | **Ships**, cited to IPC-2221 |
 > | 5. Unkeyed two-pin power input | **Ships**, and needed no question — see §2.4 |
 > | *(unlisted)* A module fed the voltage it makes | **Ships.** The case that speaks about the boards this project actually has |
 >
-> **Item 2 is the one to be careful about.** Extracting a number from a datasheet quote inherits
-> exactly the reliability problem §2.3 spent its argument avoiding, and a wrong absolute-maximum
-> claim is §3's named worst case wearing a different hat. It is not deferred for want of time.
+> **Item 2 was the one to be careful about, and §2.3's warning was exactly right.** A naive parse of
+> the ATTINY85's absolute-maximum section returns **13.0V** — a `RESET` pin rating — for a part whose
+> supply maximum is **6.0V**, which would call a 12V rail safe on a 6V part. `CTX-211.3` keys the
+> parse on the row's own label, and makes a wrong parse harmless by emitting a claim **only on
+> exceedance**: too low is a visible false positive shown beside the quote that contradicts it, too
+> high is silence. Neither reaches a false reassurance, which is the failure §3 forbids.
 
 
 1.  **Linear regulator dissipation.** `(Vin - Vout) x Iout` against the part's package thermal

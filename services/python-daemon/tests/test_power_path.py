@@ -448,3 +448,83 @@ class TestPowerInputConnectors(unittest.TestCase):
             {"name": "GND", "nodes": [
                 {"reference": "U1", "pin": "1", "function": "GND_1", "type": "power_in"}]},
         ]), {})
+
+
+class TestSupplyMaximumFromQuotes(unittest.TestCase):
+    """`CTX-211.3` -- the extraction `SPEC-211` §2.3 warned about.
+
+    Every quote below is real, copied from this library's own two part records.
+    """
+
+    _ATTINY = [
+        {"quote": "Operating Temperature..................................-55°C to +125°C", "page": 161},
+        {"quote": "Storage Temperature.....................................-65°C to +150°C", "page": 161},
+        {"quote": "Voltage on RESET with respect to Ground......-0.5V to +13.0V", "page": 161},
+        {"quote": "Maximum Operating Voltage............................................6.0V", "page": 161},
+        {"quote": "DC Current per I/O Pin...............................................40.0 mA", "page": 161},
+    ]
+    _NE555 = [
+        {"quote": "V Supply voltage(2) 18 V", "page": 4},
+        {"quote": "V Input voltage CONT, RESET, THRES, TRIG V V", "page": 4},
+        {"quote": "I Output current ±225 mA", "page": 4},
+        {"quote": "T Operating virtual junction temperature 150 °C", "page": 4},
+    ]
+
+    def test_it_reads_the_supply_maximum_past_the_dot_leaders(self):
+        got = P.supply_maximum_from_quotes(self._ATTINY)
+        self.assertEqual(got["volts"], 6.0)
+        self.assertEqual(got["page"], 161)
+
+    def test_it_does_not_mistake_a_pin_rating_for_the_supply_rail(self):
+        """THE test in this file.
+
+        A naive parse reads `Voltage on RESET ... +13.0V` and reports 13V for a
+        part whose supply maximum is 6.0V -- more than double, and wrong in the
+        direction that says a 12V rail is fine. `SPEC-211` §1's fry case getting
+        the answer backwards."""
+        self.assertEqual(P.supply_maximum_from_quotes(self._ATTINY)["volts"], 6.0)
+
+    def test_it_reads_a_row_whose_subscript_was_lost_in_extraction(self):
+        # "V Supply voltage(2) 18 V" -- the real quote. VCC's subscript did not
+        # survive the PDF, and the row is still readable.
+        self.assertEqual(P.supply_maximum_from_quotes(self._NE555)["volts"], 18.0)
+
+    def test_a_temperature_or_a_current_is_never_read_as_a_voltage(self):
+        for quotes in ([self._ATTINY[0]], [self._ATTINY[1]], [self._ATTINY[4]],
+                       [self._NE555[2]], [self._NE555[3]]):
+            self.assertIsNone(P.supply_maximum_from_quotes(quotes), quotes)
+
+    def test_a_row_that_lost_its_numbers_entirely_yields_nothing(self):
+        # Real: the NE555's input-voltage row came out of the PDF as
+        # "CONT, RESET, THRES, TRIG V V" with no figures at all.
+        self.assertIsNone(P.supply_maximum_from_quotes([self._NE555[1]]))
+
+    def test_no_quotes_at_all_yields_nothing(self):
+        self.assertIsNone(P.supply_maximum_from_quotes([]))
+        self.assertIsNone(P.supply_maximum_from_quotes(None))
+
+    def test_the_quote_and_page_travel_with_the_number(self):
+        # The only thing that makes this extraction defensible is that the user
+        # can see the row it came from.
+        got = P.supply_maximum_from_quotes(self._NE555)
+        self.assertIn("Supply voltage", got["quote"])
+        self.assertEqual(got["page"], 4)
+
+
+class TestSymbolToPartMatching(unittest.TestCase):
+
+    def test_a_part_matches_the_symbol_it_is_drawn_as(self):
+        self.assertTrue(P.symbol_matches_part(
+            {"lib_id": "Timer:NE555P", "value": "NE555P"}, "NE555"))
+        self.assertTrue(P.symbol_matches_part(
+            {"lib_id": "MCU_Microchip_ATtiny:ATtiny85-20PU", "value": "ATtiny85-20PU"},
+            "ATTINY85-20PU"))
+
+    def test_an_unrelated_part_does_not_match(self):
+        self.assertFalse(P.symbol_matches_part(
+            {"lib_id": "Device:R", "value": "1K"}, "NE555"))
+
+    def test_a_short_part_id_claims_nothing(self):
+        # Otherwise a two-character id matches half the board.
+        self.assertFalse(P.symbol_matches_part(
+            {"lib_id": "Device:R", "value": "R"}, "R"))

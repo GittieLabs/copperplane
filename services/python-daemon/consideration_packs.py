@@ -585,6 +585,83 @@ def current_budget_against_source(project: dict) -> list:
         ),
     )]
 
+def supply_exceeds_absolute_maximum(project: dict) -> list:
+    """A rail above what the part's own datasheet allows -- §2.1 item 2.
+
+    `SPEC-211` §1's literal fry case: a 12V input and a part rated to 6V. This
+    is the item `CTX-211.1` left unbuilt, and §2.3 is why -- it needs a number,
+    and `SPEC-205` stores datasheet quotes rather than numbers.
+
+    **It is built on the extraction the spec warned against, and what makes it
+    safe is how the pack uses the result rather than any trust in the parse.** A
+    claim is emitted only when the rail EXCEEDS the parsed maximum. So a parse
+    that reads too low is a visible false positive, shown beside the datasheet
+    quote that contradicts it; a parse that reads too high is silence, which is
+    what this app did before this pack existed. Neither path reaches a false
+    *"you are fine"*, and false reassurance is what §3 actually forbids.
+
+    `cited`, and the source is the part's own datasheet page. The quote is IN
+    the explanation rather than summarised out of it: the whole reason this is
+    defensible is that the user can see the row the number was read from.
+    """
+    nets = project.get("nets") or []
+    symbols = project.get("symbols") or []
+    raised = []
+
+    for part in project.get("parts") or []:
+        part_id = part.get("part_id")
+        maximum = P.supply_maximum_from_quotes(part.get("absolute_maximum_ratings"))
+        if not part_id or not maximum:
+            continue
+        for symbol in symbols:
+            if not P.symbol_matches_part(symbol, part_id):
+                continue
+            reference = symbol.get("reference")
+            if not reference:
+                continue
+            for pin in P.supply_pins(reference, nets):
+                rail = pin["net_volts"]
+                if rail is None or not P._net_is_real(pin["net"]):
+                    continue
+                if rail <= maximum["volts"]:
+                    continue
+                quote = maximum["quote"].strip()
+                raised.append(C.make(
+                    id="supply_exceeds_absolute_maximum",
+                    domain="power",
+                    claim_class=C.CITED,
+                    trigger={"kind": "net", "ref": pin["net"],
+                             "reference": reference, "pin": pin["pin"]},
+                    source={
+                        "ref": f"{part_id} datasheet, page {maximum['page']}",
+                        "title": f"{part_id} absolute maximum ratings",
+                        "note": quote,
+                    },
+                    arithmetic={
+                        "expression": "rail - absolute maximum",
+                        "inputs": {
+                            "rail": {"value": rail, "unit": "V", "from": "rail",
+                                     "ref": pin["net"]},
+                            "maximum": {"value": maximum["volts"], "unit": "V",
+                                        "from": "datasheet",
+                                        "ref": f"page {maximum['page']}"},
+                        },
+                        "result": {"value": round(rail - maximum["volts"], 2), "unit": "V"},
+                    },
+                    explanation=(
+                        f"{reference} ({part_id}) has your {pin['net']} rail on its "
+                        f"{pin['name']} pin ({pin['pin']}). Its datasheet's absolute maximum "
+                        f"ratings say, on page {maximum['page']}: \"{quote}\" — so {rail:g}V is "
+                        f"above the {maximum['volts']:g}V it is rated for. Absolute maximum is "
+                        f"not a working range; it is the point at which the part is damaged, "
+                        f"and going past it is usually permanent. This number was read out of "
+                        f"that quote, so check the quote — if it is the wrong row, this "
+                        f"finding is wrong with it."
+                    ),
+                ))
+    return raised
+
+
 #: The registry. `SPEC-210`'s claim is that a new subject area is a row here
 #: plus a function, not a rebuild.
 #:
@@ -602,6 +679,7 @@ PACKS = {
         trace_too_narrow_for_current,
         reversible_power_input,
         current_budget_against_source,
+        supply_exceeds_absolute_maximum,
     ],
 }
 
@@ -620,12 +698,13 @@ PACK_INPUTS = {
     "trace_too_narrow_for_current": PROJECT,
     "reversible_power_input": PROJECT,
     "current_budget_against_source": PROJECT,
+    "supply_exceeds_absolute_maximum": PROJECT,
 }
 
 
 def run(nets: list, domains: list = None, symbols: list = None,
         intent_fields: dict = None, tracks: list = None,
-        footprints: list = None) -> list:
+        footprints: list = None, parts: list = None) -> list:
     """Every pack's considerations for this project.
 
     Order is by `SPEC-210` §2.6's third option -- *"would this have built
@@ -648,6 +727,10 @@ def run(nets: list, domains: list = None, symbols: list = None,
         # state early on -- two of five real boards have zero segments.
         "tracks": tracks or [],
         "footprints": footprints or [],
+        # Library part records for the parts this project links, carrying only
+        # what a pack may read -- the daemon does the I/O so packs stay pure
+        # functions over data and remain testable without a storage root.
+        "parts": parts or [],
     }
     out = []
     for domain, packs in PACKS.items():
