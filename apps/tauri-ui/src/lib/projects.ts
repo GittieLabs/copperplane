@@ -72,6 +72,10 @@ export interface Project {
    * on the board -- a blank cannot trigger anything, because a blank is
    * indistinguishable from a question nobody put. */
   intent_fields?: IntentFields
+  /** SPEC-343 §5: the Overview guidance, per project. Defaults to `true` --
+   *  the people it is for are the ones who will not go looking for a setting
+   *  to switch it on. */
+  guided_path?: boolean
   /** SPEC-325 §2.1: the `.kicad_pro` this project is anchored to. The
    *  schematic and PCB are resolved from it, replacing "whatever board
    *  KiCad currently has open" -- which needed KiCad running, its API
@@ -298,4 +302,12 @@ export async function setProjectIntentFields(
   fields: Record<string, unknown>,
 ): Promise<Project> {
   return unwrap(await dispatch('project.set_intent_fields', { name, fields }))
+}
+
+/** SPEC-343 §5: turn the Overview guidance on or off for this project.
+ *
+ *  Off means gone, not diminished. A user who switches something off and gets
+ *  a smaller version of it is being negotiated with. */
+export async function setProjectGuidedPath(name: string, enabled: boolean): Promise<Project> {
+  return unwrap(await dispatch('project.set_guided_path', { name, enabled }))
 }

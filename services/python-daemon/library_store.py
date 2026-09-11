@@ -1200,6 +1200,16 @@ def _backfill_project_intent(record: dict) -> dict:
     # SPEC-210: `{}` rather than `None`, following `check_display` -- an absent
     # record and an empty one both mean "no pack has run yet".
     record.setdefault("considerations", {})
+    # SPEC-343 §2.6, settled: `True`, and the default is not a coin toss.
+    #
+    # The people this surface is for are the ones who will not go looking for a
+    # setting to switch it on. Defaulting off costs them the whole feature;
+    # defaulting on costs a second-time user one click. And it is one sentence,
+    # so the cost of being wrong in this direction is small.
+    #
+    # Backfilled explicitly rather than read as `.get(key, True)`, so the record
+    # says what is true rather than leaving every caller to remember a default.
+    record.setdefault("guided_path", True)
     return record
 
 
@@ -1838,6 +1848,26 @@ def get_project_review_result(name: str, area: str) -> dict | None:
 # -- and must survive the next run of the pack that raised it. Storing it
 # somewhere that gets overwritten and truncated would lose exactly the thing
 # section 2.3 says buys "not asking twice", and it would lose it silently.
+def set_project_guided_path(name: str, enabled: bool) -> dict:
+    """Turn the Overview guidance on or off for one project -- `SPEC-343` §5.
+
+    **Off means gone, not diminished.** `SPEC-343` §2.6 asked whether off should
+    still show *where am I* without the teaching; it should not. A user who
+    switches something off and gets a smaller version of it is being negotiated
+    with, and one toggle with one meaning is easier to trust than a three-state
+    control nobody asked for.
+
+    Per project, not per install: `SPEC-343` §5 says it can be turned off for
+    the project and back on at any point, and a maker part-way through one board
+    has different needs from the same person starting another.
+    """
+    if not isinstance(enabled, bool):
+        raise SchemaValidationError("guided_path must be true or false.")
+    project = load_project(name)
+    project["guided_path"] = enabled
+    return save_project(project)
+
+
 def set_project_considerations(
     name: str, considerations: list, source_path: str = None,
 ) -> dict:
