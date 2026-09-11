@@ -258,6 +258,123 @@ def regulated_rail_into_module_input(nets: list) -> list:
             ))
     return raised
 
+def regulator_dissipation(project: dict) -> list:
+    """What a linear regulator throws away as heat -- `SPEC-211` §2.1 item 1.
+
+    `(Vin - Vout) x Iout`, from three facts that live in three different places:
+    `Vout` from the symbol name, `Vin` from the rail the netlist proves reaches
+    the part, `Iout` from what the user said the board draws. Every one of them
+    is named in the explanation, per `SPEC-211` §2.2 -- *"a finding built on the
+    user's guess says so and a finding built on the app's estimate says so"*.
+
+    **It states the watts and refuses to state a temperature, and that is the
+    spec being corrected rather than implemented.** `SPEC-211` §1 says the
+    sentence to put in front of the user is the ceiling -- *"your 1A regulator
+    is a 130mA regulator on this supply"* -- which needs a thermal resistance.
+
+    Measured 2026-09-10: **this app holds no thermal data for any part, and no
+    numeric datasheet field of any kind.** `SPEC-205`'s guidance is quotes and
+    page numbers; `datasheet_structure.CATEGORY_PATTERNS` has no thermal
+    category, and neither datasheet module parses a number at all. So §2.6's
+    open question -- *"what happens to a part record that has no thermal data"*
+    -- turns out to describe every part there is.
+
+    The choice §2.6 offered was *"silence, or an explicit 'cannot compare',
+    never an assumed value"*. Inventing a package-typical figure would be an
+    assumed value wearing a citation's clothes, and §3 names a wrong thermal
+    claim as the worst output this pack can produce. So: the watts, which are
+    real arithmetic over stated numbers, and an explicit sentence about what
+    would be needed to turn them into a temperature.
+    """
+    nets = project.get("nets") or []
+    symbols = project.get("symbols") or []
+    intent = project.get("intent_fields") or {}
+
+    raised = []
+    for regulator in P.regulators(symbols):
+        reference = regulator["reference"]
+        out_volts = regulator["output_volts"]
+        supply = P.supply_volts(reference, nets, intent)
+        in_volts = supply["volts"]
+        milliamps = P.budget_milliamps(intent)
+
+        missing = _dissipation_gap(out_volts, in_volts, milliamps)
+        if missing:
+            raised.append(C.make(
+                id="regulator_dissipation_unanswerable",
+                domain="power",
+                claim_class=C.COMPUTED,
+                trigger={"kind": "reference", "ref": reference,
+                         "lib_id": regulator["lib_id"]},
+                explanation=(
+                    f"{reference} is a linear regulator, which works by turning the "
+                    f"voltage it does not pass on into heat. Whether that matters here "
+                    f"is arithmetic, and one number is missing to do it: {missing}."
+                ),
+            ))
+            continue
+
+        if in_volts <= out_volts:
+            # A dropout problem rather than a heat one, and a different claim.
+            continue
+
+        watts = (in_volts - out_volts) * milliamps / 1000.0
+        origin = (
+            f"the {supply['ref']} rail on your schematic"
+            if supply["source"] == P.FROM_RAIL
+            else "the supply voltage you entered"
+        )
+        raised.append(C.make(
+            id="regulator_dissipation",
+            domain="power",
+            claim_class=C.COMPUTED,
+            trigger={"kind": "reference", "ref": reference,
+                     "lib_id": regulator["lib_id"]},
+            arithmetic={
+                "expression": "(Vin - Vout) * Iout",
+                "inputs": {
+                    "Vin": {"value": in_volts, "unit": "V", "from": supply["source"],
+                            "ref": supply["ref"]},
+                    "Vout": {"value": out_volts, "unit": "V", "from": "symbol",
+                             "ref": regulator["lib_id"]},
+                    "Iout": {"value": milliamps, "unit": "mA", "from": "intent",
+                             "ref": "current_budget"},
+                },
+                "result": {"value": round(watts, 3), "unit": "W"},
+            },
+            explanation=(
+                f"{reference} takes {in_volts:g}V in and puts {out_volts:g}V out, and a "
+                f"linear regulator gets rid of the difference as heat. At the "
+                f"{milliamps:g}mA you said this board draws, that is "
+                f"({in_volts:g} - {out_volts:g}) x {milliamps / 1000:g} = "
+                f"{watts:.2f}W it has to lose. The {in_volts:g}V came from {origin}, the "
+                f"{out_volts:g}V from the part's own name, and the {milliamps:g}mA from "
+                f"what you told us. Whether {watts:.2f}W is survivable depends on the "
+                f"package and on how much copper the tab is soldered to — this app does "
+                f"not hold that figure for {reference}, so it is telling you the watts "
+                f"and not a temperature."
+            ),
+        ))
+    return raised
+
+
+def _dissipation_gap(out_volts, in_volts, milliamps):
+    """Which single piece stops the sum, phrased for a person.
+
+    One at a time and in this order, because a list of three unknowns reads as
+    a form to fill in and the first one is often the only one the user has to
+    do anything about.
+    """
+    if out_volts is None:
+        return ("what it is set to produce. This part's name does not say, because an "
+                "adjustable regulator's output is set by the resistors around it")
+    if in_volts is None:
+        return ("the voltage going into it. Neither the schematic's rail names nor "
+                "your project settings say yet")
+    if milliamps is None:
+        return "roughly how much current this board draws, which nothing has said yet"
+    return None
+
 #: The registry. `SPEC-210`'s claim is that a new subject area is a row here
 #: plus a function, not a rebuild.
 #:
@@ -271,6 +388,7 @@ PACKS = {
         led_series_resistor,
         component_without_value,
         regulated_rail_into_module_input,
+        regulator_dissipation,
     ],
 }
 
@@ -278,26 +396,49 @@ PACKS = {
 #: Which packs read which source. `led_series_resistor` needs the netlist;
 #: `component_without_value` needs the schematic's symbols. Declared rather than
 #: inferred from a signature, so a caller knows what to gather before running.
+#: A pack wanting more than one of them takes the whole bundle.
+PROJECT = "project"
+
 PACK_INPUTS = {
     "led_series_resistor": "nets",
     "component_without_value": "symbols",
     "regulated_rail_into_module_input": "nets",
+    "regulator_dissipation": PROJECT,
 }
 
 
-def run(nets: list, domains: list = None, symbols: list = None) -> list:
+def run(nets: list, domains: list = None, symbols: list = None,
+        intent_fields: dict = None) -> list:
     """Every pack's considerations for this project.
 
     Order is by `SPEC-210` §2.6's third option -- *"would this have built
     silently wrong"* -- approximated as computed before cited before judgement,
     since a computed claim is the one the user can go and check.
+
+    A pack declares what it wants in `PACK_INPUTS`. Most want one thing;
+    `PROJECT` hands over everything, for a pack whose claim genuinely spans the
+    schematic, the netlist and what the user has told us -- `SPEC-211`'s
+    dissipation needs an output voltage from the symbol, an input voltage from
+    the net, and a current from the user's own answer, and no two of those three
+    live in the same place.
     """
+    bundle = {
+        "nets": nets or [],
+        "symbols": symbols or [],
+        "intent_fields": intent_fields or {},
+    }
     out = []
     for domain, packs in PACKS.items():
         if domains and domain not in domains:
             continue
         for pack in packs:
-            source = nets if PACK_INPUTS.get(pack.__name__) == "nets" else (symbols or [])
+            wants = PACK_INPUTS.get(pack.__name__)
+            if wants == PROJECT:
+                source = bundle
+            elif wants == "nets":
+                source = bundle["nets"]
+            else:
+                source = bundle["symbols"]
             out.extend(pack(source))
     order = {C.COMPUTED: 0, C.CITED: 1, C.JUDGEMENT: 2}
     return sorted(out, key=lambda c: order.get(c["claim_class"], 9))

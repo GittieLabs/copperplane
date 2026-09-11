@@ -291,3 +291,68 @@ class TestModulePowerPins(unittest.TestCase):
              "nodes": [self._node("X1", "3V3", None, "power_out+no_connect")]},
         ])
         self.assertEqual([o["name"] for o in pins["X1"]["outputs"]], ["3V3"])
+
+
+class TestSupplyResolution(unittest.TestCase):
+    """Phase 4. Derive before asking, per `SPEC-343` §2.5.2."""
+
+    def _nets(self, rail):
+        return [
+            {"name": rail, "nodes": [{"reference": "U1", "pin": "3",
+                                      "function": "VI_3", "type": "power_in"}]},
+            {"name": "GND", "nodes": [{"reference": "U1", "pin": "1",
+                                       "function": "GND_1", "type": "power_in"}]},
+        ]
+
+    def test_the_rail_name_answers_it_without_asking_anyone(self):
+        # Four of five real boards name their own rail. Asking a user to type a
+        # number their schematic already states teaches them the app is not
+        # paying attention.
+        got = P.supply_volts("U1", self._nets("+12V"))
+        self.assertEqual(got, {"volts": 12.0, "source": P.FROM_RAIL, "ref": "+12V"})
+
+    def test_a_plain_regulator_resolves_even_with_no_output_pin_in_the_netlist(self):
+        """The bug the real fixture caught.
+
+        This was written on top of `module_power_pins`, which requires a part to
+        have an output pin too. A three-pin regulator whose output is not routed
+        yet has none in the netlist, so the one part the pack most needed an
+        answer for resolved to `None`."""
+        nets = self._nets("+12V")
+        self.assertEqual(P.module_power_pins(nets), {}, "not a module, correctly")
+        self.assertEqual(P.supply_volts("U1", nets)["volts"], 12.0)
+
+    def test_intent_answers_when_the_schematic_does_not(self):
+        got = P.supply_volts(
+            "U1", self._nets("Net-(U1-VI)"),
+            {"input_supply": {"source": "adapter", "nominal_volts": 12}},
+        )
+        self.assertEqual(got["source"], P.FROM_INTENT)
+        self.assertEqual(got["volts"], 12.0)
+
+    def test_the_schematic_wins_over_intent_when_both_exist(self):
+        got = P.supply_volts(
+            "U1", self._nets("+9V"),
+            {"input_supply": {"source": "adapter", "nominal_volts": 12}},
+        )
+        self.assertEqual(got["source"], P.FROM_RAIL)
+        self.assertEqual(got["volts"], 9.0)
+
+    def test_unknown_is_not_an_answer_and_produces_no_number(self):
+        got = P.supply_volts("U1", self._nets("Net-(U1-VI)"),
+                             {"input_supply": "unknown"})
+        self.assertIsNone(got["volts"])
+        self.assertIsNone(got["source"])
+
+    def test_usb_without_a_stated_voltage_yields_no_number(self):
+        # `nominal_volts: None` is legal and meaningful -- the user knows it is
+        # USB-powered without knowing or caring that USB is 5V. This module is
+        # not allowed to fill that in.
+        got = P.supply_volts("U1", self._nets("Net-(U1-VI)"),
+                             {"input_supply": {"source": "usb", "nominal_volts": None}})
+        self.assertIsNone(got["volts"])
+
+    def test_a_current_budget_is_read_and_unknown_is_not(self):
+        self.assertEqual(P.budget_milliamps({"current_budget": {"milliamps": 500}}), 500.0)
+        self.assertIsNone(P.budget_milliamps({"current_budget": "unknown"}))
+        self.assertIsNone(P.budget_milliamps({}))

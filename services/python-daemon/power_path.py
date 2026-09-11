@@ -202,15 +202,15 @@ def nominal_volts(name: str):
     return None
 
 
-def module_power_pins(nets: list) -> dict:
-    """Per reference, the non-ground power pins a schematic declares.
+def power_pins_by_reference(nets: list) -> dict:
+    """Per reference, every non-ground power pin a schematic declares.
 
     Returns `{reference: {"supplies": [...], "outputs": [...]}}`, each entry
     `{"pin", "name", "net", "volts", "net_volts"}` -- see the comment below on
-    why a pin carries two voltages and which one means what. A part appears only if it has at least
-    one of each, which is the shape of a thing that takes power in and makes a
-    different rail out of it -- a dev board module, in practice, on every board
-    measured.
+    why a pin carries two voltages and which one means what.
+
+    Unfiltered on purpose. `module_power_pins` narrows this to the parts that
+    have both, and the two callers genuinely want different things.
     """
     found = {}
     for net in nets:
@@ -244,8 +244,21 @@ def module_power_pins(nets: list) -> dict:
                 "volts": nominal_volts(name),
                 "net_volts": nominal_volts(net_name),
             })
+    return found
+
+
+def module_power_pins(nets: list) -> dict:
+    """Only the parts that take power in AND make a different rail out of it.
+
+    A dev board module, in practice, on every board measured. Kept separate from
+    `power_pins_by_reference` because the two questions are genuinely different
+    and conflating them cost a real bug: `supply_volts` was written on top of
+    this filter, so it could not answer for a plain three-pin regulator -- which
+    has supply pins and, once its output is left unrouted, no output pin in the
+    netlist at all. The pack that most needed the answer got `None`.
+    """
     return {
-        ref: entry for ref, entry in found.items()
+        ref: entry for ref, entry in power_pins_by_reference(nets).items()
         if entry["supplies"] and entry["outputs"]
     }
 
@@ -253,3 +266,60 @@ def module_power_pins(nets: list) -> dict:
 def _net_is_real(net_name: str) -> bool:
     """KiCad names an unconnected pin's net `unconnected-(REF-PIN-PadN)`."""
     return bool(net_name) and not net_name.startswith("unconnected-")
+
+
+#: Where a number came from, which every finding built on it must state --
+#: `SPEC-211` §2.2. *"A wrong estimate that is labelled is honest; an unlabelled
+#: one is the kind of confidently-wrong output that spends this family's
+#: credibility."*
+FROM_RAIL = "rail"
+FROM_INTENT = "intent"
+
+
+def supply_volts(reference: str, nets: list, intent_fields: dict = None):
+    """What voltage reaches this part, and how we know -- `SPEC-211` §2.4.
+
+    **Derive before asking**, per `SPEC-343` §2.5.2. Four of the five boards
+    measured name their own supply rail (`+5V`, `+9V`, `/5V`), so the answer is
+    usually written on the schematic already. Asking a user to type a number
+    their own drawing states teaches them the app is not paying attention.
+
+    The netlist is what makes the rail *count* as reaching the part: the rail
+    and the part's supply pin being one net is the fact `SPEC-211` §2.4 said the
+    app could not establish, and it is why item 2 is a finding rather than a
+    question now.
+
+    Returns `{"volts", "source", "ref"}`, with `volts` `None` when neither the
+    schematic nor the user has said. `None` is an answer, not a failure.
+    """
+    for entry in power_pins_by_reference(nets).get(reference, {}).get("supplies", []):
+        if entry["net_volts"] is not None and _net_is_real(entry["net"]):
+            return {
+                "volts": entry["net_volts"],
+                "source": FROM_RAIL,
+                "ref": entry["net"],
+            }
+
+    supply = (intent_fields or {}).get("input_supply")
+    if isinstance(supply, dict) and isinstance(supply.get("nominal_volts"), (int, float)):
+        return {
+            "volts": float(supply["nominal_volts"]),
+            "source": FROM_INTENT,
+            "ref": "input_supply",
+        }
+    return {"volts": None, "source": None, "ref": None}
+
+
+def budget_milliamps(intent_fields: dict = None):
+    """The current the user said this board draws, or `None`.
+
+    `unknown` is a real, distinguishable answer here and it deliberately yields
+    `None` the same as never-asked -- the difference matters to whoever decides
+    whether to ask again, not to arithmetic. `SPEC-211` §2.2 wants an explicit
+    "I do not know" to trigger an estimate from the parts on the board; that
+    estimate is not this function's to invent.
+    """
+    budget = (intent_fields or {}).get("current_budget")
+    if isinstance(budget, dict) and isinstance(budget.get("milliamps"), (int, float)):
+        return float(budget["milliamps"])
+    return None

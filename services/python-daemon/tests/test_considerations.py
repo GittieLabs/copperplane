@@ -601,3 +601,104 @@ class TestModuleInputPackOnRealBoards(unittest.TestCase):
             if name == "Blink_LEDs":
                 continue
             self.assertEqual(self._raised(path), [], f"false positive on {name}")
+
+
+class TestRegulatorDissipation(unittest.TestCase):
+    """`SPEC-211` §2.1 item 1 / `CTX-211.1` Phase 3 -- the lead case."""
+
+    _FIXTURE = os.path.join(
+        os.path.dirname(__file__), "fixtures", "regulator_from_12v.kicad_sch"
+    )
+
+    def setUp(self):
+        import kicad_cli
+        try:
+            kicad_cli.find_kicad_cli()
+        except Exception:
+            self.skipTest("kicad-cli not found on this machine.")
+
+    def _run(self, intent):
+        import kicad_cli
+        import structural_checks
+        import consideration_packs as packs
+        return packs.regulator_dissipation({
+            "nets": kicad_cli.export_netlist(self._FIXTURE)["nets"],
+            "symbols": structural_checks.read_schematic_symbols(self._FIXTURE),
+            "intent_fields": intent,
+        })
+
+    def test_the_spec_s_own_worked_example_comes_out_of_the_real_pipeline(self):
+        """`SPEC-211` §1: 12V to 3.3V at half an amp is 4.35W.
+
+        Through real kicad-cli on a real .kicad_sch, not hand-built dicts --
+        though the file is one authored for this test, because no board
+        available to this project has a discrete regulator at all."""
+        raised = self._run({"current_budget": {"milliamps": 500}})
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["id"], "regulator_dissipation")
+        self.assertEqual(raised[0]["arithmetic"]["result"], {"value": 4.35, "unit": "W"})
+
+    def test_every_number_says_where_it_came_from(self):
+        """`SPEC-211` §2.2. An unlabelled estimate is the confidently-wrong
+        output that spends this family's credibility."""
+        inputs = self._run({"current_budget": {"milliamps": 500}})[0]["arithmetic"]["inputs"]
+
+        self.assertEqual(inputs["Vin"]["from"], "rail")
+        self.assertEqual(inputs["Vin"]["ref"], "+12V")
+        self.assertEqual(inputs["Vout"]["from"], "symbol")
+        self.assertEqual(inputs["Iout"]["from"], "intent")
+
+    def test_it_states_watts_and_refuses_to_state_a_temperature(self):
+        """The spec corrected rather than implemented.
+
+        `SPEC-211` §1 wants the ceiling -- "your 1A regulator is a 130mA
+        regulator on this supply" -- which needs a thermal resistance. This app
+        holds no thermal data for any part and no numeric datasheet field of any
+        kind, so §2.6's "never an assumed value" decides it."""
+        explanation = self._run({"current_budget": {"milliamps": 500}})[0]["explanation"]
+
+        self.assertIn("4.35W", explanation)
+        for invented in ("degC", "°C", "88", "125", "150"):
+            self.assertNotIn(invented, explanation)
+
+    def test_a_missing_current_names_that_one_thing_and_not_a_list(self):
+        raised = self._run({})
+
+        self.assertEqual(len(raised), 1)
+        self.assertEqual(raised[0]["id"], "regulator_dissipation_unanswerable")
+        self.assertIn("how much current", raised[0]["explanation"])
+
+    def test_an_explicit_unknown_is_treated_as_no_answer(self):
+        raised = self._run({"current_budget": "unknown"})
+
+        self.assertEqual(raised[0]["id"], "regulator_dissipation_unanswerable")
+
+    def test_a_board_with_no_regulator_raises_nothing(self):
+        import consideration_packs as packs
+        self.assertEqual(packs.regulator_dissipation({
+            "nets": [], "symbols": [{"reference": "R1", "lib_id": "Device:R"}],
+            "intent_fields": {"current_budget": {"milliamps": 500}},
+        }), [])
+
+    def test_an_adjustable_regulator_says_so_rather_than_guessing_its_output(self):
+        import consideration_packs as packs
+        raised = packs.regulator_dissipation({
+            "nets": [{"name": "+12V", "nodes": [{"reference": "U1", "pin": "3",
+                                                 "function": "VI_3", "type": "power_in"}]}],
+            "symbols": [{"reference": "U1", "lib_id": "Regulator_Linear:AMS1117"}],
+            "intent_fields": {"current_budget": {"milliamps": 500}},
+        })
+
+        self.assertEqual(raised[0]["id"], "regulator_dissipation_unanswerable")
+        self.assertIn("adjustable", raised[0]["explanation"])
+
+    def test_a_switching_regulator_is_never_given_this_arithmetic(self):
+        """It is the FIX this pack recommends, not the problem."""
+        import consideration_packs as packs
+        self.assertEqual(packs.regulator_dissipation({
+            "nets": [{"name": "+12V", "nodes": [{"reference": "U1", "pin": "3",
+                                                 "function": "VI_3", "type": "power_in"}]}],
+            "symbols": [{"reference": "U1", "lib_id": "Regulator_Switching:LM2596-3.3"}],
+            "intent_fields": {"current_budget": {"milliamps": 500}},
+        }), [])

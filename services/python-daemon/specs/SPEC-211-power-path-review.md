@@ -120,6 +120,34 @@ arithmetic is the same arithmetic; it just happens inside a module whose datashe
 hold. Whether that becomes a finding, a question, or nothing is Phase 1's to settle with evidence,
 not this section's to assume.
 
+**8. Measured 2026-09-10, and it costs this spec its headline sentence: there is no thermal data
+anywhere in this app, for any part.** §1 says *"the sentence to actually put in front of the user is
+the ceiling, not the wattage"* — the 130mA figure — and a ceiling needs a thermal resistance to
+divide by.
+
+`SPEC-205`'s design guidance is **quotes and page numbers**, not numbers: an item is
+`{"quote", "page", "category"}`. `datasheet_structure.CATEGORY_PATTERNS` has eight categories and
+none of them is thermal, and neither datasheet module parses a numeric value at all — there is not a
+single `float()` call between them. Nothing else in the daemon holds a junction temperature, a
+package thermal resistance, or an absolute maximum as a number.
+
+So §2.6's open question — *"what happens to a part record that has no thermal data at all"* — turns
+out to describe **every part there is**, and the choice it offered decides the matter: *"silence, or
+an explicit 'cannot compare', never an assumed value."* A package-typical figure inferred from a
+footprint would be an assumed value wearing a citation's clothes, and §3 names a wrong thermal claim
+as the worst output this pack can produce.
+
+**What ships instead is the watts, which are real.** `(Vin - Vout) x Iout` over three stated numbers
+— output voltage from the symbol name, input voltage from the rail the netlist proves reaches the
+part, current from the user's own answer — each labelled with where it came from, per §2.2. Then one
+sentence saying plainly that whether that wattage is survivable depends on the package and the
+copper, and that this app does not hold that figure.
+
+That is less than §1 promised and it is the honest version of it. The ceiling becomes reachable the
+day a part record carries a thermal resistance with provenance, and nothing here has to change for
+it to: the arithmetic is already in the record's `arithmetic` field.
+
+
 **7. The two questions are already built.** `input_supply` (with `source`, `nominal_volts`) and
 `current_budget` (with `milliamps`) landed in `library_store.INTENT_FIELD_VALIDATORS` under
 `CTX-343.1`, both accepting `unknown` as a first-class value distinct from never-asked. §2.2 does
@@ -220,10 +248,13 @@ cannot afford.
 ### 2.6 Open questions
 
 *   ~~**Identifying a regulator** among the project's parts~~ — **closed 2026-09-10**, §2.0 item 2.
-    What happens to a part with no thermal data stays open and is Phase 2's to settle: silence, or
-    an explicit "cannot compare", never an assumed value.
+*   ~~**What happens to a part record that has no thermal data at all.**~~ **Closed 2026-09-10**:
+    every part is that part, because this app holds no thermal data of any kind (§2.0 item 8). The
+    answer is the explicit "cannot compare" rather than silence — the pack states the watts and says
+    in one sentence why it is not stating a temperature.
 *   **Showing the arithmetic inline or on demand.** The sum is the teaching, so inline is likely
-    right, but four sums in one review is a wall.
+    right, but four sums in one review is a wall. Still open, and now with something concrete behind
+    it: a consideration carries its calculation in `arithmetic`, so the surface can choose.
 *   ~~**The AMS1117 numbers in §1 are illustrative and unverified.**~~ **Closed 2026-09-08**: read
     off the datasheet and recorded in §1, including the copper-area caveat, which is now a UI
     requirement rather than an open question. The framing changed as a result — the ceiling (about

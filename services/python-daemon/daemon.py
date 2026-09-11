@@ -1093,7 +1093,13 @@ def project_considerations(name: str) -> dict:
 
     nets = kicad_cli.export_netlist(sch_path)["nets"]
     symbols = structural_checks.read_schematic_symbols(sch_path)
-    raised = consideration_packs.run(nets, symbols=symbols)
+    # `SPEC-211`'s dissipation needs what the user told us as well as what the
+    # files say -- an output voltage from the symbol, an input voltage from the
+    # net, and a current from `intent_fields`. No two of the three live in the
+    # same place, which is why the pack takes the whole project.
+    raised = consideration_packs.run(
+        nets, symbols=symbols, intent_fields=project.get("intent_fields"),
+    )
 
     return {
         "needs_attention": considerations.raisable(raised),
