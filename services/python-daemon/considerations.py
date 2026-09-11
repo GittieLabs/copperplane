@@ -131,6 +131,32 @@ def make(
     }
 
 
+def cleared(*, id: str, domain: str, trigger: dict, explanation: str) -> dict:
+    """Something a pack checked and found correct -- `SPEC-343` §2.7.
+
+    `SPEC-210` §2.3 says reinforcement is worthless unless the app knows what
+    the bad version would have been. **A silent pack knows exactly that**, and
+    until now computed it and threw it away: `led_series_resistor` is quiet
+    because `D1`'s anode is on a net that `R1` is also on, which is a fact about
+    this board rather than a compliment about it.
+
+    A cleared item is a consideration in every respect that matters -- it is
+    `computed`, it names a real trigger, and it carries an explanation that
+    teaches. The only difference is `state`, so it cannot be mistaken for
+    something needing attention.
+
+    **It is never produced by a pack whose trigger was simply absent.** A board
+    with no LEDs has not been taught anything by "no LED is missing a resistor",
+    and saying so is true, useless and faintly absurd. Enforced by `make`'s own
+    trigger rule: with nothing to name, nothing can be built.
+    """
+    consideration = make(
+        id=id, domain=domain, claim_class=COMPUTED,
+        trigger=trigger, explanation=explanation, state=SATISFIED,
+    )
+    return consideration
+
+
 def may_raise_unprompted(consideration: dict) -> bool:
     """`SPEC-210` §1's initiative rule.
 
@@ -151,7 +177,22 @@ def raisable(considerations: list, asked: bool = False) -> list:
     `asked=True` when the user has asked -- then judgements are included, because
     the rule is about initiative, not about hiding anything. A judgement the user
     asked for is exactly what a judgement is for.
+
+    Cleared items are never in here. They are not things needing attention, and
+    a surface that mixed them with things that do would make the list unreadable
+    in the one way that matters -- see `cleared_items`.
     """
+    pool = [c for c in considerations if c.get("state") != SATISFIED]
     if asked:
-        return list(considerations)
-    return [c for c in considerations if may_raise_unprompted(c)]
+        return pool
+    return [c for c in pool if may_raise_unprompted(c)]
+
+
+def cleared_items(considerations: list) -> list:
+    """What a pack checked and found correct. `SPEC-343` §2.7's reinforcement.
+
+    Kept apart from `raisable` rather than filtered at each call site: the whole
+    point is that these read differently, and a caller that has to remember to
+    separate them will one day not.
+    """
+    return [c for c in considerations if c.get("state") == SATISFIED]

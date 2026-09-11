@@ -46,8 +46,27 @@ def led_series_resistor(nets: list) -> list:
             if (n.get("function") or "").startswith(_ANODE)
         ]
         if not anodes:
+            # SPEC-343 §2.7's second constraint: a pack whose trigger is simply
+            # absent has taught nothing. "This net has no LED missing a
+            # resistor" is true, useless and faintly absurd.
             continue
-        if _nodes_by_prefix(net, "R"):
+        resistors = _nodes_by_prefix(net, "R")
+        if resistors:
+            # SPEC-343 §2.7: the reason this pack stays quiet is a computed fact
+            # about THIS board, and it was being calculated and thrown away.
+            # SPEC-210 §2.3 says reinforcement needs a baseline; the finding
+            # that was not raised IS the baseline.
+            led = ", ".join(sorted({n["reference"] for n in anodes}))
+            res = ", ".join(sorted({n["reference"] for n in resistors}))
+            raised.append(C.cleared(
+                id="led_series_resistor",
+                domain="power",
+                trigger={"kind": "net", "ref": net["name"], "parts": led},
+                explanation=(
+                    f"{led}'s anode reaches {res} on {net['name']} — that resistor is what "
+                    f"stops the LED drawing more current than the pin driving it can give."
+                ),
+            ))
             continue
         refs = ", ".join(sorted({n["reference"] for n in anodes}))
         raised.append(C.make(

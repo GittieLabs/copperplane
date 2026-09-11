@@ -260,8 +260,50 @@ worth returning to*. It changes when their project changes, without them asking.
 *   **Ordering when several things are true at once.** `SPEC-210` §2.6 left the same question and
     named *"would this have built silently wrong"* as probably the right ranking. Answer both
     together.
-*   **What the one sentence says when nothing is wrong.** A guided surface with nothing to report is
-    where reinforcement belongs (`SPEC-210` §2.3), and generic praise is worse than silence.
+*   ~~**What the one sentence says when nothing is wrong.**~~ **Settled 2026-09-10 — see §2.7.**
+
+### 2.7 Settled: a silent pack is the reinforcement
+
+The state where nothing is wrong was left open because `SPEC-210` §2.3 sets a bar generic praise
+cannot clear:
+
+> *"Telling a user their design is good is worthless unless the app knows what the bad version would
+> have been."*
+
+**It does know. That is exactly what a silent pack is.** `led_series_resistor` stays quiet on the
+maintainer's board for a computed reason — `D1`'s anode is on `Net-(D1-A)` and `R1` is on it too —
+and that reason is calculated and then thrown away. So:
+
+> **"D1's anode reaches R1 — that resistor is what stops the LED drawing more current than the
+> Arduino pin can give."**
+
+Not praise. A computed fact about *their* board, naming *their* parts, teaching the thing they got
+right and why it mattered. The baseline §2.3 demands is the finding that was not raised.
+
+**Why this rather than "nothing is wrong":**
+
+*   **"Nothing is wrong" is a claim this app cannot support.** It checked what it can check. A
+    beginner reads that sentence as *my board is good*, and a board can pass every check here and
+    still not work. Saying it would be the confidently-wrong-once §3 says spends the family.
+*   **It teaches at the cheapest moment.** Someone who believes they are finished is relaxed and
+    about to order. That is when an explanation costs them nothing to read.
+*   **It is computed, not generated.** No model, so no invented compliment.
+
+**Three constraints, or it becomes the noise it replaced:**
+
+1.  **One at a time.** A wall of *"here is everything that is fine"* is its own overload, and the
+    `complete` state is where a finished project sits forever.
+2.  **Only where the pack genuinely cleared something.** A pack that was silent because its trigger
+    was absent — no LEDs on this board — has taught nothing and must say nothing. *"Your board has no
+    LEDs without resistors"* is true, useless, and faintly absurd.
+3.  **Paired with what was not checked.** The `complete` state is exactly where a novice mistakes
+    *checked* for *correct*, so the honest boundary belongs beside the reinforcement rather than
+    instead of it.
+
+**The cost, stated because it is a contract change and not a string.** Packs currently return only
+what they raised. Reporting silence means each pack also returns what it **cleared** and why, which
+every future pack must then do. Accepted deliberately: a pack that can explain its silence is a pack
+whose reasoning can be read back, which is worth having whatever this surface does with it.
 
 ## 3. Known Constraints & Risks
 
