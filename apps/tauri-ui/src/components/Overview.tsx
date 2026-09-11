@@ -438,7 +438,12 @@ function WhereYouAre({
 function sentenceFor(reading: StageReading): string {
   switch (reading.state) {
     case 'no_goal':
-      return "You haven't said what you're building yet — everything here answers generically without it."
+      /* SPEC-343 §2.5.1: argue the benefit, do not note the gap. "Not stated
+         yet" is a fact about a form field; this is what saying it buys. */
+      return (
+        "Tell me what you're building and every answer here gets specific to it — "
+        + 'which parts you need, what the checks should look for, what is missing.'
+      )
     case 'no_files':
       return 'No KiCad project is linked yet, so there is nothing to check against.'
     case 'regressed':

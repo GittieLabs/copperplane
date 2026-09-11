@@ -2075,3 +2075,72 @@ class TestSuggestedParts(unittest.TestCase):
         import component_pipeline
         with self.assertRaises(component_pipeline.ComponentValidationError):
             component_pipeline.suggest_parts("   ")
+
+
+class TestIntentCaveat(ChatAgentsTestCase):
+    """SPEC-343 §2.5.1: an honest note about the basis of an answer.
+
+    SPEC-300 says a conversation surface may only produce an answer, and a
+    caveat about the BASIS of that answer is still an answer -- the same class
+    as SPEC-306's "view datasheet (unverified)". It advances nothing and moves
+    nobody.
+
+    The two disciplines are the whole design, because a caveat that appears
+    when it is not true, or on every single turn, becomes a scold -- and the
+    scold is what makes a user stop reading the caveats that matter.
+    """
+
+    def _caveat(self, project_name="p", scope="project", scope_id="p:overview"):
+        return chat_agents._intent_caveat_for(project_name, scope, scope_id)
+
+    def test_it_appears_when_the_project_has_no_intent(self):
+        store.save_project({"name": "p"})
+        self.assertEqual(self._caveat(), chat_agents.INTENT_CAVEAT)
+
+    def test_it_does_not_appear_when_the_intent_is_stated(self):
+        """Only when it is true. Every area's context block carries
+        project_intent, so a stated one genuinely did reach the agent."""
+        store.save_project({"name": "p", "intent": "a battery-powered logger"})
+        self.assertIsNone(self._caveat())
+
+    def test_it_appears_once_per_conversation_not_once_per_turn(self):
+        """Repetition turns an honest caveat into nagging, and the nagging is
+        what makes a user stop reading `unverified` and `not confirmed` too."""
+        store.save_project({"name": "p"})
+        self.assertEqual(self._caveat(), chat_agents.INTENT_CAVEAT)
+
+        store.append_thread_turn("project", "p:overview", {
+            "role": "assistant", "content": f"some answer\n\n{chat_agents.INTENT_CAVEAT}",
+        })
+
+        self.assertIsNone(self._caveat())
+
+    def test_each_conversation_gets_it_once(self):
+        """Per thread, not per project: a user who opens the PCB chat a week
+        later has not been told there."""
+        store.save_project({"name": "p"})
+        store.append_thread_turn("project", "p:overview", {
+            "role": "assistant", "content": chat_agents.INTENT_CAVEAT,
+        })
+
+        self.assertIsNone(self._caveat(scope_id="p:overview"))
+        self.assertEqual(self._caveat(scope_id="p:pcb"), chat_agents.INTENT_CAVEAT)
+
+    def test_a_conversation_with_no_project_never_gets_it(self):
+        """A scratch conversation has nothing to be specific about, so there is
+        no better answer being missed and nothing honest to say."""
+        self.assertIsNone(self._caveat(project_name=None))
+
+    def test_an_unreadable_project_costs_no_reply(self):
+        """A caveat is never worth failing an answer for."""
+        self.assertIsNone(self._caveat(project_name="does-not-exist"))
+
+    def test_it_never_guesses_what_the_project_is(self):
+        """SPEC-343 §2.5.1's governing rule. "I would have answered better
+        knowing what you are building" is honest. "This looks like an LED
+        blinker, shall I assume that?" is the inference this family refuses to
+        make, however confident it could be."""
+        text = chat_agents.INTENT_CAVEAT.lower()
+        for guess in ("looks like", "assume", "presumably", "i think you", "seems to be"):
+            self.assertNotIn(guess, text)
+        self.assertIn("i don't know what you're building", text)
