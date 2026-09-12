@@ -4,55 +4,37 @@ Not published — this file is documentation for whoever is holding the camera, 
 for a reader of the site. Images themselves go in `public/images/` and are
 referenced from a page as `/copperplane/images/<name>.png`.
 
-## Status, 2026-09-11
+## Status, 2026-09-12
 
-Eighteen images, all captured **2026-09-04**. Eleven are dead, four are probably
-fine, and the app has grown surfaces since that have never been photographed at
-all. Each claim below is tied to the commit that invalidated the shot, so this
-section can be re-derived rather than trusted.
+**Seventeen of eighteen images are the 2026-09-11 re-shoot.** Two remain from 2026-09-04 because
+nothing in that session captured them, and they are named below rather than left to be discovered.
 
-### Dead: the component behind them changed
+### Still from 2026-09-04
 
-| File | Invalidated by |
+| File | Why it was not replaced |
 | :--- | :--- |
-| ~~`hero.png`~~ | **Retaken 2026-09-12** — see the note below. |
-| `welcome.png` | `CTX-338.1` — the Copperplane mark on the launch screen |
-| `no-project.png` | `CTX-338.1` — the same mark on the no-project landing |
-| `board-check.png` | `SPEC-340` — the board-house picker and the fabrication summary banner |
-| `board-check-explained.png` | `SPEC-340` — same, plus `ViolationsList` changes |
-| `schematic-erc.png` | `SPEC-340` — `SchematicAdvisor` and `ViolationsList` |
-| `component-search.png` | `SPEC-334` (KiCad's own libraries in results) and `SPEC-306` (a dead datasheet link became a live search) |
-| `part-detail.png` | `SPEC-334.2` glossary, `CTX-339.1` review persistence |
-| `enclosure.png` | `SPEC-326` — the labelled bounding solids |
-| `enclosure-3d.png` | `SPEC-326` — same |
-| `settings.png` | `SPEC-342` — the board-house library lives here now |
+| `new-project-review.png` | The wizard's steps 1-3 were captured; **step 4 of 4, "Reviewing your project"**, was not. That step is the shot — the wizard's own check pass, with parity, component count and the ERC/DRC counts. |
+| `settings.png` | Not captured, and **probably does not need to be**. `Settings.tsx` last changed 2026-09-03 and `ProviderConfigEditor` on 2026-08-31, both before the capture, so nothing that screen renders has moved since. Worth an eye before the next release; not a retake. |
 
-**`welcome.png` and `no-project.png` are worth a note.** They were captured at
-**23:26** on 2026-09-04; `CTX-338.1`, the commit that put the mark on those two
-exact screens, landed at **23:39**. Thirteen minutes. The shots are of the
-screens the commit was about, taken just before it.
+> **A correction, recorded because it was asserted twice.** An earlier version of this file said the
+> board-house library had moved into Settings and that `settings.png` was therefore wrong about the
+> screen's contents. **It is not in Settings.** `HouseLibrary` renders inside `FabricationProfile`,
+> which renders inside `BoardAdvisor` — the **PCB tab**. The contact sheet used to triage these shots
+> showed "Board houses" under the PCB tab, and the claim was written anyway.
 
-### Probably fine — check, do not assume
+### Never captured, and not yet referenced by any page
 
-`guided-provider.png`, `guided-tools.png`, `new-project.png`,
-`new-project-review.png`, `schematic-check.png`, `design-guidance.png`,
-`ask-the-agent.png`. No component behind them has changed since the capture.
-Compare against the running app before keeping them.
+These surfaces were photographed on 2026-09-11 and are sitting in the capture folder, but adding
+them means **editing a page to reference them** — `test_docs_images.py` fails an image nobody uses,
+in both directions. That is a docs change rather than a screenshot change, so it is listed and not
+done.
 
-### Never captured: surfaces that did not exist on 2026-09-04
-
-These are the gap that matters, because the site cannot show the app's most
-distinctive feature at all.
-
-| Needed | What to set up |
-| :--- | :--- |
-| **Overview with considerations** | Link `Copperplane_Blink_LEDs`. It raises R1's placeholder value and the `+5V`-on-`VIN` finding with no setup at all. The most important missing shot on the list. |
-| **What you got right** | Same screen — D1's series resistor, with the "checked here" line visible underneath. Frame both together if they fit. |
-| **The guided-path toggle** | Same screen, showing that it can be turned off. |
-| **The intent editor** | Overview, with the supply and current-budget fields. Leave them empty; empty is the honest default state. |
-| **Board-house picker** | PCB tab with a house selected, so the banner shows what changed against the generic profile. |
-| **The board-house library** | Settings. Show more than one house, so the picker reads as a library rather than a setting. |
-| **KiCad's own libraries in search** | Components tab. A query returning both your saved parts and KiCad's own footprints, so the merge is visible. |
+*   The suggested-parts card populated, with real suggestions against the tutorial project.
+*   The board-house library, and a house selected with the comparison table showing what differs
+    from KiCad's own defaults.
+*   The footprint glossary — *"What the abbreviations mean"* — expanded on a real part.
+*   KiCad's own footprint libraries appearing in search results beside saved parts.
+*   Overview at `board_only` and `both_checked`, if the guided path ever wants its own page.
 
 ### The hero
 
@@ -60,15 +42,28 @@ Retaken 2026-09-12 at 00:29, showing Overview at the `complete` state — a read
 unreachable until `CTX-343.3` fixed the card going stale, and whose evidence line was a word-for-word
 copy of its own heading until the same branch fixed that. Both are right in this capture.
 
-Processing worth repeating for the rest, since the raw captures do not match the existing set:
+## The pipeline the raw captures need
 
-*   `Cmd+Shift+4` + Space captures a **soft drop shadow and a transparent surround**. The existing
-    images have neither — crop to where alpha is fully opaque, which is the window itself, then
-    flatten onto black.
-*   Resize to **2560** wide to match the siblings, then save as a 256-colour palette PNG. A flat
-    dark UI loses nothing visible and drops from ~820KB to ~205KB, inside the 400KB this file asks
-    for. Straight RGB at that width is ~490KB and misses it. Check the small grey body text at 1:1
-    for banding before accepting the palette version.
+Recorded because the raw captures do **not** match the set already here, and finding that out costs
+an hour.
+
+1.  **Redact first, at full resolution.** `scripts/redact_screenshots.py` needs `pytesseract`, which
+    is in none of this repo's virtualenvs — and must not be added to `.build-venv`, which is what
+    freezes the shipped sidecar. Make a throwaway venv outside the repo. Of the fifteen shots
+    processed on 2026-09-12, **six** carried the username.
+2.  **Crop away the drop shadow.** `Cmd+Shift+4` + Space captures a soft shadow and a transparent
+    surround; nothing already in `public/images/` has either. The window is where alpha is fully
+    opaque — crop to that bounding box, then flatten onto black.
+3.  **Resize to 2560 wide**, which is what the existing images are.
+4.  **Save as a palette PNG.** A flat dark UI loses nothing visible. 256 colours suits most shots;
+    text-dense screens need fewer to come down — 128 for `schematic-erc`, 96 for `design-guidance`,
+    64 for `ask-the-agent`. Check the small grey body text at 1:1 for banding before accepting it;
+    at 64 colours it was still crisp.
+
+`ask-the-agent.png` is the extreme case: a full agent answer, so nearly the whole frame is small
+text. Retaken 2026-09-12 with the answer fitting in one window, and it needs **48 colours** to come
+in at 379KB. Checked at 1:1 — the text is still crisp there, and a dark UI with light text has far
+fewer distinct colours than the palette count suggests.
 
 ## Dark theme, everywhere
 
@@ -134,7 +129,7 @@ now historical records rather than current screens.
 | `enclosure.png` | The generation form with the measured height hint |
 | `enclosure-3d.png` | The generated enclosure with the board seated inside |
 
-## One capture was rejected
+## One capture was rejected (2026-09-04 session)
 
 The Components tab shot (23:11:19) shows an empty search field, no results, and a leftover
 NE555 as the only project part -- which contradicts the eight components the wizard had just
