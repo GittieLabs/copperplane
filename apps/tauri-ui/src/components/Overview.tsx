@@ -559,6 +559,29 @@ function WhatNeedsAttention({ result }: { result: ConsiderationsResult | null })
   )
 }
 
+/** Acronyms that must not be lower-cased when a pack's name becomes prose.
+ *
+ *  `checked` arrives as the pack function names -- `led_series_resistor` -- and
+ *  turning underscores into spaces gets most of the way. It also produced
+ *  **"led series resistor"** in the middle of a sentence that capitalises KiCad,
+ *  VIN and IPC everywhere else, which shipped into a docs screenshot before
+ *  anybody read it back.
+ *
+ *  A list of acronyms rather than a map of display names, deliberately.
+ *  `SPEC-210`'s claim is that a new subject area is *"a data file and a trigger
+ *  rather than a rebuild"* -- a per-pack label table would quietly make it a
+ *  rebuild plus a frontend edit. This only needs touching when a pack
+ *  introduces an acronym nobody has used yet.
+ */
+const ACRONYMS = ['LED', 'PCB', 'ERC', 'DRC', 'USB', 'IPC', 'KiCad', '3D']
+
+export function humanisePackName(name: string): string {
+  return name.split('_').map((word) => {
+    const hit = ACRONYMS.find((a) => a.toLowerCase() === word.toLowerCase())
+    return hit ?? word
+  }).join(' ')
+}
+
 function WhatYouGotRight({ result }: { result: ConsiderationsResult | null }) {
   const first = result?.cleared?.[0]
   if (!result || !first) return null
@@ -577,7 +600,7 @@ function WhatYouGotRight({ result }: { result: ConsiderationsResult | null }) {
           reinforcement rather than instead of it. The list is what actually
           ran, so it cannot drift out of date as packs are added. */}
       <p className="text-xs text-fg-tertiary">
-        Checked here: {result.checked.join(', ').replace(/_/g, ' ')}. Nothing on this page knows
+        Checked here: {result.checked.map(humanisePackName).join(', ')}. Nothing on this page knows
         whether the circuit does what you intended — that is still yours to decide.
       </p>
     </div>
