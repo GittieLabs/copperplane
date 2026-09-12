@@ -63,13 +63,18 @@ than shared. A hero and a guide illustration should be independently
 replaceable; pointing both at one file means changing the homepage silently
 changes the guide.
 
-> **One capture, three takes.** The first had the app's own evidence line
-> duplicating its heading. The second fixed that and carried a typo in the
-> project description. The third fixed that — and reading it back found
-> *"led series resistor"* lower-cased in the app's own copy, which no test
-> caught because a test was asserting the lower-cased form. **Read the whole
-> frame back before placing it**; three of those four defects were in text
-> nobody had looked at since writing it.
+> **One capture, four takes, and each take found the next defect.**
+>
+> 1. The app's own evidence line duplicated its heading, word for word.
+> 2. Fixed — and the project description read *"ardurino"*.
+> 3. Fixed — and reading it back found *"led series resistor"* lower-cased in
+>    the app's own copy. No test caught it because a test was **asserting** the
+>    lower-cased form.
+> 4. Clean.
+>
+> Three of those were in text nobody had read since writing it, and one was
+> being actively held in place by its own test. **Read the whole frame back
+> before placing it** — not the part you changed, the whole frame.
 
 ## The pipeline the raw captures need
 
