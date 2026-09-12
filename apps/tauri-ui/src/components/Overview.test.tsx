@@ -716,3 +716,167 @@ describe('Overview: SPEC-343 the reading goes stale when another tab changes it'
     expect(projectStageMock).not.toHaveBeenCalled()
   })
 })
+
+describe('Overview: SPEC-343 §2.6 what needs attention', () => {
+  /* The packs have been computing findings since 2026-09-10 and NOTHING
+   * rendered them. `project.considerations` returned `needs_attention` on every
+   * load and `WhatYouGotRight` read `cleared` and `checked` only — so R1's
+   * placeholder value and the `+5V`-on-`VIN` finding were worked out each time
+   * and shown to nobody.
+   *
+   * Found while writing `guides/what-it-notices.md`'s illustration: the page
+   * described a surface that did not exist, and the screenshot could not be
+   * taken because the app had nothing to photograph.
+   *
+   * §2.6 settles the shape: "it is there when they look, and something makes
+   * them look... a count on the Overview tab: a signal that something changed,
+   * which the user may ignore entirely. No modal, no redirect, no chat message
+   * arriving unbidden, no stage advanced on their behalf." */
+
+  function consideration(over = {}) {
+    return {
+      id: 'component_without_value',
+      type: 'copperplane.component_without_value',
+      domain: 'power',
+      claim_class: 'computed',
+      trigger: { kind: 'reference', ref: 'R1' },
+      explanation: "R1 still has KiCad's placeholder value (R).",
+      state: 'raised',
+      source: null,
+      ...over,
+    }
+  }
+
+  async function renderWith(result: unknown) {
+    projectStageMock.mockResolvedValue({
+      state: 'board_only', action: 'Check the board', area: 'pcb',
+      evidence: 'a result is on record for the schematic', stale_areas: [],
+    })
+    projectConsiderationsMock.mockResolvedValue(result)
+    render(
+      <Overview
+        projectName="weather-pcb"
+        project={{ name: 'weather-pcb', intent: 'a logger' } as never}
+        active
+      />,
+    )
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+  }
+
+  const base = { needs_attention: [], cleared: [], checked: ['led series resistor'],
+                 source_path: '/p/x.kicad_sch', reason: null }
+
+  it('019_shows a finding the packs raised', async () => {
+    await renderWith({ ...base, needs_attention: [consideration()] })
+
+    await waitFor(() => screen.getByText(/placeholder value/))
+  })
+
+  it('020_names the thing on the board it is about', async () => {
+    /* `SPEC-210` §2.2's safety property, made visible. A claim that cannot name
+     * something the user can go and look at is "a best-practices essay wearing
+     * a finding's clothes" -- so the surface has to show the name, not just the
+     * sentence. */
+    await renderWith({ ...base, needs_attention: [consideration()] })
+
+    await waitFor(() => screen.getByText('R1'))
+  })
+
+  it('021_counts them, which is the signal SPEC-343 2.6 asked for', async () => {
+    await renderWith({
+      ...base,
+      needs_attention: [
+        consideration(),
+        consideration({ id: 'regulated_rail_into_module_input',
+                        trigger: { kind: 'net', ref: '+5V' },
+                        explanation: 'A1 pin 8 is its VIN pin.' }),
+      ],
+    })
+
+    await waitFor(() => screen.getByText('2'))
+  })
+
+  it('022_shows where a cited claim got its fact', async () => {
+    /* `SPEC-210` §2.1: a cited claim must say where the fact came from, and
+     * `considerations.make` refuses to build one without a source. Dropping it
+     * at the last step would defeat the rule the daemon enforces. */
+    await renderWith({
+      ...base,
+      needs_attention: [consideration({
+        id: 'trace_too_narrow_for_current',
+        claim_class: 'cited',
+        trigger: { kind: 'net', ref: 'GND' },
+        explanation: 'The narrowest trace on GND is 0.2mm.',
+        source: { ref: 'IPC-2221', title: 'IPC-2221', note: 'IPC-2152 supersedes it.' },
+      })],
+    })
+
+    await waitFor(() => screen.getByText(/IPC-2221/))
+  })
+
+  it('023_renders nothing at all when there is nothing to say', async () => {
+    await renderWith({ ...base, needs_attention: [] })
+
+    expect(screen.queryByText(/needs attention/i)).toBeNull()
+  })
+
+  it('024_stays quiet when the guided path is off', async () => {
+    /* `SPEC-343` §2.6: "off means gone, not diminished." */
+    projectStageMock.mockResolvedValue(null)
+    projectConsiderationsMock.mockResolvedValue({
+      ...base, needs_attention: [consideration()],
+    })
+    render(
+      <Overview
+        projectName="weather-pcb"
+        project={{ name: 'weather-pcb', intent: 'a logger', guided_path: false } as never}
+        active
+      />,
+    )
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+
+    expect(screen.queryByText(/placeholder value/)).toBeNull()
+  })
+
+  it('025_never navigates by itself', async () => {
+    /* `SPEC-300`'s boundary and §2.6 both: no redirect, no stage advanced on
+     * the user's behalf. A finding names a place; the user goes there. */
+    const onGoToArea = vi.fn()
+    projectStageMock.mockResolvedValue({
+      state: 'board_only', action: 'Check the board', area: 'pcb',
+      evidence: 'a result is on record', stale_areas: [],
+    })
+    projectConsiderationsMock.mockResolvedValue({ ...base, needs_attention: [consideration()] })
+    render(
+      <Overview
+        projectName="weather-pcb"
+        project={{ name: 'weather-pcb', intent: 'a logger' } as never}
+        onGoToArea={onGoToArea}
+        active
+      />,
+    )
+    await waitFor(() => screen.getByText(/placeholder value/))
+
+    expect(onGoToArea).not.toHaveBeenCalled()
+  })
+
+  it('026_asks the daemon once, not once per card', async () => {
+    /* `project.considerations` runs a kicad-cli netlist export. Two cards on
+     * one tab reading the same route would pay for it twice on every visit. */
+    /* Two DIFFERENT findings on purpose. Both cards render an explanation, so
+     * reusing one sentence makes `getByText` match twice and the failure looks
+     * like a routing bug rather than a duplicated fixture. */
+    await renderWith({
+      ...base,
+      needs_attention: [consideration()],
+      cleared: [consideration({
+        id: 'led_series_resistor',
+        trigger: { kind: 'net', ref: 'Net-(D1-A)' },
+        explanation: "D1's anode reaches R1, which is what limits the current.",
+      })],
+    })
+    await waitFor(() => screen.getByText(/placeholder value/))
+
+    expect(projectConsiderationsMock).toHaveBeenCalledTimes(1)
+  })
+})

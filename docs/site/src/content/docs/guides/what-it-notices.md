@@ -13,6 +13,18 @@ So the app also reads your schematic's **actual connectivity** — which pin joi
 which net, and what each pin is for — and raises a small number of
 **considerations** on the **Overview** tab.
 
+![Overview showing two findings the rule checks do not report, and one thing the board got right](/copperplane/images/what-needs-attention.png)
+
+Both findings there are real, on the tutorial project, and neither is an ERC or
+DRC violation. `R1` still carries the placeholder value KiCad wrote when it was
+placed. And the `+5V` rail is on the Arduino's `VIN` pin — the input that feeds
+the board's own regulator — while the pin that actually *is* 5V sits unconnected
+beside it.
+
+Notice how the second one ends. **It asks.** The app cannot see inside an Arduino
+module, and a different board might accept 5V there quite happily, so it says
+what it can see and leaves the judgement with you.
+
 ## What it checks
 
 Today, eight things. The list is short on purpose; each one had to be measured
@@ -74,6 +86,17 @@ It will also not say a temperature for a regulator. The arithmetic gives watts;
 turning watts into degrees needs a thermal resistance for that exact part in
 that exact package on that much copper, and the app does not hold that figure.
 It tells you the watts and says so.
+
+## The count is the whole of the interruption
+
+There is no modal, no notification, and nothing arrives while you are working
+somewhere else. The number beside **What needs attention** changes when your
+project changes, and that is the entire mechanism — a signal you are free to
+ignore until you next look at the tab.
+
+That is a deliberate limit rather than an unfinished one. The app never advances
+a stage for you, never moves you to another screen, and never opens a
+conversation you did not start.
 
 ## When nothing is wrong
 

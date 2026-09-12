@@ -9,6 +9,16 @@ export interface Consideration {
   trigger: { kind: string; ref: string; parts?: string }
   explanation: string
   state: 'raised' | 'answered' | 'satisfied' | 'dismissed'
+  /** `SPEC-210` §2.1: where a `cited` claim's fact came from — a standard, a
+   *  datasheet page. `considerations.make` refuses to build a cited claim
+   *  without one, and refuses a computed claim that carries one, so this is
+   *  null exactly when the class says it should be. */
+  source: { ref: string; title?: string; note?: string } | null
+  /** `SPEC-210` §2.0.1: the calculation behind a claim that rests on one. The
+   *  explanation already reads the sum out in prose, so this is here for a
+   *  surface that wants to show its working separately -- `SPEC-211` §2.6
+   *  leaves inline-or-on-demand open. */
+  arithmetic?: Record<string, unknown> | null
 }
 
 export interface ConsiderationsResult {

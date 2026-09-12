@@ -357,6 +357,15 @@ toggle, the skipped description and absence-shaped triggers;
 real board (`SPEC-210` §3 records the three that failed on first contact and why), and the full
 suite on both sides.
 
+**§2.6 was designed and never built, found 2026-09-12.** *"A count on the Overview tab: a signal
+that something changed"* — the packs computed `needs_attention` on every load and nothing rendered
+it. Found while trying to screenshot the guide describing it: there was no such screenshot in 51
+captures, because the app had never shown a finding. Built in
+[CTX-343.4](../context/CTX-343.4-what-needs-attention.md).
+
+That this spec closed as `Completed` with a settled §2.6 unbuilt is the more useful half of the
+lesson. Everything §2.6 asked for was decided; the decision was mistaken for the work.
+
 **Found by use, 2026-09-11, and it is the defect this section predicted.** The reading went stale:
 the user was told *"Nothing has been checked yet"*, followed the *"Check the schematic"* action, ran
 the review on the Schematic tab, came back, and the card had not moved. The record on disk was
