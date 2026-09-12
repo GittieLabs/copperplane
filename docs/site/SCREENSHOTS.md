@@ -78,26 +78,32 @@ changes the guide.
 
 ## The pipeline the raw captures need
 
-Recorded because the raw captures do **not** match the set already here, and finding that out costs
+Recorded because the raw captures do **not** match what the site wants, and finding that out costs
 an hour.
 
 1.  **Redact first, at full resolution.** `scripts/redact_screenshots.py` needs `pytesseract`, which
     is in none of this repo's virtualenvs — and must not be added to `.build-venv`, which is what
-    freezes the shipped sidecar. Make a throwaway venv outside the repo. Of the fifteen shots
-    processed on 2026-09-12, **six** carried the username.
-2.  **Crop away the drop shadow.** `Cmd+Shift+4` + Space captures a soft shadow and a transparent
-    surround; nothing already in `public/images/` has either. The window is where alpha is fully
-    opaque — crop to that bounding box, then flatten onto black.
-3.  **Resize to 2560 wide**, which is what the existing images are.
-4.  **Save as a palette PNG.** A flat dark UI loses nothing visible. 256 colours suits most shots;
-    text-dense screens need fewer to come down — 128 for `schematic-erc`, 96 for `design-guidance`,
-    64 for `ask-the-agent`. Check the small grey body text at 1:1 for banding before accepting it;
-    at 64 colours it was still crisp.
+    freezes the shipped sidecar. Make a throwaway venv outside the repo.
+2.  **Keep the alpha.** `Cmd+Shift+4` + Space captures the window on a **transparent surround with a
+    soft drop shadow**, and that is the thing that makes a screenshot sit on a light page as
+    comfortably as a dark one. Do not flatten it.
+3.  **Scale so the WINDOW is 2560 wide**, not the image. Normalising the whole image instead means a
+    capture with a bigger shadow gets a smaller app inside it.
+4.  **Save as a palette PNG with transparency.** `quantize(method=FASTOCTREE)` keeps the alpha;
+    `convert('P')` does not. A flat dark UI loses nothing visible, and the shadow gradient palettes
+    *better* than a full-bleed dark rectangle — every image here is under 250KB, where flattened
+    ones ran to 500KB and needed 48-colour palettes to fit.
 
-`ask-the-agent.png` is the extreme case: a full agent answer, so nearly the whole frame is small
-text. Retaken 2026-09-12 with the answer fitting in one window, and it needs **48 colours** to come
-in at 379KB. Checked at 1:1 — the text is still crisp there, and a dark UI with light text has far
-fewer distinct colours than the palette count suggests.
+## Two shots have a synthesised shadow
+
+`settings.png` and `new-project-review.png` come from the 2026-09-04 session, which captured windows
+already cropped to their own edges — square corners, no shadow, no transparency. Rather than reshoot
+two screens that are still accurate, both were given a shadow built to match the real ones:
+**20px corner radius, 34px blur, 18px downward offset**, measured off a genuine capture rather than
+guessed. The native shadow ramps over 111px; the synthetic one ramps over 111px.
+
+If either is ever recaptured the synthetic shadow should go — a real one is always better than a
+matched one.
 
 ## Dark theme, everywhere
 

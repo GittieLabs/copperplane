@@ -27,9 +27,16 @@
   --sl-color-accent-high: #0b5c34; /* Solder mask */
 }
 
-/* Screenshots of a desktop app need a visible edge or they bleed into the
-   page background in whichever theme has the same tone. */
+/* Screenshots carry their own edge.
+   
+   These used to get a 1px border, because a window flattened onto black bleeds
+   into whichever theme shares its tone. They are no longer flattened: each one
+   keeps the transparent surround and soft drop shadow that macOS captured, so
+   the window floats on the page's own background -- light or dark -- and the
+   shadow is the edge.
+   
+   A border here would now draw a rectangle around the SHADOW rather than the
+   window, which is worse than having none. */
 .sl-markdown-content img {
-  border: 1px solid var(--sl-color-gray-5);
-  border-radius: 4px;
+  border: 0;
 }
