@@ -86,6 +86,15 @@ def find_boxes(grey, secret):
 
 
 def redact(image, boxes, pad=4):
+    # A macOS window capture is RGBA: the window sits on a transparent surround
+    # with its own drop shadow. Blurring has to happen in RGB -- pixelating an
+    # alpha channel would eat the shadow's gradient -- but the transparency has
+    # to survive the round trip, or every redacted shot comes back flattened
+    # onto black while the ones with nothing to redact keep their shadow.
+    #
+    # That is exactly what happened on 2026-09-12: nine of twenty-three images
+    # came out opaque and fourteen did not, from one run.
+    alpha = image.getchannel("A") if image.mode == "RGBA" else None
     out = image.convert("RGB")
     for x, y, w, h in boxes:
         box = (max(0, x - pad), max(0, y - pad),
@@ -95,6 +104,9 @@ def redact(image, boxes, pad=4):
             (max(1, region.width // 12), max(1, region.height // 6)), Image.BILINEAR
         ).resize(region.size, Image.NEAREST)
         out.paste(pixelated.filter(ImageFilter.GaussianBlur(3)), box)
+    if alpha is not None:
+        out = out.convert("RGBA")
+        out.putalpha(alpha)
     return out
 
 
