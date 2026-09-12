@@ -47,6 +47,18 @@ def read(project: dict, stale_areas: list = None) -> dict:
     Every reading carries `evidence`, per `CTX-343.1` Phase 2: a wrong reading
     must be debuggable by the person looking at it, not only by whoever wrote
     the ranking.
+
+    **Evidence says what the record HELD, never what the reading concluded.**
+    The conclusion is already on screen above it -- `Overview.tsx`'s
+    `sentenceFor` writes that -- so an evidence line that restates it is a
+    duplicated sentence in the user's face and tells a debugger nothing.
+
+    Four of these did exactly that until 2026-09-12, and `complete` was word for
+    word identical to its own heading: *"Schematic, board and enclosure have all
+    been checked."* over *"schematic, board and enclosure have all been
+    checked"*. Reported from a screenshot, which is the only place it is
+    visible -- the two strings live in different languages and neither test
+    suite could see the other.
     """
     stale_areas = list(stale_areas or [])
     results = project.get("last_results") or {}
@@ -110,18 +122,19 @@ def read(project: dict, stale_areas: list = None) -> dict:
 
     if schematic and not board:
         return out(BOARD_ONLY, "Check the board", "pcb",
-                   "the schematic has been checked and the board has not")
+                   "a result is on record for the schematic and none for the board")
 
     if board and not schematic:
         return out(SCHEMATIC_ONLY, "Check the schematic", "schematic",
-                   "the board has been checked and the schematic has not")
+                   "a result is on record for the board and none for the schematic")
 
     if not enclosure:
         return out(BOTH_CHECKED, "Generate an enclosure", "enclosure",
-                   "schematic and board are both checked, no enclosure yet")
+                   "results are on record for the schematic and the board, and no "
+                   "enclosure has been generated")
 
     # `SPEC-343` §2.6 and §3: what this says when nothing is wrong is an open
     # question, and generic praise is worse than silence. So it says nothing and
     # names why, rather than inventing an encouragement.
     return out(COMPLETE, None, None,
-               "schematic, board and enclosure have all been checked")
+               "results are on record for all three, and none of them is out of date")
