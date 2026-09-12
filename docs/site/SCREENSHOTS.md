@@ -53,9 +53,28 @@ written already overstates what ships.
 
 ### The hero
 
-Retaken 2026-09-12 at 00:29, showing Overview at the `complete` state — a reading that was
-unreachable until `CTX-343.3` fixed the card going stale, and whose evidence line was a word-for-word
-copy of its own heading until the same branch fixed that. Both are right in this capture.
+**Swapped 2026-09-12** to Overview flagging two findings, from the `complete`
+state it showed before. The homepage's own first card is *"Notices what a rule
+checker cannot"* — a hero showing the calm, everything-checked state argued
+against the sentence beside it.
+
+`what-needs-attention.png` is the same capture, deliberately duplicated rather
+than shared. A hero and a guide illustration should be independently
+replaceable; pointing both at one file means changing the homepage silently
+changes the guide.
+
+> **One capture, four takes, and each take found the next defect.**
+>
+> 1. The app's own evidence line duplicated its heading, word for word.
+> 2. Fixed — and the project description read *"ardurino"*.
+> 3. Fixed — and reading it back found *"led series resistor"* lower-cased in
+>    the app's own copy. No test caught it because a test was **asserting** the
+>    lower-cased form.
+> 4. Clean.
+>
+> Three of those were in text nobody had read since writing it, and one was
+> being actively held in place by its own test. **Read the whole frame back
+> before placing it** — not the part you changed, the whole frame.
 
 ## The pipeline the raw captures need
 

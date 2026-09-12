@@ -573,7 +573,10 @@ describe('Overview: SPEC-343 what you got right', () => {
     expect(await screen.findByText(/D1's anode reaches R1/)).toBeTruthy()
     // The boundary, beside the reinforcement rather than instead of it.
     expect(screen.getByText(/does what you intended/)).toBeTruthy()
-    expect(screen.getByText(/led series resistor/)).toBeTruthy()
+    // "LED", not "led". This asserted the lower-cased form until 2026-09-12 --
+    // the test pinned the bug, which is why the suite stayed green while the
+    // sentence read wrong on screen and then in a published screenshot.
+    expect(screen.getByText(/LED series resistor/)).toBeTruthy()
   })
 
   it('shows one at a time, and counts the rest', async () => {
@@ -878,5 +881,55 @@ describe('Overview: SPEC-343 §2.6 what needs attention', () => {
     await waitFor(() => screen.getByText(/placeholder value/))
 
     expect(projectConsiderationsMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Overview: pack names read as prose', () => {
+  /* `checked` arrives as pack function names. Replacing underscores with spaces
+   * produced "led series resistor" in a sentence that capitalises KiCad, VIN and
+   * IPC everywhere else -- and it shipped into a docs screenshot before anybody
+   * read it back. Caught by the maintainer proofreading a retake, not by a test. */
+
+  it('027_keeps an acronym an acronym', async () => {
+    const { humanisePackName } = await import('./Overview')
+    expect(humanisePackName('led_series_resistor')).toBe('LED series resistor')
+  })
+
+  it('028_leaves ordinary words alone', async () => {
+    const { humanisePackName } = await import('./Overview')
+    expect(humanisePackName('component_without_value')).toBe('component without value')
+    expect(humanisePackName('supply_exceeds_absolute_maximum'))
+      .toBe('supply exceeds absolute maximum')
+  })
+
+  it('029_needs no edit for a pack that introduces no new acronym', async () => {
+    /* `SPEC-210`: a new subject area is "a data file and a trigger rather than a
+     * rebuild". A per-pack label table would have made it a rebuild plus a
+     * frontend edit; a list of acronyms does not. */
+    const { humanisePackName } = await import('./Overview')
+    expect(humanisePackName('some_future_pack_nobody_wrote_yet'))
+      .toBe('some future pack nobody wrote yet')
+  })
+
+  it('030_renders the corrected list on the card', async () => {
+    projectStageMock.mockResolvedValue(null)
+    projectConsiderationsMock.mockResolvedValue({
+      needs_attention: [],
+      cleared: [{
+        id: 'led_series_resistor', type: 'copperplane.led_series_resistor',
+        domain: 'power', claim_class: 'computed',
+        trigger: { kind: 'net', ref: 'Net-(D1-A)' },
+        explanation: "D1's anode reaches R1.", state: 'satisfied', source: null,
+      }],
+      checked: ['component_without_value', 'led_series_resistor'],
+      source_path: '/p/x.kicad_sch', reason: null,
+    })
+    render(
+      <Overview projectName="weather-pcb"
+                project={{ name: 'weather-pcb', intent: 'a logger' } as never} active />,
+    )
+
+    await waitFor(() => screen.getByText(/LED series resistor/))
+    expect(screen.queryByText(/led series resistor/)).toBeNull()
   })
 })
