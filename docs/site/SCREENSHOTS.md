@@ -22,19 +22,28 @@ nothing in that session captured them, and they are named below rather than left
 > which renders inside `BoardAdvisor` — the **PCB tab**. The contact sheet used to triage these shots
 > showed "Board houses" under the PCB tab, and the claim was written anyway.
 
-### Never captured, and not yet referenced by any page
+### Placed 2026-09-12
 
-These surfaces were photographed on 2026-09-11 and are sitting in the capture folder, but adding
-them means **editing a page to reference them** — `test_docs_images.py` fails an image nobody uses,
-in both directions. That is a docs change rather than a screenshot change, so it is listed and not
-done.
+Four surfaces that had never appeared on the site now have pages written around
+them: the board-house library and a house compared against KiCad's defaults
+(`guides/board-houses.md`), the footprint glossary (`guides/footprints.md`), and
+KiCad's own libraries in search results (`guides/find-a-part.md`).
+`guides/board-checks.md` gained an image too, reusing `schematic-erc.png` rather
+than shipping a second copy of the same capture.
 
-*   The suggested-parts card populated, with real suggestions against the tutorial project.
-*   The board-house library, and a house selected with the comparison table showing what differs
-    from KiCad's own defaults.
-*   The footprint glossary — *"What the abbreviations mean"* — expanded on a real part.
-*   KiCad's own footprint libraries appearing in search results beside saved parts.
-*   Overview at `board_only` and `both_checked`, if the guided path ever wants its own page.
+### Still unplaced, and blocked on a product question rather than a camera
+
+**Overview's design considerations.** The captures exist. The page exists —
+`guides/what-it-notices.md`. What does not exist is the surface: the packs run,
+`project.considerations` returns `needs_attention`, and **nothing in the app
+renders it.** `WhatYouGotRight` reads `cleared` and `checked` only.
+
+So an Overview screenshot cannot show a finding, because the app does not show
+one. Illustrating that page means building the surface first, and the page as
+written already overstates what ships.
+
+**Suggested parts, populated.** Captured, but the same shot carries Overview's
+`WHERE YOU ARE` card with the pre-fix evidence wording. Wants one fresh capture.
 
 ### The hero
 

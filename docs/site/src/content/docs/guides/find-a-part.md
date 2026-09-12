@@ -23,6 +23,18 @@ part you did not ask for.
 Parts already in your library are marked as such, so you do not re-add one you
 already own.
 
+### KiCad's own libraries are in there too
+
+A search does not only look at parts you have saved. It also searches the
+footprint libraries already installed on your machine — including the 150-odd
+that ship inside KiCad itself — and merges them into the same ranked list.
+
+![Search results drawing on KiCad's own installed libraries alongside saved parts](/copperplane/images/kicad-libraries-in-search.png)
+
+That matters most for the part you were about to draw by hand. The footprint for
+a common module is very often already on your disk, and the app looking there
+first is cheaper than either of you making a new one.
+
 ## Confirming
 
 Confirming a candidate runs extraction against its datasheet and opens Part

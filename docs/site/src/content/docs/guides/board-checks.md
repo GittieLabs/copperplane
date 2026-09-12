@@ -39,6 +39,13 @@ but has no equivalent call for an open schematic, confirmed by testing against
 the real thing. Linking a project sidesteps it entirely, which is why linking is
 worth doing once.
 
+![A schematic review, with two findings marked as not reported by ERC or DRC](/copperplane/images/schematic-erc.png)
+
+The findings marked **not reported by ERC or DRC** are the ones no rule checker
+produces: here, a symbol and its footprint disagreeing about how many pins a part
+has. Nothing in KiCad calls that an error, because in KiCad's terms it is not
+one — it is a part described perfectly consistently that happens not to exist.
+
 ## Reading the results
 
 Explanations are generated from the violation KiCad reported plus what the app
