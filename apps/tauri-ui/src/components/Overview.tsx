@@ -89,6 +89,11 @@ export function Overview({
   /** SPEC-343: the same reason. Overview names a destination; App moves. */
   onGoToArea?: (area: Area) => void
 }) {
+  // One read for the whole tab: `project.considerations` runs a netlist export,
+  // and two cards show two halves of its answer.
+  const considerations = useConsiderations(
+    projectName, active, project?.guided_path === false,
+  )
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [chatHistory, setChatHistory] = useState<ConversationTurn[]>([])
@@ -184,8 +189,12 @@ export function Overview({
         onProjectUpdated={onProjectUpdated}
         active={active}
       />
-      {/* SPEC-343 §2.7: beside the reading, never instead of it. */}
-      <WhatYouGotRight projectName={projectName} active={active} />
+      {/* SPEC-343 §2.6, then §2.7 — what needs attention, then what did not.
+          Both halves of one route call, in that order: the thing to act on
+          leads, and the reinforcement sits beside the reading rather than
+          instead of it. */}
+      <WhatNeedsAttention result={considerations} />
+      <WhatYouGotRight result={considerations} />
       <IntentEditor
         key={projectName}
         projectName={projectName}
@@ -470,28 +479,87 @@ function WhereYouAre({
  *  One at a time, per §2.7: the `complete` state is where a finished project
  *  sits forever, and a wall of *"here is everything that is fine"* is the
  *  overload this spec exists to avoid. */
-function WhatYouGotRight({
-  projectName,
-  active = true,
-}: { projectName: string; active?: boolean }) {
+/** Everything the packs raised, read once for the whole tab.
+ *
+ *  `project.considerations` runs a `kicad-cli` netlist export, so the two cards
+ *  that show halves of its answer must not each ask for it. Owned here and
+ *  handed down, rather than fetched twice a visit.
+ *
+ *  `active` for the reason `WhereYouAre` documents: the tab stays mounted while
+ *  hidden, so nothing re-runs on its own when the user comes back from running
+ *  a check somewhere else.
+ */
+function useConsiderations(projectName: string, active: boolean, off: boolean) {
   const [result, setResult] = useState<ConsiderationsResult | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    // Same reason as the reading above: this tab stays mounted while hidden, so
-    // without `active` a pack result computed before the user ran a check would
-    // sit here unchanged afterwards. And `project.considerations` runs a
-    // netlist export, so re-reading while nobody is looking is not free.
     if (!active) return
     setResult(null)
+    if (off) return
     projectConsiderations(projectName)
       .then((r) => { if (!cancelled) setResult(r) })
       // Advisory, like the reading above it. Teaching that cannot be computed
       // must not take the Overview tab down with it.
       .catch(() => { if (!cancelled) setResult(null) })
     return () => { cancelled = true }
-  }, [active, projectName])
+  }, [active, projectName, off])
 
+  return result
+}
+
+/** `SPEC-343` §2.6: what the packs found, where the user will meet it.
+ *
+ *  §2.6 settles the shape and rules out most of the alternatives: *"it is there
+ *  when they look, and something makes them look... a count on the Overview
+ *  tab: a signal that something changed, which the user may ignore entirely. No
+ *  modal, no redirect, no chat message arriving unbidden, no stage advanced on
+ *  their behalf."*
+ *
+ *  **This existed only in the daemon until 2026-09-12.** The packs ran, the
+ *  route returned `needs_attention`, and nothing on this page read it — so
+ *  every finding was computed on each load and shown to nobody. Found while
+ *  trying to screenshot the guide that described it.
+ *
+ *  Each finding leads with **what it is about** rather than with its sentence.
+ *  `SPEC-210` §2.2's whole safety property is that a consideration names
+ *  something real on the board; showing the sentence without the name would
+ *  keep the rule in the daemon and drop it at the last step.
+ */
+function WhatNeedsAttention({ result }: { result: ConsiderationsResult | null }) {
+  const items = result?.needs_attention ?? []
+  if (!items.length) return null
+
+  return (
+    <div className="flex flex-col gap-2 rounded border border-line bg-surface p-3 text-sm">
+      <div className="flex items-baseline justify-between">
+        <p className="text-xs font-medium uppercase text-fg-muted">What needs attention</p>
+        {/* The signal §2.6 asked for, and the whole of it. It changes when the
+            project changes; it never interrupts. */}
+        <span className="text-xs text-fg-tertiary">{items.length}</span>
+      </div>
+      {items.map((c) => (
+        <div key={`${c.id}:${c.trigger.ref}`} className="flex flex-col gap-0.5">
+          <p className="text-sm text-fg-bright">
+            <span className="font-medium">{c.trigger.ref}</span>
+            <span className="text-fg-muted"> — </span>
+            {c.explanation}
+          </p>
+          {/* `SPEC-210` §2.1: a cited claim says where the fact came from.
+              `considerations.make` refuses to build one without a source, so
+              dropping it here would defeat the rule the daemon enforces. */}
+          {c.source && (
+            <p className="text-xs text-fg-tertiary">
+              {c.source.ref}{c.source.note ? ` — ${c.source.note}` : ''}
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function WhatYouGotRight({ result }: { result: ConsiderationsResult | null }) {
   const first = result?.cleared?.[0]
   if (!result || !first) return null
 
