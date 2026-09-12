@@ -962,6 +962,11 @@ function App() {
                 onProjectUpdated={setCurrentProject}
                 onCarryToSearch={handleCarryToSearch}
                 onGoToArea={handleSelectArea}
+                /* Every area is rendered at once and the inactive ones are
+                   hidden with CSS, so Overview never unmounts and cannot know
+                   on its own that the user went away and ran a check. Telling
+                   it when it is the visible one is what lets it re-read. */
+                active={view.area === 'overview'}
               />
             </div>
             <div data-testid="components-area" className={view.area === 'components' ? 'w-full' : 'hidden'}>

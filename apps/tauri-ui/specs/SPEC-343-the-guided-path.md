@@ -357,6 +357,18 @@ toggle, the skipped description and absence-shaped triggers;
 real board (`SPEC-210` §3 records the three that failed on first contact and why), and the full
 suite on both sides.
 
+**Found by use, 2026-09-11, and it is the defect this section predicted.** The reading went stale:
+the user was told *"Nothing has been checked yet"*, followed the *"Check the schematic"* action, ran
+the review on the Schematic tab, came back, and the card had not moved. The record on disk was
+correct and `project_stage.read` computed the right answer from it — every layer above the daemon
+was stale, because `App` renders all areas at once and hides the inactive ones with CSS, so Overview
+never unmounts and no effect here re-runs. Fixed by re-reading when the tab becomes visible.
+
+It is worth being exact about what this cost. Every route was verified, every pack measured against
+real boards, 968 frontend tests green — and the surface was broken in the first minute of somebody
+using it, in a way none of that could have caught. `CLAUDE.md`'s *"verify as the user, not just as
+the capability"* is not a formality.
+
 **What is not:** nobody has used this surface as a novice would. The norm in `CLAUDE.md` —
 *"verify as the user, not just as the capability"* — is satisfied for the capability and not for
 the user, and `SPEC-302` is the reason that distinction is written down. §3's second constraint is

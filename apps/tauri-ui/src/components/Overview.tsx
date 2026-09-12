@@ -62,10 +62,26 @@ export function Overview({
   onProjectUpdated,
   onCarryToSearch,
   onGoToArea,
+  active = true,
 }: {
   projectName: string
   project: Project | null
   onProjectUpdated?: (project: Project) => void
+  /** Whether this tab is the one being looked at.
+   *
+   *  `App` renders every area at once and hides the inactive ones with CSS, so
+   *  Overview never unmounts and no effect here re-runs on its own when the
+   *  user comes back to it. That is how a reading went stale in real use on
+   *  2026-09-11: the user followed "Check the schematic", ran the review on the
+   *  Schematic tab, returned, and this card still said nothing had been checked
+   *  -- while the record on disk, and the daemon reading it, both said
+   *  otherwise.
+   *
+   *  Re-reading on becoming visible is the fix rather than adding
+   *  `last_reviews` to a dependency array, because the sibling tabs have no way
+   *  to announce that they changed the record and should not need one. This
+   *  also covers a record changed by something other than this app. */
+  active?: boolean
   /** SPEC-328 §5: "Each entry can be carried straight into the existing part
    *  search." Owned by App, which is what knows about area tabs -- Overview
    *  should not have to know that Components is a sibling tab. */
@@ -166,9 +182,10 @@ export function Overview({
         project={project}
         onGoToArea={onGoToArea}
         onProjectUpdated={onProjectUpdated}
+        active={active}
       />
       {/* SPEC-343 §2.7: beside the reading, never instead of it. */}
-      <WhatYouGotRight projectName={projectName} />
+      <WhatYouGotRight projectName={projectName} active={active} />
       <IntentEditor
         key={projectName}
         projectName={projectName}
@@ -354,16 +371,22 @@ function WhereYouAre({
   project,
   onGoToArea,
   onProjectUpdated,
+  active = true,
 }: {
   projectName: string
   project: Project | null
   onGoToArea?: (area: Area) => void
   onProjectUpdated?: (project: Project) => void
+  active?: boolean
 }) {
   const [reading, setReading] = useState<StageReading | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    // A hidden tab must not re-read: nobody is looking, and it costs a route
+    // call. Leave whatever is on screen alone rather than blanking it, so
+    // coming back does not flash an empty card before the new reading lands.
+    if (!active) return
     setReading(null)
     // Off means gone, so do not spend a route call computing a reading nobody
     // will see.
@@ -378,7 +401,10 @@ function WhereYouAre({
     // Re-read whenever the record changes underneath us: a saved intent or a
     // linked project moves the reading, and a stale one is the bug this whole
     // surface exists to avoid having.
-  }, [projectName, project?.intent, project?.kicad_project_path, project?.guided_path])
+    // `active` is the one that matters and the one that was missing. The rest
+    // are the fields Overview changes ITSELF; a check run on another tab moves
+    // `last_results` and `last_reviews`, which nothing here ever sees.
+  }, [active, projectName, project?.intent, project?.kicad_project_path, project?.guided_path])
 
   /* SPEC-343 §5, and §2.6 settled: OFF MEANS GONE, not diminished. The way
      back is a single quiet line where the card was -- if turning it off left
@@ -444,11 +470,19 @@ function WhereYouAre({
  *  One at a time, per §2.7: the `complete` state is where a finished project
  *  sits forever, and a wall of *"here is everything that is fine"* is the
  *  overload this spec exists to avoid. */
-function WhatYouGotRight({ projectName }: { projectName: string }) {
+function WhatYouGotRight({
+  projectName,
+  active = true,
+}: { projectName: string; active?: boolean }) {
   const [result, setResult] = useState<ConsiderationsResult | null>(null)
 
   useEffect(() => {
     let cancelled = false
+    // Same reason as the reading above: this tab stays mounted while hidden, so
+    // without `active` a pack result computed before the user ran a check would
+    // sit here unchanged afterwards. And `project.considerations` runs a
+    // netlist export, so re-reading while nobody is looking is not free.
+    if (!active) return
     setResult(null)
     projectConsiderations(projectName)
       .then((r) => { if (!cancelled) setResult(r) })
@@ -456,7 +490,7 @@ function WhatYouGotRight({ projectName }: { projectName: string }) {
       // must not take the Overview tab down with it.
       .catch(() => { if (!cancelled) setResult(null) })
     return () => { cancelled = true }
-  }, [projectName])
+  }, [active, projectName])
 
   const first = result?.cleared?.[0]
   if (!result || !first) return null
