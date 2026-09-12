@@ -9,12 +9,18 @@ referenced from a page as `/copperplane/images/<name>.png`.
 **Seventeen of eighteen images are the 2026-09-11 re-shoot.** Two remain from 2026-09-04 because
 nothing in that session captured them, and they are named below rather than left to be discovered.
 
-### Still from 2026-09-04
+### Still from 2026-09-04, and both are fine
 
-| File | Why it was not replaced |
+Neither of these needs retaking, and both were briefly listed as stale by a triage that asked *"is
+it old?"* rather than *"did the thing it photographs change?"*
+
+| File | Why it stands |
 | :--- | :--- |
-| `new-project-review.png` | The wizard's steps 1-3 were captured; **step 4 of 4, "Reviewing your project"**, was not. That step is the shot — the wizard's own check pass, with parity, component count and the ERC/DRC counts. |
-| `settings.png` | Not captured, and **probably does not need to be**. `Settings.tsx` last changed 2026-09-03 and `ProviderConfigEditor` on 2026-08-31, both before the capture, so nothing that screen renders has moved since. Worth an eye before the next release; not a retake. |
+| `new-project-review.png` | Step 4 of 4 has not changed. It was retaken on 2026-09-12 and the retake was **rejected**: the new one reads `DRC: 16 violations` because a board house was selected, while the tutorial two paragraphs later says *"five errors on the PCB"*. The 2026-09-04 shot reads `DRC: 4 violations, 1 unconnected item` — which is that five, against KiCad's own defaults, and is what a reader following along will see. |
+| `settings.png` | `Settings.tsx` last changed 2026-09-03 and `ProviderConfigEditor` on 2026-08-31, both before the capture. Nothing that screen renders has moved since. |
+
+> **If step 4 is ever retaken**, do it with the board check set to **"Check against KiCad's defaults
+> instead"**. A house selected changes the DRC count and breaks the tutorial's own arithmetic.
 
 > **A correction, recorded because it was asserted twice.** An earlier version of this file said the
 > board-house library had moved into Settings and that `settings.png` was therefore wrong about the
