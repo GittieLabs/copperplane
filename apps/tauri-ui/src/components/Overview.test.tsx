@@ -621,3 +621,98 @@ describe('Overview: SPEC-343 what you got right', () => {
     expect(screen.queryByText(/no schematic/)).toBeNull()
   })
 })
+
+describe('Overview: SPEC-343 the reading goes stale when another tab changes it', () => {
+  /* Reported from real use, 2026-09-11, and the first defect found by using
+   * this surface as a user rather than proving the route works -- which is
+   * exactly the gap `SPEC-211` §6 and `SPEC-343` §6 both recorded as open.
+   *
+   * Overview said "Nothing has been checked yet" and offered "Check the
+   * schematic". The user followed it, ran the review on the Schematic tab, came
+   * back, and the card had not moved. The project record on disk WAS correct --
+   * `last_reviews: ['schematic']` -- and `project_stage.read` computed
+   * "the schematic has been checked and the board has not" from it. Every layer
+   * above the daemon was stale.
+   *
+   * The cause is structural rather than a missed dependency. `App.tsx` renders
+   * every tab at once and hides the inactive ones with CSS, so Overview never
+   * unmounts and its effects never re-run. Nothing refetches the project on
+   * navigation, and the sibling tabs are given no way to say they changed it.
+   *
+   * So the fix is not "add a dependency" -- it is that the reading re-reads
+   * when the tab becomes visible, which is the only moment that matters and the
+   * only one that also covers a record changed outside the app entirely. */
+
+  it('016_re-reads when the tab becomes visible again', async () => {
+    projectStageMock.mockResolvedValue({
+      state: 'nothing_checked', action: 'Check the schematic', area: 'schematic',
+      evidence: 'a linked project with nothing checked yet', stale_areas: [],
+    })
+    const project = { name: 'weather-pcb', intent: 'a logger' } as never
+
+    const { rerender } = render(
+      <Overview projectName="weather-pcb" project={project} active />,
+    )
+    await waitFor(() => screen.getByText(/nothing checked yet/))
+
+    // The user leaves for the Schematic tab and runs a review there. The record
+    // changes underneath Overview, which is still mounted and still hidden.
+    projectStageMock.mockResolvedValue({
+      state: 'board_only', action: 'Check the board', area: 'pcb',
+      evidence: 'the schematic has been checked and the board has not',
+      stale_areas: [],
+    })
+    rerender(<Overview projectName="weather-pcb" project={project} active={false} />)
+
+    // ...and comes back. Note `project` is the SAME object: App does not refetch
+    // it, so nothing in the props has changed except visibility.
+    rerender(<Overview projectName="weather-pcb" project={project} active />)
+
+    await waitFor(() => screen.getByText(/the schematic has been checked/))
+    expect(screen.queryByText(/nothing checked yet/)).toBeNull()
+  })
+
+  it('017_re-reads its considerations on return too, for the same reason', async () => {
+    projectStageMock.mockResolvedValue({
+      state: 'nothing_checked', action: 'Check the schematic', area: 'schematic',
+      evidence: 'nothing checked yet', stale_areas: [],
+    })
+    projectConsiderationsMock.mockResolvedValue({
+      needs_attention: [], cleared: [], checked: ['led series resistor'],
+      source_path: '/p/x.kicad_sch', reason: null,
+    })
+    const project = { name: 'weather-pcb', intent: 'a logger' } as never
+
+    const { rerender } = render(
+      <Overview projectName="weather-pcb" project={project} active />,
+    )
+    await waitFor(() => expect(projectConsiderationsMock).toHaveBeenCalledTimes(1))
+
+    rerender(<Overview projectName="weather-pcb" project={project} active={false} />)
+    rerender(<Overview projectName="weather-pcb" project={project} active />)
+
+    await waitFor(() => expect(projectConsiderationsMock).toHaveBeenCalledTimes(2))
+  })
+
+  it('018_does not re-read while it stays hidden', async () => {
+    /* The other half. A hidden tab that polls is a route call nobody asked for,
+     * and `project.considerations` runs a netlist export. */
+    projectStageMock.mockResolvedValue({
+      state: 'nothing_checked', action: 'Check the schematic', area: 'schematic',
+      evidence: 'nothing checked yet', stale_areas: [],
+    })
+    const project = { name: 'weather-pcb', intent: 'a logger' } as never
+
+    const { rerender } = render(
+      <Overview projectName="weather-pcb" project={project} active={false} />,
+    )
+    rerender(<Overview projectName="weather-pcb" project={project} active={false} />)
+
+    /* The effect is async, so asserting straight after `render` passes whether
+     * or not the guard works -- measured: a plain mount reports zero calls at
+     * that instant. Wait for something that DOES resolve, so a broken guard has
+     * had every chance to fire before this asserts it did not. */
+    await waitFor(() => screen.getByText(/AgentChat stub/))
+    expect(projectStageMock).not.toHaveBeenCalled()
+  })
+})

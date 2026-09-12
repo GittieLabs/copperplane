@@ -15,7 +15,7 @@ section can be re-derived rather than trusted.
 
 | File | Invalidated by |
 | :--- | :--- |
-| `hero.png` | `SPEC-343` — Overview is a different screen now: the reading of where the project stands, the considerations callout, what you got right, the intent editor |
+| ~~`hero.png`~~ | **Retaken 2026-09-12** — see the note below. |
 | `welcome.png` | `CTX-338.1` — the Copperplane mark on the launch screen |
 | `no-project.png` | `CTX-338.1` — the same mark on the no-project landing |
 | `board-check.png` | `SPEC-340` — the board-house picker and the fabrication summary banner |
@@ -53,6 +53,22 @@ distinctive feature at all.
 | **Board-house picker** | PCB tab with a house selected, so the banner shows what changed against the generic profile. |
 | **The board-house library** | Settings. Show more than one house, so the picker reads as a library rather than a setting. |
 | **KiCad's own libraries in search** | Components tab. A query returning both your saved parts and KiCad's own footprints, so the merge is visible. |
+
+### The hero
+
+Retaken 2026-09-12 at 00:29, showing Overview at the `complete` state — a reading that was
+unreachable until `CTX-343.3` fixed the card going stale, and whose evidence line was a word-for-word
+copy of its own heading until the same branch fixed that. Both are right in this capture.
+
+Processing worth repeating for the rest, since the raw captures do not match the existing set:
+
+*   `Cmd+Shift+4` + Space captures a **soft drop shadow and a transparent surround**. The existing
+    images have neither — crop to where alpha is fully opaque, which is the window itself, then
+    flatten onto black.
+*   Resize to **2560** wide to match the siblings, then save as a 256-colour palette PNG. A flat
+    dark UI loses nothing visible and drops from ~820KB to ~205KB, inside the 400KB this file asks
+    for. Straight RGB at that width is ~490KB and misses it. Check the small grey body text at 1:1
+    for banding before accepting the palette version.
 
 ## Dark theme, everywhere
 

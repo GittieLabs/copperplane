@@ -133,3 +133,72 @@ class TestStageReading(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EvidenceSaysWhatTheRecordHeld(unittest.TestCase):
+    """`SPEC-343` §2.4 -- evidence explains the input, never the conclusion.
+
+    Reported from a screenshot on 2026-09-12: the `complete` card read
+
+        Schematic, board and enclosure have all been checked.
+        schematic, board and enclosure have all been checked
+
+    -- the heading and the line under it, word for word. Four states restated
+    their own conclusion that way.
+
+    Nothing could have caught it. The heading is written by `sentenceFor` in
+    `Overview.tsx` and the evidence by this module; they live in different
+    languages, and neither suite can see the other. So this pins the half that
+    is checkable: an evidence line has to name something the RECORD held, which
+    a restatement of the conclusion never does.
+    """
+
+    #: The vocabulary of "what was on file", which is what evidence is for.
+    _RECORD_WORDS = ("recorded", "on record", "linked", "changed")
+
+    def _every_reading(self):
+        base = {"intent": "a logger", "kicad_project_path": "/p/x.kicad_pro"}
+        return [
+            ps.read({}, []),
+            ps.read({"intent": "a logger"}, []),
+            ps.read(base, ["schematic"]),
+            ps.read(base, []),
+            ps.read({**base, "last_reviews": {"schematic": 1}}, []),
+            ps.read({**base, "last_results": {"pcb": 1}}, []),
+            ps.read(
+                {**base, "last_reviews": {"schematic": 1}, "last_results": {"pcb": 1}}, []),
+            ps.read(
+                {**base, "last_reviews": {"schematic": 1, "enclosure": 1},
+                 "last_results": {"pcb": 1}}, []),
+        ]
+
+    def test_020_every_evidence_line_names_something_the_record_held(self):
+        for reading in self._every_reading():
+            with self.subTest(reading["state"]):
+                self.assertTrue(
+                    any(w in reading["evidence"] for w in self._RECORD_WORDS),
+                    f"{reading['state']}'s evidence states a conclusion rather than "
+                    f"what was on file: {reading['evidence']!r}",
+                )
+
+    def test_021_the_check_would_notice(self):
+        """A check that cannot fail is not evidence -- `CLAUDE.md`.
+
+        The exact string this replaced, which passes every other assertion in
+        this file and was wrong on screen."""
+        restatement = "schematic, board and enclosure have all been checked"
+
+        self.assertFalse(any(w in restatement for w in self._RECORD_WORDS))
+
+    def test_022_the_finished_reading_says_why_it_is_not_a_stale_one(self):
+        """`complete` outranks nothing, so the question a reader actually has
+        there is why this is not `regressed`. The evidence answers it."""
+        reading = self._every_reading()[-1]
+
+        self.assertEqual(reading["state"], ps.COMPLETE)
+        self.assertIn("out of date", reading["evidence"])
+
+    def test_023_no_two_states_share_an_evidence_line(self):
+        lines = [r["evidence"] for r in self._every_reading()]
+
+        self.assertEqual(len(lines), len(set(lines)))
