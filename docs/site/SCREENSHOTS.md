@@ -9,12 +9,18 @@ referenced from a page as `/copperplane/images/<name>.png`.
 **Seventeen of eighteen images are the 2026-09-11 re-shoot.** Two remain from 2026-09-04 because
 nothing in that session captured them, and they are named below rather than left to be discovered.
 
-### Still from 2026-09-04, and still wrong
+### Still from 2026-09-04
 
 | File | Why it was not replaced |
 | :--- | :--- |
-| `settings.png` | No Settings screen was captured. It also moved: `SPEC-342` put the board-house library there, so the old shot is wrong about what the screen contains, not merely dated. |
 | `new-project-review.png` | The wizard's steps 1-3 were captured; **step 4 of 4, "Reviewing your project"**, was not. That step is the shot — the wizard's own check pass, with parity, component count and the ERC/DRC counts. |
+| `settings.png` | Not captured, and **probably does not need to be**. `Settings.tsx` last changed 2026-09-03 and `ProviderConfigEditor` on 2026-08-31, both before the capture, so nothing that screen renders has moved since. Worth an eye before the next release; not a retake. |
+
+> **A correction, recorded because it was asserted twice.** An earlier version of this file said the
+> board-house library had moved into Settings and that `settings.png` was therefore wrong about the
+> screen's contents. **It is not in Settings.** `HouseLibrary` renders inside `FabricationProfile`,
+> which renders inside `BoardAdvisor` — the **PCB tab**. The contact sheet used to triage these shots
+> showed "Board houses" under the PCB tab, and the claim was written anyway.
 
 ### Never captured, and not yet referenced by any page
 
@@ -54,9 +60,10 @@ an hour.
     64 for `ask-the-agent`. Check the small grey body text at 1:1 for banding before accepting it;
     at 64 colours it was still crisp.
 
-`ask-the-agent.png` is **413KB**, over the 400KB below, and is the one exception. It is a very tall,
-very text-dense screen; 64 colours is as far as the palette goes before the text suffers, and the
-alternative is a narrower image than every other file here.
+`ask-the-agent.png` is the extreme case: a full agent answer, so nearly the whole frame is small
+text. Retaken 2026-09-12 with the answer fitting in one window, and it needs **48 colours** to come
+in at 379KB. Checked at 1:1 — the text is still crisp there, and a dark UI with light text has far
+fewer distinct colours than the palette count suggests.
 
 ## Dark theme, everywhere
 
