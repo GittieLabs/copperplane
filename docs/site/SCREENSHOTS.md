@@ -9,12 +9,18 @@ referenced from a page as `/copperplane/images/<name>.png`.
 **Seventeen of eighteen images are the 2026-09-11 re-shoot.** Two remain from 2026-09-04 because
 nothing in that session captured them, and they are named below rather than left to be discovered.
 
-### Still from 2026-09-04
+### Still from 2026-09-04, and both are fine
 
-| File | Why it was not replaced |
+Neither of these needs retaking, and both were briefly listed as stale by a triage that asked *"is
+it old?"* rather than *"did the thing it photographs change?"*
+
+| File | Why it stands |
 | :--- | :--- |
-| `new-project-review.png` | The wizard's steps 1-3 were captured; **step 4 of 4, "Reviewing your project"**, was not. That step is the shot — the wizard's own check pass, with parity, component count and the ERC/DRC counts. |
-| `settings.png` | Not captured, and **probably does not need to be**. `Settings.tsx` last changed 2026-09-03 and `ProviderConfigEditor` on 2026-08-31, both before the capture, so nothing that screen renders has moved since. Worth an eye before the next release; not a retake. |
+| `new-project-review.png` | Step 4 of 4 has not changed. It was retaken on 2026-09-12 and the retake was **rejected**: the new one reads `DRC: 16 violations` because a board house was selected, while the tutorial two paragraphs later says *"five errors on the PCB"*. The 2026-09-04 shot reads `DRC: 4 violations, 1 unconnected item` — which is that five, against KiCad's own defaults, and is what a reader following along will see. |
+| `settings.png` | `Settings.tsx` last changed 2026-09-03 and `ProviderConfigEditor` on 2026-08-31, both before the capture. Nothing that screen renders has moved since. |
+
+> **If step 4 is ever retaken**, do it with the board check set to **"Check against KiCad's defaults
+> instead"**. A house selected changes the DRC count and breaks the tutorial's own arithmetic.
 
 > **A correction, recorded because it was asserted twice.** An earlier version of this file said the
 > board-house library had moved into Settings and that `settings.png` was therefore wrong about the
@@ -22,19 +28,28 @@ nothing in that session captured them, and they are named below rather than left
 > which renders inside `BoardAdvisor` — the **PCB tab**. The contact sheet used to triage these shots
 > showed "Board houses" under the PCB tab, and the claim was written anyway.
 
-### Never captured, and not yet referenced by any page
+### Placed 2026-09-12
 
-These surfaces were photographed on 2026-09-11 and are sitting in the capture folder, but adding
-them means **editing a page to reference them** — `test_docs_images.py` fails an image nobody uses,
-in both directions. That is a docs change rather than a screenshot change, so it is listed and not
-done.
+Four surfaces that had never appeared on the site now have pages written around
+them: the board-house library and a house compared against KiCad's defaults
+(`guides/board-houses.md`), the footprint glossary (`guides/footprints.md`), and
+KiCad's own libraries in search results (`guides/find-a-part.md`).
+`guides/board-checks.md` gained an image too, reusing `schematic-erc.png` rather
+than shipping a second copy of the same capture.
 
-*   The suggested-parts card populated, with real suggestions against the tutorial project.
-*   The board-house library, and a house selected with the comparison table showing what differs
-    from KiCad's own defaults.
-*   The footprint glossary — *"What the abbreviations mean"* — expanded on a real part.
-*   KiCad's own footprint libraries appearing in search results beside saved parts.
-*   Overview at `board_only` and `both_checked`, if the guided path ever wants its own page.
+### Still unplaced, and blocked on a product question rather than a camera
+
+**Overview's design considerations.** The captures exist. The page exists —
+`guides/what-it-notices.md`. What does not exist is the surface: the packs run,
+`project.considerations` returns `needs_attention`, and **nothing in the app
+renders it.** `WhatYouGotRight` reads `cleared` and `checked` only.
+
+So an Overview screenshot cannot show a finding, because the app does not show
+one. Illustrating that page means building the surface first, and the page as
+written already overstates what ships.
+
+**Suggested parts, populated.** Captured, but the same shot carries Overview's
+`WHERE YOU ARE` card with the pre-fix evidence wording. Wants one fresh capture.
 
 ### The hero
 

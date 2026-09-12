@@ -25,6 +25,12 @@ These were read off each vendor's own published capability page on
 
 All four in one file: [board-houses.json](/copperplane/board-houses/board-houses.json)
 
+![The board-house library on the PCB tab, with several houses saved and one in use](/copperplane/images/board-house-library.png)
+
+The houses live on the **PCB** tab, not in Settings — they belong to the check
+that uses them. They are shared across your projects: each one picks which house
+to check against, and the numbers stay as you imported them.
+
 ## Import one
 
 1. Download the file (or files) you want.
@@ -43,6 +49,31 @@ choosing because only you know whether the copy you have is one you edited.
 Imported houses are ordinary houses — editable, clonable, removable. Nothing here
 is locked, because a house that came from a file can always be got back by
 downloading it again.
+
+## Seeing what a house changes
+
+Pick a house and the check tells you, in the same place, **which of its numbers
+are tighter than KiCad's own defaults and which are looser** — so a clean check
+against a permissive house is never mistaken for a clean board.
+
+![A house selected, with each of its numbers shown against KiCad's defaults](/copperplane/images/board-house-compared.png)
+
+Two things on that screen are worth reading slowly.
+
+**A house only constrains what it publishes.** The one above states 4 of the 9
+limits this check can enforce. The other five are *not checked* rather than
+checked against a number nobody stated — which is the honest behaviour, and the
+reason a clean result against a sparse house means less than a clean result
+against a detailed one.
+
+**Every number says whether anyone has confirmed it.** These read
+`not confirmed · recorded 2026-09-09` — read off the vendor's published page on
+that date and not verified since. A figure a fab quietly changed is a figure this
+file will keep reporting until somebody checks.
+
+The violation count moves with the house, sometimes a lot. That difference is the
+feature working, not a bug in it — and the check shows both counts so you can see
+which numbers caused it.
 
 ## What these are, and what they are not
 

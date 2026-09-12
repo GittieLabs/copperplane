@@ -31,6 +31,19 @@ SparkFun's libraries are CC-BY-4.0, which requires attribution if you publish a
 design using them. See [Attribution and licences](/copperplane/attribution/).
 :::
 
+### The abbreviations, decoded
+
+A KiCad footprint name is a compressed sentence — `LED_THT:LED_D5.0mm-4_RGB` is
+a through-hole 5 mm four-pin RGB LED, if you already know how to read it. Expand
+a part and the app decodes the fragments it recognises.
+
+![A footprint expanded, with each abbreviation in its name explained](/copperplane/images/footprint-glossary.png)
+
+It decodes from name fragments rather than a fixed list, which is how thirty-odd
+entries and a handful of prefix letters cover most of the 15,000-plus footprints
+KiCad ships. A fragment it does not recognise is left alone rather than guessed
+at.
+
 ## Generating one
 
 If nothing fits, the app can build a footprint from the package dimensions in
