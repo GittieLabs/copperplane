@@ -440,3 +440,89 @@ class FrozenSidecarRouteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(_kicad_cli_available(), REASON_NO_CLI)
+@unittest.skipUnless(os.path.isdir(EXAMPLE_PROJECT), REASON_NO_EXAMPLE)
+class CheckingAgainstDefaultsIgnoresALeftoverSidecar(unittest.TestCase):
+    """A check that says "KiCad's own defaults" has to mean it.
+
+    Reported from a screenshot on 2026-09-24. The PCB tab read *"Against KiCad's
+    own defaults"* while the board carried a generated sidecar from an earlier
+    board-house review -- so the annular minimum in force was the house's
+    0.15mm rather than KiCad's own, and twelve extra warnings came from the
+    verification canary that file also carries. Sixteen violations, twelve of
+    them an artefact, under a label promising none of it.
+
+    Nothing cleans the sidecar up: `fabrication_review.review` writes it and
+    leaves it, which is correct -- it is what makes the house's rules real
+    inside KiCad. The defect is that the no-profile path then reads the board
+    without accounting for it.
+
+    **The fix already existed one function away.** `fabrication_review.baseline`
+    stashes a generated sidecar, runs DRC, and puts it back, and its docstring
+    says exactly why: *"a leftover file from an earlier run would quietly make
+    the 'before' side of the comparison into another 'after'."* The comparison
+    knew about this hazard; the plain check did not.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project = os.path.join(self._tmp.name, "Copperplane_Blink_LEDs")
+        shutil.copytree(EXAMPLE_PROJECT, self.project)
+        self.pcb = os.path.join(self.project, "Copperplane_Blink_LEDs.kicad_pcb")
+        self.dru = kicad_dru.sidecar_path_for(self.pcb)
+        self.addCleanup(self._tmp.cleanup)
+
+    def _leave_a_house_sidecar(self):
+        """What a board-house review leaves behind, canary included."""
+        with open(self.dru, "w", encoding="utf-8") as handle:
+            handle.write(kicad_dru.render_sidecar([
+                ("min-annular-ring", "annular_width", "min 0.15mm", "warning"),
+                ("min-clearance", "clearance", "min 0.1mm", "warning"),
+            ]))
+
+    def test_020_a_leftover_sidecar_really_does_change_the_raw_drc(self):
+        """The hazard, pinned first. If this ever stops being true the fix
+        below is unnecessary and should be revisited rather than kept."""
+        import fabrication_review
+        self._leave_a_house_sidecar()
+        raw = kicad_cli.run_drc(self.pcb)
+        names = kicad_dru.rule_hits(raw)
+
+        self.assertTrue(names, "a generated sidecar fired no named rules at all")
+        self.assertIn(kicad_dru.CANARY_RULE_NAME, names)
+
+    def test_021_the_defaults_check_reads_the_board_without_it(self):
+        import fabrication_review
+        self._leave_a_house_sidecar()
+        report = fabrication_review.baseline(self.pcb)
+
+        self.assertEqual(len(report["violations"]), BASELINE_VIOLATIONS)
+        self.assertFalse(
+            kicad_dru.rule_hits(report),
+            "a check billed as KiCad's own defaults reported a generated rule",
+        )
+
+    def test_022_the_sidecar_survives_being_read_around(self):
+        """Stashing it must not delete the user's board configuration."""
+        import fabrication_review
+        self._leave_a_house_sidecar()
+        before = open(self.dru, encoding="utf-8").read()
+        fabrication_review.baseline(self.pcb)
+
+        self.assertTrue(os.path.exists(self.dru))
+        self.assertEqual(open(self.dru, encoding="utf-8").read(), before)
+
+    def test_023_a_hand_written_sidecar_is_left_alone(self):
+        """Only Copperplane's own file is stepped around. A sidecar the user
+        wrote is their design rules, and a check that ignored it would be
+        lying in the other direction."""
+        import fabrication_review
+        with open(self.dru, "w", encoding="utf-8") as handle:
+            handle.write('(version 1)\n(rule "mine"\n'
+                         '  (constraint track_width (min 500mm))\n'
+                         '  (severity warning))\n')
+        report = fabrication_review.baseline(self.pcb)
+
+        self.assertIn("mine", kicad_dru.rule_hits(report))

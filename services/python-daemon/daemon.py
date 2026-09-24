@@ -2505,7 +2505,22 @@ def kicad_check_board(pcb_path: str, profile: dict = None) -> dict:
         violations = fab["findings"]
         fabrication = {k: v for k, v in fab.items() if k not in ("findings", "raw_after_report")}
     else:
-        report = kicad_cli.run_drc(pcb_path, schematic_parity=True)
+        # `baseline`, not `run_drc` directly. A board-house review writes a
+        # generated `.kicad_dru` beside the board and deliberately leaves it --
+        # that file is what makes the house's rules real inside KiCad. But KiCad
+        # applies it on EVERY run, so reading the board raw here reports the
+        # house's numbers under a heading that says "KiCad's own defaults".
+        #
+        # Reported from a screenshot on 2026-09-24: sixteen violations against a
+        # leftover house's 0.15mm annular minimum, twelve of them the
+        # verification canary that file also carries, all captioned as defaults.
+        #
+        # `baseline` already stashes a generated sidecar, runs, and puts it
+        # back, and only ever steps around Copperplane's own marker -- a sidecar
+        # the user wrote is their design rules and stays in force. The
+        # comparison path knew about this hazard from the start; this one did
+        # not.
+        report = fabrication_review.baseline(pcb_path, schematic_parity=True)
         violations = report["violations"]
 
     findings = [
@@ -2877,7 +2892,12 @@ def _build_routes() -> dict:
         routes["kicad.list_open_boards"] = kicad_list_open_boards
         routes["kicad.list_project_schematics"] = kicad_list_project_schematics
     if kicad_cli is not None and component_pipeline is not None:
-        if kicad_bridge is not None:
+        if kicad_bridge is not None and fabrication_review is not None:
+            # `fabrication_review` on BOTH branches now: the profile branch has
+            # always called `review()` unguarded, and the default branch calls
+            # `baseline()`. `CTX-210.1`'s lesson, found again -- a route
+            # registered on fewer guards than it needs exists whenever those
+            # import and fails with a bare AttributeError when the others do not.
             routes["kicad.check_board"] = kicad_check_board
         routes["kicad.check_schematic"] = kicad_check_schematic
     if capability_profile is not None:
