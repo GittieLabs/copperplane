@@ -31,7 +31,7 @@ So there is a new segment 3, and it is the one to protect. Two segments now carr
 the argument rather than one:
 
 *   **Segment 3** — it spoke first. Nothing was clicked.
-*   **Segment 5** — the part that passes every check and was never going to work.
+*   **Segment 5** — the part that breaks no rule and was never going to work.
 
 Neither can be copied by adding a feature. Segment 5 is still the sharpest single
 idea; segment 3 is the one that lands earliest, on a viewer who has not yet
@@ -79,11 +79,17 @@ somebody made* in the first two, reframe tighter.
 | | |
 | :--- | :--- |
 | **Capture** | KiCad's own DRC dialog, run on the example board. Its raw violation list. Let it sit two beats too long. |
-| **Must be legible** | `Annular width (board setup constraints min annular width 0.1000 mm; actual 0.0850 mm)` — the exact sentence. |
+| **Must be legible** | One full `Annular width` violation line, in KiCad's own wording — rule name, minimum, actual, all of it. |
 | **On screen** | *(nothing — let the dialog speak)* |
 | **Voiceover** | "This is where a lot of projects stop." |
 
 The discomfort is the point. Do not cut away early to be kind.
+
+**Whatever that line says on your screen is what segment 4 has to match**, down
+to the number. The two shots are the same violation seen twice — once raw, once
+explained — and the beat only lands if a viewer can see it is the same one. That
+is also why neither segment names a figure here: the minimum comes from whichever
+design rules are in force, not from the board.
 
 ### 3 — It already knew (0:13–0:27)
 
@@ -114,41 +120,66 @@ find things.
 
 | | |
 | :--- | :--- |
-| **Capture** | **PCB** tab. Click **Run Review**. Let the findings appear, then rest the cursor on the annular finding and scroll slowly through its explanation. |
-| **Must be legible** | The annular heading, then `0.085 mm` against `0.100 mm`, and the phrase about the plating cracking or the hole breaking loose. |
-| **On screen** | `Same files. Same checks.` then `0.085 mm of copper. The rule says 0.100.` |
-| **Voiceover** | "It runs the same checks KiCad does, on the same files, and then tells you what they mean. A plated hole needs a ring of copper around it. Yours is 0.085 millimetres where the rule says 0.100 — thin enough for the drill to break through, on a board that looked fine in CAD." |
+| **Capture** | **PCB** tab. Click **Run board check**. Let it finish, then scroll slowly through the plain-language summary and into the first annular finding. |
+| **Must be legible** | The summary paragraph naming the unconnected GND net and the thin annular rings, then one annular finding with **both numbers from your own screen** — the actual ring width against whatever minimum this board is checked against. |
+| **On screen** | `Same files. Same checks.` then the two numbers **as your recording shows them**. |
+| **Voiceover** | "It runs the same checks KiCad does, on the same files, and then tells you what they mean. A plated hole needs a ring of copper around it. Yours is thinner than the minimum this board is checked against — thin enough for the drill to break through, on a board that looked fine in CAD." |
 
-This is the segment that earns trust: specific, names the part, says what
-physically goes wrong. It used to be two segments; segment 3 now carries the
-"it reads your files" idea, so this one only has to carry the explanation.
+**Read both numbers off your own screen and caption those.** This script has now
+been wrong about a number twice: first a findings count, then an annular minimum
+it stated as 0.100 mm when the board was being checked at 0.15 mm. The threshold
+is **not a property of the board** — it comes from whichever design rules are in
+force, so it changes with the board house selected and with any `.kicad_dru` on
+disk. Anything here that hard-codes a figure will rot again.
 
-KiCad reports that annular violation **four times**. Copperplane compresses it.
-That compression is worth landing, and the heading carries it.
+**Check what the board is being checked against before you roll.** The header
+above the results says which rules are in force. If it says a board house, the
+numbers are that house's. See the note after segment 5 about a `.kicad_dru` that
+outlives the choice that created it.
 
-**Do not put a findings count on screen**, and do not say one out loud. The
-explanation pass groups related violations, so the number on the list is not
-fixed between runs — a caption saying "three findings" can be contradicted by
-your own recording.
+Two things on this screen are new since the script was first written, and both
+are worth the scroll:
+
+*   **A plain-language summary of the whole board**, above the findings — one
+    paragraph saying what is actually wrong with it. That is a better opening
+    beat than any single finding, because it is the app doing the reading rather
+    than the reader doing it.
+*   **"5 DRC tests switched off — 3 worth turning back on."** Do not narrate it;
+    it costs more seconds than it earns here. Leave it in frame. A viewer
+    noticing the app checked KiCad's *configuration* as well as the board reads
+    as thoroughness.
+
+**Do not put a findings count on screen**, and do not say one out loud. The count
+moves with the rules in force, and a caption is contradicted by your own
+recording the moment anything changes.
 
 ### 5 — The thing KiCad cannot see (0:38–0:52)
 
 | | |
 | :--- | :--- |
-| **Capture** | Stay on the same findings list and scroll to the bottom two. No typing, no chat panel — they are already there. |
-| **Must be legible** | The D1 finding: the symbol `Device:LED` has 2 pins, the footprint `LED_THT:LED_D5.0mm-4_RGB` has 4 numbered pads. |
-| **On screen** | `ERC passes.` `DRC passes.` `This part was never going to work.` |
-| **Voiceover** | "And then there is this. A two-pin LED symbol, on a four-pin RGB footprint. Two pads connected to nothing, one resistor where three belong. Every check passes. It is not a rule violation — it is a part that was never going to work." |
+| **Capture** | Scroll past the DRC results into **"Review the board"** — a separate panel below them. Stop on the two findings badged **"Not reported by ERC or DRC"**. |
+| **Must be legible** | The app's own line, `2 of these were found by Copperplane. ERC and DRC do not report them.`, and then the D1 finding: a 2-pin schematic symbol against a 4-pad RGB footprint. |
+| **On screen** | `A symbol with 2 pins.` `A footprint with 4 pads.` `No rule was broken.` |
+| **Voiceover** | "And then there is this. A two-pin LED symbol, on a four-pin RGB footprint. Two pads connected to nothing, one resistor where three belong. No rule was broken — this is a part that was never going to work." |
 
 **The three on-screen lines should land as three separate beats.** This is the
 whole argument for the product in fourteen seconds: a checker tells you which
 rules you broke; knowing what you actually built is a different question.
 
-**This segment used to require typing a question on camera**, because the app
-only surfaced the mismatch if you asked for it. It does not any more — the
-finding is in the list you already ran. Shoot it as a scroll, not as a demo of
-the chat. Someone who has to know the question in advance is not the person this
-argument is for.
+**The old captions said `ERC passes.` `DRC passes.` Do not use them — they are
+false.** ERC reports two violations on this board and DRC reports a genuine
+`ERROR`: a ground track that stops short of the Arduino's pad. Putting "every
+check passes" on screen while a red error sits two scrolls above it is the exact
+failure this product argues against, committed by its own advert.
+
+The replacement is stronger anyway, because **the app says it rather than a
+caption**: *"2 of these were found by Copperplane. ERC and DRC do not report
+them."* is already on screen, in the product, in green. Frame it.
+
+**The panel is separate from DRC now**, which the script previously assumed it
+was not. "Review the board" explicitly says the board check reports its problems
+above and that this review does not repeat them — so this is a scroll into a
+different card, not further down the same list.
 
 There is a **second** mismatch in the list, SW1, and it is deliberately not in the
 script. It is the milder case — a tactile switch whose extra legs are internally
@@ -156,6 +187,19 @@ paired — and explaining why one is fatal and the other probably is not costs m
 seconds than the segment has. Do not crop it out of frame; just do not narrate
 it. A viewer noticing a second finding they were not told about reads as
 thoroughness.
+
+> **Before you roll: check for a leftover `.kicad_dru`.**
+>
+> A board house's numbers are written to `<project>.kicad_dru`, and **KiCad
+> applies that file whenever it is present** — including when the app's own
+> header says *"Against KiCad's own defaults."* On 2026-09-24 the tutorial board
+> was being checked at a house's 0.15 mm annular minimum while the screen said
+> defaults, with twelve extra warnings from the verification canary that file
+> also carries.
+>
+> For filming, delete it or reset the profile first. You want KiCad's real
+> defaults, the four annular warnings and the one unconnected item the tutorial
+> also describes — not sixteen violations, twelve of which are a self-test.
 
 ### 6 — The case (0:52–1:02)
 
