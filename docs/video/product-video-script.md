@@ -39,10 +39,10 @@ decided to keep watching.
 
 ### What has to be reshot after the 2026-09-24 fix
 
-The recording session that stopped at segment 4 produced footage of a board being
-checked at a board house's 0.15 mm while the screen said KiCad's defaults.
-`SPEC-340` then changed what the app reports, so some of that footage now shows
-numbers the app will never show again. Scoped by what actually moved:
+**Segments 1 through 4 were shot; 5 onwards were not.** That session filmed a
+board being checked at a board house's 0.15 mm while the screen said KiCad's
+defaults. `SPEC-340` then changed what the app reports, so some of that footage
+shows numbers the app will never show again. Scoped by what actually moved:
 
 | Segment | Reshoot? | Why |
 | :--- | :--- | :--- |
@@ -50,16 +50,47 @@ numbers the app will never show again. Scoped by what actually moved:
 | 2 — The wall | **Yes** | KiCad's raw dialog still honours a leftover `.kicad_dru`, so its annular minimum has to be re-established against a clean board *and matched to segment 4*. |
 | 3 — It already knew | **No** | Overview's findings are connectivity and intent. Nothing on that screen reads DRC rules or a board house, so the fix cannot have changed it. |
 | 4 — The same files | **Yes** | The count and the minimum both changed: sixteen violations at 0.15 mm became the real defaults. It also gains two things that were never shot — the plain-language board summary and the switched-off DRC tests. |
-| 5 — What KiCad cannot see | **Yes** | Continuous with segment 4's screen, and it puts a DRC count on screen of its own: *"DRC separately reports N problems on this board."* That N moved with segment 4's. |
+| 5 — What KiCad cannot see | **Never shot** | Not a reshoot, but it belongs to segment 4's sitting: it is continuous with that screen and puts a DRC count on screen of its own — *"DRC separately reports N problems on this board"* — which has to agree with what segment 4 just showed. |
 | 6 — The case | **No** | Enclosure heights, measured from the board geometry. Untouched by design rules. |
 | 7 — Whose machine | **No** | Two windows and the mark. |
 | 8 — Close | **No** | The mark and the URL. |
 
-**Shoot 2, 4 and 5 in one sitting, with the sidecar cleared before the first of
-them.** The match between 2 and 4 is a property of the session, not of either
+**Shoot 2, 4 and 5 in one sitting, with the `.kicad_dru` cleared before the first
+of them.** The match between 2 and 4 is a property of the session, not of either
 shot: clearing the file between them produces two takes that each look right
 alone and contradict each other in the cut. Segment 5 follows 4 down the same
-screen, so it belongs to the same sitting whether or not its own number changed.
+screen, so it belongs to the same sitting.
+
+**Record against a built `.app`, not `tauri dev`.** `tauri dev` runs `daemon.py`
+from source; a build runs the frozen sidecar, which is what a viewer downloads.
+The distinction is not academic here — segment 4's plain-language summary comes
+from a real LLM call, and `CTX-407.4` is the case where `daemon.spec`'s
+`datas=[]` made **every AI feature fail in every packaged build since v0.1.0**
+while working perfectly from source. Filming that beat from a dev instance risks
+advertising something broken in every build anyone can install.
+
+A *released* build is not an option either: the newest, `v0.4.0` (2026-09-05),
+predates the `SPEC-340` fix, so it still shows the wrong number, and it predates
+the `SPEC-343` work segment 3 depends on. Build Tier 2 from `CONTRIBUTING.md` —
+`npx @tauri-apps/cli@2.11.4 build --bundles app` — which runs `ensure_sidecar.py`
+itself via `beforeBuildCommand`, so the freeze is not a separate step.
+
+Four things about a local build that show up on camera:
+
+*   **The keychain prompts on every launch.** Local builds are ad-hoc signed, so
+    the signing identity is the binary's own hash and changes on every rebuild —
+    the "Always Allow" ACL never matches. `spawn_daemon` reads every known secret
+    at startup, so it fires on launch rather than on first AI use. **Clear the
+    prompts before rolling, and do not rebuild between segments 2 and 4** — a
+    rebuild re-triggers all of them.
+*   **A stale copy in `/Applications` shadows the build.** Same bundle id, so
+    Spotlight and the Dock may launch an old version. Open the built `.app` by
+    explicit path.
+*   **The degraded-build notice renders above everything, onboarding included.**
+    If the freeze came out incomplete, that banner is in frame. It is dismissible,
+    but confirm it is absent rather than dismissing it on camera.
+*   **`tauri.conf.json` still says `0.4.0`** while the code is past it. Not in
+    frame for these segments, but an About panel would understate the version.
 
 Everything above is about footage. Segments 2, 4 and 5 also have **script**
 changes from `2433b32` and from this pass — captions, what must be legible, and
