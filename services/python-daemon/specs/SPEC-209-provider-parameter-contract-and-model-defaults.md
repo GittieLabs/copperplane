@@ -1,10 +1,10 @@
 ---
 id: SPEC-209
 title: "Provider Parameter Contract & Model Defaults"
-status: Draft
+status: Completed
 type: Feature
 created: 2026-08-31
-last_updated: 2026-08-31
+last_updated: 2026-10-09
 target_version: v0.4.0
 location: "services/python-daemon/specs/SPEC-209-provider-parameter-contract-and-model-defaults.md"
 parent_spec: "SPEC-208-provider-records-and-model-roles.md"

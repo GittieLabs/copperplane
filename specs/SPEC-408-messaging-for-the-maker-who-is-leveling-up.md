@@ -1,10 +1,10 @@
 ---
 id: SPEC-408
 title: "Messaging, Onboarding Content & the Product Video, for the Maker Levelling Up"
-status: Draft
+status: In-Progress
 type: Feature
 created: 2026-09-03
-last_updated: 2026-09-03
+last_updated: 2026-10-09
 target_version: v0.4.0
 location: "specs/SPEC-408-messaging-for-the-maker-who-is-leveling-up.md"
 parent_spec: "SPEC-000-architecture-overview.md"
@@ -13,6 +13,14 @@ user_facing: true
 ---
 
 # SPEC-408: Messaging, Onboarding Content & the Product Video, for the Maker Levelling Up
+
+> **Status note, 2026-10-09.** This spec read `Draft` while all six of its contexts
+> (`CTX-408.1`–`CTX-408.6`) were `Completed` and merged — the README, the docs site, the voice pass,
+> the tutorial catch-up, and two passes over the video script have all shipped. It is now
+> `In-Progress` rather than `Completed` for one reason: **the product video has not been recorded.**
+> `docs/video/product-video-script.md` is a shot list waiting on a camera, and its "Before you
+> record" section is addressed to someone who has not yet rolled. Messaging that exists as a script
+> is not messaging the audience has received, so this spec is not done.
 
 ## 1. Executive Summary & Goals
 

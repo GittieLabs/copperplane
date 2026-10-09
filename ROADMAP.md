@@ -105,6 +105,47 @@ code does not do that yet.) This is the single biggest blocker between "impressi
     Keith's Mac. → SPEC-903.
 *   There is no `CLAUDE.md`. Every agent session so far has rediscovered the framework by reading
     `CONTRIBUTING.md` from scratch. → SPEC-901.
+*   **A `commit_hashes` entry is never checked against a ref that actually carries it.** Found
+    2026-10-09 by walking the graph: `CTX-320.1` records `c065aa5`, which
+    `git branch -a --contains` places on *no* branch — the planning commit was dropped and the hash
+    survives only in one machine's object store. `CTX-113.4` records `14cc659`, which lives only on
+    a sibling context's branch and is correctly absent from `develop` because the feature was
+    reverted. Both are now annotated in place, and the two cases are opposite in meaning — which is
+    the point: a hash check that cannot tell "never pushed" from "deliberately withdrawn" would
+    flag the honest record and the broken one identically. **Why `CTX-902.2`'s verifier did not
+    catch either:** it resolves only the entries a PR *adds* —
+    `added_hashes = [h for h in new_hashes if h not in old_hashes]` — so every hash already sitting
+    in a context file is grandfathered forever, and `c065aa5` has been unresolvable since the day
+    it was written. Confirmed directly: editing `CTX-320.1` in the same PR that carries this note
+    still does not flag it, while a *reworded* entry elsewhere is flagged immediately. The check is
+    right to work this way on a PR — it cannot demand that old history stay reachable — which is
+    exactly why the sweep over what is already recorded has to live somewhere else. → SPEC-902.
+*   **A squash merge makes finished work look unmerged, and `/spec-status` reported it that way.**
+    Found 2026-10-09, and the most expensive of these four. `CTX-210.1` read `In-Progress` with a
+    live branch on `origin` and five commits that `git merge-base --is-ancestor` placed outside
+    `develop` — so a graph walk called it the repo's one unmerged thread and a plan was made to open
+    a PR for it. **The PR already existed and had merged four weeks earlier**: #436, squashed to
+    `99cd2f2`, with `develop` since moved ~2,600 lines ahead on the same files. Opening that PR
+    would have reverted all of it. `--is-ancestor` answers a question about commits; "did the work
+    land" is a question about content, and a squash merge makes those two answers disagree. The
+    check that settles it is `git diff --name-status origin/develop <branch>` — empty means
+    superseded, not pending. → SPEC-902, and it belongs in `/spec-status` itself, which currently
+    reports branch-vs-`develop` commit ancestry and presents it as merge state.
+*   **A spec's `status` drifts behind its contexts with nothing watching.** Found the same day:
+    `SPEC-408` read `Draft` with all six of `CTX-408.1`–`.6` merged, and `SPEC-209` read `Draft`
+    with both of its contexts complete. `CTX-902.3` made `status` a checked *enum*; nothing checks
+    it against the state of the contexts beneath it. `SPEC-408` is now `In-Progress` — deliberately
+    not `Completed`, because the product video is still unrecorded — and `SPEC-209` is `Completed`.
+    → SPEC-902.
+*   **Stale `.claude/worktrees/` copies corrupt every repo-wide search.** Four of them held a full
+    duplicate of the spec tree, so a naive `find . -name 'SPEC-*.md'` returned 20+ phantom specs
+    and any grep-based survey of the graph was wrong before it started. Removed 2026-10-09 after
+    confirming none held unique work. Not a spec-graph bug, but it is how a session comes to
+    believe a false picture of the graph — worth knowing before trusting any count.
+*   `docs/research/SPEC-203-supplier-api-exploration.md` is a research note using the `SPEC-` name
+    prefix. `docs/` is excluded from the validator by design (`CTX-902.3` Phase 2), so it is not in
+    the graph and nothing is broken — but it inflates any naive spec count by one and reads as a
+    spec to anyone listing filenames. Left as-is; renaming it would break inbound links.
 
 ---
 
