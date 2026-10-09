@@ -114,6 +114,17 @@ code does not do that yet.) This is the single biggest blocker between "impressi
     the point: a hash check that cannot tell "never pushed" from "deliberately withdrawn" would
     flag the honest record and the broken one identically. → SPEC-902, which owns this
     (`CTX-902.2` built the verifier for hashes *in* a PR, not for hashes already recorded).
+*   **A squash merge makes finished work look unmerged, and `/spec-status` reported it that way.**
+    Found 2026-10-09, and the most expensive of these four. `CTX-210.1` read `In-Progress` with a
+    live branch on `origin` and five commits that `git merge-base --is-ancestor` placed outside
+    `develop` — so a graph walk called it the repo's one unmerged thread and a plan was made to open
+    a PR for it. **The PR already existed and had merged four weeks earlier**: #436, squashed to
+    `99cd2f2`, with `develop` since moved ~2,600 lines ahead on the same files. Opening that PR
+    would have reverted all of it. `--is-ancestor` answers a question about commits; "did the work
+    land" is a question about content, and a squash merge makes those two answers disagree. The
+    check that settles it is `git diff --name-status origin/develop <branch>` — empty means
+    superseded, not pending. → SPEC-902, and it belongs in `/spec-status` itself, which currently
+    reports branch-vs-`develop` commit ancestry and presents it as merge state.
 *   **A spec's `status` drifts behind its contexts with nothing watching.** Found the same day:
     `SPEC-408` read `Draft` with all six of `CTX-408.1`–`.6` merged, and `SPEC-209` read `Draft`
     with both of its contexts complete. `CTX-902.3` made `status` a checked *enum*; nothing checks
