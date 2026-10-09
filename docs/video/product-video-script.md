@@ -37,6 +37,34 @@ Neither can be copied by adding a feature. Segment 5 is still the sharpest singl
 idea; segment 3 is the one that lands earliest, on a viewer who has not yet
 decided to keep watching.
 
+### What has to be reshot after the 2026-09-24 fix
+
+The recording session that stopped at segment 4 produced footage of a board being
+checked at a board house's 0.15 mm while the screen said KiCad's defaults.
+`SPEC-340` then changed what the app reports, so some of that footage now shows
+numbers the app will never show again. Scoped by what actually moved:
+
+| Segment | Reshoot? | Why |
+| :--- | :--- | :--- |
+| 1 — The hook | **No** | KiCad's PCB editor as a picture. Carries no number. |
+| 2 — The wall | **Yes** | KiCad's raw dialog still honours a leftover `.kicad_dru`, so its annular minimum has to be re-established against a clean board *and matched to segment 4*. |
+| 3 — It already knew | **No** | Overview's findings are connectivity and intent. Nothing on that screen reads DRC rules or a board house, so the fix cannot have changed it. |
+| 4 — The same files | **Yes** | The count and the minimum both changed: sixteen violations at 0.15 mm became the real defaults. It also gains two things that were never shot — the plain-language board summary and the switched-off DRC tests. |
+| 5 — What KiCad cannot see | **Yes** | Continuous with segment 4's screen, and it puts a DRC count on screen of its own: *"DRC separately reports N problems on this board."* That N moved with segment 4's. |
+| 6 — The case | **No** | Enclosure heights, measured from the board geometry. Untouched by design rules. |
+| 7 — Whose machine | **No** | Two windows and the mark. |
+| 8 — Close | **No** | The mark and the URL. |
+
+**Shoot 2, 4 and 5 in one sitting, with the sidecar cleared before the first of
+them.** The match between 2 and 4 is a property of the session, not of either
+shot: clearing the file between them produces two takes that each look right
+alone and contradict each other in the cut. Segment 5 follows 4 down the same
+screen, so it belongs to the same sitting whether or not its own number changed.
+
+Everything above is about footage. Segments 2, 4 and 5 also have **script**
+changes from `2433b32` and from this pass — captions, what must be legible, and
+what not to narrate — so re-read them rather than reshooting from memory.
+
 ---
 
 ## Before you record
@@ -46,6 +74,12 @@ decided to keep watching.
     `examples/README.md`.
 *   **Dark theme**, one window size, the rail showing only `Copperplane Blink LEDs`.
 *   Have both windows pre-arranged. Never record a window being dragged.
+*   **Delete `examples/Copperplane_Blink_LEDs/Copperplane_Blink_LEDs.kicad_dru` if it
+    exists.** This is the first thing to check and the one that already cost a
+    session. Resetting the board-house profile in the app does **not** remove it.
+    Full reasoning in the note after segment 5; the short version is that KiCad
+    still applies that file and the app no longer does, so leaving it makes
+    segments 2 and 4 disagree.
 *   Run each check once before recording so nothing shows a spinner you have to
     cut around. **Segment 3 is the exception** — its whole point is that nothing
     was run. Link the project, let Overview settle, and shoot it as it arrives.
@@ -91,6 +125,12 @@ explained — and the beat only lands if a viewer can see it is the same one. Th
 is also why neither segment names a figure here: the minimum comes from whichever
 design rules are in force, not from the board.
 
+**This dialog is the one surface that still honours a leftover `.kicad_dru`.**
+KiCad applies that file whenever it is present; the app's default check no longer
+does. So if one is on disk, this shot and segment 4 will disagree and the pair
+cannot be made to match by reshooting either one alone. Clear it first — the note
+after segment 5 says how, and why resetting the profile is not how.
+
 ### 3 — It already knew (0:13–0:27)
 
 | | |
@@ -133,9 +173,16 @@ force, so it changes with the board house selected and with any `.kicad_dru` on
 disk. Anything here that hard-codes a figure will rot again.
 
 **Check what the board is being checked against before you roll.** The header
-above the results says which rules are in force. If it says a board house, the
-numbers are that house's. See the note after segment 5 about a `.kicad_dru` that
-outlives the choice that created it.
+above the results says which rules are in force, and **since `SPEC-340` it is
+telling the truth** — the default check reads the board around any generated
+`.kicad_dru` rather than through it. If the header names a board house, the
+numbers are that house's because you selected it, not because a stale file is
+lying to you.
+
+**The catch is that KiCad is not so careful, and segment 2 is KiCad.** A leftover
+sidecar makes this screen and segment 2's dialog show different minimums for the
+same violation, which breaks the one thing the two shots have to do. Read the
+note after segment 5 before shooting either of them.
 
 Two things on this screen are new since the script was first written, and both
 are worth the scroll:
@@ -158,7 +205,7 @@ recording the moment anything changes.
 | | |
 | :--- | :--- |
 | **Capture** | Scroll past the DRC results into **"Review the board"** — a separate panel below them. Stop on the two findings badged **"Not reported by ERC or DRC"**. |
-| **Must be legible** | The app's own line, `2 of these were found by Copperplane. ERC and DRC do not report them.`, and then the D1 finding: a 2-pin schematic symbol against a 4-pad RGB footprint. |
+| **Must be legible** | The app's own origin line — *"N of these were found by Copperplane. ERC and DRC do not report them."* — **as your recording shows it**, and then the D1 finding: a 2-pin schematic symbol against a 4-pad RGB footprint. |
 | **On screen** | `A symbol with 2 pins.` `A footprint with 4 pads.` `No rule was broken.` |
 | **Voiceover** | "And then there is this. A two-pin LED symbol, on a four-pin RGB footprint. Two pads connected to nothing, one resistor where three belong. No rule was broken — this is a part that was never going to work." |
 
@@ -173,8 +220,19 @@ check passes" on screen while a red error sits two scrolls above it is the exact
 failure this product argues against, committed by its own advert.
 
 The replacement is stronger anyway, because **the app says it rather than a
-caption**: *"2 of these were found by Copperplane. ERC and DRC do not report
-them."* is already on screen, in the product, in green. Frame it.
+caption**: *"N of these were found by Copperplane. ERC and DRC do not report
+them."* is already on screen, in the product, in green. Frame it — do not
+transcribe it into this script.
+
+**That line is computed, and it changes shape, not just value.** `ReviewPanel`
+counts the findings whose origin is this app and branches on one versus many, so
+a board with a single such finding renders *"1 of these **was** found by
+Copperplane. ERC and DRC do not report **it**."* An earlier draft of this script
+hard-coded the two-finding wording as a must-be-legible string, which is the same
+mistake as hard-coding the annular minimum one segment earlier, and it would have
+sent someone hunting for a sentence their screen was never going to show. It also
+moves the moment `SPEC-210`'s consideration packs reach this panel, since those
+carry the same `copperplane.` origin.
 
 **The panel is separate from DRC now**, which the script previously assumed it
 was not. "Review the board" explicitly says the board check reports its problems
@@ -188,18 +246,43 @@ seconds than the segment has. Do not crop it out of frame; just do not narrate
 it. A viewer noticing a second finding they were not told about reads as
 thoroughness.
 
-> **Before you roll: check for a leftover `.kicad_dru`.**
+> **Before you roll: delete any leftover `.kicad_dru`. This is the one that cost a
+> recording session.**
 >
-> A board house's numbers are written to `<project>.kicad_dru`, and **KiCad
-> applies that file whenever it is present** — including when the app's own
-> header says *"Against KiCad's own defaults."* On 2026-09-24 the tutorial board
-> was being checked at a house's 0.15 mm annular minimum while the screen said
-> defaults, with twelve extra warnings from the verification canary that file
-> also carries.
+> A board house's numbers are written to `<project>.kicad_dru` and deliberately
+> left there — that file is what makes the house's rules real inside KiCad. The
+> hazard is what reads it afterwards, and **that changed on 2026-09-24**:
 >
-> For filming, delete it or reset the profile first. You want KiCad's real
-> defaults, the four annular warnings and the one unconnected item the tutorial
-> also describes — not sixteen violations, twelve of which are a self-test.
+> *   **KiCad still applies it, always.** Segment 2 shoots KiCad's own DRC
+>     dialog, so segment 2 sees the house's numbers.
+> *   **The app no longer does.** `SPEC-340`/`CTX-340.3` fixed the default board
+>     check to run via `fabrication_review.baseline`, which moves a generated
+>     sidecar aside, runs DRC, and puts it back. So segment 4 sees KiCad's real
+>     defaults.
+>
+> **Which means a leftover file now makes segments 2 and 4 disagree about the
+> same violation** — 0.15 mm in the KiCad dialog, 0.100 mm in the app — and
+> matching those two numbers is the one thing both segments are required to do.
+> Before the fix they agreed and were both wrong; now they are silently
+> different, which is worse on camera, because nothing on either screen says why.
+>
+> The original fault was the app's label: on 2026-09-24 the PCB tab read *"Against
+> KiCad's own defaults"* above **sixteen** violations at a house's 0.15 mm, twelve
+> of them the verification canary that file also carries. **The app does not lie
+> about this any more.** The number it shows is now always the one its header
+> names. What it cannot do is change what KiCad shows you in segment 2.
+>
+> **Delete the file. Resetting the profile does not.** *"Check against KiCad's
+> defaults instead"* changes which rules the **app** checks against; it leaves
+> `<project>.kicad_dru` on disk, so KiCad — and segment 2 — still use the house's
+> numbers. Nothing in the app removes that file today (`CTX-340.3` §4, still
+> open). `rm` it, or move it aside, and keep a copy if the project needs it back.
+>
+> Then confirm, before shooting either: the annular minimum in **KiCad's dialog**
+> and the one in **the app** are the same number. If they differ, a sidecar is
+> still on disk. You want the four annular warnings and the one unconnected item
+> the tutorial describes — not sixteen violations, twelve of which are a
+> self-test.
 
 ### 6 — The case (0:52–1:02)
 

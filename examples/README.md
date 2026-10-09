@@ -25,9 +25,16 @@ three findings. Both numbers are correct; they are counting different things.
 
 And one defect **neither check reports**: D1 pairs a two-pin `Device:LED` symbol
 with a four-pin `LED_THT:LED_D5.0mm-4_RGB` footprint, so two pads carry no net
-and a single resistor stands in for three colour channels. ERC passes. DRC does
-not call it an error. It is a part that was never going to work, described
-perfectly consistently — which is the tutorial's closing point.
+and a single resistor stands in for three colour channels. **Neither ERC nor DRC
+says anything about it** — ERC's two errors above are `power_pin_not_driven` on
+something else entirely, and DRC does not treat this as a violation at all. It is
+a part that was never going to work, described perfectly consistently — which is
+the tutorial's closing point.
+
+*(This paragraph used to read "ERC passes." It does not: see the table above.
+That phrasing was scoped to this one defect and read as a claim about the whole
+board, which is precisely the false caption `SPEC-408` removed from the product
+video script. Worth not reintroducing.)*
 
 If you change these files, the numbers above stop being true and the tutorial
 starts lying. Re-measure before committing:
