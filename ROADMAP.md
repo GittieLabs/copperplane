@@ -112,8 +112,14 @@ code does not do that yet.) This is the single biggest blocker between "impressi
     a sibling context's branch and is correctly absent from `develop` because the feature was
     reverted. Both are now annotated in place, and the two cases are opposite in meaning — which is
     the point: a hash check that cannot tell "never pushed" from "deliberately withdrawn" would
-    flag the honest record and the broken one identically. → SPEC-902, which owns this
-    (`CTX-902.2` built the verifier for hashes *in* a PR, not for hashes already recorded).
+    flag the honest record and the broken one identically. **Why `CTX-902.2`'s verifier did not
+    catch either:** it resolves only the entries a PR *adds* —
+    `added_hashes = [h for h in new_hashes if h not in old_hashes]` — so every hash already sitting
+    in a context file is grandfathered forever, and `c065aa5` has been unresolvable since the day
+    it was written. Confirmed directly: editing `CTX-320.1` in the same PR that carries this note
+    still does not flag it, while a *reworded* entry elsewhere is flagged immediately. The check is
+    right to work this way on a PR — it cannot demand that old history stay reachable — which is
+    exactly why the sweep over what is already recorded has to live somewhere else. → SPEC-902.
 *   **A squash merge makes finished work look unmerged, and `/spec-status` reported it that way.**
     Found 2026-10-09, and the most expensive of these four. `CTX-210.1` read `In-Progress` with a
     live branch on `origin` and five commits that `git merge-base --is-ancestor` placed outside
