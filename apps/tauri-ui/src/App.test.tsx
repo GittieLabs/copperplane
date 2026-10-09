@@ -42,6 +42,12 @@ const loadPartMock = vi.fn()
  *
  *  Renders and opens the first project in the rail. A no-op when there are
  *  none, so the empty-state tests keep working unchanged. */
+/** Renders the app and opens the first project once the list has loaded.
+ *
+ *  Only usable when `listProjects` actually resolves. The `await` below is on
+ *  the mock's own recorded result, so a test that holds the project list in
+ *  flight deadlocks here rather than failing -- see the note on
+ *  `App: loading the project list`. Those tests call `render` directly. */
 async function renderAppOpen(projectName?: string) {
   const utils = render(<App />)
   const name = projectName ?? (await listProjectsMock.mock.results[0]?.value ?? [])[0]
@@ -1017,10 +1023,34 @@ describe('App: loading the project list', () => {
      in-flight listProjects() then REPLACED that state with the list as it was
      before the new project existed -- so the project vanished from the rail. */
 
+  /* This block had no `beforeEach` of its own and ran on whatever mock state
+     the block above it happened to leave behind. That is why it passed: three
+     tests here hold `listProjects` deliberately in flight, and `renderAppOpen`
+     awaits `listProjectsMock.mock.results[0]`, which only resolved because
+     index 0 was a *settled* result from an earlier test. Clear that state --
+     which vitest 5 does -- and index 0 becomes this test's own pending promise,
+     so the helper awaits forever and all three die at `testTimeout`.
+     Confirmed on vitest 4 as well: run this block with `-t` and it fails 3/3
+     on undefined mocks. The deadline was never the problem, so nothing here
+     raises one. */
+  beforeEach(() => {
+    loadProjectMock.mockReset().mockImplementation((name: string) => Promise.resolve({ name, schema_version: 1 }))
+    listenMock.mockReset().mockResolvedValue(() => {})
+    openProjectFromDirectoryMock.mockReset()
+    pickProjectDirectoryMock.mockReset()
+    listLibraryPartsMock.mockReset().mockResolvedValue([])
+    loadConversationMock.mockReset().mockResolvedValue([])
+    /* Not `listProjects` -- every test below sets it to a promise it controls. */
+    listProjectsMock.mockReset()
+  })
+
   it('says the projects are loading instead of showing a blank area', async () => {
     let release: (v: string[]) => void = () => {}
     listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
-    await renderAppOpen()
+    /* `render`, not `renderAppOpen`: the helper awaits the project list to find
+       a project to open, and this test's whole point is that it has not
+       arrived. There is nothing to open yet. */
+    render(<App />)
 
     expect(await screen.findByText('Loading your projects…')).toBeTruthy()
 
@@ -1031,7 +1061,10 @@ describe('App: loading the project list', () => {
   it('does not offer to create a project until the list has loaded', async () => {
     let release: (v: string[]) => void = () => {}
     listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
-    await renderAppOpen()
+    /* `render`, not `renderAppOpen`: the helper awaits the project list to find
+       a project to open, and this test's whole point is that it has not
+       arrived. There is nothing to open yet. */
+    render(<App />)
 
     await waitFor(() => {
       const button = screen.getByRole('button', { name: '+ New…' }) as HTMLButtonElement
@@ -1048,7 +1081,10 @@ describe('App: loading the project list', () => {
   it('never drops a project created while the list was still in flight', async () => {
     let release: (v: string[]) => void = () => {}
     listProjectsMock.mockReturnValue(new Promise<string[]>((r) => { release = r }))
-    await renderAppOpen()
+    /* `render`, not `renderAppOpen`: the helper awaits the project list to find
+       a project to open, and this test's whole point is that it has not
+       arrived. There is nothing to open yet. */
+    render(<App />)
     await waitFor(() => screen.getByText('Loading your projects…'))
 
     // The defence in depth: even if creation happens mid-flight, the list
