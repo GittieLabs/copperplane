@@ -73,5 +73,16 @@ class TestBuildIdentity(unittest.TestCase):
             self.assertNotEqual(ids[0]['sidecar_sha1'], ids[1]['sidecar_sha1'])
 
 
+class TestRepoRelative(unittest.TestCase):
+
+    def test_001_a_path_inside_the_repo_is_recorded_relative(self):
+        inside = os.path.join(cs.REPO_ROOT, 'core', 'Copperplane.app')
+        self.assertEqual(cs.repo_relative(inside), os.path.join('core', 'Copperplane.app'))
+
+    def test_002_a_path_outside_the_repo_is_recorded_absolute_not_as_dot_dot(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(cs.repo_relative(d), os.path.abspath(d))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -72,6 +72,20 @@ def sha1_of(path):
     return digest.hexdigest()
 
 
+def repo_relative(path):
+    """Relative to the repo when inside it, absolute otherwise.
+
+    `os.path.relpath` raises on Windows when the two paths are on different
+    drives, which is exactly where CI puts a temp directory (C:) and the
+    checkout (D:).
+    """
+    try:
+        rel = os.path.relpath(path, REPO_ROOT)
+    except ValueError:
+        return os.path.abspath(path)
+    return os.path.abspath(path) if rel == os.pardir or rel.startswith(os.pardir + os.sep) else rel
+
+
 def build_identity(bundle_path):
     """What build is on screen, in terms that differ between two local builds."""
     macos_dir = os.path.join(bundle_path, 'Contents', 'MacOS')
@@ -81,7 +95,7 @@ def build_identity(bundle_path):
         raise CaptureError(f'no built app at {bundle_path}; build it first (CONTRIBUTING.md, Tier 2)')
     built = datetime.datetime.fromtimestamp(os.path.getmtime(core), datetime.timezone.utc)
     return {
-        'app_bundle': os.path.relpath(bundle_path, REPO_ROOT),
+        'app_bundle': repo_relative(bundle_path),
         'core_built_at': built.isoformat(timespec='seconds'),
         'sidecar_sha1': sha1_of(sidecar),
     }
