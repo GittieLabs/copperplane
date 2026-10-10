@@ -4,7 +4,7 @@ title: "Messaging, Onboarding Content & the Product Video, for the Maker Levelli
 status: In-Progress
 type: Feature
 created: 2026-09-03
-last_updated: 2026-10-09
+last_updated: 2026-10-10
 target_version: v0.4.0
 location: "specs/SPEC-408-messaging-for-the-maker-who-is-leveling-up.md"
 parent_spec: "SPEC-000-architecture-overview.md"
@@ -21,11 +21,14 @@ user_facing: true
 > `docs/video/product-video-script.md` is a shot list waiting on a camera, and its "Before you
 > record" section is addressed to someone who has not yet rolled. Messaging that exists as a script
 > is not messaging the audience has received, so this spec is not done.
+>
+> **2026-10-10:** `CTX-408.7` takes that last item on. It records three short captioned cuts instead
+> of one narrated video (§2), and the agent shoots them by driving a production build of the app.
 
 ## 1. Executive Summary & Goals
 
 *   **High-Level Goal:** Say who this is for, to the people it is for, in the places they arrive —
-    the README, the docs site, a downloadable first project, and a 60-90 second video — so that
+    the README, the docs site, a downloadable first project, and three short videos (15s, 30s, ~60s) — so that
     someone moving from Arduino sketches and breadboards to their first custom PCB and enclosure
     tries the app instead of deciding it is not for them.
 
@@ -101,12 +104,37 @@ user_facing: true
     README's: `why.md` opens on a reader who already has a microcontroller on a board and a
     230-page datasheet open. **Still open:** which pages get the approachable opening, and whether
     new pages are needed or existing ones re-led.
-*   **What the 60-90 second video shows, in order.** Ninety seconds is roughly 200 spoken words and
-    perhaps five screens. Decide the single story before writing the script; the failure mode is a
-    feature tour that shows eight things and lands none.
-*   **How images and GIFs are produced and kept current.** Screen Studio on macOS is the chosen
-    tool. A screenshot of a UI that has changed is worse than no screenshot, and this repo changes
-    its UI weekly — so settle what gets captured, at what size, and how a stale one is noticed.
+*   ~~**What the 60-90 second video shows, in order.** Ninety seconds is roughly 200 spoken words
+    and perhaps five screens.~~ **The story is settled; the format changed on 2026-10-10
+    (`CTX-408.7`).**
+    - `CTX-408.6` settled the single story: the app speaks first (segment 3), then shows the part
+      that breaks no rule and was never going to work (segment 5). That still holds, and the
+      warning against a feature tour that shows eight things and lands none still applies.
+    - What changed is the format. Instead of one narrated 60-90s screen recording, there are
+      **three cuts — 15s, 30s and ~60s — from one shot list.** They have **captions and no
+      sound**: no voiceover, no music.
+    - Each finding is **pulled out of the real UI** as a card, rather than left in a full window
+      for the viewer to find. A muted viewer scrolling a feed does not hunt for a warning.
+    - The "200 spoken words" budget no longer applies. Captions are read, not heard, so it becomes
+      about one short line every 2-3 seconds.
+    - **Captions carry the whole argument, so they are part of the design.** They are burned into
+      the frame at a size that reads on a phone, and each one stays up long enough to be read.
+      Each cut also ships an `.srt` file for platforms that want one.
+    - Every number in a caption is read off the captured frame it comes from, never copied from
+      the script.
+    - The 15s cut is hook, segment 3, segment 5, close: the two beats the script already ranked
+      first.
+*   **How images and GIFs are produced and kept current.** ~~Screen Studio on macOS is the chosen
+    tool.~~ **Changed 2026-10-10 (`CTX-408.7`).**
+    - The agent drives a production build of the app itself and captures stills with
+      `screencapture -l`, which works while the window is covered.
+    - Cap records only the few shots with real motion, with the screen cleared for each take.
+    - Pullouts are composited from those real captures, never redrawn.
+    The staleness concern stands, and has already bitten: the first test take showed a saved board
+    check from before the SPEC-340 fix. So every saved result is re-run on the build being filmed,
+    and every number in a caption is read off the captured frame it came from. Still open: how
+    docs screenshots, which are dark, and the video, which is light UI on a dark background, are
+    kept consistent.
 
 ## 3. Known Constraints & Risks
 
@@ -133,6 +161,9 @@ user_facing: true
 *   `README.md` — the first thing anyone reads; currently addressed to hardware engineers.
 *   `CONTRIBUTING.md` — the contributor path, deliberately unchanged.
 *   `brand/` — lockups and palette for the site and video (`SPEC-338`).
+*   `docs/video/product-video-script.md` — the segment-by-segment shot list all three cuts draw
+    from, and the record of every number it has got wrong.
+*   `context/CTX-408.7-motion-cuts.md` — how the cuts are captured and composited.
 *   `apps/tauri-ui/specs/SPEC-336-first-run-onboarding-and-launch.md` — the first-run experience a
     new user meets, and the record that no docs site exists.
 *   `specs/SPEC-406-contributor-local-builds.md` — the contributor build path, and the platform
@@ -146,10 +177,20 @@ user_facing: true
     turn a working breadboard into a board they can order and a case they can print — without first
     having to learn what a courtyard, a netlist or a DRC rule is.
 *   **What the user sees and does:** A README that opens with their problem in their words and gets
-    to a download without a paragraph about IPC. A 60-90 second video showing one real project going
-    from a schematic they did not draw to a check they can understand and an enclosure that fits. A
+    to a download without a paragraph about IPC. Short, muted, captioned videos showing one real
+    project going from a schematic they did not draw to a check they can understand and an
+    enclosure that fits. A
     quick-start project they can open in one click, with something mildly wrong in it, so the app
     has something true and useful to say the first time they press a button. Docs whose first
     screen of every page is the outcome, with the depth below it for when they want it. And, for
     the Windows and Linux user particularly, a clear invitation that says what is unverified on
     their platform and that a report is the most valuable thing they can send back.
+*   **The video viewer specifically** (added 2026-10-10, `CTX-408.7`):
+    - They are scrolling a feed, usually with the sound off, and decide within about two seconds
+      whether to stop.
+    - They will not read a full app window to find the one line that matters, and they will not
+      wait out a spinner.
+    - So each cut opens on its strongest image, pulls each finding out of the UI and holds it until
+      its caption can be read, and never shows waiting.
+    - The 15s cut has to work for someone who watches only that. The longer cuts are for someone
+      who stopped scrolling.
