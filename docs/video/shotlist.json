@@ -1,0 +1,135 @@
+{
+  "about": "One shot list for the 15s, 30s and ~60s cuts (CTX-408.7). Each shot says how long it runs in each cut; a cut that does not list a shot drops it. Captions carry the whole story, with no sound. A caption that states a number is checked against the source frame it came from by scripts/check_shotlist.py. Crops are [x, y, width, height] in the source capture's own pixels.",
+  "session": "s1",
+  "captures_dir": "video-captures/s1",
+  "site_url": "https://gittielabs.github.io/copperplane",
+  "cuts": {
+    "15": {"target_seconds": 15, "tolerance": 0.25},
+    "30": {"target_seconds": 30, "tolerance": 0.25},
+    "60": {"target_seconds": 60, "tolerance": 5}
+  },
+  "shots": [
+    {
+      "id": "s1-hook",
+      "segment": 1,
+      "kind": "still",
+      "source": "kicad-01-pcb-editor",
+      "notes": "The board in KiCad's PCB editor, dark. A slow push-in. No number, no pullout.",
+      "duration": {"15": 1.5, "30": 2.0, "60": 4.0},
+      "captions": [
+        {"text": "Your breadboard works.", "cuts": ["15", "30", "60"]},
+        {"text": "Now make it a real board.", "cuts": ["60"]}
+      ]
+    },
+    {
+      "id": "s2-the-wall",
+      "segment": 2,
+      "kind": "pullout",
+      "source": "kicad-03-drc-full-line",
+      "notes": "KiCad's own DRC dialog. The violation line is the same one segment 4 explains, and its numbers match the app's.",
+      "pullouts": [
+        {"crop": [40, 150, 1400, 170], "highlight": "min annular width 0.1000 mm; actual 0.0850 mm"}
+      ],
+      "duration": {"30": 3.0, "60": 5.0},
+      "captions": [
+        {"text": "This is where a lot of projects stop.", "cuts": ["30", "60"]}
+      ]
+    },
+    {
+      "id": "s3-it-already-knew",
+      "segment": 3,
+      "kind": "pullout",
+      "source": "overview-01-findings",
+      "base_crop": [380, 600, 1940, 900],
+      "notes": "Base crop starts below the 'Where you are' card, which says the board has been checked and would contradict the caption. The pullout is an editorial camera move over a still with no pointer in it; the caption claims only that nothing beyond opening the project was done.",
+      "pullouts": [
+        {"crop": [448, 622, 1792, 314], "highlight": "Its own 5V pin (pin 5) is not connected to anything."}
+      ],
+      "duration": {"15": 5.2, "30": 7.3, "60": 10.0},
+      "captions": [
+        {"text": "Open the project. Nothing else.", "cuts": ["15", "30", "60"]},
+        {"text": "It already read the board.", "cuts": ["30", "60"]},
+        {"text": "+5V is on VIN. The 5V pin is unconnected.", "cuts": ["15", "30", "60"], "verify": "pullout:0"},
+        {"text": "It asks: is that what you meant?", "cuts": ["60"]}
+      ]
+    },
+    {
+      "id": "s4-same-files",
+      "segment": 4,
+      "kind": "pullout",
+      "source": "pcb-03-summary-and-annular",
+      "notes": "Header from pcb-02 (fresh check, KiCad's defaults), then the summary and the first annular card from pcb-03. The two numbers are the ones segment 2's dialog shows.",
+      "pullouts": [
+        {"source": "pcb-02-check-result", "crop": [460, 1316, 1780, 120], "highlight": "KiCad reports 4 design-rule violations, 1 unconnected item."},
+        {"crop": [459, 620, 1790, 90], "highlight": "four annular-width errors on D1's pads"},
+        {"crop": [476, 724, 1738, 334], "highlight": "min annular width 0.1000 mm; actual 0.0850 mm"}
+      ],
+      "duration": {"30": 7.2, "60": 10.0},
+      "captions": [
+        {"text": "Same files. Same checks as KiCad.", "cuts": ["30", "60"]},
+        {"text": "Then it says what they mean.", "cuts": ["30", "60"]},
+        {"text": "Copper ring: 0.085 mm. Minimum: 0.100 mm.", "cuts": ["30", "60"], "verify": "pullout:2"},
+        {"text": "Thin enough for the drill to break it.", "cuts": ["60"]}
+      ]
+    },
+    {
+      "id": "s5-what-no-check-reports",
+      "segment": 5,
+      "kind": "pullout",
+      "source": "review-02-not-reported-d1-sw1",
+      "notes": "The origin line in copper, then the D1 card. The review's repeated DRC findings (a known defect) stay out of frame.",
+      "pullouts": [
+        {"source": "review-01-header", "crop": [460, 466, 854, 50], "highlight": "2 of these were found by Copperplane. ERC and DRC do not report them."},
+        {"crop": [476, 854, 1738, 478], "highlight": "only has 2 pins"}
+      ],
+      "duration": {"15": 5.8, "30": 8.0, "60": 10.5},
+      "captions": [
+        {"text": "Then, what no check reports.", "cuts": ["30", "60"]},
+        {"text": "A symbol with 2 pins.", "cuts": ["15", "30", "60"], "verify": "pullout:1"},
+        {"text": "A footprint with 4 pads.", "cuts": ["15", "30", "60"], "verify": "pullout:1"},
+        {"text": "No rule was broken.", "cuts": ["15", "30", "60"]},
+        {"text": "It was never going to work.", "cuts": ["60"]}
+      ]
+    },
+    {
+      "id": "s6-the-case",
+      "segment": 6,
+      "kind": "pullout",
+      "source": "enclosure-01-measured-height",
+      "notes": "The measured-height callout, then the real orbit from take A (motion measured at 8.5-11.3 s).",
+      "pullouts": [
+        {"crop": [448, 1048, 940, 92], "highlight": "14.1mm needed, set by D1"}
+      ],
+      "clip": {"take": "take-a-enclosure-orbit", "in": 8.3, "out": 11.6, "crop": [1100, 60, 1300, 1000]},
+      "duration": {"60": 9.0},
+      "captions": [
+        {"text": "It sizes a case from your board.", "cuts": ["60"]},
+        {"text": "Needs 14.1 mm inside. Set by D1.", "cuts": ["60"], "verify": "pullout:0"},
+        {"text": "And says what it couldn't measure.", "cuts": ["60"]}
+      ]
+    },
+    {
+      "id": "s7-whose-machine",
+      "segment": 7,
+      "kind": "split",
+      "sources": ["kicad-01-pcb-editor", "overview-01-findings"],
+      "notes": "Two real captures side by side, presented as two windows: KiCad unchanged, Copperplane beside it.",
+      "duration": {"60": 5.0},
+      "captions": [
+        {"text": "It reads your files.", "cuts": ["60"]},
+        {"text": "It doesn't take them over.", "cuts": ["60"]}
+      ]
+    },
+    {
+      "id": "s8-close",
+      "segment": 8,
+      "kind": "card",
+      "notes": "Stacked lockup on dark (brand/png/lockup-stacked-on-dark-1200.png), with the site URL set as part of the card, not as a caption.",
+      "card_text": ["gittielabs.github.io/copperplane"],
+      "duration": {"15": 2.5, "30": 2.5, "60": 4.5},
+      "captions": [
+        {"text": "Free. Open. Runs on your machine.", "cuts": ["15", "30", "60"]}
+      ]
+    }
+  ]
+}
