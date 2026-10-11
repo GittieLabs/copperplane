@@ -101,6 +101,21 @@ class TestStructuralChecksCanFail(unittest.TestCase):
             shot(sl, 's8-close')['card_text'] = ['gittielabs.github.io/hardware-agent-studio']
         self.assertTrue(any('site URL' in p for p in self.problems_after(mutate)))
 
+    def test_008_a_caption_that_shows_a_pullout_that_does_not_exist(self):
+        def mutate(sl):
+            shot(sl, 's3-it-already-knew')['captions'][1]['shows'] = 4
+        self.assertTrue(any('names no pullout' in p for p in self.problems_after(mutate)))
+
+    def test_009_a_caption_that_shows_a_clip_on_a_shot_without_one(self):
+        def mutate(sl):
+            shot(sl, 's3-it-already-knew')['captions'][1]['shows'] = 'clip'
+        self.assertTrue(any('has none' in p for p in self.problems_after(mutate)))
+
+    def test_010_a_continuation_that_does_not_share_its_card(self):
+        def mutate(sl):
+            shot(sl, 's5-what-no-check-reports')['pullouts'][2]['crop'] = [476, 854, 1738, 400]
+        self.assertTrue(any('continues a card' in p for p in self.problems_after(mutate)))
+
     def test_007_a_banned_phrase(self):
         def mutate(sl):
             shot(sl, 's7-whose-machine')['captions'][0]['text'] = 'It just reads your files.'

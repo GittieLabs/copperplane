@@ -16,9 +16,11 @@ export function layoutFor(format) {
   if (format === '9x16') {
     return {
       W, H, pad,
-      media: { x: pad, y: Math.round(H * 0.16), w: W - 2 * pad, h: Math.round(H * 0.52) },
+      media: { x: pad, y: Math.round(H * 0.1), w: W - 2 * pad, h: Math.round(H * 0.6) },
       caption: { x: pad, y: Math.round(H * 0.72), w: W - 2 * pad, h: Math.round(H * 0.16) },
       captionSize: 68,
+      zoomWidth: 0.92,
+      cardTextPx: 52,
     };
   }
   if (format === '1x1') {
@@ -27,6 +29,8 @@ export function layoutFor(format) {
       media: { x: pad, y: pad, w: W - 2 * pad, h: Math.round(H * 0.68) },
       caption: { x: pad, y: Math.round(H * 0.76), w: W - 2 * pad, h: Math.round(H * 0.2) },
       captionSize: 52,
+      zoomWidth: 0.9,
+      cardTextPx: 44,
     };
   }
   return {
@@ -34,6 +38,8 @@ export function layoutFor(format) {
     media: { x: pad, y: pad, w: W - 2 * pad, h: Math.round(H * 0.74) },
     caption: { x: pad, y: Math.round(H * 0.82), w: W - 2 * pad, h: Math.round(H * 0.15) },
     captionSize: 56,
+    zoomWidth: 0.66,
+    cardTextPx: 46,
   };
 }
 

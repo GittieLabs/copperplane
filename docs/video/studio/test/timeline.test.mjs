@@ -1,14 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { buildTimeline, readingSeconds, toSrt, ESTABLISH } from '../src/timeline.js';
+import { buildTimeline, readingSeconds, toSrt, SHORT_ESTABLISH } from '../src/timeline.js';
 import { layoutFor, FORMATS, fit } from '../src/layout.js';
 import { spring, track, rng, CARD } from '../src/motion.js';
 
 const shotlist = JSON.parse(readFileSync(fileURLToPath(new URL('../../shotlist.json', import.meta.url)), 'utf8'));
 const CUTS = Object.keys(shotlist.cuts);
+const BUILT = fileURLToPath(new URL('../build/data.json', import.meta.url));
 
 test('each cut runs as long as its shots add up to', () => {
   for (const cut of CUTS) {
@@ -46,7 +47,7 @@ test('pullouts lift after the window is established and before the shot ends', (
   for (const cut of CUTS) {
     for (const s of buildTimeline(shotlist, cut).shots) {
       for (const b of s.beats) {
-        assert.ok(b.start >= s.start + Math.min(ESTABLISH, 0.15 * (s.end - s.start)) - 1e-9, `${cut} ${s.id}`);
+        assert.ok(b.start >= s.start + SHORT_ESTABLISH - 1e-9, `${cut} ${s.id}`);
         assert.ok(b.end <= s.end + 1e-9, `${cut} ${s.id}`);
       }
     }
@@ -94,4 +95,32 @@ test('seeded noise repeats exactly, so renders are identical', () => {
   const a = rng(408);
   const b = rng(408);
   for (let i = 0; i < 100; i++) assert.equal(a(), b());
+});
+
+test('a pullout lifts no later than the caption that shows it', () => {
+  for (const cut of CUTS) {
+    for (const s of buildTimeline(shotlist, cut).shots) {
+      for (const b of s.beats.filter((b) => b.kind === 'pullout')) {
+        const c = s.captions.find((c) => c.shows === b.index);
+        if (c) assert.ok(b.start <= Math.max(c.start, s.start + SHORT_ESTABLISH) + 1e-9, `${cut} ${s.id} pullout ${b.index}`);
+      }
+    }
+  }
+});
+
+// The page draws from build/data.json, not the shot list. A field prepare.py
+// forgets to copy is silently undefined in the page: on 2026-10-10 a dropped
+// `continues` turned a pan into a card that fell back into the window and
+// lifted again. Runs only where build/ exists (it is made from the captures).
+test('every pullout field the page reads survives into build/data.json', { skip: !existsSync(BUILT) && 'no build/ here' }, () => {
+  const data = JSON.parse(readFileSync(BUILT, 'utf8'));
+  for (const shot of shotlist.shots) {
+    (shot.pullouts || []).forEach((p, i) => {
+      const built = data.shots[shot.id].pullouts[i];
+      assert.equal(built.continues, Boolean(p.continues), `${shot.id} pullout ${i}: continues`);
+      assert.equal(built.accent, p.accent || 'green', `${shot.id} pullout ${i}: accent`);
+      assert.deepEqual(built.crop, p.crop, `${shot.id} pullout ${i}: crop`);
+      assert.ok(built.highlights.length > 0, `${shot.id} pullout ${i}: no highlight boxes`);
+    });
+  }
 });

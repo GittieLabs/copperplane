@@ -48,7 +48,7 @@ for (const { cut, format } of jobs) {
   page.on('pageerror', (e) => { console.error(`page error: ${e.message}`); process.exitCode = 1; });
   await page.goto(`${origin}/index.html?cut=${cut}&format=${format}`);
   await page.evaluate(() => window.ready);
-  const { duration, srt } = await page.evaluate(() => window.studio);
+  const { duration, srt, timeline } = await page.evaluate(() => window.studio);
   const from = Number(arg('from', 0));
   const to = Math.min(duration, Number(arg('to', duration)));
   const name = `cut-${cut}-${format}`;
@@ -73,6 +73,7 @@ for (const { cut, format } of jobs) {
   const code = await new Promise((r) => ff.on('close', r));
   if (code !== 0) { console.error(`ffmpeg exited ${code} for ${name}`); process.exitCode = 1; }
   writeFileSync(join(HERE, 'out', `${name}.srt`), srt);
+  writeFileSync(join(HERE, 'out', `${name}.timeline.json`), JSON.stringify(timeline, null, 1));
   console.log(`${name}: ${total} frames, ${(to - from).toFixed(2)}s, rendered in ${((Date.now() - started) / 1000).toFixed(0)}s -> out/${name}.mp4`);
   await page.close();
 }
