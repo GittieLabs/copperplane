@@ -1,5 +1,5 @@
 {
-  "about": "One shot list for the 15s, 30s and ~60s cuts (CTX-408.7). Each shot says how long it runs in each cut; a cut that does not list a shot drops it. Captions carry the whole story, with no sound. A caption that states a number is checked against the source frame it came from by scripts/check_shotlist.py. Crops are [x, y, width, height] in the source capture's own pixels. A caption's \"shows\" names the pullout (or \"clip\") it brings up, so the picture changes with the words. A pullout with \"continues\" re-points the highlight inside the card already up.",
+  "about": "One shot list for the 15s, 30s and ~60s cuts (CTX-408.7). Each shot says how long it runs in each cut; a cut that does not list a shot drops it. Captions carry the whole story, with no sound. A caption that states a number is checked against the source frame it came from by scripts/check_shotlist.py. Crops are [x, y, width, height] in the source capture's own pixels. A caption's \"shows\" names the pullout (or \"clip\") it brings up, so the picture changes with the words. A pullout with \"continues\" re-points the highlight inside the card already up. Shot s0 is the one illustration; \"shows\": \"morph\" starts its breadboard-to-PCB morph with that caption.",
   "session": "s1",
   "captures_dir": "video-captures/s1",
   "site_url": "https://gittielabs.github.io/copperplane",
@@ -10,18 +10,26 @@
   },
   "shots": [
     {
+      "id": "s0-cold-open",
+      "segment": 0,
+      "kind": "illustration",
+      "notes": "The only illustrated shot: a vector breadboard (Arduino, R1, a pushbutton, a blinking LED) that routes itself into a PCB. A metaphor, not a capture; every app screen stays real. Wired the way a breadboard connects, and routable: no crossing traces, 45-degree bends. Its first frame is the thumbnail, so the first line is on screen at 0 s.",
+      "duration": {"15": 4.3, "30": 4.3, "60": 4.5},
+      "captions": [
+        {"text": "It works on the breadboard.", "cuts": ["15", "30", "60"]},
+        {"text": "Will it work as a PCB?", "cuts": ["15", "30", "60"], "shows": "morph"}
+      ]
+    },
+    {
       "id": "s1-hook",
       "segment": 1,
       "kind": "still",
       "source": "kicad-01-pcb-editor",
-      "notes": "The board in KiCad's PCB editor, cropped to the board so it fills the frame: all four mounting holes, SW1, D1 and R1. The push-in drifts toward D1, the LED segment 5 shows was never going to work: the opening quietly points at the punchline. No number, no pullout.",
+      "notes": "The real board in KiCad, cropped to the board: the match cut out of the illustrated PCB. The push-in drifts toward D1, the LED segment 5 shows was never going to work.",
       "base_crop": [760, 230, 2300, 2080],
       "push_to": [2043, 2107],
-      "duration": {"15": 1.5, "30": 2.0, "60": 4.0},
-      "captions": [
-        {"text": "Your breadboard works.", "cuts": ["15", "30", "60"]},
-        {"text": "Now make it a real board.", "cuts": ["60"]}
-      ]
+      "duration": {"60": 3.0},
+      "captions": [{"text": "Here's the real one, in KiCad.", "cuts": ["60"]}]
     },
     {
       "id": "s2-the-wall",
@@ -41,16 +49,11 @@
       "base_crop": [380, 600, 1940, 900],
       "notes": "Base crop starts below the 'Where you are' card, which says the board has been checked and would contradict the caption. The pullout is an editorial camera move over a still with no pointer in it; the caption claims only that nothing beyond opening the project was done.",
       "pullouts": [{"crop": [448, 622, 1792, 314], "highlight": "Its own 5V pin (pin 5) is not connected to anything."}],
-      "duration": {"15": 5.2, "30": 7.3, "60": 10.0},
+      "duration": {"30": 5.2, "60": 10.0},
       "captions": [
-        {"text": "Open the project. Nothing else.", "cuts": ["15", "30", "60"]},
-        {"text": "It already read the board.", "cuts": ["30", "60"], "shows": 0},
-        {
-          "text": "+5V is on VIN. The 5V pin is unconnected.",
-          "cuts": ["15", "30", "60"],
-          "verify": "pullout:0",
-          "shows": 0
-        },
+        {"text": "Open the project. Nothing else.", "cuts": ["30", "60"]},
+        {"text": "It already read the board.", "cuts": ["60"], "shows": 0},
+        {"text": "+5V is on VIN. The 5V pin is unconnected.", "cuts": ["30", "60"], "verify": "pullout:0", "shows": 0},
         {"text": "It asks: is that what you meant?", "cuts": ["60"], "shows": 0}
       ]
     },
@@ -93,13 +96,13 @@
         {"crop": [476, 854, 1738, 478], "highlight": "only has 2 pins"},
         {"crop": [476, 854, 1738, 478], "continues": true, "highlight": "is a 4-pad footprint"}
       ],
-      "duration": {"15": 5.8, "30": 8.0, "60": 10.5},
+      "duration": {"15": 8.2, "30": 8.0, "60": 10.5},
       "captions": [
         {"text": "Then, what no check reports.", "cuts": ["30", "60"], "shows": 0},
         {"text": "A symbol with 2 pins.", "cuts": ["15", "30", "60"], "verify": "pullout:1", "shows": 1},
         {"text": "A footprint with 4 pads.", "cuts": ["15", "30", "60"], "verify": "pullout:2", "shows": 2},
         {"text": "No rule was broken.", "cuts": ["15", "30", "60"], "shows": 2},
-        {"text": "It was never going to work.", "cuts": ["60"], "shows": 2}
+        {"text": "It was never going to work.", "cuts": ["15", "60"], "shows": 2}
       ]
     },
     {
@@ -135,7 +138,7 @@
       "kind": "card",
       "notes": "Stacked lockup on dark (brand/png/lockup-stacked-on-dark-1200.png), with the site URL set as part of the card, not as a caption.",
       "card_text": ["gittielabs.github.io/copperplane"],
-      "duration": {"15": 2.5, "30": 2.5, "60": 4.5},
+      "duration": {"15": 2.5, "30": 2.3, "60": 4.5},
       "captions": [{"text": "Free. Open. Runs on your machine.", "cuts": ["15", "30", "60"]}]
     }
   ]

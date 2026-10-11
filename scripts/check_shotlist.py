@@ -126,7 +126,10 @@ def structural_problems(shotlist):
                 problems.append(f"{s['id']}: caption states a number but names no frame to check it against: {text!r}")
             if 'shows' in c:
                 shows, pullouts = c['shows'], s.get('pullouts', [])
-                if shows == 'clip':
+                if shows == 'morph':
+                    if s.get('kind') != 'illustration':
+                        problems.append(f"{s['id']}: caption shows the morph, which only the illustration has: {text!r}")
+                elif shows == 'clip':
                     if 'clip' not in s:
                         problems.append(f"{s['id']}: caption shows the clip but the shot has none: {text!r}")
                 elif not isinstance(shows, int) or not 0 <= shows < len(pullouts):

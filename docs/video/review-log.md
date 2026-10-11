@@ -88,6 +88,41 @@ found the worst defect of the whole loop.
   is the LED segment 5 shows was never going to work, so the opening quietly points at the punchline.
 - Nothing else scored under 8.
 
+## Round 4: the maintainer's first watch (Phase 6)
+
+**Verdict:** "I'm missing the 'catch your attention quick' moment. Even a maker might miss the fact
+this video is for them."
+
+My round-3 score of 8 for the hook was wrong, and this is why.
+
+- **The first frame was a PCB layout in KiCad.** That is the stage a breadboard maker has not
+  reached, so it said "for people who already do PCBs".
+- **"Your breadboard works." was a statement,** with nothing to make a scroller stop.
+- **The tension arrived late:** at 7 s in the 15 s cut, and after 25 s in the 60 s cut.
+
+I had scored the hook on composition and motion, and never asked who it was talking to.
+
+**Fix:** a cold open, "It works on the breadboard." → "Will it work as a PCB?"
+
+- **It is illustrated in vector,** because no breadboard footage exists. An Arduino, R1, a button
+  and a blinking LED sit on a breadboard drawn the way breadboards connect.
+- **The jumpers settle into 45-degree traces** and the breadboard becomes a routable PCB, with no
+  crossing traces.
+- **The camera then leans in on D1 while its pads pulse.** That is the LED the next shot shows was
+  never going to work.
+- **First frame:** the line is already set and the LED is lit, because it is the thumbnail.
+
+**Storyboard critique, before animating:**
+
+- the first layout floated small in 9:16, so tall formats now stand the drawing upright;
+- its traces crossed, so the circuit was rewired column by column, the way a breadboard connects;
+- the morph finished in half a second and then held still for 1.7 s, so it slowed to about 1 s,
+  and the lean-in now fills the rest;
+- the leaning board ran into the caption band, so it is clipped.
+
+**The 15 s cut changed shape.** The two hook lines need 4.3 s to read, so it became the cold open
+plus the D1 answer, dropping the +5V finding.
+
 **Still visible, not fixed:**
 
 - **Weakest contrast in the cut:** "4 design-rule violations, 1 unconnected item" is the app's orange

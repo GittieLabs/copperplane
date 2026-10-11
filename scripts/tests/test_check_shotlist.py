@@ -73,7 +73,7 @@ class TestStructuralChecksCanFail(unittest.TestCase):
 
     def test_001_a_cut_that_no_longer_adds_up(self):
         def mutate(sl):
-            shot(sl, 's1-hook')['duration']['15'] += 1
+            shot(sl, 's0-cold-open')['duration']['15'] += 1
         self.assertTrue(any('cut 15' in p for p in self.problems_after(mutate)))
 
     def test_002_a_caption_too_long_for_a_phone(self):
@@ -93,7 +93,7 @@ class TestStructuralChecksCanFail(unittest.TestCase):
 
     def test_005_a_shot_too_short_to_read_its_captions(self):
         def mutate(sl):
-            shot(sl, 's3-it-already-knew')['duration']['15'] = 2.0
+            shot(sl, 's5-what-no-check-reports')['duration']['15'] = 2.0
         self.assertTrue(any('to read' in p for p in self.problems_after(mutate)))
 
     def test_006_a_close_card_url_that_is_not_the_site(self):
@@ -115,6 +115,11 @@ class TestStructuralChecksCanFail(unittest.TestCase):
         def mutate(sl):
             shot(sl, 's5-what-no-check-reports')['pullouts'][2]['crop'] = [476, 854, 1738, 400]
         self.assertTrue(any('continues a card' in p for p in self.problems_after(mutate)))
+
+    def test_011_the_morph_belongs_only_to_the_illustration(self):
+        def mutate(sl):
+            shot(sl, 's3-it-already-knew')['captions'][2]['shows'] = 'morph'
+        self.assertTrue(any('only the illustration' in p for p in self.problems_after(mutate)))
 
     def test_007_a_banned_phrase(self):
         def mutate(sl):
