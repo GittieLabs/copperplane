@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Copperplane video studio</title>
+<style>
+  html, body { margin: 0; background: #0A1410; }
+  canvas { display: block; max-width: 100vw; max-height: 100vh; margin: 0 auto; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// ?cut=15|30|60&format=9x16|1x1|16x9. Opened in a normal browser it loops as a
+// live preview; under Playwright (navigator.webdriver) it waits for seek(t).
+import { buildTimeline, toSrt } from './src/timeline.js';
+import { layoutFor } from './src/layout.js';
+import { draw } from './src/draw.js';
+
+const q = new URLSearchParams(location.search);
+const cut = q.get('cut') || '15';
+const format = q.get('format') || '9x16';
+
+async function loadImage(src) {
+  const img = new Image();
+  img.src = src;
+  await img.decode();
+  return img;
+}
+
+async function loadFonts() {
+  const base = './node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin';
+  for (const weight of [400, 600]) {
+    const face = new FontFace('IBM Plex Sans', `url(${base}-${weight}-normal.woff2)`, { weight: String(weight) });
+    document.fonts.add(await face.load());
+  }
+}
+
+async function setup() {
+  const [shotlist, data] = await Promise.all([
+    fetch('./build/shotlist.json').then((r) => r.json()),
+    fetch('./build/data.json').then((r) => r.json()),
+    loadFonts(),
+  ]);
+  const files = new Map();
+  for (const [name, info] of Object.entries(data.images)) files.set(name, `./build/${info.file}`);
+  for (const shot of Object.values(data.shots)) {
+    for (const p of shot.pullouts) files.set(p.file, `./build/${p.file}`);
+    if (shot.clip) for (const f of shot.clip.frames) files.set(f, `./build/${f}`);
+  }
+  files.set(data.lockup, `./build/${data.lockup}`);
+  const images = {};
+  await Promise.all([...files].map(async ([k, src]) => { images[k] = await loadImage(src); }));
+
+  const layout = layoutFor(format);
+  const timeline = buildTimeline(shotlist, cut);
+  const canvas = document.getElementById('c');
+  canvas.width = layout.W;
+  canvas.height = layout.H;
+  const ctx = canvas.getContext('2d');
+  const scene = { data, images, layout, timeline };
+
+  window.seek = (t) => { draw(ctx, scene, t); return true; };
+  window.studio = { cut, format, duration: timeline.duration, srt: toSrt(timeline) };
+
+  if (!navigator.webdriver) {
+    const t0 = performance.now();
+    const loop = () => { draw(ctx, scene, ((performance.now() - t0) / 1000) % timeline.duration); requestAnimationFrame(loop); };
+    loop();
+  }
+}
+
+window.ready = setup();
+</script>
+</body>
+</html>
