@@ -6,6 +6,9 @@ export const FORMATS = {
   '9x16': { width: 1080, height: 1920 },
   '1x1': { width: 1080, height: 1080 },
   '16x9': { width: 1920, height: 1080 },
+  // LinkedIn's mobile feed shows 4:5 taller than square: more of the screen as
+  // someone scrolls past (CTX-408.8).
+  '4x5': { width: 1080, height: 1350 },
 };
 
 export function layoutFor(format) {
@@ -21,6 +24,16 @@ export function layoutFor(format) {
       captionSize: 68,
       zoomWidth: 0.92,
       cardTextPx: 52,
+    };
+  }
+  if (format === '4x5') {
+    return {
+      W, H, pad,
+      media: { x: pad, y: Math.round(H * 0.06), w: W - 2 * pad, h: Math.round(H * 0.66) },
+      caption: { x: pad, y: Math.round(H * 0.75), w: W - 2 * pad, h: Math.round(H * 0.2) },
+      captionSize: 56,
+      zoomWidth: 0.92,
+      cardTextPx: 48,
     };
   }
   if (format === '1x1') {
