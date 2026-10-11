@@ -42,6 +42,7 @@ export default defineConfig({
         {
           label: 'Start here',
           items: [
+            { label: 'Watch it', slug: 'watch' },
             { label: 'Why this exists', slug: 'why' },
             { label: 'What it is, and what it is not', slug: 'what-it-is' },
             { label: 'Install', slug: 'install' },
