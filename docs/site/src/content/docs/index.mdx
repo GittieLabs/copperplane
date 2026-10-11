@@ -4,10 +4,29 @@ description: A co-pilot for your first real circuit board. It reads your KiCad p
 template: splash
 hero:
   tagline: Your breadboard works. Copperplane helps with the next part — a real board, checks you can actually read, and a case that fits it. It works alongside KiCad and FreeCAD, not instead of them.
+  # The video sits in the hero, so it is in the first screen on every device:
+  # beside the tagline on a desktop, under it on a phone. Phones get the 15 s
+  # vertical cut (the first <source> whose media query matches wins); everything
+  # else gets the 30 s 16:9 cut. All muted, so it autoplays.
+  # One poster serves both: before the first frame (or where autoplay is blocked,
+  # e.g. iOS Low Power Mode) a phone shows the 16:9 hook frame letterboxed in the
+  # vertical box. A script to swap it is dropped by Astro's MDX, so there is none.
+  image:
+    html: >-
+      <video id="hero-video" autoplay muted loop playsinline preload="metadata"
+      poster="/copperplane/video/copperplane-30s-16x9-poster.jpg"
+      aria-label="Copperplane in 30 seconds: a breadboard becomes a PCB, then the app reads a real KiCad project and points at what the usual checks miss"
+      style="width: 100%; max-height: 72vh; object-fit: contain; border-radius: 12px; background: #0A1410;">
+      <source media="(max-width: 50rem)" src="/copperplane/video/copperplane-15s-9x16.mp4" type="video/mp4">
+      <source src="/copperplane/video/copperplane-30s-16x9.mp4" type="video/mp4">
+      </video>
   actions:
+    - text: Watch it (30 s)
+      link: /copperplane/watch/
+      icon: right-arrow
     - text: Why this exists
       link: /copperplane/why/
-      icon: right-arrow
+      variant: minimal
     - text: Install
       link: /copperplane/install/
       variant: minimal
@@ -18,20 +37,6 @@ hero:
 ---
 
 import { Card, CardGrid, Aside } from '@astrojs/starlight/components'
-
-<video
-  src="/copperplane/video/copperplane-30s-16x9.mp4"
-  poster="/copperplane/video/copperplane-30s-16x9-poster.jpg"
-  autoplay
-  muted
-  loop
-  playsinline
-  preload="metadata"
-  aria-label="Copperplane in 30 seconds: a breadboard becomes a PCB, then the app reads a real KiCad project and points at what the usual checks miss"
-  style="width: 100%; border-radius: 12px;"
-></video>
-
-Thirty seconds, captioned. [Watch it with controls, or download a cut to share](/copperplane/watch/).
 
 <Aside type="caution" title="Early, and honest about it">
 Every release publishes a build for **macOS (both architectures), Windows and
