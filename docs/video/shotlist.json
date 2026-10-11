@@ -28,7 +28,7 @@
       "source": "kicad-03-drc-full-line",
       "notes": "KiCad's own DRC dialog. The violation line is the same one segment 4 explains, and its numbers match the app's.",
       "pullouts": [
-        {"crop": [40, 150, 1400, 170], "highlight": "min annular width 0.1000 mm; actual 0.0850 mm"}
+        {"crop": [40, 150, 1400, 164], "highlight": "min annular width 0.1000 mm; actual 0.0850 mm"}
       ],
       "duration": {"30": 3.0, "60": 5.0},
       "captions": [
@@ -79,7 +79,7 @@
       "source": "review-02-not-reported-d1-sw1",
       "notes": "The origin line in copper, then the D1 card. The review's repeated DRC findings (a known defect) stay out of frame.",
       "pullouts": [
-        {"source": "review-01-header", "crop": [460, 466, 854, 50], "highlight": "2 of these were found by Copperplane. ERC and DRC do not report them."},
+        {"source": "review-01-header", "crop": [460, 466, 854, 50], "accent": "copper", "highlight": "2 of these were found by Copperplane. ERC and DRC do not report them."},
         {"crop": [476, 854, 1738, 478], "highlight": "only has 2 pins"}
       ],
       "duration": {"15": 5.8, "30": 8.0, "60": 10.5},

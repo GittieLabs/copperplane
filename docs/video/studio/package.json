@@ -1,0 +1,14 @@
+{
+  "name": "copperplane-video-studio",
+  "private": true,
+  "description": "Renders the product-video cuts from docs/video/shotlist.json (CTX-408.7).",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "@fontsource/ibm-plex-sans": "5.3.0",
+    "playwright-core": "1.63.0"
+  }
+}
