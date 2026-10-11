@@ -61,7 +61,11 @@ async function setup() {
   const scene = { data, images, layout, timeline };
 
   window.seek = (t) => { draw(ctx, scene, t); return true; };
-  window.studio = { cut, format, duration: timeline.duration, srt: toSrt(timeline) };
+  window.studio = {
+    cut, format, duration: timeline.duration, srt: toSrt(timeline),
+    timeline: timeline.shots.map((s) => ({ id: s.id, start: s.start, end: s.end, beats: s.beats,
+                                           captions: s.captions.map(({ text, start, end }) => ({ text, start, end })) })),
+  };
 
   if (!navigator.webdriver) {
     const t0 = performance.now();

@@ -11,6 +11,9 @@ export const PAPER = '#F4F7F3';
 export const BRIGHT = '#4FC17E';
 const HIGHLIGHT = { green: '#A6E8C0', copper: '#F3C6A2' };
 
+// The push-in overlaps the lift: one move, not two.
+export const ZOOM_DELAY = 0.45;
+
 const FONT = '"IBM Plex Sans", system-ui, sans-serif';
 
 let gridCache = null;
@@ -59,13 +62,30 @@ function drawBase(ctx, scene, shot, lt, L) {
   // Entry: the window settles in with weight. The hook keeps pushing in slowly.
   const settle = springOf(lt, HEAVY);
   let scale = lerp(1.035, 1, settle);
-  if (shot.kind === 'still') scale *= 1 + 0.06 * clamp(lt / (shot.end - shot.start));
+  scale *= 1 + (shot.kind === 'still' ? 0.06 : 0.02) * clamp(lt / (shot.end - shot.start));
   const cx = placed.x + placed.w / 2;
   const cy = placed.y + placed.h / 2;
-  const drawn = { x: cx - (placed.w * scale) / 2, y: cy - (placed.h * scale) / 2 + (1 - settle) * 24,
+  // A still can push in toward a point (source px) instead of its centre.
+  let ox = 0, oy = 0;
+  if (shot.push_to) {
+    const p = clamp(lt / (shot.end - shot.start));
+    const px = placed.x + (shot.push_to[0] - (bc ? bc[0] : 0)) * placed.s;
+    const py = placed.y + (shot.push_to[1] - (bc ? bc[1] : 0)) * placed.s;
+    const e = p * p * (3 - 2 * p);
+    scale *= 1 + 0.32 * e;
+    // Zoom about the point (it stays put while everything grows), then carry
+    // the point most of the way toward the middle of the frame.
+    ox = (cx - px) * (scale - 1) + (cx - px) * 0.6 * e;
+    oy = (cy - py) * (scale - 1) + (cy - py) * 0.6 * e;
+  }
+  const drawn = { x: cx - (placed.w * scale) / 2 + ox, y: cy - (placed.h * scale) / 2 + (1 - settle) * 24 + oy,
                   w: placed.w * scale, h: placed.h * scale, s: placed.s * scale };
   if (bc) {
     ctx.save();
+    // A pushed-in base never runs into the caption band.
+    ctx.beginPath();
+    ctx.rect(0, 0, L.W, L.caption.y - L.pad * 0.4);
+    ctx.clip();
     roundRect(ctx, drawn.x, drawn.y, drawn.w, drawn.h, 18);
     ctx.clip();
     ctx.drawImage(img, bc[0], bc[1], bc[2], bc[3], drawn.x, drawn.y, drawn.w, drawn.h);
@@ -85,6 +105,21 @@ function cardTarget(L, w, h) {
   return { x: L.media.x + (L.media.w - tw) / 2, y: L.media.y + (L.media.h - th) / 2, w: tw, h: th };
 }
 
+// Where a pullout's card sits, how far the camera pushes in on its phrase, and
+// the point it pushes in on. All at full lift and full zoom; callers blend.
+function cardGeometry(L, img, p) {
+  const r = cardTarget(L, img.width, img.height);
+  const k0 = r.w / img.width;
+  const hb = p.highlights.reduce((u, [hx, hy, hw, hh]) => [
+    Math.min(u[0], hx), Math.min(u[1], hy), Math.max(u[2], hx + hw), Math.max(u[3], hy + hh)],
+  [Infinity, Infinity, -Infinity, -Infinity]);
+  const lineH = p.highlights.reduce((a, h) => a + h[3], 0) / p.highlights.length;
+  // Push in until the phrase spans the frame, but never past readable text
+  // size: in 16:9 a width-only rule made 1,920-px-wide type.
+  const zoom = clamp(Math.min((L.W * L.zoomWidth) / ((hb[2] - hb[0]) * k0), L.cardTextPx / (lineH * k0)), 1, 4);
+  return { r, k0, zoom, hc: { x: r.x + ((hb[0] + hb[2]) / 2) * k0, y: r.y + ((hb[1] + hb[3]) / 2) * k0 } };
+}
+
 function drawPullouts(ctx, scene, shot, t, L, base) {
   const prep = scene.data.shots[shot.id];
   const beats = shot.beats.filter((b) => b.kind === 'pullout');
@@ -93,47 +128,65 @@ function drawPullouts(ctx, scene, shot, t, L, base) {
 
   // The window dims once and stays dimmed while cards are up.
   const dimOut = clip ? springOf(t - clip.start, SNAPPY) : 0;
-  const dim = 0.78 * springOf(t - beats[0].start, CARD) * (1 - dimOut);
+  const dim = 0.8 * springOf(t - beats[0].start, CARD) * (1 - dimOut);
   ctx.fillStyle = `rgba(10,20,16,${dim})`;
   ctx.fillRect(0, 0, L.W, L.H);
+
+  // Cards never run into the caption band, however far the camera pushes in.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, L.W, L.caption.y - L.pad * 0.4);
+  ctx.clip();
 
   beats.forEach((b, i) => {
     if (t < b.start) return;
     const p = prep.pullouts[b.index];
+    const nextBeat = beats[i + 1];
+    const handedOn = nextBeat && prep.pullouts[nextBeat.index].continues;
+    if (handedOn && t >= nextBeat.start) return;   // the continuation draws this card now
     const img = scene.images[p.file];
-    const lift = springOf(t - b.start, CARD);
-    const next = beats[i + 1] ? beats[i + 1].start : (clip ? clip.start : Infinity);
-    const leave = springOf(t - next, SNAPPY);
+    const g = cardGeometry(L, img, p);
+    const prevBeat = beats[i - 1];
+    const continuing = p.continues && prevBeat;
+
+    const lift = continuing ? 1 : springOf(t - b.start, CARD);
+    const next = nextBeat && !handedOn ? nextBeat.start : (clip ? clip.start : Infinity);
+    const leave = handedOn ? 0 : springOf(t - next, SNAPPY);
     if (leave > 0.999) return;
 
-    const target = cardTarget(L, img.width, img.height);
+    // Zoom in after the card lands. A continuation starts fully zoomed on the
+    // previous phrase and pans to its own.
+    let zoom, hc;
+    const zoomStart = continuing ? b.start : b.start + ZOOM_DELAY;
+    const zp = springOf(t - zoomStart, HEAVY);
+    if (continuing) {
+      const pg = cardGeometry(L, scene.images[prep.pullouts[prevBeat.index].file], prep.pullouts[prevBeat.index]);
+      zoom = lerp(pg.zoom, g.zoom, zp);
+      hc = { x: lerp(pg.hc.x, g.hc.x, zp), y: lerp(pg.hc.y, g.hc.y, zp) };
+    } else {
+      zoom = lerp(1, g.zoom, zp);
+      hc = g.hc;
+    }
+    // Never a dead frame: once settled, the camera keeps drifting in slowly.
+    zoom *= 1 + 0.018 * Math.max(0, t - (zoomStart + 0.8));
+    const focusY = L.media.y + L.media.h / 2;
+    const zoomedIn = continuing ? 1 : zp;
+    const tx = lerp(hc.x, L.W / 2, zoomedIn);
+    const ty = lerp(hc.y, focusY, zoomedIn);
+
     const fromWindow = p.source === base.baseName;
     const origin = fromWindow ? mapCrop(p.crop, base.baseCrop, base.placed)
-      : { x: target.x, y: target.y + 90, w: target.w * 0.94, h: target.h * 0.94 };
+      : { x: g.r.x, y: g.r.y + 90, w: g.r.w * 0.94, h: g.r.h * 0.94 };
     const r = {
-      x: lerp(origin.x, target.x, lift), y: lerp(origin.y, target.y, lift) - leave * 70,
-      w: lerp(origin.w, target.w, lift), h: lerp(origin.h, target.h, lift),
+      x: lerp(origin.x, g.r.x, lift), y: lerp(origin.y, g.r.y, lift) - leave * 70,
+      w: lerp(origin.w, g.r.w, lift), h: lerp(origin.h, g.r.h, lift),
     };
-    // Second beat: once the card has landed, the camera pushes in on the
-    // highlighted phrase until it spans most of the frame. A whole card at phone
-    // width is as small as the window it came from; the phrase is what must read.
-    const k0 = r.w / img.width;
-    const hb = p.highlights.reduce((u, [hx, hy, hw, hh]) => [
-      Math.min(u[0], hx), Math.min(u[1], hy), Math.max(u[2], hx + hw), Math.max(u[3], hy + hh)],
-    [Infinity, Infinity, -Infinity, -Infinity]);
-    const zoomTo = clamp((L.W * 0.92) / ((hb[2] - hb[0]) * k0), 1, 3.2);
-    const zp = springOf(t - (b.start + 0.75), HEAVY);
-    const z = lerp(1, zoomTo, zp);
-    const hcx = r.x + ((hb[0] + hb[2]) / 2) * k0;
-    const hcy = r.y + ((hb[1] + hb[3]) / 2) * k0;
-    const tx = lerp(hcx, L.W / 2, zp);
-    const ty = lerp(hcy, L.media.y + L.media.h / 2, zp);
 
     ctx.save();
     ctx.translate(tx, ty);
-    ctx.scale(z, z);
-    ctx.translate(-hcx, -hcy);
-    ctx.globalAlpha = (fromWindow ? 1 : clamp(lift * 2.5)) * (1 - leave);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-hc.x, -hc.y);
+    ctx.globalAlpha = (fromWindow || continuing ? 1 : clamp(lift * 2.5)) * (1 - leave);
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
     ctx.shadowBlur = 70 * lift;
     ctx.shadowOffsetY = 28 * lift;
@@ -149,14 +202,37 @@ function drawPullouts(ctx, scene, shot, t, L, base) {
     const k = r.w / img.width;
     ctx.globalCompositeOperation = 'multiply';
     ctx.fillStyle = HIGHLIGHT[p.accent] || HIGHLIGHT.green;
+    if (continuing) {
+      // The previous phrase's highlight fades as the camera leaves it, instead of
+      // vanishing in one frame.
+      const prev = prep.pullouts[prevBeat.index];
+      ctx.save();
+      ctx.globalAlpha *= 1 - springOf(t - b.start, SNAPPY);
+      ctx.fillStyle = HIGHLIGHT[prev.accent] || HIGHLIGHT.green;
+      prev.highlights.forEach(([hx, hy, hw, hh]) => ctx.fillRect(r.x + (hx - 6) * k, r.y + (hy - 5) * k, (hw + 12) * k, (hh + 10) * k));
+      ctx.restore();
+    }
+    const sweepAt = continuing ? b.start + 0.35 : b.start + 0.5;
     p.highlights.forEach(([hx, hy, hw, hh], j) => {
-      const sweep = springOf(t - (b.start + 0.5 + 0.22 * j), SNAPPY);
+      const sweep = springOf(t - (sweepAt + 0.22 * j), SNAPPY);
       if (sweep <= 0) return;
       const padX = 6, padY = 5;
       ctx.fillRect(r.x + (hx - padX) * k, r.y + (hy - padY) * k, (hw + 2 * padX) * k * clamp(sweep), (hh + 2 * padY) * k);
     });
     ctx.restore();
   });
+
+  // A close-up runs off both sides of the frame. Fade the edges into the stage
+  // so a cut word reads as a camera move, not a crop accident.
+  const edge = L.W * 0.08;
+  for (const [x0, x1] of [[0, edge], [L.W, L.W - edge]]) {
+    const g = ctx.createLinearGradient(x0, 0, x1, 0);
+    g.addColorStop(0, 'rgba(10,20,16,0.95)');
+    g.addColorStop(1, 'rgba(10,20,16,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(Math.min(x0, x1), 0, edge, L.caption.y);
+  }
+  ctx.restore();
 }
 
 function drawClip(ctx, scene, shot, t, L) {
@@ -237,7 +313,19 @@ function wrap(ctx, words, maxW) {
     if (line.length && ctx.measureText(trial).width > maxW) lines.push([w]);
     else line.push(w);
   }
-  return lines;
+  if (lines.length !== 2) return lines;
+  // Two lines: split where the longer line is shortest, so a caption never
+  // ends on an orphan ("... Minimum: 0.100 / mm.").
+  const width = (ws) => ctx.measureText(ws.join(' ')).width;
+  let best = lines;
+  let bestW = Math.max(width(lines[0]), width(lines[1]));
+  for (let i = 1; i < words.length; i++) {
+    const a = words.slice(0, i);
+    const b = words.slice(i);
+    const w = Math.max(width(a), width(b));
+    if (w <= maxW && w < bestW) { best = [a, b]; bestW = w; }
+  }
+  return best;
 }
 
 function drawCaption(ctx, shot, t, L) {

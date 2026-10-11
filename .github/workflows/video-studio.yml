@@ -1,0 +1,33 @@
+name: "Video Studio"
+
+# The product-video compositor (CTX-408.7). Its timeline is pure JavaScript:
+# every caption gets its reading time, shots tile each cut exactly, layouts stay
+# inside the frame. Rendering needs the gitignored captures and Chrome, so CI
+# runs the tests only; the test that reads build/ skips itself here.
+on:
+  pull_request:
+    branches: [ develop, main ]
+    paths:
+      - "docs/video/**"
+      - ".github/workflows/video-studio.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs/video/studio
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Install
+        run: npm ci
+
+      - name: Test
+        run: npm test

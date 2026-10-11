@@ -7,6 +7,7 @@ export const readingSeconds = (text) => 0.6 + 0.28 * text.trim().split(/\s+/).le
 
 // The window is on screen alone for this long before the first pullout lifts.
 export const ESTABLISH = 0.7;
+export const SHORT_ESTABLISH = 0.35;
 
 export function buildTimeline(shotlist, cut) {
   if (!(cut in shotlist.cuts)) throw new Error(`unknown cut ${cut}`);
@@ -17,13 +18,8 @@ export function buildTimeline(shotlist, cut) {
     if (!duration) continue;
     const start = at;
     const end = at + duration;
-    shots.push({
-      ...shot,
-      start,
-      end,
-      captions: captionWindows(shot, cut, start, end),
-      beats: beatsFor(shot, start, end),
-    });
+    const captions = captionWindows(shot, cut, start, end);
+    shots.push({ ...shot, start, end, captions, beats: beatsFor(shot, start, end, captions) });
     at = end;
   }
   return { cut, duration: at, shots };
@@ -38,27 +34,48 @@ export function captionWindows(shot, cut, start, end) {
   const scale = total > 0 ? (end - start) / total : 0;
   let at = start;
   return shown.map((c, i) => {
-    const w = { text: c.text, start: at, end: at + need[i] * scale };
+    const w = { text: c.text, shows: c.shows, start: at, end: at + need[i] * scale };
     at = w.end;
     return w;
   });
 }
 
-// When each pullout lifts, and where a clip plays. A shot with a clip gives the
-// clip the second half; the pullouts share what is left after the establish.
-export function beatsFor(shot, start, end) {
+// Pictures change a beat before the words that talk about them, so the card is
+// already moving when its caption lands.
+export const LEAD = 0.15;
+
+// When each pullout lifts, and where a clip plays.
+//
+// A caption's `shows` anchors what it talks about: the pullout (or clip) starts
+// with the first caption in this cut that shows it. A pullout no caption in the
+// cut shows is left out of that cut. A shot whose captions anchor nothing falls
+// back to an even split, with any clip taking the second half.
+export function beatsFor(shot, start, end, captions = []) {
   const pullouts = shot.pullouts || [];
-  const establish = Math.min(ESTABLISH, 0.15 * (end - start));
-  const clipStart = shot.clip ? start + (end - start) / 2 : end;
-  const each = pullouts.length ? (clipStart - start - establish) / pullouts.length : 0;
-  const beats = pullouts.map((p, i) => ({
-    kind: 'pullout',
-    index: i,
-    start: start + establish + i * each,
-    end: start + establish + (i + 1) * each,
-  }));
-  if (shot.clip) beats.push({ kind: 'clip', start: clipStart, end });
-  return beats;
+  // When the shot's first caption already talks about a card, the window gets a
+  // short establish: the viewer needs only a glimpse of where the card comes from.
+  const leadsWithCard = captions.length > 0 && captions[0].shows !== undefined;
+  const establish = leadsWithCard ? SHORT_ESTABLISH : Math.min(ESTABLISH, 0.15 * (end - start));
+  const earliest = start + establish;
+  const anchorOf = (key) => {
+    const c = captions.find((c) => c.shows === key);
+    return c ? Math.max(earliest, c.start - LEAD) : null;
+  };
+  const anchored = captions.some((c) => c.shows !== undefined);
+
+  let marks;
+  if (anchored) {
+    marks = pullouts.map((_, i) => ({ kind: 'pullout', index: i, start: anchorOf(i) }));
+    if (shot.clip) marks.push({ kind: 'clip', start: anchorOf('clip') });
+    marks = marks.filter((m) => m.start !== null);
+  } else {
+    const clipStart = shot.clip ? start + (end - start) / 2 : end;
+    const each = pullouts.length ? (clipStart - earliest) / pullouts.length : 0;
+    marks = pullouts.map((_, i) => ({ kind: 'pullout', index: i, start: earliest + i * each }));
+    if (shot.clip) marks.push({ kind: 'clip', start: clipStart });
+  }
+  marks.sort((a, b) => a.start - b.start);
+  return marks.map((m, i) => ({ ...m, end: i + 1 < marks.length ? marks[i + 1].start : end }));
 }
 
 export function activeShot(timeline, t) {

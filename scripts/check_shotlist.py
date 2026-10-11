@@ -124,6 +124,21 @@ def structural_problems(shotlist):
                     problems.append(f"{s['id']}: caption verify {c['verify']!r} does not name a pullout")
             elif numbers_in(text):
                 problems.append(f"{s['id']}: caption states a number but names no frame to check it against: {text!r}")
+            if 'shows' in c:
+                shows, pullouts = c['shows'], s.get('pullouts', [])
+                if shows == 'clip':
+                    if 'clip' not in s:
+                        problems.append(f"{s['id']}: caption shows the clip but the shot has none: {text!r}")
+                elif not isinstance(shows, int) or not 0 <= shows < len(pullouts):
+                    problems.append(f"{s['id']}: caption shows {shows!r}, which names no pullout: {text!r}")
+        for i, p in enumerate(s.get('pullouts', [])):
+            if p.get('continues'):
+                prev = s['pullouts'][i - 1] if i else None
+                same_card = (prev is not None and prev['crop'] == p['crop']
+                             and prev.get('source', s.get('source')) == p.get('source', s.get('source')))
+                if not same_card:
+                    problems.append(f"{s['id']}: pullout {i} continues a card it does not share: "
+                                    f"it needs the same source and crop as pullout {i - 1}")
         for cut, seconds in s['duration'].items():
             needed = sum(reading_seconds(c['text']) for c in s['captions'] if cut in c['cuts'])
             if needed > seconds + 1e-9:
@@ -201,7 +216,11 @@ def capture_problems(shotlist, repo_root=REPO_ROOT):
 
     for s in shotlist['shots']:
         for name in ([s['source']] if 'source' in s else []) + s.get('sources', []):
-            frame(name, s['id'])
+            found = frame(name, s['id'])
+            if found and 'base_crop' in s and name == s.get('source'):
+                width, height = found[0]['pixels']
+                if not crop_inside(s['base_crop'], width, height):
+                    problems.append(f"{s['id']}: base_crop {s['base_crop']} is outside the {width}x{height} frame")
         texts = []
         for i, p in enumerate(s.get('pullouts', [])):
             found = frame(p.get('source', s.get('source')), f"{s['id']} pullout {i}")

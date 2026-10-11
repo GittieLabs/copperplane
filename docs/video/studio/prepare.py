@@ -163,7 +163,8 @@ def main():
             crop.save(os.path.join(BUILD, file))
             boxes = highlight_boxes(crop, p['highlight'])
             prepared['pullouts'].append({'file': file, 'source': base(source), 'crop': p['crop'],
-                                         'highlights': boxes, 'accent': p.get('accent', 'green')})
+                                         'highlights': boxes, 'accent': p.get('accent', 'green'),
+                                         'continues': bool(p.get('continues'))})
             print(f"pullout {shot['id']}[{i}]: highlight on {len(boxes)} line(s)", file=sys.stderr)
         if 'clip' in shot:
             c = shot['clip']

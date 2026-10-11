@@ -8,6 +8,9 @@ on:
       - "scripts/**"
       - "board-houses/**"
       - "docs/site/public/board-houses/**"
+      # scripts/tests/test_check_shotlist.py checks this file; a PR that changes
+      # only the shot list must still run it.
+      - "docs/video/shotlist.json"
       - ".github/workflows/python-ci.yml"
 
 jobs:
