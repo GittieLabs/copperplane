@@ -51,6 +51,11 @@ export const LEAD = 0.15;
 // cut shows is left out of that cut. A shot whose captions anchor nothing falls
 // back to an even split, with any clip taking the second half.
 export function beatsFor(shot, start, end, captions = []) {
+  if (shot.kind === 'illustration') {
+    // The breadboard routes itself into a PCB as the caption that asks about it lands.
+    const c = captions.find((c) => c.shows === 'morph');
+    return c ? [{ kind: 'morph', start: Math.max(start, c.start - LEAD), end }] : [];
+  }
   const pullouts = shot.pullouts || [];
   // When the shot's first caption already talks about a card, the window gets a
   // short establish: the viewer needs only a glimpse of where the card comes from.

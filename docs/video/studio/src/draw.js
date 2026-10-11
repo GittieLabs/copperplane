@@ -4,6 +4,7 @@
 import { clamp, lerp, springOf, CARD, HEAVY, SNAPPY, TEXT, rng } from './motion.js';
 import { activeShot } from './timeline.js';
 import { fit } from './layout.js';
+import { drawColdOpen } from './coldopen.js';
 
 // brand/README.md palette.
 export const INK = '#0A1410';
@@ -13,6 +14,10 @@ const HIGHLIGHT = { green: '#A6E8C0', copper: '#F3C6A2' };
 
 // The push-in overlaps the lift: one move, not two.
 export const ZOOM_DELAY = 0.45;
+
+// The breadboard-to-PCB morph: slow and critically damped, so it settles
+// without a wobble in about a second and a half.
+const MORPH = [16, 8];
 
 const FONT = '"IBM Plex Sans", system-ui, sans-serif';
 
@@ -331,7 +336,8 @@ function wrap(ctx, words, maxW) {
 function drawCaption(ctx, shot, t, L) {
   const c = shot.captions.find((c) => t >= c.start && t < c.end);
   if (!c) return;
-  const size = L.captionSize;
+  // The cold open's lines are titles, set larger than captions.
+  const size = Math.round(L.captionSize * (shot.kind === 'illustration' ? 1.25 : 1));
   ctx.save();
   ctx.font = `600 ${size}px ${FONT}`;
   ctx.textBaseline = 'alphabetic';
@@ -348,7 +354,9 @@ function drawCaption(ctx, shot, t, L) {
     let x = L.W / 2 - total / 2;
     line.forEach((w, wi) => {
       // Words arrive one after another and settle without overshoot.
-      const p = springOf(t - c.start - 0.045 * k, TEXT);
+      // A caption that opens the cut is fully set at 0 s: that frame is the
+      // thumbnail on LinkedIn, and a half-arrived word reads as a glitch.
+      const p = c.start < 1e-6 ? 1 : springOf(t - c.start - 0.045 * k, TEXT);
       ctx.globalAlpha = clamp(p * 1.6) * (1 - leave);
       // Numbers carry the argument, so they are set in the accent.
       ctx.fillStyle = /\d/.test(w) ? BRIGHT : PAPER;
@@ -368,7 +376,18 @@ export function draw(ctx, scene, t) {
 
   const shot = activeShot(scene.timeline, t);
   const lt = t - shot.start;
-  if (shot.kind === 'card') drawCard(ctx, scene, shot, lt, L);
+  if (shot.kind === 'illustration') {
+    const m = shot.beats.find((b) => b.kind === 'morph');
+    // After the morph settles, the camera leans in on D1 for the rest of the shot.
+    const leanFrom = m ? m.start + 1.0 : Infinity;
+    const lean = clamp((t - leanFrom) / Math.max(0.5, shot.end - leanFrom));
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, L.W, L.caption.y - L.pad * 0.4);   // never into the caption band
+    ctx.clip();
+    drawColdOpen(ctx, L.media, m ? springOf(t - m.start, MORPH) : 0, lt, lean);
+    ctx.restore();
+  } else if (shot.kind === 'card') drawCard(ctx, scene, shot, lt, L);
   else if (shot.kind === 'split') drawSplit(ctx, scene, shot, lt, L);
   else {
     const clip = shot.beats.find((b) => b.kind === 'clip');

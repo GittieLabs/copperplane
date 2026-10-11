@@ -124,3 +124,13 @@ test('every pullout field the page reads survives into build/data.json', { skip:
     });
   }
 });
+
+test('every cut opens on the cold open, with its first line set at 0 s (the thumbnail)', () => {
+  for (const cut of CUTS) {
+    const first = buildTimeline(shotlist, cut).shots[0];
+    assert.equal(first.kind, 'illustration', cut);
+    assert.equal(first.captions[0].start, 0, cut);
+    const morph = first.beats.find((b) => b.kind === 'morph');
+    assert.ok(morph && morph.start > first.captions[0].start, `${cut}: the morph must wait for the question`);
+  }
+});
