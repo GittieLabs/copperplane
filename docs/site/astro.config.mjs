@@ -24,7 +24,17 @@ export default defineConfig({
         replacesTitle: false,
       },
       description:
-        'A local-first desktop assistant that bridges KiCad and FreeCAD. It reads the datasheet and shows you the page it got that from.',
+        'A co-pilot for your first real circuit board. It reads your KiCad project, explains what the checks are telling you, and sizes a case that fits.',
+      // The card a shared link previews with: the lockup and the cold open's
+      // finished PCB, drawn by docs/video/studio/card.html so it matches the video.
+      head: [
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://gittielabs.github.io/copperplane/og-card.png' } },
+        { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+        { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Copperplane: a co-pilot for your first real circuit board' } },
+        { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://gittielabs.github.io/copperplane/og-card.png' } },
+      ],
       social: [
         {
           icon: 'github',
@@ -42,6 +52,7 @@ export default defineConfig({
         {
           label: 'Start here',
           items: [
+            { label: 'Watch it', slug: 'watch' },
             { label: 'Why this exists', slug: 'why' },
             { label: 'What it is, and what it is not', slug: 'what-it-is' },
             { label: 'Install', slug: 'install' },

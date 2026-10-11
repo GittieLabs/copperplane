@@ -19,6 +19,20 @@ hero:
 
 import { Card, CardGrid, Aside } from '@astrojs/starlight/components'
 
+<video
+  src="/copperplane/video/copperplane-30s-16x9.mp4"
+  poster="/copperplane/video/copperplane-30s-16x9-poster.jpg"
+  autoplay
+  muted
+  loop
+  playsinline
+  preload="metadata"
+  aria-label="Copperplane in 30 seconds: a breadboard becomes a PCB, then the app reads a real KiCad project and points at what the usual checks miss"
+  style="width: 100%; border-radius: 12px;"
+></video>
+
+Thirty seconds, captioned. [Watch it with controls, or download a cut to share](/copperplane/watch/).
+
 <Aside type="caution" title="Early, and honest about it">
 Every release publishes a build for **macOS (both architectures), Windows and
 Linux**. The macOS builds are signed and notarized; the Windows and Linux ones
@@ -31,8 +45,6 @@ find, and [telling us what happened](https://github.com/GittieLabs/copperplane/i
 is the single most useful thing you can do for this project right now — more
 useful than a pull request.
 </Aside>
-
-![Copperplane on a linked KiCad project, flagging two things no rule checker reports](/copperplane/images/hero.png)
 
 ## What it does
 

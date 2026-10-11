@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Copperplane social card</title>
+<style>html, body { margin: 0; background: #0A1410; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+// The link-preview card: the docs site's og:image and the GitHub repo's social
+// preview. ?w=1200&h=630 (Open Graph) or ?w=1280&h=640 (GitHub). Same canvas
+// code and type as the video, so a shared link looks like the video it leads to.
+import { drawColdOpen } from './src/coldopen.js';
+
+const q = new URLSearchParams(location.search);
+const W = Number(q.get('w') || 1200);
+const H = Number(q.get('h') || 630);
+const c = document.getElementById('c');
+c.width = W; c.height = H;
+const ctx = c.getContext('2d');
+
+async function setup() {
+  const base = './node_modules/@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin';
+  for (const w of [400, 600]) {
+    document.fonts.add(await new FontFace('IBM Plex Sans', `url(${base}-${w}-normal.woff2)`, { weight: String(w) }).load());
+  }
+  const lockup = new Image();
+  lockup.src = './build/lockup-horizontal-on-dark.svg';
+  await lockup.decode();
+
+  ctx.fillStyle = '#0A1410';
+  ctx.fillRect(0, 0, W, H);
+  // The stage grid from the video, barely there.
+  const pitch = Math.round(H / 21);
+  ctx.fillStyle = 'rgba(79,193,126,0.06)';
+  for (let y = pitch / 2; y < H; y += pitch) for (let x = pitch / 2; x < W; x += pitch) ctx.fillRect(x, y, 2, 2);
+
+  // Left: lockup, line, URL. Right: the finished PCB from the cold open.
+  const left = Math.round(W * 0.07);
+  const lw = Math.round(W * 0.38);
+  const lh = lw * (lockup.naturalHeight / lockup.naturalWidth);
+  ctx.drawImage(lockup, left, Math.round(H * 0.24), lw, lh);
+  ctx.fillStyle = '#F4F7F3';
+  ctx.font = `600 ${Math.round(H * 0.068)}px "IBM Plex Sans"`;
+  const y0 = Math.round(H * 0.24 + lh + H * 0.12);
+  ['A co-pilot for your first', 'real circuit board.'].forEach((line, i) => ctx.fillText(line, left, y0 + i * H * 0.085));
+  ctx.fillStyle = '#4FC17E';
+  ctx.font = `600 ${Math.round(H * 0.04)}px "IBM Plex Sans"`;
+  ctx.fillText('gittielabs.github.io/copperplane', left, Math.round(H * 0.86));
+
+  drawColdOpen(ctx, { x: W * 0.52, y: H * 0.1, w: W * 0.44, h: H * 0.8 }, 1, 0, 0);
+}
+window.ready = setup();
+</script>
+</body>
+</html>
