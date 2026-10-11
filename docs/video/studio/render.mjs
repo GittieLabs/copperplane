@@ -19,7 +19,7 @@ const HERE = fileURLToPath(new URL('.', import.meta.url));
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const FPS = Number(arg('fps', 30));
 const jobs = process.argv.includes('--all')
-  ? ['15', '30', '60'].flatMap((cut) => ['9x16', '1x1', '16x9'].map((format) => ({ cut, format })))
+  ? ['15', '30', '60'].flatMap((cut) => ['9x16', '4x5', '1x1', '16x9'].map((format) => ({ cut, format })))
   : [{ cut: arg('cut', '15'), format: arg('format', '9x16') }];
 
 if (!existsSync(join(HERE, 'build', 'data.json'))) {
@@ -62,6 +62,10 @@ for (const { cut, format } of jobs) {
   if (Math.round(size.width) !== FORMATS[format].width || Math.round(size.height) !== FORMATS[format].height) {
     throw new Error(`canvas displays at ${size.width}x${size.height}, not ${FORMATS[format].width}x${FORMATS[format].height}`);
   }
+  // The cover: frame 0, which a test pins as the hook. LinkedIn uses the first
+  // frame as the thumbnail unless a cover is uploaded, so upload this one.
+  await page.evaluate(() => window.seek(0));
+  await canvas.screenshot({ path: join(HERE, 'out', `${name}-cover.png`) });
   const total = Math.round((to - from) * FPS);
   const started = Date.now();
   for (let i = 0; i < total; i++) {

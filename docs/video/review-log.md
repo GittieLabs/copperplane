@@ -123,6 +123,18 @@ I had scored the hook on composition and motion, and never asked who it was talk
 **The 15 s cut changed shape.** The two hook lines need 4.3 s to read, so it became the cold open
 plus the D1 answer, dropping the +5V finding.
 
+## Round 5: 4:5 for the LinkedIn feed (`CTX-408.8`)
+
+The new 4:5 cut was reviewed at the feed's own sizes instead of a bare phone: 390 px (mobile feed)
+and 555 px (desktop feed). The cold open fills the frame width, every pullout phrase reads, and the
+captions mostly fit on one line.
+
+| Hook | Readability | Motion | Variety | Composition | Accuracy |
+|---|---|---|---|---|---|
+| 8 | 8 | 8 | 8 | 8 | 9 |
+
+Motion is shared with the other formats; nothing new moves in 4:5.
+
 **Still visible, not fixed:**
 
 - **Weakest contrast in the cut:** "4 design-rule violations, 1 unconnected item" is the app's orange
