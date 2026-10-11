@@ -1127,16 +1127,20 @@ def send(
 _REVIEW_PROMPT = (
     "Review this area for anything worth flagging -- a real risk, a gap, or a suggestion -- "
     "using only what you're actually grounded in.\n\n"
-    "Every finding in the check block you were given is worth flagging: explain each one in "
-    "plain language for a maker who does not know the abbreviations, and say where on the board "
-    "it is, using that finding's own `locations`.\n\n"
+    "The check block you were given holds two kinds of finding, told apart by `finding_id`. "
+    "One whose id starts with `kicad-` is KiCad's own ERC or DRC result: the user already sees "
+    "it, explained, in that check's own panel, and this review must NOT list it again. One whose "
+    "id starts with `copperplane-` is something ERC and DRC do not report: every one of those is "
+    "worth flagging -- explain it in plain language for a maker who does not know the "
+    "abbreviations, say where it is using that finding's own `locations`, and cite its "
+    "`finding_id`.\n\n"
     "Answer with ONLY this block and nothing else -- no preamble, no prose before or after:\n\n"
     "<<<FINDINGS>>>\n"
     '[{"severity": "info" | "suggestion" | "warning", "title": "...", "detail": "...", '
     '"sources": [...], "general_practice": true|false}]\n'
     "<<<END_FINDINGS>>>\n\n"
     "An empty array is a normal, honest result when nothing stands out -- but it is wrong if the "
-    "check block listed anything. A reply without the block cannot be read at all."
+    "check block listed any `copperplane-` finding. A reply without the block cannot be read at all."
 )
 _REVIEW_SEVERITIES = ("info", "suggestion", "warning")
 
@@ -1394,7 +1398,7 @@ def review(
             pass
         fallback = _findings_from_check_alone(area, scope_id, project_name)
         if fallback is not None:
-            return fallback
+            return without_the_checks_own_findings(fallback, area)
         raise ReviewFormatError(
             "The review came back without its findings block, so it could not be read. "
             "This is NOT a clean result -- the area has not been assessed."
@@ -1441,7 +1445,34 @@ def review(
             "origin": _origin_of(self_reported),
         })
 
-    return _with_uncited_checks_of_our_own(findings, area, scope_id, project_name, cited_ids)
+    return without_the_checks_own_findings(
+        _with_uncited_checks_of_our_own(findings, area, scope_id, project_name, cited_ids), area,
+    )
+
+
+def without_the_checks_own_findings(findings: list, area: str) -> list:
+    """Drop every finding KiCad's own ERC/DRC reported, in an area that has one.
+
+    The PCB and Schematic tabs show that check in its own panel, explained,
+    directly above the review, and the review's header says it "does not
+    repeat them" (SPEC-340's cross-reference; SPEC-341 kept the two lists
+    separate on purpose). The prompt says so too, but a prompt is a request:
+    on the tutorial board the review listed all five DRC problems first,
+    under a header promising it would not. So it is enforced here, on the
+    `origin` read from an id this process generated -- never on wording.
+
+    A finding citing one of OUR ids stays even if it also cites KiCad's: its
+    point is the part ERC and DRC miss. A finding citing nothing identifiable
+    (`origin` None) is the model's own judgement and also stays -- which means
+    one restating a DRC result without citing it is not caught. That gap is
+    named in CTX-319.8 rather than closed by guessing from prose.
+
+    Public because the stored-review route applies it too: a review saved
+    before this existed must not keep showing what the header disowns.
+    """
+    if area not in _CHECK_AREA_LABELS:
+        return findings
+    return [f for f in findings if f.get("origin") != "kicad"]
 
 
 def _cited_finding_ids(refs: list) -> set:

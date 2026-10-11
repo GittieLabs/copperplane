@@ -115,6 +115,7 @@ vi.mock('./ReviewPanel', () => ({
     title,
     projectName,
     menuCommand,
+    siblingCheck,
   }: {
     area: string
     scope: string
@@ -122,11 +123,13 @@ vi.mock('./ReviewPanel', () => ({
     title: string
     projectName?: string
     menuCommand?: { area: string; command: string; nonce: number } | null
+    siblingCheck?: { count: number | null }
   }) => (
     <p>
       ReviewPanel stub: area={area} scope={scope} scopeId={scopeId} title="{title}"
       {projectName && ` projectName=${projectName}`}
       {menuCommand && ` menuCommand=${menuCommand.area}:${menuCommand.command}:${menuCommand.nonce}`}
+      {siblingCheck && ` siblingCount=${siblingCheck.count ?? 'none'}`}
     </p>
   ),
 }))
@@ -202,6 +205,21 @@ describe('BoardAdvisor: Board (DRC) -- CTX-309.4 list-first flow', () => {
     await waitFor(() => screen.getByText(/Board has malformed outline/))
     screen.getByText('ERROR')
     screen.getByText(/no outline drawn on the Edge.Cuts layer/)
+  })
+
+  it('CTX-319.8: the review is told every kind of problem the DRC card lists, schematic mismatches included', async () => {
+    // The review drops everything KiCad's check reported, so a count that
+    // skipped schematic parity would make those mismatches vanish from both.
+    listOpenBoardsMock.mockResolvedValue(ONE_BOARD_OPEN)
+    checkBoardMock.mockResolvedValueOnce({
+      ...VIOLATION_RESULT, violation_count: 4, unconnected_count: 1, parity_count: 2,
+    })
+
+    render(<BoardAdvisor projectName="test-project" />)
+    await waitFor(() => screen.getByText('board.kicad_pcb'))
+    fireEvent.click(screen.getByText('board.kicad_pcb'))
+
+    await waitFor(() => screen.getByText(/siblingCount=7/))
   })
 
   it('a clean board shows an honest "no violations" message, not an empty section', async () => {
