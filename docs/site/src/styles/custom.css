@@ -40,3 +40,22 @@
 .sl-markdown-content img {
   border: 0;
 }
+
+/* The landing page's hero carries the product video (CTX-408.9), not a logo.
+   Starlight sizes the hero's image slot for an illustration: 20rem on a phone,
+   a 4fr column capped at 25rem on a desktop. At that size the video's captions
+   are too small to read, so the video gets the full width on a phone and the
+   larger column beside the tagline on a desktop. */
+.hero > .hero-html {
+  width: min(100%, 26rem);
+}
+
+@media (min-width: 50rem) {
+  .hero {
+    grid-template-columns: 5fr 6fr;
+  }
+
+  .hero > .hero-html {
+    width: 100%;
+  }
+}
