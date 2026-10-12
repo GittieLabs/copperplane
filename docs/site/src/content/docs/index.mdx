@@ -11,17 +11,19 @@ hero:
   # One poster serves both: before the first frame (or where autoplay is blocked,
   # e.g. iOS Low Power Mode) a phone shows the 16:9 hook frame letterboxed in the
   # vertical box. A script to swap it is dropped by Astro's MDX, so there is none.
+  # Neither the button below nor the aria-label names a length: a phone plays
+  # 15 s and everything else 30 s, so any one number is wrong for someone.
   image:
     html: >-
       <video id="hero-video" autoplay muted loop playsinline preload="metadata"
       poster="/copperplane/video/copperplane-30s-16x9-poster.jpg"
-      aria-label="Copperplane in 30 seconds: a breadboard becomes a PCB, then the app reads a real KiCad project and points at what the usual checks miss"
+      aria-label="Copperplane, muted and captioned: a breadboard becomes a PCB, then the app reads a real KiCad project and points at what the usual checks miss"
       style="width: 100%; max-height: 72vh; object-fit: contain; border-radius: 12px; background: #0A1410;">
       <source media="(max-width: 50rem)" src="/copperplane/video/copperplane-15s-9x16.mp4" type="video/mp4">
       <source src="/copperplane/video/copperplane-30s-16x9.mp4" type="video/mp4">
       </video>
   actions:
-    - text: Watch it (30 s)
+    - text: Watch the video
       link: /copperplane/watch/
       icon: right-arrow
     - text: Why this exists
