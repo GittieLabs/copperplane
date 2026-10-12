@@ -13,12 +13,13 @@ you get every ERC and DRC finding KiCad reports, with the part and the rule.
 What you do not get is the plain-language explanation under each one. That part
 is a model call, and the app says so instead of failing.
 
-**Ollama**, for a model on your own machine, is supported but is not yet the
-way to start. The local model it is set up with by default is too small to return
-the structured answers the explanations and part lookup rely on, so those
-features decline to run on it. Making the local path work without an account is
-being fixed.
-[What you need for each feature →](#what-you-need-alongside-it)
+**Or run a model on your own machine, for free, with [Ollama](https://ollama.com/download).**
+Choose *Ollama* in first-run setup and the app checks that Ollama is running and
+gives you the one command to fetch the model it uses (`ollama pull qwen2.5:7b`,
+about 5 GB). Then the explanations, reviews and project chat all run locally.
+Looking up a *new* part still needs an API key: local models get part packages
+wrong often enough to put the wrong footprint on a board, so the app will not
+ask one. [More about local models →](#running-a-model-locally)
 :::
 
 ## What is published
@@ -260,6 +261,39 @@ Supported: **Anthropic**, **OpenAI**, **Google**, **Perplexity**, and **Ollama**
 for a fully local model. Ollama is the option to choose if you would rather
 nothing left your machine at all; see [Privacy and your
 data](/copperplane/privacy/) for exactly what is sent under each.
+
+### Running a model locally
+
+With [Ollama](https://ollama.com/download) installed and running, the default
+local model is `qwen2.5:7b`:
+
+```bash
+ollama pull qwen2.5:7b
+```
+
+First-run setup checks for it and offers the command if it is missing; later,
+**Settings → Model roles** binds both roles to `ollama`.
+
+What works locally, and what does not:
+
+| Feature | On `qwen2.5:7b` |
+| :--- | :--- |
+| ERC and DRC findings | ✅ No model needed at all |
+| Plain-language explanations and reviews | ✅ |
+| Project chat, including looking things up in your project | ✅ |
+| Searching for a part by description | ❌ Needs a hosted provider |
+| Adding a part from its part number | ❌ Needs a hosted provider |
+
+Part lookup is the exception on purpose. A model working from memory has to know
+each part's exact package and pinout. In testing, a 7B local model got the
+package wrong for all five common parts it was given, and two of those wrong
+answers were real packages that would have passed every check. A real but wrong
+package puts the wrong footprint on your board, so the app refuses rather than
+guess, and says so.
+
+The model needs about 5 GB of free memory while it answers. On an 8 GB machine
+that competes with KiCad, and a hosted provider will be the better experience.
+Answers are plainer than a large hosted model's, and slower on older hardware.
 
 No key at all is a real option too: the checks still run, without the
 explanations. See the note [at the top of this page](#_top).

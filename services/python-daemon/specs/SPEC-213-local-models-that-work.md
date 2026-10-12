@@ -17,8 +17,8 @@ user_facing: true
 ## 1. Executive Summary & Goals
 
 *   **High-Level Goal:** A maker with no API key can pick Ollama, during first-run setup or in
-    Settings, and then get explanations, part lookup and chat from a local model. Today none of
-    those work. `CTX-408.9` Phase 7 drove the frozen v0.7.0 sidecar against a real local Ollama
+    Settings, and then get explanations, reviews and chat from a local model. Today none of those
+    work. Part lookup stays with hosted models, on purpose (§2.2). `CTX-408.9` Phase 7 drove the frozen v0.7.0 sidecar against a real local Ollama
     and found four separate defects, listed below. Each one alone is enough to stop the local path.
     1. **The roles are not the source of truth.** Settings → Model roles writes `provider_roles`,
        but `llm.chat` and every agent-backed route still read the legacy `llm_provider` field. That
@@ -40,6 +40,7 @@ user_facing: true
     *   No per-model capability database. A record still declares one set of `capabilities` (SPEC-208
         §2.4: a declaration is a claim, not a measurement). The claim changes because the preset's
         default model changes.
+    *   Not part lookup on a local model. See §2.2: it is gated, not fixed.
     *   Copperplane does not pull models itself. Pulling is a multi-GB download, and the user
         starts it. The app tells them the exact command.
     *   No managed or hosted access. That is SPEC-404.
@@ -60,12 +61,19 @@ user_facing: true
     `provider`/`model`) records the provider and model the role actually resolved to, not the
     legacy field.
 
-### 2.2 Ollama's preset default is a model that can do the work
+### 2.2 Ollama's preset default is a model that can do the work, and part lookup is gated
 
 *   Ollama's preset `models` move from `llama3.2:1b` to `qwen2.5:7b` for both roles, with
-    `capabilities: {tool_use: true, strict_json: true}`. A live run against a real local Ollama
-    has to confirm this before it ships (SPEC-208 §2.2.2), on the frozen sidecar, for chat,
-    explanations and part lookup.
+    `capabilities: {tool_use: true, strict_json: true, part_facts: false}`. This was verified live
+    against a real local Ollama, on the frozen sidecar, per SPEC-208 §2.2.2 (`CTX-213.1`).
+*   **A third declared capability, `part_facts`:** the model knows part packages and pinouts well
+    enough to look a part up from memory. `component_extraction` and `component_search` require
+    it. The hosted presets (`anthropic`, `google`, `openai`, `managed`) claim it; `ollama` and
+    `perplexity` do not. A custom record claims it only when the user ticks it, and it is off by
+    default. This was decided with the maintainer on 2026-10-11 after the live run. `qwen2.5:7b`
+    held the JSON contract on all five parts it was given, but got the package wrong on all five.
+    Two of those wrong packages were real, so they would have passed every check and put the wrong
+    footprint on a board.
 *   SPEC-209's merge-over-preset means existing installs move with the preset. Their saved config
     holds only deltas, and the old default was never a delta.
 
@@ -88,7 +96,7 @@ user_facing: true
     record that needs no key (local) or has its key saved. The check is cheap: no network call,
     per that function's contract. `requirements.ts` uses it for the "No AI provider is
     configured" requirement, and falls back to `llm_providers.length` for an older daemon.
-*   `GuidedSetup.tsx` offers *"Run a model on this computer (Ollama)"* next to the key-based
+*   `GuidedSetup.tsx` offers *"Ollama — a model on this computer, no key"* next to the key-based
     providers. Choosing it probes `localhost:11434` with the existing `llm.probe_endpoint` and
     shows one of three states:
     *   **Ollama not answering:** a link to download Ollama, plus "Check again".
@@ -100,14 +108,16 @@ user_facing: true
 
 *   `services/python-daemon`: `daemon.py`, `llm_providers.py`, `component_pipeline.py`. The
     sidecar must be re-frozen: everything in this spec ships inside it.
-*   `apps/tauri-ui`: `GuidedSetup.tsx`, `requirements.ts`, `settings.ts` (the `llm_ready` type).
-*   Docs: `docs/site/src/content/docs/install.md` and `docs/release-notes/v0.7.0.md`.
+*   `apps/tauri-ui`: `GuidedSetup.tsx`, `requirements.ts`, `settings.ts` (the `llm_ready` type),
+    `ProviderConfigEditor.tsx` (the `part_facts` claim).
+*   Docs: `install.md`, `first-run.md` and `docs/release-notes/v0.7.0.md`.
 
 ## 3. Known Constraints & Risks
 
-*   **A 7B model is a floor, not a match for a frontier model.** Its explanations will be
-    plainer, and its part extraction less reliable on long pin lists. The capability claim means
-    it can hold the contract, not that it matches Claude.
+*   **A 7B model is a floor, not a match for a frontier model.** Its explanations are plainer,
+    and it follows output formats less faithfully. One example: it wrapped chat citation blocks
+    in code fences, which `chat_agents` now tolerates. The capability claim means it can hold the
+    contract, not that it matches Claude.
 *   **The record's capabilities are a claim about its default model.** A user who overrides
     Ollama's model to `llama3.2:1b` keeps a record that claims `strict_json`. SPEC-208 §2.4
     already accepts that a declaration catches honest mismatches, not optimistic ones.
@@ -129,9 +139,10 @@ user_facing: true
     chat.
 *   **What the user is trying to accomplish:** Use Copperplane's AI features without paying for an
     API key, on a model running on their own computer.
-*   **What the user sees and does:** In first-run setup they choose "Run a model on this computer
-    (Ollama)". The app tells them whether Ollama is running and whether the model is pulled,
-    gives them the one command to run if it isn't, and then binds it. After that, a check's
-    explanations, a part lookup and the Overview chat all answer from the local model. If
-    nothing capable is set up, those surfaces say so and point to Settings → Model roles, not to
-    a pin list or an SDK error.
+*   **What the user sees and does:** In first-run setup they choose Ollama from the provider
+    list. The app tells them up front that part lookup still needs a key. It then shows whether
+    Ollama is running and whether the model is pulled, gives them the one command to run if it
+    isn't, and binds it. After that, a check's explanations, reviews and the project chat answer
+    from the local model. A part lookup says plainly that it needs a hosted provider, and why.
+    If nothing capable is set up, every one of these surfaces says so and points to Settings →
+    Model roles, never to a pin list or an SDK error.

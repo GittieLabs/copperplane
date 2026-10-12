@@ -28,6 +28,13 @@ for whichever provider you picked. **Skip this step** moves on without one; the
 app still runs, and the features that need a model say so rather than failing
 oddly.
 
+**No key, and no wish for one?** Pick **Ollama** from the same list to run a model
+on your own computer instead. The app checks that Ollama is running and that its
+model is there. If it is not, the app shows the one command to fetch it, with a
+button that copies it. Once it is ready, **Use Ollama and continue**. A local
+model explains checks, reviews your board and answers questions. Looking up new
+parts still needs a key — [why, and what else to expect](/copperplane/install/#running-a-model-locally).
+
 **Step 2 — KiCad and FreeCAD.** Copperplane looks for both and shows you what it
 found, with the real paths.
 
@@ -74,7 +81,8 @@ install yourself, and it is explicit about which features need which:
 | You want to | You need |
 | :--- | :--- |
 | Read a board, run ERC or DRC, search footprints | **KiCad 9+** |
-| Have check results explained, look up parts, ask questions | An **AI provider** key |
+| Have check results explained, get reviews, ask questions | An **AI provider** key, or **Ollama** on your own machine |
+| Look up and add new parts | An **AI provider** key |
 | Generate an enclosure | **FreeCAD 0.20+** |
 | Browse the app, read your library, change settings | Nothing |
 
