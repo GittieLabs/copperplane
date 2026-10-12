@@ -28,6 +28,9 @@ export const TOOL_DOWNLOADS: Record<'kicad' | 'freecad', { label: string; url: s
   freecad: { label: 'FreeCAD downloads', url: 'https://www.freecad.org/downloads.php' },
 }
 
+/** SPEC-213 §2.4: where a user without a key gets a local model server. */
+export const OLLAMA_DOWNLOAD = { label: 'Ollama downloads', url: 'https://ollama.com/download' }
+
 /** Opens a URL in the user's own browser. Never in an app window: a login or
  *  a key-creation page belongs in the browser the user already trusts, with
  *  their own password manager and their own session. */

@@ -59,7 +59,8 @@ const ANTHROPIC_RECORD = {
   base_url: null,
   api_key_ref: 'anthropic_api_key',
   models: { reasoning: 'claude-sonnet-5', fast: 'claude-sonnet-5' },
-  capabilities: { tool_use: true, strict_json: true },
+  // What the daemon sends since SPEC-213: every preset carries part_facts.
+  capabilities: { tool_use: true, strict_json: true, part_facts: true },
 }
 
 const OLLAMA_RECORD = {
@@ -67,8 +68,8 @@ const OLLAMA_RECORD = {
   kind: 'openai_compat' as const,
   base_url: 'http://localhost:11434/v1',
   api_key_ref: null,
-  models: { reasoning: 'llama3.2:1b', fast: 'llama3.2:1b' },
-  capabilities: { tool_use: false, strict_json: false },
+  models: { reasoning: 'qwen2.5:7b', fast: 'qwen2.5:7b' },
+  capabilities: { tool_use: true, strict_json: true, part_facts: false },
 }
 
 function renderEditor(overrides?: { capabilities?: Partial<typeof EMPTY_CAPABILITIES> }) {
@@ -244,7 +245,8 @@ describe('ProviderConfigEditor: add/edit a record', () => {
         base_url: 'http://nuc.local:11434/v1',
         api_key_ref: 'my-server_api_key',
         models: { reasoning: 'llama3.3:70b' },
-        capabilities: { tool_use: true, strict_json: true },
+        // SPEC-213: a new record does not claim part facts until the user does.
+        capabilities: { tool_use: true, strict_json: true, part_facts: false },
       },
     ])
     expect(roles).toEqual({ reasoning: 'anthropic', fast: 'anthropic' })

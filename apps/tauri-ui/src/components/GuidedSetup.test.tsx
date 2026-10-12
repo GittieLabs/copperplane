@@ -7,11 +7,18 @@ const setToolPathMock = vi.fn()
 const getCapabilitiesMock = vi.fn()
 const chooseToolExecutableMock = vi.fn()
 const openExternalMock = vi.fn()
+const probeEndpointMock = vi.fn()
+const getProviderRecordsMock = vi.fn()
+const copyTextMock = vi.fn()
 
 vi.mock('../lib/settings', async () => {
   const actual = await vi.importActual<typeof import('../lib/settings')>('../lib/settings')
   return {
     KEY_BASED_PROVIDERS: actual.KEY_BASED_PROVIDERS,
+    LOCAL_OLLAMA_BASE_URL: actual.LOCAL_OLLAMA_BASE_URL,
+    probeEndpoint: (...a: unknown[]) => probeEndpointMock(...a),
+    getProviderRecords: (...a: unknown[]) => getProviderRecordsMock(...a),
+    copyText: (...a: unknown[]) => copyTextMock(...a),
     secretKeyFor: actual.secretKeyFor,
     saveSecret: (...a: unknown[]) => saveSecretMock(...a),
     bindBothRolesTo: (...a: unknown[]) => bindBothRolesToMock(...a),
@@ -31,6 +38,7 @@ vi.mock('../lib/externalLinks', () => ({
     kicad: { label: 'KiCad downloads', url: 'https://www.kicad.org/download/' },
     freecad: { label: 'FreeCAD downloads', url: 'https://www.freecad.org/downloads.php' },
   },
+  OLLAMA_DOWNLOAD: { label: 'Ollama downloads', url: 'https://ollama.com/download' },
   openExternal: (...a: unknown[]) => openExternalMock(...a),
 }))
 
@@ -72,6 +80,13 @@ beforeEach(() => {
   getCapabilitiesMock.mockReset().mockResolvedValue(EMPTY)
   chooseToolExecutableMock.mockReset()
   openExternalMock.mockReset()
+  probeEndpointMock.mockReset().mockResolvedValue({ reachable: true, models: ['qwen2.5:7b'], reason: null })
+  getProviderRecordsMock.mockReset().mockResolvedValue({
+    records: [{ id: 'ollama', models: { reasoning: 'qwen2.5:7b', fast: 'qwen2.5:7b' } }],
+    provider_roles: { reasoning: 'anthropic', fast: 'anthropic' },
+    provider_roles_saved: false,
+  })
+  copyTextMock.mockReset().mockResolvedValue(undefined)
 })
 
 function renderSetup(overrides: Partial<Parameters<typeof GuidedSetup>[0]> = {}) {
@@ -228,5 +243,66 @@ describe('GuidedSetup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
 
     await waitFor(() => expect(onCapabilitiesChanged).toHaveBeenCalledWith(READY))
+  })
+
+  /** SPEC-213 §2.4: first run could not choose Ollama at all. */
+  describe('with Ollama', () => {
+    function chooseOllama() {
+      fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'ollama' } })
+    }
+
+    it('is offered, and asks for no key', async () => {
+      renderSetup()
+      chooseOllama()
+
+      expect(screen.queryByPlaceholderText('Paste the key here')).toBeNull()
+      expect(await screen.findByText(/is ready/)).toBeTruthy()
+      expect(probeEndpointMock).toHaveBeenCalledWith('http://localhost:11434/v1')
+    })
+
+    it('says plainly that part lookup still needs a key', async () => {
+      renderSetup()
+      chooseOllama()
+
+      expect((await screen.findByTestId('local-model')).textContent).toMatch(/Looking up a new\s+part still needs an API key/)
+    })
+
+    it('binds both roles to ollama when the model is ready', async () => {
+      renderSetup()
+      chooseOllama()
+
+      const use = await screen.findByRole('button', { name: 'Use Ollama and continue' })
+      await waitFor(() => expect((use as HTMLButtonElement).disabled).toBe(false))
+      fireEvent.click(use)
+
+      await waitFor(() => expect(bindBothRolesToMock).toHaveBeenCalledWith('ollama'))
+      expect(saveSecretMock).not.toHaveBeenCalled()
+      expect(await screen.findByText(/Ollama is set up/)).toBeTruthy()
+    })
+
+    it('links to the download when Ollama is not running, and will not continue', async () => {
+      probeEndpointMock.mockResolvedValue({ reachable: false, models: [], reason: 'connection refused' })
+      renderSetup()
+      chooseOllama()
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Download Ollama' }))
+      expect(openExternalMock).toHaveBeenCalledWith('https://ollama.com/download')
+      expect((screen.getByRole('button', { name: 'Use Ollama and continue' }) as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it('gives the exact pull command for the daemon’s default model when it is missing', async () => {
+      probeEndpointMock.mockResolvedValue({ reachable: true, models: ['llama3.2:1b'], reason: null })
+      renderSetup()
+      chooseOllama()
+
+      expect(await screen.findByText('ollama pull qwen2.5:7b')).toBeTruthy()
+      fireEvent.click(screen.getByRole('button', { name: 'Copy' }))
+      await waitFor(() => expect(copyTextMock).toHaveBeenCalledWith('ollama pull qwen2.5:7b'))
+      expect((screen.getByRole('button', { name: 'Use Ollama and continue' }) as HTMLButtonElement).disabled).toBe(true)
+
+      probeEndpointMock.mockResolvedValue({ reachable: true, models: ['llama3.2:1b', 'qwen2.5:7b'], reason: null })
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }))
+      expect(await screen.findByText(/is ready/)).toBeTruthy()
+    })
   })
 })
