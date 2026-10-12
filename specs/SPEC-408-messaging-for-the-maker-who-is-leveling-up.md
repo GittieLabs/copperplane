@@ -122,8 +122,18 @@ user_facing: true
       Each cut also ships an `.srt` file for platforms that want one.
     - Every number in a caption is read off the captured frame it comes from, never copied from
       the script.
-    - The 15s cut is hook, segment 3, segment 5, close: the two beats the script already ranked
-      first.
+    - **Every cut opens on a cold open (added 2026-10-11, the maintainer's Phase 6 verdict).**
+      Without one, nothing in the first second told a maker the video was for them: the first frame
+      was a PCB layout, a stage they have not reached yet. The cold open is "It works on the
+      breadboard." → "Will it work as a PCB?" over a **vector illustration** of a breadboard (an
+      Arduino, a resistor, a button, a blinking LED) that routes itself into a PCB.
+      - It is the **only illustrated shot**: no breadboard footage exists, and every app screen
+        stays a real capture.
+      - It is drawn honestly: wired the way a breadboard connects, and routable as a PCB, with no
+        crossing traces.
+      - Its first frame is the thumbnail on LinkedIn and similar feeds.
+    - The 15s cut is the cold open and one answer: the D1 mismatch, the same LED the illustration
+      blinks. That is one question and its payoff, rather than three findings in fifteen seconds.
 *   **How images and GIFs are produced and kept current.** ~~Screen Studio on macOS is the chosen
     tool.~~ **Changed 2026-10-10 (`CTX-408.7`).**
     - The agent drives a production build of the app itself and captures stills with

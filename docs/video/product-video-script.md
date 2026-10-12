@@ -127,6 +127,16 @@ Each segment lists what to capture, what must be legible, and the line. The
 **on-screen text** column matters more than the voiceover: most people will watch
 this muted.
 
+### 0 — The cold open (the short cuts only)
+
+The 15s, 30s and ~60s captioned cuts (`CTX-408.7`, `docs/video/shotlist.json`) open on a
+two-second question before segment 1: **"It works on the breadboard." → "Will it work as a
+PCB?"**
+
+It plays over a vector illustration of a breadboard routing itself into a PCB. It is the only
+illustrated shot. Every app screen is a real capture. Its first frame is the thumbnail, so the
+first line is set at 0 s.
+
 ### 1 — The hook (0:00–0:06)
 
 | | |

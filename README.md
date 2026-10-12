@@ -7,6 +7,15 @@
   <strong>A co-pilot for your first real circuit board.</strong>
 </p>
 
+<p align="center">
+  <a href="https://gittielabs.github.io/copperplane/watch/">
+    <img src="docs/site/public/video/copperplane-readme-poster.jpg" alt="Watch Copperplane in 30 seconds: a breadboard becomes a PCB, then the app reads a real KiCad project" width="640">
+  </a>
+  <br>
+  <a href="https://gittielabs.github.io/copperplane/watch/">Watch it in 30 seconds</a> ·
+  <a href="https://github.com/GittieLabs/copperplane/releases/tag/product-video-2026-10">Download a cut to share</a>
+</p>
+
 ---
 
 Your breadboard works. The next step — a real PCB, and a case to put it in — is where a lot of

@@ -3,6 +3,24 @@ title: Install
 description: How to install Copperplane, what you need alongside it, and what to expect on each platform.
 ---
 
+:::tip[No API key? You can still try it on your board]
+You do not need an Anthropic, OpenAI or any other account to see what
+Copperplane finds. Install it, choose **Skip for now and look around** on the
+first screen, and open your KiCad project.
+
+The checks are KiCad's own, run on your machine, and they work without a model:
+you get every ERC and DRC finding KiCad reports, with the part and the rule.
+What you do not get is the plain-language explanation under each one. That part
+is a model call, and the app says so instead of failing.
+
+**Ollama**, for a model on your own machine, is supported but is not yet the
+way to start. The local model it is set up with by default is too small to return
+the structured answers the explanations and part lookup rely on, so those
+features decline to run on it. Making the local path work without an account is
+being fixed.
+[What you need for each feature →](#what-you-need-alongside-it)
+:::
+
 ## What is published
 
 Every release publishes a build for all four targets:
@@ -242,5 +260,8 @@ Supported: **Anthropic**, **OpenAI**, **Google**, **Perplexity**, and **Ollama**
 for a fully local model. Ollama is the option to choose if you would rather
 nothing left your machine at all; see [Privacy and your
 data](/copperplane/privacy/) for exactly what is sent under each.
+
+No key at all is a real option too: the checks still run, without the
+explanations. See the note [at the top of this page](#_top).
 
 [First run →](/copperplane/first-run/)

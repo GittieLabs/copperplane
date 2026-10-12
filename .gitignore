@@ -92,3 +92,11 @@ copperplane-blink-tutorial/
 # The 2026-09-11 re-shoot, after the guided path shipped and made every existing
 # image stale. ~100MB of Retina PNGs; keep working from the copy outside the repo.
 copperplane-shots/
+
+# Product-video captures (CTX-408.7). Raw, unredacted, never committed;
+# each session folder carries its own manifest of what build was on screen.
+video-captures/
+
+# Product-video compositor output, made from the gitignored captures (CTX-408.7).
+docs/video/studio/build/
+docs/video/studio/out/
