@@ -38,7 +38,8 @@ export function Welcome({
           <p className="text-sm font-medium text-fg-bright">Use your own provider</p>
           <p className="text-xs text-fg-secondary">
             You bring an API key from Anthropic, OpenAI, Google or Perplexity. You pay them
-            directly, and the key stays in your machine&rsquo;s keychain.
+            directly, and the key stays in your machine&rsquo;s keychain. Or run a model on this
+            computer with Ollama, for free.
           </p>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <button
