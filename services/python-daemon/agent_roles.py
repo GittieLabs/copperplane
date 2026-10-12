@@ -27,7 +27,7 @@ VALID_MODEL_ROLES = frozenset({"reasoning", "fast"})
 # SPEC-208 §2.4: what an agent's prompt body actually needs, checked
 # against a provider record's own declared `capabilities` -- CTX-208.3's
 # job to enforce; this module only parses and validates the declaration.
-VALID_REQUIRES = frozenset({"tool_use", "strict_json"})
+VALID_REQUIRES = frozenset({"tool_use", "strict_json", "part_facts"})
 
 
 class AgentRoleError(Exception):

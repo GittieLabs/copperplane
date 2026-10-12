@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -419,6 +420,42 @@ class TestResolve(unittest.TestCase):
             resolve("anthropic", "claude-sonnet-4-6", {}, provider="managed", config=config)
 
 
+class TestSetupErrors(unittest.TestCase):
+    """SPEC-213 §2.3/§2.4: a setup problem is found before any SDK client
+    exists, and said in our words."""
+
+    def test_001_a_keyed_record_with_no_key_is_a_setup_error_before_the_sdk_is_built(self):
+        with patch("llm_providers._build_provider_from_record") as build, \
+                self.assertRaises(llm_providers.ModelSetupError) as ctx:
+            resolve("anthropic", "claude-sonnet-5", {}, config={}, model_role="reasoning")
+        build.assert_not_called()
+        self.assertIn("anthropic", str(ctx.exception))
+        self.assertIn("Model roles", str(ctx.exception))
+
+    def test_002_a_keyless_local_record_needs_no_key(self):
+        _, provider, _ = resolve(
+            "anthropic", None, {}, config={"provider_roles": {"reasoning": "ollama", "fast": "ollama"}},
+            model_role="reasoning",
+        )
+        self.assertEqual(provider, "ollama")
+
+    def test_003_roles_ready_counts_local_bindings_and_saved_keys_only(self):
+        both = lambda p: {"provider_roles": {"reasoning": p, "fast": p}}
+        self.assertTrue(llm_providers.roles_ready(both("ollama"), {}))
+        self.assertFalse(llm_providers.roles_ready(both("anthropic"), {}))
+        self.assertTrue(llm_providers.roles_ready(both("anthropic"), {"anthropic_api_key": "k"}))
+        self.assertFalse(llm_providers.roles_ready({}, {}), "an unconfigured install binds Anthropic, with no key")
+        self.assertFalse(llm_providers.roles_ready(both("not-a-record"), {}))
+        mixed = {"provider_roles": {"reasoning": "anthropic", "fast": "ollama"}}
+        self.assertFalse(llm_providers.roles_ready(mixed, {}))
+
+    def test_004_bound_to_role_reports_what_answers_not_the_legacy_field(self):
+        config = {"llm_provider": "anthropic", "provider_roles": {"reasoning": "ollama", "fast": "ollama"}}
+        self.assertEqual(
+            llm_providers.bound_to_role(config, "reasoning"), ("ollama", llm_providers._DEFAULT_MODELS["ollama"])
+        )
+
+
 class TestMigrateLegacyConfig(unittest.TestCase):
     """SPEC-208 §2.5: a config.json predating SPEC-208 (llm_provider/
     llm_model, no provider_roles) is read as binding both roles to that
@@ -537,13 +574,18 @@ class TestCheckCapabilities(unittest.TestCase):
     def test_003_a_satisfied_requirement_raises_nothing(self):
         llm_providers._check_capabilities("chat_overview", ["tool_use"], self._record(tool_use=True))
 
-    def test_004_a_missing_capability_raises_naming_the_agent_requirement_and_record(self):
-        with self.assertRaises(LLMProviderError) as ctx:
+    def test_004_a_missing_capability_raises_naming_the_requirement_and_record(self):
+        """SPEC-213 §2.3: the message is for the user -- the requirement in
+        plain words, the record, and where to fix it. The agent's internal
+        name goes to the log, where a maintainer reads it."""
+        with self.assertLogs("llm_providers", level="WARNING") as logs, \
+                self.assertRaises(llm_providers.ModelSetupError) as ctx:
             llm_providers._check_capabilities("chat_overview", ["tool_use"], self._record(tool_use=False))
         message = str(ctx.exception)
-        self.assertIn("chat_overview", message)
-        self.assertIn("tool_use", message)
+        self.assertIn("tool use", message)
         self.assertIn("test-record", message)
+        self.assertIn("Model roles", message)
+        self.assertIn("chat_overview", "".join(logs.output))
 
     def test_005_an_undeclared_capability_key_counts_as_not_offered(self):
         with self.assertRaises(LLMProviderError):

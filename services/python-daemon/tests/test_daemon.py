@@ -833,15 +833,12 @@ class TestLibraryImportCommunityFootprint(unittest.TestCase):
 
 
 class TestLlmChatProviderFallback(unittest.TestCase):
-    """CTX-302.1: llm_chat's provider resolution -- found by actually
-    running the real chat surface against a real, never-configured
-    install (no config.json exists anywhere on this machine, and
-    SPEC-303's settings UI doesn't exist yet to create one): the old
-    behavior raised LLMProviderError outright, which meant the chat
-    surface's plain-chat fallback could never work at all on a fresh
-    install. Mocked -- llm_providers.chat is a real, already-verified
-    function (test_llm_providers.py); this only checks what daemon.py
-    resolves before calling it."""
+    """CTX-302.1, then SPEC-213 §2.1: what llm_chat resolves before calling
+    the provider. It used to read the legacy `llm_provider` field and fall
+    back to Anthropic; Settings → Model roles never writes that field, so a
+    user who bound both roles to Ollama had chat calling Anthropic. It now
+    resolves the reasoning role like every agent. Mocked at the call --
+    the real call is test_async_jobs.py's live Ollama test."""
 
     def setUp(self):
         self._original_config = dict(daemon.CONFIG)
@@ -850,35 +847,47 @@ class TestLlmChatProviderFallback(unittest.TestCase):
         daemon.CONFIG.clear()
         daemon.CONFIG.update(self._original_config)
 
-    @patch('daemon.llm_providers.chat')
-    def test_001_falls_back_to_the_default_provider_when_nothing_is_configured(self, mock_chat):
-        daemon.CONFIG['llm_provider'] = None
-        mock_chat.return_value = "ok"
+    def _chat(self, **kwargs):
+        with patch('daemon.llm_providers.chat_with_client', return_value={"text": "ok"}) as mock_chat:
+            daemon.llm_chat("hello", **kwargs)
+        args, _ = mock_chat.call_args
+        return args[1], args[2]
 
-        daemon.llm_chat("hello")
+    def test_001_nothing_configured_falls_back_to_the_default_provider(self):
+        daemon.CONFIG.update(llm_provider=None, llm_model=None, provider_roles=None, providers=None,
+                             secrets={"anthropic_api_key": "fake"})
+        provider, _ = self._chat()
+        self.assertEqual(provider, daemon.llm_providers._DEFAULT_PROVIDER)
 
-        _, kwargs = mock_chat.call_args
-        self.assertEqual(kwargs['provider'], daemon.llm_providers._DEFAULT_PROVIDER)
+    def test_002_an_explicit_provider_still_wins(self):
+        daemon.CONFIG.update(llm_provider=None, provider_roles={"reasoning": "ollama", "fast": "ollama"},
+                             secrets={"google_api_key": "fake"})
+        provider, _ = self._chat(provider="google")
+        self.assertEqual(provider, "google")
 
-    @patch('daemon.llm_providers.chat')
-    def test_002_an_explicit_provider_still_wins_over_the_default(self, mock_chat):
-        daemon.CONFIG['llm_provider'] = None
-        mock_chat.return_value = "ok"
+    def test_003_a_legacy_only_config_still_counts(self):
+        daemon.CONFIG.update(llm_provider="perplexity", provider_roles=None,
+                             secrets={"perplexity_api_key": "fake"})
+        provider, _ = self._chat()
+        self.assertEqual(provider, "perplexity")
 
-        daemon.llm_chat("hello", provider="google")
+    def test_004_saved_roles_win_over_a_stale_legacy_field(self):
+        """The defect itself: roles bound to Ollama, `llm_provider` unset or
+        left over from an earlier choice, and no Anthropic key."""
+        for legacy in (None, "anthropic"):
+            with self.subTest(legacy=legacy):
+                daemon.CONFIG.update(llm_provider=legacy, providers=None, secrets={},
+                                     provider_roles={"reasoning": "ollama", "fast": "ollama"})
+                provider, model = self._chat()
+                self.assertEqual(provider, "ollama")
+                self.assertEqual(model, daemon.llm_providers._DEFAULT_MODELS["ollama"])
 
-        _, kwargs = mock_chat.call_args
-        self.assertEqual(kwargs['provider'], "google")
-
-    @patch('daemon.llm_providers.chat')
-    def test_003_a_configured_provider_still_wins_over_the_default(self, mock_chat):
-        daemon.CONFIG['llm_provider'] = "perplexity"
-        mock_chat.return_value = "ok"
-
-        daemon.llm_chat("hello")
-
-        _, kwargs = mock_chat.call_args
-        self.assertEqual(kwargs['provider'], "perplexity")
+    def test_005_no_key_is_a_setup_error_in_our_words_not_the_sdks(self):
+        daemon.CONFIG.update(llm_provider=None, provider_roles=None, providers=None, secrets={})
+        with self.assertRaises(daemon.llm_providers.ModelSetupError) as ctx:
+            daemon.llm_chat("hello")
+        self.assertIn("Model roles", str(ctx.exception))
+        self.assertNotIn("authentication method", str(ctx.exception))
 
 
 class TestConfigureDaemonLiveUpdates(unittest.TestCase):
@@ -1146,7 +1155,7 @@ class TestKicadGenerateComponentProviderOverride(unittest.TestCase):
         daemon.CONFIG.update(self._original_config)
 
     @patch('daemon.component_pipeline.generate_component')
-    def test_001_passes_the_configured_provider_and_model_through(self, mock_generate):
+    def test_001_leaves_provider_resolution_to_the_roles(self, mock_generate):
         daemon.CONFIG['llm_provider'] = "google"
         daemon.CONFIG['llm_model'] = "gemini-flash"
         daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
@@ -1155,8 +1164,10 @@ class TestKicadGenerateComponentProviderOverride(unittest.TestCase):
         daemon.kicad_generate_component("ATtiny85")
 
         _, kwargs = mock_generate.call_args
-        self.assertEqual(kwargs['provider'], "google")
-        self.assertEqual(kwargs['model'], "gemini-flash")
+        # SPEC-213 §2.1: the legacy fields are not an override any more;
+        # resolution goes through CONFIG's provider_roles.
+        self.assertNotIn('provider', kwargs)
+        self.assertNotIn('model', kwargs)
         self.assertEqual(kwargs['secrets'], {"google_api_key": "fake"})
 
     @patch('daemon.component_pipeline.generate_component')
@@ -1171,8 +1182,10 @@ class TestKicadGenerateComponentProviderOverride(unittest.TestCase):
         daemon.kicad_generate_component("ATtiny85")
 
         _, kwargs = mock_generate.call_args
-        self.assertIsNone(kwargs['provider'])
-        self.assertIsNone(kwargs['model'])
+        # SPEC-213 §2.1: the legacy fields are not an override any more;
+        # resolution goes through CONFIG's provider_roles.
+        self.assertNotIn('provider', kwargs)
+        self.assertNotIn('model', kwargs)
 
 
 class TestComponentSearchAndCacheDatasheetRoutes(unittest.TestCase):
@@ -1190,7 +1203,7 @@ class TestComponentSearchAndCacheDatasheetRoutes(unittest.TestCase):
         daemon.CONFIG.update(self._original_config)
 
     @patch('daemon.component_pipeline.search_components')
-    def test_001_component_search_passes_the_configured_provider_and_model_through(self, mock_search):
+    def test_001_component_search_leaves_provider_resolution_to_the_roles(self, mock_search):
         daemon.CONFIG['llm_provider'] = "google"
         daemon.CONFIG['llm_model'] = "gemini-flash"
         daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
@@ -1200,8 +1213,10 @@ class TestComponentSearchAndCacheDatasheetRoutes(unittest.TestCase):
 
         args, kwargs = mock_search.call_args
         self.assertEqual(args[0], "atiny85")
-        self.assertEqual(kwargs['provider'], "google")
-        self.assertEqual(kwargs['model'], "gemini-flash")
+        # SPEC-213 §2.1: the legacy fields are not an override any more;
+        # resolution goes through CONFIG's provider_roles.
+        self.assertNotIn('provider', kwargs)
+        self.assertNotIn('model', kwargs)
         self.assertEqual(kwargs['secrets'], {"google_api_key": "fake"})
 
     @patch('daemon.component_pipeline.search_components')
@@ -1213,8 +1228,10 @@ class TestComponentSearchAndCacheDatasheetRoutes(unittest.TestCase):
         daemon.component_search("atiny85")
 
         _, kwargs = mock_search.call_args
-        self.assertIsNone(kwargs['provider'])
-        self.assertIsNone(kwargs['model'])
+        # SPEC-213 §2.1: the legacy fields are not an override any more;
+        # resolution goes through CONFIG's provider_roles.
+        self.assertNotIn('provider', kwargs)
+        self.assertNotIn('model', kwargs)
 
     @patch('daemon.library_store.cache_datasheet')
     def test_003_cache_datasheet_delegates_and_wraps_the_path_in_a_result_dict(self, mock_cache):
@@ -1450,8 +1467,10 @@ class TestKicadGenerateConnectionGuidanceRoute(unittest.TestCase):
 
         args, kwargs = mock_guidance.call_args
         self.assertEqual(args, ("ATtiny85", "SOIC-8", pins))
-        self.assertEqual(kwargs['provider'], "google")
-        self.assertEqual(kwargs['model'], "gemini-flash")
+        # SPEC-213 §2.1: the legacy fields are not an override any more;
+        # resolution goes through CONFIG's provider_roles.
+        self.assertNotIn('provider', kwargs)
+        self.assertNotIn('model', kwargs)
         self.assertEqual(kwargs['secrets'], {"google_api_key": "fake"})
         # CTX-206.1: the wire response is unchanged (the mocked pipeline
         # result, verbatim) -- persistence is a side effect this route
@@ -1534,8 +1553,10 @@ class TestKicadSuggestFootprintQueryRoute(unittest.TestCase):
 
         args, kwargs = mock_suggest.call_args
         self.assertEqual(args, ("ESP32-S3", "Espressif", "QFN-56"))
-        self.assertEqual(kwargs['provider'], "google")
-        self.assertEqual(kwargs['model'], "gemini-flash")
+        # SPEC-213 §2.1: the legacy fields are not an override any more;
+        # resolution goes through CONFIG's provider_roles.
+        self.assertNotIn('provider', kwargs)
+        self.assertNotIn('model', kwargs)
         self.assertEqual(kwargs['secrets'], {"google_api_key": "fake"})
         self.assertEqual(result, mock_suggest.return_value)
 
@@ -2242,7 +2263,7 @@ class TestChatSendRoute(unittest.TestCase):
         daemon.CONFIG.update(self._original_config)
 
     @patch('daemon.chat_agents.send')
-    def test_001_threads_config_provider_model_and_secrets_through(self, mock_send):
+    def test_001_threads_config_and_secrets_through(self, mock_send):
         daemon.CONFIG['llm_provider'] = "google"
         daemon.CONFIG['llm_model'] = "gemini-flash"
         daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
@@ -2252,7 +2273,7 @@ class TestChatSendRoute(unittest.TestCase):
 
         mock_send.assert_called_once_with(
             "project", "weather-pcb:overview", "overview", "hello", project_name="weather-pcb",
-            secrets={"google_api_key": "fake"}, provider="google", model="gemini-flash",
+            secrets={"google_api_key": "fake"},
             config=daemon.CONFIG,
         )
         self.assertEqual(result, {"turn_id": "t1", "role": "assistant", "content": "hi"})
@@ -2287,7 +2308,7 @@ class TestChatReviewRoute(unittest.TestCase):
         daemon.CONFIG.update(self._original_config)
 
     @patch('daemon.chat_agents.review')
-    def test_001_threads_config_provider_model_and_secrets_through(self, mock_review):
+    def test_001_threads_config_and_secrets_through(self, mock_review):
         daemon.CONFIG['llm_provider'] = "google"
         daemon.CONFIG['llm_model'] = "gemini-flash"
         daemon.CONFIG['secrets'] = {"google_api_key": "fake"}
@@ -2297,7 +2318,7 @@ class TestChatReviewRoute(unittest.TestCase):
 
         mock_review.assert_called_once_with(
             "project", "weather-pcb:overview", "overview", project_name="weather-pcb",
-            secrets={"google_api_key": "fake"}, provider="google", model="gemini-flash",
+            secrets={"google_api_key": "fake"},
             config=daemon.CONFIG,
         )
         self.assertEqual(result, [{"severity": "info", "title": "x", "detail": "y"}])
@@ -3920,3 +3941,31 @@ class TestDesignGuidanceDoesNotWasteYourTime(unittest.TestCase):
         daemon.datasheet_generate_guidance("TEST-GUIDANCE")
 
         generate.assert_called_once()
+
+
+class TestLocalModelSetup(unittest.TestCase):
+    """SPEC-213 §2.3/§2.4: what the app says when no capable model is set
+    up, and whether it thinks one is."""
+
+    def setUp(self):
+        self._original_config = dict(daemon.CONFIG)
+
+    def tearDown(self):
+        daemon.CONFIG.clear()
+        daemon.CONFIG.update(self._original_config)
+
+    def test_001_llm_ready_counts_a_local_binding_and_not_a_keyless_one(self):
+        daemon.CONFIG.update(secrets={}, providers=None, provider_roles={"reasoning": "ollama", "fast": "ollama"})
+        self.assertTrue(daemon.get_daemon_capabilities()["llm_ready"])
+        daemon.CONFIG.update(provider_roles={"reasoning": "anthropic", "fast": "anthropic"})
+        self.assertFalse(daemon.get_daemon_capabilities()["llm_ready"])
+
+    def test_002_a_setup_error_reads_as_ours_in_the_check_summary(self):
+        findings = [{"type": "pin_not_connected", "description": "x", "severity": "error"}]
+        setup = daemon.llm_providers.ModelSetupError("No AI model is set up yet. Set one up in Settings.")
+        with patch.object(daemon.component_pipeline, "explain_violations", side_effect=setup):
+            result = daemon._explain_or_report_plainly(findings, "erc")
+        self.assertTrue(result["explanations_failed"])
+        self.assertIn("need an AI model", result["summary"])
+        self.assertNotIn("could not be generated", result["summary"])
+        self.assertEqual(len(result["violations"]), 1)

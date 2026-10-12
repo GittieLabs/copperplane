@@ -243,9 +243,9 @@ def _build_agent_executor(
     before that fix -- caught here the same way, by running it for real.
 
     `provider`/`model` (SPEC-303, CTX-303.2) override the agent's own
-    `.prompt.md` frontmatter default when given -- daemon.py resolves
-    these from CONFIG["llm_provider"]/["llm_model"] (the Settings-
-    configured value), the same precedence llm_chat already uses. Neither
+    `.prompt.md` frontmatter default when given. daemon.py used to pass
+    the legacy CONFIG["llm_provider"]/["llm_model"] here; it no longer
+    does, because that outranked the roles Settings writes (SPEC-213 §2.1). Neither
     given leaves the prompt file's own hardcoded default untouched, so a
     fresh install with nothing configured in Settings yet behaves exactly
     as before (CTX-303.1 Plan Drift Deviation 2 -- this used to always run
@@ -798,9 +798,9 @@ def generate_component(
     resolved here, the same pattern llm_providers.chat already
     established for SPEC-201.
 
-    `provider`/`model` (SPEC-303, CTX-303.2) let the caller (daemon.py,
-    from CONFIG["llm_provider"]/["llm_model"]) override the extraction
-    agent's own hardcoded default -- see _build_agent_executor."""
+    `provider`/`model` (SPEC-303, CTX-303.2) are an explicit per-call
+    override; daemon.py no longer passes them, and the agent's role resolves
+    through `app_config`'s `provider_roles` (SPEC-213 §2.1)."""
     secrets = secrets or {}
 
     loader = ConfigLoader(_AGENTFLOW_DIR)
@@ -809,12 +809,22 @@ def generate_component(
 
     for attempt in range(1, _MAX_EXTRACTION_ATTEMPTS + 1):
         provider_clients = []
+        setup_errors: list[llm_providers.ModelSetupError] = []
 
         def runner_factory(node_id: str) -> NodeRunner:
             node = next(n for n in config.nodes if n.id == node_id)
-            executor, provider_client = _build_agent_executor(
-                node.agent, loader, secrets, provider, model, app_config=app_config,
-            )
+            try:
+                executor, provider_client = _build_agent_executor(
+                    node.agent, loader, secrets, provider, model, app_config=app_config,
+                )
+            except llm_providers.ModelSetupError as exc:
+                # SPEC-213 §2.3: the workflow turns a node that cannot start
+                # into an empty answer, and `validate` then reports that as
+                # malformed JSON -- which told the user their part had an
+                # unusually long pin list, and to try again. Kept here so the
+                # real cause can be raised once the workflow returns.
+                setup_errors.append(exc)
+                raise
             provider_clients.append(provider_client)
             return NodeRunner(node, executor)
 
@@ -824,7 +834,15 @@ def generate_component(
             handlers={"validate_component_schema": validate_component_schema},
         )
 
-        outputs = asyncio.run(_run_workflow_and_close(workflow_executor, part_number, provider_clients))
+        try:
+            outputs = asyncio.run(_run_workflow_and_close(workflow_executor, part_number, provider_clients))
+        except Exception:
+            if setup_errors:
+                raise setup_errors[0] from None
+            raise
+        if setup_errors:
+            # Not retried: no second attempt can change the user's setup.
+            raise setup_errors[0]
 
         validate_output = outputs["validate"]
         if not validate_output.metadata.get("error"):

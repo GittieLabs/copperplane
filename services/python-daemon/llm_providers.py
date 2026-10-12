@@ -28,6 +28,16 @@ class LLMProviderError(Exception):
     frontend."""
 
 
+class ModelSetupError(LLMProviderError):
+    """SPEC-213 §2.3: the user's setup, not the request, is why this cannot
+    run -- the provider a role is bound to needs a key that is not saved, or
+    its model cannot do what the agent requires. Raised before any SDK client
+    is built, so the message is ours and says where to fix it. Before this,
+    the first case reached the user as Anthropic's own "Could not resolve
+    authentication method", and the second as a JSON-parse error that blamed
+    the part's pin list."""
+
+
 # Ollama and Perplexity both speak the OpenAI-compatible chat completions
 # format (SPEC-201 §2) -- routed through the same OpenAICompatProvider as
 # real OpenAI itself, just pointed at a different base_url.
@@ -55,7 +65,7 @@ _DEFAULT_MODELS = {
     "google": "gemini-flash-latest",
     "openai": "gpt-4o",
     "perplexity": "sonar",
-    "ollama": "llama3.2:1b",
+    "ollama": "qwen2.5:7b",
 }
 
 # daemon.py's llm_chat route falls back to this when no provider is
@@ -65,6 +75,13 @@ _DEFAULT_MODELS = {
 # to this same provider for kicad.generate_component, so this isn't a
 # new app-wide convention, just applying the existing one consistently.
 _DEFAULT_PROVIDER = "anthropic"
+
+# SPEC-213 §2.3: where every ModelSetupError sends the user. One string, so
+# the explanation surfaces and part lookup cannot drift apart.
+SETUP_HINT = (
+    "Set one up in Settings, under Model roles: add an API key for a hosted provider, "
+    f"or run a local model with Ollama (`ollama pull {_DEFAULT_MODELS['ollama']}`)."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -151,19 +168,19 @@ def _preset_records() -> dict[str, "ProviderRecord"]:
             "id": "anthropic", "kind": "anthropic", "base_url": None,
             "api_key_ref": "anthropic_api_key",
             "models": {"reasoning": _DEFAULT_MODELS["anthropic"], "fast": _DEFAULT_MODELS["anthropic"]},
-            "capabilities": {"tool_use": True, "strict_json": True},
+            "capabilities": {"tool_use": True, "strict_json": True, "part_facts": True},
         },
         "google": {
             "id": "google", "kind": "google", "base_url": None,
             "api_key_ref": "google_api_key",
             "models": {"reasoning": _DEFAULT_MODELS["google"], "fast": _DEFAULT_MODELS["google"]},
-            "capabilities": {"tool_use": True, "strict_json": True},
+            "capabilities": {"tool_use": True, "strict_json": True, "part_facts": True},
         },
         "openai": {
             "id": "openai", "kind": "openai_compat", "base_url": None,
             "api_key_ref": "openai_api_key",
             "models": {"reasoning": _DEFAULT_MODELS["openai"], "fast": _DEFAULT_MODELS["openai"]},
-            "capabilities": {"tool_use": True, "strict_json": True},
+            "capabilities": {"tool_use": True, "strict_json": True, "part_facts": True},
         },
         "perplexity": {
             "id": "perplexity", "kind": "openai_compat", "base_url": _PERPLEXITY_BASE_URL,
@@ -177,11 +194,17 @@ def _preset_records() -> dict[str, "ProviderRecord"]:
             # _OLLAMA_PLACEHOLDER_API_KEY for this record specifically.
             "api_key_ref": None,
             "models": {"reasoning": _DEFAULT_MODELS["ollama"], "fast": _DEFAULT_MODELS["ollama"]},
-            # SPEC-208 §3: llama3.2:1b cannot reliably tool-call or hold a
-            # strict-JSON contract -- known, not yet verified-and-replaced
-            # (§2.2.2 requires a live call against a real local server,
-            # unavailable in this environment; see CTX-208.1 Plan Drift).
-            "capabilities": {"tool_use": False, "strict_json": False},
+            # SPEC-213 §2.2: verified live on 2026-10-11 against a real local
+            # Ollama 0.40.0 (CTX-213.1 Plan Drift). qwen2.5:7b called tools
+            # and held the board_advisor JSON contract; llama3.2:1b, the
+            # default before it, could do neither.
+            #
+            # `part_facts` is honestly False. The same run extracted 5 parts
+            # from memory: 3 named packages that do not exist and 2 named a
+            # real package that was wrong (ATmega328P-PU as TQFP-32; it is
+            # PDIP-28). A wrong package passes every check and puts the wrong
+            # footprint on a real board.
+            "capabilities": {"tool_use": True, "strict_json": True, "part_facts": False},
         },
         "managed": {
             "id": "managed", "kind": "openai_compat",
@@ -194,9 +217,9 @@ def _preset_records() -> dict[str, "ProviderRecord"]:
             # role" rule), not a guessed alias name.
             "models": {},
             # The gateway proxies to real hosted vendor APIs (SPEC-404
-            # §2.2) -- both capabilities are real there, unlike Ollama's
-            # honestly-declared gaps above.
-            "capabilities": {"tool_use": True, "strict_json": True},
+            # §2.2) -- every capability is real there, unlike Ollama's
+            # honestly-declared gap above.
+            "capabilities": {"tool_use": True, "strict_json": True, "part_facts": True},
         },
     }
 
@@ -482,7 +505,7 @@ def migrate_legacy_config(config: dict | None) -> dict:
             "base_url": preset["base_url"] if preset else None,
             "api_key_ref": preset["api_key_ref"] if preset else f"{legacy_provider}_api_key",
             "models": models,
-            "capabilities": preset["capabilities"] if preset else {"tool_use": True, "strict_json": True},
+            "capabilities": preset["capabilities"] if preset else {"tool_use": True, "strict_json": True, "part_facts": True},
         }
         providers = [p for p in (config.get("providers") or []) if p.get("id") != legacy_provider]
         providers.append(override_record)
@@ -500,6 +523,24 @@ def migrate_legacy_config(config: dict | None) -> dict:
 # passing check wrongly exempt a different agent's real, unchecked
 # requirement against the same record.
 _preflight_checked: set[tuple[str, str]] = set()
+
+
+# Plain words for the capability names a refusal reports to a user.
+_CAPABILITY_WORDS = {
+    "tool_use": "tool use",
+    "strict_json": "structured (JSON) answers",
+    "part_facts": "reliable part facts (packages and pinouts)",
+}
+
+# SPEC-213 §2.2: a missing `part_facts` is not fixed by "run a local model",
+# which is what SETUP_HINT suggests -- a local model is the usual reason for it.
+_PART_FACTS_REFUSAL = (
+    "Looking up a part needs a model that knows part packages and pinouts reliably, and the "
+    "configured one ({record}: {model}) is not marked as one. A local model gets these wrong "
+    "often enough to put the wrong footprint on a board, so part lookup uses a hosted provider. "
+    "Add an API key in Settings, under Model roles, and bind the reasoning role to it. "
+    "Explanations, reviews and chat keep working on the local model."
+)
 
 
 def _check_capabilities(agent_name: str | None, requires: list[str] | None, record: "ProviderRecord") -> None:
@@ -521,10 +562,14 @@ def _check_capabilities(agent_name: str | None, requires: list[str] | None, reco
     capabilities = record.get("capabilities") or {}
     missing = [r for r in requires if not capabilities.get(r)]
     if missing:
-        raise LLMProviderError(
-            f"Agent {agent_name!r} requires {missing}, but provider record {record['id']!r} "
-            f"does not declare {'it' if len(missing) == 1 else 'them'}. Bind this agent's role to "
-            f"a different provider, or fix that record's declared capabilities."
+        logger.warning("agent %r requires %s; record %r does not declare it", agent_name, missing, record["id"])
+        model_name = (record.get("models") or {}).get("reasoning") or "no model"
+        if missing == ["part_facts"]:
+            raise ModelSetupError(_PART_FACTS_REFUSAL.format(record=record["id"], model=model_name))
+        needs = " and ".join(_CAPABILITY_WORDS.get(r, r) for r in missing)
+        raise ModelSetupError(
+            f"No capable AI model is set up for this. It needs a model that supports {needs}, "
+            f"and the configured one ({record['id']}: {model_name}) does not. {SETUP_HINT}"
         )
 
     _preflight_checked.add(cache_key)
@@ -617,8 +662,47 @@ def resolve(
     _check_capabilities(agent_name, requires, record)
 
     api_key = _resolve_api_key(record, secrets)
+    if record.get("api_key_ref") and not api_key:
+        # SPEC-213 §2.3: checked here, before the SDK client exists, because
+        # an SDK constructed with an empty key only fails at call time -- and
+        # then in the vendor's words, which reached the user verbatim.
+        raise ModelSetupError(
+            f"No AI model is set up yet: the {resolved_provider} provider needs an API key, "
+            f"and none is saved. {SETUP_HINT}"
+        )
     provider_client = _build_provider_from_record(record, api_key, resolved_model)
     return provider_client, resolved_provider, resolved_model
+
+
+def bound_to_role(config: dict | None, model_role: str) -> tuple[str | None, str | None]:
+    """The `(provider id, model)` a role resolves to, without building a
+    client -- for provenance written beside a result (SPEC-213 §2.1), which
+    used to record the legacy `llm_provider` field whatever had answered."""
+    migrated = migrate_legacy_config(config)
+    provider_id = (migrated.get("provider_roles") or {}).get(model_role)
+    record = _resolve_provider_records(migrated).get(provider_id) if provider_id else None
+    if record is None:
+        return provider_id, None
+    return provider_id, (record.get("models") or {}).get(model_role)
+
+
+def roles_ready(config: dict | None, secrets: dict) -> bool:
+    """SPEC-213 §2.4: every role is bound to a record that exists and either
+    needs no key (a local server) or has its key saved.
+
+    No network call, so cheap enough for `daemon.get_capabilities`. It says
+    the setup is complete, not that the server is up or the model pulled --
+    those are a live probe's job, and the first real call reports them."""
+    migrated = migrate_legacy_config(config)
+    records = _resolve_provider_records(migrated)
+    roles = migrated.get("provider_roles") or {}
+    for role in ("reasoning", "fast"):
+        record = records.get(roles.get(role))
+        if record is None or not (record.get("models") or {}).get(role):
+            return False
+        if record.get("api_key_ref") and not _resolve_api_key(record, secrets):
+            return False
+    return True
 
 
 async def _close_provider_client(provider_client) -> None:
@@ -712,15 +796,37 @@ def chat(
     the sync/async boundary with AgentFlow's `async def chat()` gets
     resolved, via `asyncio.run`.
     """
-    from agentflow import Message
-    from agentflow.types import Role
-
     try:
         provider_client = _build_provider(provider, api_key, model)
     except LLMProviderError:
         raise
     except Exception as e:
         raise LLMProviderError(f"Could not construct the '{provider}' provider: {e}") from e
+
+    return chat_with_client(
+        provider_client, provider, _resolved_model_for(provider, model),
+        prompt, system=system, history=history, params=params,
+    )
+
+
+def chat_with_client(
+    provider_client,
+    provider: str,
+    model: str | None,
+    prompt: str,
+    system: str = "",
+    history: list[dict] | None = None,
+    params: dict[str, Any] | None = None,
+) -> dict:
+    """`chat()` for a client `resolve()` already built (SPEC-213 §2.1).
+
+    `chat()` takes a bare provider *name* and looks up its preset, so it can
+    only ever reach the five presets, with their shipped models. `llm.chat`
+    has to answer from whatever the user's `provider_roles` resolve to --
+    a custom record, a preset with an edited model -- and `resolve()` is the
+    one place that knows. `model` is reported back as given."""
+    from agentflow import Message
+    from agentflow.types import Role
 
     messages = [
         Message(role=Role(turn["role"]), content=turn["content"]) for turn in (history or [])
@@ -742,7 +848,7 @@ def chat(
     return {
         "text": response.text,
         "usage": usage,
-        "model": _resolved_model_for(provider, model),
+        "model": model,
     }
 
 

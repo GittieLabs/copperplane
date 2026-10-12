@@ -2,7 +2,7 @@
 name: component_extraction
 description: Extracts a structured component schema from a part number or datasheet excerpt
 model_role: reasoning
-requires: [strict_json]
+requires: [strict_json, part_facts]
 temperature: 0.2
 max_tokens: 8192
 ---

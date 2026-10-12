@@ -700,8 +700,8 @@ class TestSend(ChatAgentsTestCase):
             MockExecutor.return_value.run = AsyncMock(
                 return_value=NodeOutput(node_id="n", agent_id="a", text=self._NO_CITATIONS_TEXT)
             )
-            chat_agents.send("project", "weather-pcb:overview", "overview", "first message", secrets={})
-            chat_agents.send("project", "weather-pcb:overview", "overview", "second message", secrets={})
+            chat_agents.send("project", "weather-pcb:overview", "overview", "first message", secrets={"anthropic_api_key": "fake"})
+            chat_agents.send("project", "weather-pcb:overview", "overview", "second message", secrets={"anthropic_api_key": "fake"})
 
             second_call_kwargs = MockExecutor.return_value.run.call_args_list[1].kwargs
             history = second_call_kwargs["history"]
@@ -882,7 +882,7 @@ class TestReview(ChatAgentsTestCase):
             MockExecutor.return_value.run = AsyncMock(
                 return_value=NodeOutput(node_id="n", agent_id="a", text=self._NO_FINDINGS_TEXT)
             )
-            chat_agents.review("project", "weather-pcb:overview", "overview", secrets={})
+            chat_agents.review("project", "weather-pcb:overview", "overview", secrets={"anthropic_api_key": "fake"})
 
             passed_tools = MockExecutor.call_args.kwargs["tools"]
             tool_names = {t["name"] for t in passed_tools.list_tools()}
