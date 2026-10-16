@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { buildTimeline, readingSeconds, toSrt, SHORT_ESTABLISH } from '../src/timeline.js';
 import { layoutFor, FORMATS, fit } from '../src/layout.js';
-import { spring, track, rng, CARD } from '../src/motion.js';
+import { spring, springOf, fadeOut, track, rng, CARD, SNAPPY } from '../src/motion.js';
 
 const shotlist = JSON.parse(readFileSync(fileURLToPath(new URL('../../shotlist.json', import.meta.url)), 'utf8'));
 const CUTS = Object.keys(shotlist.cuts);
@@ -82,6 +82,22 @@ test('a spring starts at 0 and settles at 1', () => {
   assert.equal(spring(0), 0);
   assert.equal(spring(-1), 0);
   assert.ok(Math.abs(spring(5) - 1) < 1e-6);
+});
+
+// A canvas ignores a negative globalAlpha and keeps the previous value, so
+// `1 - spring` on an overshooting preset flashed a faded highlight back at full
+// strength for about 0.2 s (found in Rigovera's port, 2026-10-16). The first
+// assertion keeps this from passing vacuously: if SNAPPY ever stops
+// overshooting, the bound below proves nothing and should be revisited.
+test('fadeOut stays within [0, 1] even though SNAPPY overshoots', () => {
+  const ts = Array.from({ length: 2001 }, (_, i) => i / 1000);
+  assert.ok(Math.min(...ts.map((t) => 1 - springOf(t, SNAPPY))) < -0.005, 'SNAPPY no longer overshoots');
+  for (const t of ts) {
+    const v = fadeOut(t, SNAPPY);
+    assert.ok(v >= 0 && v <= 1, `fadeOut(${t}) = ${v}`);
+  }
+  assert.equal(fadeOut(0, SNAPPY), 1);
+  assert.ok(fadeOut(2, SNAPPY) < 1e-3);
 });
 
 test('track is continuous when its target changes', () => {

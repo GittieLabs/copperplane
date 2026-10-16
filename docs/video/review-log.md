@@ -145,3 +145,48 @@ Motion is shared with the other formats; nothing new moves in 4:5.
 
 These scores are mine, about my own work. Phase 6 is the maintainer watching each cut on a phone,
 muted, and that verdict is the one that counts.
+
+## Round 6: the faded highlight blinks back (2026-10-16)
+
+Found while porting the compositor to Rigovera, not by this loop. Its render showed the previous
+phrase's highlight flash back about 1.1 s after a `continues` pan. A motion strip caught it there;
+still frames had not.
+
+- **Cause:** round 2's fix faded the old highlight with `globalAlpha *= 1 - spring(SNAPPY)`.
+  `SNAPPY` is under-damped, so the spring overshoots 1 and `1 - spring` goes negative (as low as
+  -0.008 at +0.32 s). A canvas ignores a negative `globalAlpha` and keeps the previous value, 1.
+- **It was worse than reported: four blinks, not one.** The spring rings, so `1 - spring` is
+  negative in lobes about 0.32 s long, starting at +0.26, +0.91, +1.55 and +2.2 s. Every lobe draws
+  the highlight at full strength, however small the overshoot.
+- **Every cut had it.** The "2 pins" → "4 pads" handoff in segment 5 is in all three cuts. The 60 s
+  cut also has it at the "14.1mm needed" → "6 components" handoff in segment 6.
+- **Fix:** `fadeOut(t, preset)` in `src/motion.js` clamps `1 - spring` to [0, 1]. It is used for
+  the old highlight, a card's alpha as it leaves, and the window dim when a clip starts.
+  - **Guard:** a test that `fadeOut` stays in [0, 1] over 0-2 s. It also asserts that `SNAPPY`
+    still overshoots, so the bound cannot pass vacuously.
+- **Only the highlight ever flashed.** Checked in Chrome, not assumed:
+  - A card's leave fade was already safe, because it returns once the spring passes 0.999, before
+    `1 - leave` goes negative.
+  - The dim is an `rgba()` string, and Chrome clamps a negative alpha in a color string to 0.
+  - Both now use `fadeOut` anyway, so nothing depends on either accident.
+
+**Evidence.** `sheets.py --strip T0 T1` now makes the strip: every frame at 15 fps, from 0.2 s
+before each handoff to 2.4 s after it. It was run on the 9:16 render of each cut, before (the
+2026-10-10 renders) and after:
+
+| Cut | Handoff | Before | After |
+|---|---|---|---|
+| 15 | "2 pins" → "4 pads", 6.20 s | blinks back at 6.47, 7.13, 7.80, 8.40 s | fades by 6.40 s, stays gone |
+| 30 | "2 pins" → "4 pads", 23.70 s | blinks back from +0.26 s, four times | fades, stays gone |
+| 60 | "2 pins" → "4 pads", 36.55 s | blinks back from +0.26 s, four times | fades, stays gone |
+| 60 | "14.1mm needed" → "6 components", 45.96 s | blinks back at 46.23, 46.89, 47.49, 48.16 s | fades, stays gone |
+
+**The fix changed nothing else, and that was checked too.** Each old render was compared with its
+new one frame by frame (mean absolute difference), in all four formats at all four handoffs. The
+two differ only in the four lobes, at +0.26-0.56, +0.93-1.20, +1.57-1.87 and +2.20-2.43 s. Elsewhere
+the difference is encoder noise, a median of 0.05-0.11 on a 0-255 scale. The only motion strips
+looked at are from 9:16; the other formats were compared numerically.
+
+**The published cuts are the old renders.** They are the 12 on the `product-video-2026-10` release
+and the two site copies in `docs/site/public/video/`. All of them contain the "2 pins" handoff. They
+are not replaced here.

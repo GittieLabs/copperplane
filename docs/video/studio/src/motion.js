@@ -28,6 +28,12 @@ export const TEXT = [260, 40];     // captions: critically damped, no overshoot
 
 export const springOf = (t, preset) => spring(t, preset[0], preset[1]);
 
+// 1 to 0 on a spring, for anything that fades out. `1 - springOf(...)` is not
+// enough: an under-damped preset overshoots 1, the difference goes negative, and
+// a canvas ignores a negative globalAlpha and keeps the previous value, so the
+// faded thing flashes back at full strength while the spring rings.
+export const fadeOut = (t, preset) => clamp(1 - springOf(t, preset));
+
 // A value with several targets: one spring per change, each from its own start
 // time, summed. Motion stays continuous across target changes, and any frame is
 // still a closed-form evaluation. keys: [[time, value], ...] sorted by time.

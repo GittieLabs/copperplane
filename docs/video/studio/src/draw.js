@@ -1,7 +1,7 @@
 // Paints one frame: draw(ctx, scene, t). A pure function of t. Nothing here
 // keeps state between frames, so any frame renders the same in any order.
 
-import { clamp, lerp, springOf, CARD, HEAVY, SNAPPY, TEXT, rng } from './motion.js';
+import { clamp, lerp, springOf, fadeOut, CARD, HEAVY, SNAPPY, TEXT, rng } from './motion.js';
 import { activeShot } from './timeline.js';
 import { fit } from './layout.js';
 import { drawColdOpen } from './coldopen.js';
@@ -132,8 +132,8 @@ function drawPullouts(ctx, scene, shot, t, L, base) {
   const clip = shot.beats.find((b) => b.kind === 'clip');
 
   // The window dims once and stays dimmed while cards are up.
-  const dimOut = clip ? springOf(t - clip.start, SNAPPY) : 0;
-  const dim = 0.8 * springOf(t - beats[0].start, CARD) * (1 - dimOut);
+  const dimStay = clip ? fadeOut(t - clip.start, SNAPPY) : 1;
+  const dim = 0.8 * springOf(t - beats[0].start, CARD) * dimStay;
   ctx.fillStyle = `rgba(10,20,16,${dim})`;
   ctx.fillRect(0, 0, L.W, L.H);
 
@@ -156,8 +156,8 @@ function drawPullouts(ctx, scene, shot, t, L, base) {
 
     const lift = continuing ? 1 : springOf(t - b.start, CARD);
     const next = nextBeat && !handedOn ? nextBeat.start : (clip ? clip.start : Infinity);
-    const leave = handedOn ? 0 : springOf(t - next, SNAPPY);
-    if (leave > 0.999) return;
+    const stay = handedOn ? 1 : fadeOut(t - next, SNAPPY);
+    if (stay < 0.001) return;
 
     // Zoom in after the card lands. A continuation starts fully zoomed on the
     // previous phrase and pans to its own.
@@ -183,7 +183,7 @@ function drawPullouts(ctx, scene, shot, t, L, base) {
     const origin = fromWindow ? mapCrop(p.crop, base.baseCrop, base.placed)
       : { x: g.r.x, y: g.r.y + 90, w: g.r.w * 0.94, h: g.r.h * 0.94 };
     const r = {
-      x: lerp(origin.x, g.r.x, lift), y: lerp(origin.y, g.r.y, lift) - leave * 70,
+      x: lerp(origin.x, g.r.x, lift), y: lerp(origin.y, g.r.y, lift) - (1 - stay) * 70,
       w: lerp(origin.w, g.r.w, lift), h: lerp(origin.h, g.r.h, lift),
     };
 
@@ -191,7 +191,7 @@ function drawPullouts(ctx, scene, shot, t, L, base) {
     ctx.translate(tx, ty);
     ctx.scale(zoom, zoom);
     ctx.translate(-hc.x, -hc.y);
-    ctx.globalAlpha = (fromWindow || continuing ? 1 : clamp(lift * 2.5)) * (1 - leave);
+    ctx.globalAlpha = (fromWindow || continuing ? 1 : clamp(lift * 2.5)) * stay;
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
     ctx.shadowBlur = 70 * lift;
     ctx.shadowOffsetY = 28 * lift;
@@ -212,7 +212,7 @@ function drawPullouts(ctx, scene, shot, t, L, base) {
       // vanishing in one frame.
       const prev = prep.pullouts[prevBeat.index];
       ctx.save();
-      ctx.globalAlpha *= 1 - springOf(t - b.start, SNAPPY);
+      ctx.globalAlpha *= fadeOut(t - b.start, SNAPPY);
       ctx.fillStyle = HIGHLIGHT[prev.accent] || HIGHLIGHT.green;
       prev.highlights.forEach(([hx, hy, hw, hh]) => ctx.fillRect(r.x + (hx - 6) * k, r.y + (hy - 5) * k, (hw + 12) * k, (hh + 10) * k));
       ctx.restore();

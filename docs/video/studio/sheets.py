@@ -6,7 +6,13 @@ Review sheets for one rendered cut, for the critique loop (CTX-408.7 Phase 5).
 *   `<name>-contact.png`: one frame every half second, sampled by **time**
     (Cap's raw takes taught this: frame-indexed sampling misses still stretches).
 
+*   `<name>-strip-<t0>.png` (with `--strip T0 T1`): every frame at 15 fps from
+    T0 to T1. Still frames miss a flash that lasts a fifth of a second; a strip
+    catches it. Rigovera's port found one this way on 2026-10-16: a faded
+    highlight snapping back at full strength while its spring rang.
+
 Usage: python3 docs/video/studio/sheets.py out/cut-15-9x16.mp4 [width]
+       python3 docs/video/studio/sheets.py out/cut-15-9x16.mp4 --strip 6.0 8.6
 
 Width defaults to 360 (a phone). LinkedIn's feed is about 390 on mobile and
 555 on desktop.
@@ -54,5 +60,31 @@ def main(video, width=360):
     print(f'{base}-phone{"" if width == 360 else f"-{width}"}.png ({len(tiles)} captions at {width} px), {base}-contact.png')
 
 
+def strip(video, t0, t1, fps=15, width=180):
+    with tempfile.TemporaryDirectory() as d:
+        subprocess.run(['ffmpeg', '-v', 'error', '-y', '-ss', f'{t0:.3f}', '-i', video, '-t', f'{t1 - t0:.3f}',
+                        '-vf', f'fps={fps},scale={width}:-1', os.path.join(d, '%04d.png')], check=True)
+        frames = [Image.open(os.path.join(d, f)).convert('RGB') for f in sorted(os.listdir(d))]
+    tiles = []
+    for i, im in enumerate(frames):
+        tile = Image.new('RGB', (im.width, im.height + 18), (40, 40, 40))
+        ImageDraw.Draw(tile).text((4, 4), f'{t0 + i / fps:6.2f}s', fill=(220, 220, 220))
+        tile.paste(im, (0, 18))
+        tiles.append(tile)
+    cols = min(10, len(tiles))
+    rows = (len(tiles) + cols - 1) // cols
+    w, h = tiles[0].size
+    sheet = Image.new('RGB', (cols * (w + 4), rows * (h + 4)), (20, 20, 20))
+    for i, t in enumerate(tiles):
+        sheet.paste(t, ((i % cols) * (w + 4), (i // cols) * (h + 4)))
+    out = f'{video[:-4]}-strip-{t0:.2f}.png'
+    sheet.save(out)
+    print(f'{out} ({len(tiles)} frames at {fps} fps)')
+
+
 if __name__ == '__main__':
-    main(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 360)
+    if '--strip' in sys.argv:
+        i = sys.argv.index('--strip')
+        strip(sys.argv[1], float(sys.argv[i + 1]), float(sys.argv[i + 2]))
+    else:
+        main(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 360)
