@@ -307,7 +307,9 @@ export function BoardAdvisor({
       <ReviewPanel
         siblingCheck={{
           label: 'The board check (DRC)',
-          count: (boardCheckResult ? (boardCheckResult.violation_count ?? boardCheckResult.violations.length) + (boardCheckResult.unconnected_count ?? 0) : null),
+          // Every kind the DRC card lists, parity included: the review drops
+          // all of them (CTX-319.8), so a count that skipped one would hide it.
+          count: (boardCheckResult ? (boardCheckResult.violation_count ?? boardCheckResult.violations.length) + (boardCheckResult.unconnected_count ?? 0) + (boardCheckResult.parity_count ?? 0) : null),
           where: 'Board (DRC) above',
         }}
         key={`${projectName}:pcb`}

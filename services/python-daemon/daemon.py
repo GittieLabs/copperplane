@@ -1287,9 +1287,17 @@ def chat_stored_review(area: str, project_name: str, scope_id: str = None) -> di
     if library_store is None:
         raise RuntimeError("Reading a stored review requires library_store, which failed to import.")
     real_project_name, _, _ = (scope_id or "").partition(":")
-    return {"review": library_store.get_project_review_result(
-        project_name or real_project_name, area
-    )}
+    review = library_store.get_project_review_result(project_name or real_project_name, area)
+    # CTX-319.8: a review saved before the check's own findings were filtered
+    # out would otherwise keep repeating them under a header that says it
+    # does not, until the user happened to re-run it. Guarded, not required:
+    # this route deliberately survives a build that lost the agent layer.
+    if chat_agents is not None and isinstance(review, dict) \
+            and isinstance(review.get("findings"), list):
+        review = {**review, "findings": chat_agents.without_the_checks_own_findings(
+            review["findings"], area,
+        )}
+    return {"review": review}
 
 
 def context_search(query: str, part_id: str = None, project_name: str = None, limit: int = 8) -> list:

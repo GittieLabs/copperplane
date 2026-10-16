@@ -1430,9 +1430,13 @@ class TestOriginIsReadFromAnIdWeGenerated(ChatAgentsTestCase):
         self.assertEqual(findings[0]["origin"], "copperplane")
 
     def test_002_a_kicad_id_credits_kicad(self):
-        findings = self._review(self._block("kicad-2"))
-
-        self.assertEqual(findings[0]["origin"], "kicad")
+        """Read directly: in the schematic and PCB areas a KiCad-credited
+        finding no longer survives the review at all (CTX-319.8), so the
+        attribution is checked where it is decided."""
+        self.assertEqual(
+            chat_agents._origin_of([{"kind": "check_finding", "finding_id": "kicad-2"}]),
+            "kicad",
+        )
 
     def test_003_citing_nothing_identifiable_claims_neither(self):
         """A third state, and an honest one. Defaulting it to KiCad is the bug
@@ -1487,6 +1491,101 @@ class TestOriginIsReadFromAnIdWeGenerated(ChatAgentsTestCase):
         )
 
         self.assertEqual(len(findings), 1)
+
+
+class TestTheReviewDoesNotRepeatTheCheck(ChatAgentsTestCase):
+    """CTX-319.8, seen on a production build against the tutorial board.
+
+    The PCB review's header said DRC "separately reports 5 problems ... This
+    review does not repeat them", and the review's first five findings were
+    exactly those five, each tagged as a DRC finding. The prompt had told the
+    model to explain every finding in the check block, so it did. The header
+    is the design (SPEC-341 kept two lists on purpose); the content is what
+    was wrong, and it is now enforced on the generated id, not the prompt.
+    """
+
+    _NOTE_FINDINGS = [
+        {"finding_id": "kicad-1", "type": "annular_width",
+         "description": "Annular width too small.", "source_path": "/p/b.kicad_pcb"},
+        {"finding_id": "copperplane-1", "type": "copperplane.pin_count_mismatch",
+         "description": "D1's symbol and footprint disagree. LED:LED_RGB has 4.",
+         "source_path": "/p/b.kicad_pcb"},
+    ]
+
+    def _review(self, response_text, area="pcb"):
+        store.save_project({"name": "P", "kicad_project_path": "/p/p.kicad_pro"})
+        note = json.dumps({
+            "check": "DRC", "source_path": "/p/b.kicad_pcb", "findings": self._NOTE_FINDINGS,
+        })
+
+        async def fake_dispatch(*a, **kw):
+            return {"text": response_text, "tool_calls_raw": [], "model": "m", "provider": "p"}
+
+        with patch.object(chat_agents, "_dispatch", side_effect=fake_dispatch), \
+             patch.object(chat_agents.tool_registry, "build_tool_registry", return_value={}), \
+             patch.object(chat_agents, "_check_status_note", return_value=note):
+            return chat_agents.review("project", f"P:{area}", area, project_name="P")
+
+    @staticmethod
+    def _block(*entries):
+        rows = []
+        for title, ids in entries:
+            sources = ", ".join(
+                f'{{"kind": "check_finding", "finding_id": "{i}"}}' for i in ids
+            )
+            rows.append(
+                f'{{"severity": "warning", "title": "{title}", "detail": "d", '
+                f'"sources": [{sources}], "general_practice": false}}'
+            )
+        return "<<<FINDINGS>>>\n[" + ", ".join(rows) + "]\n<<<END_FINDINGS>>>"
+
+    def test_001_a_finding_the_model_credits_to_drc_is_dropped(self):
+        findings = self._review(self._block(
+            ("Annular ring too small", ["kicad-1"]),
+            ("D1 symbol vs footprint", ["copperplane-1"]),
+        ))
+
+        self.assertEqual([f["title"] for f in findings], ["D1 symbol vs footprint"])
+
+    def test_002_the_same_holds_for_erc_on_the_schematic(self):
+        findings = self._review(self._block(
+            ("Pin not driven", ["kicad-1"]),
+            ("D1 symbol vs footprint", ["copperplane-1"]),
+        ), area="schematic")
+
+        self.assertNotIn("Pin not driven", [f["title"] for f in findings])
+
+    def test_003_one_citing_both_is_ours_and_stays(self):
+        """Its point is the part ERC and DRC miss."""
+        findings = self._review(self._block(("Both", ["kicad-1", "copperplane-1"])))
+
+        self.assertEqual([f["title"] for f in findings], ["Both"])
+
+    def test_004_the_models_own_uncited_judgement_stays(self):
+        findings = self._review(self._block(
+            ("Consider a bulk capacitor", []), ("D1", ["copperplane-1"]),
+        ))
+
+        self.assertIn("Consider a bulk capacitor", [f["title"] for f in findings])
+
+    def test_005_the_fallback_does_not_repeat_the_check_either(self):
+        """No findings block: the raw check is the fallback, and it used to
+        carry KiCad's findings straight through under the same header."""
+        findings = self._review("prose and no block")
+
+        self.assertEqual([f["origin"] for f in findings], ["copperplane"])
+
+    def test_006_an_area_with_no_sibling_check_is_untouched(self):
+        kept = [{"origin": "kicad", "title": "x"}]
+
+        self.assertEqual(chat_agents.without_the_checks_own_findings(kept, "enclosure"), kept)
+        self.assertEqual(chat_agents.without_the_checks_own_findings(kept, "components"), kept)
+
+    def test_007_the_prompt_no_longer_asks_for_every_check_finding(self):
+        """The prompt is what produced the duplicates. It is not the guarantee
+        -- the filter is -- but it must not instruct the opposite."""
+        self.assertNotIn("Every finding in the check block", chat_agents._REVIEW_PROMPT)
+        self.assertIn("must NOT list it again", chat_agents._REVIEW_PROMPT)
 
 
 class TestTheFallbackDoesNotCreditKicad(ChatAgentsTestCase):

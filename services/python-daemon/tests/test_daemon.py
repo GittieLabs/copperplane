@@ -740,6 +740,41 @@ class TestLibraryRoutes(unittest.TestCase):
         self.assertEqual(symbols["result"], ["Sym1"])
 
 
+class TestStoredReviewDoesNotRepeatTheCheck(unittest.TestCase):
+    """CTX-319.8: a review saved before KiCad's own findings were filtered out
+    must not keep showing them under a header that says it does not, through
+    the real `chat.stored_review` route over JSON-RPC dispatch."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        daemon.library_store.configure(storage_root=self._tmpdir.name)
+        daemon.library_store.save_project({"name": "P", "kicad_project_path": None})
+
+    def tearDown(self):
+        daemon.library_store.configure(storage_root=None)
+        self._tmpdir.cleanup()
+
+    def _stored(self, area):
+        daemon.library_store.set_project_review_result("P", area, {"findings": [
+            {"title": "Annular ring", "origin": "kicad"},
+            {"title": "D1 mismatch", "origin": "copperplane"},
+            {"title": "Bulk cap", "origin": None},
+        ]})
+        request = json.dumps({"jsonrpc": "2.0", "method": "chat.stored_review",
+                              "params": {"area": area, "project_name": "P"}, "id": "r"})
+        return json.loads(handle_request(request))["result"]["review"]
+
+    def test_001_a_pcb_review_saved_with_drc_findings_no_longer_shows_them(self):
+        if daemon.chat_agents is None:
+            self.skipTest("chat_agents itself failed to import")
+        titles = [f["title"] for f in self._stored("pcb")["findings"]]
+
+        self.assertEqual(titles, ["D1 mismatch", "Bulk cap"])
+
+    def test_002_the_enclosure_has_no_sibling_check_and_keeps_everything(self):
+        self.assertEqual(len(self._stored("enclosure")["findings"]), 3)
+
+
 class TestLibraryImportCommunityFootprint(unittest.TestCase):
     """CTX-314.2: real, live end-to-end coverage of the import route's
     business logic -- called directly (like test_007c above), not
