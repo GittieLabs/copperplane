@@ -8,6 +8,10 @@ on:
 jobs:
   validate-specs-and-context:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -24,9 +28,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyyaml
 
+      # Labels are read live, not from github.event.pull_request.labels: the
+      # event payload is a snapshot from when the event fired. Dependabot
+      # opens a PR and applies 'trivial-fix' a second later, so the `opened`
+      # run's payload can carry no labels at all and fail while the
+      # `labeled` runs beside it pass (PR #491). By the time this step runs
+      # the labels are on the PR, whichever event started the run.
       - name: Run Spec & Context Validator
         env:
           BASE_REF: ${{ github.base_ref }}
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          PR_LABELS=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/labels" --jq '[.[].name] | join(",")')
+          echo "PR labels: ${PR_LABELS:-<none>}"
           python scripts/validate_spec_context.py --base origin/$BASE_REF --labels "$PR_LABELS"
