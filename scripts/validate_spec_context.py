@@ -417,9 +417,11 @@ def validate_spec_graph():
 
 
 def validate_pr(base_branch, labels=None):
-    """CTX-902.3: `labels` is the real PR label set (from the workflow's own
-    `github.event.pull_request.labels`, passed in as `--labels`, never
-    fetched here via the GitHub API -- this script stays runnable offline
+    """CTX-902.3: `labels` is the real PR label set, read live by the
+    workflow step (not from the event payload, which can predate
+    Dependabot's own labels -- see spec-container-gatekeeper.yml) and passed
+    in as `--labels`. It is never fetched here via the GitHub API -- this
+    script stays runnable offline
     and unit-testable without any real network/token). `trivial-fix`
     bypasses exactly RULE 1 below (the missing-context-file check) and
     nothing else: the spec-graph checks, the Testing Matrix/commit-hash
@@ -545,8 +547,8 @@ if __name__ == '__main__':
     parser.add_argument('--base', required=True, help="Base branch/commit to compare against (e.g. origin/develop)")
     parser.add_argument(
         '--labels', default='',
-        help="Comma-separated PR label names (e.g. from GitHub Actions' "
-             "${{ join(github.event.pull_request.labels.*.name, ',') }}). "
+        help="Comma-separated PR label names (the workflow reads them live "
+             "from the GitHub API at step time). "
              "'trivial-fix' bypasses the missing-context-file check only.",
     )
     args = parser.parse_args()
