@@ -44,6 +44,7 @@ interface RecordDraft {
   fastModel: string
   tool_use: boolean
   strict_json: boolean
+  part_facts: boolean
   needsApiKey: boolean
 }
 
@@ -55,6 +56,8 @@ const BLANK_DRAFT: RecordDraft = {
   fastModel: '',
   tool_use: true,
   strict_json: true,
+  // SPEC-213: off until claimed. A wrong claim puts a wrong footprint on a board.
+  part_facts: false,
   needsApiKey: true,
 }
 
@@ -67,6 +70,7 @@ function draftFromRecord(record: ProviderRecord): RecordDraft {
     fastModel: record.models.fast ?? '',
     tool_use: record.capabilities.tool_use,
     strict_json: record.capabilities.strict_json,
+    part_facts: record.capabilities.part_facts ?? false,
     needsApiKey: record.api_key_ref != null,
   }
 }
@@ -82,7 +86,7 @@ function recordFromDraft(draft: RecordDraft): ProviderRecord {
     base_url: draft.base_url.trim() || null,
     api_key_ref: draft.needsApiKey ? `${id}_api_key` : null,
     models,
-    capabilities: { tool_use: draft.tool_use, strict_json: draft.strict_json },
+    capabilities: { tool_use: draft.tool_use, strict_json: draft.strict_json, part_facts: draft.part_facts },
   }
 }
 
@@ -370,7 +374,7 @@ export function ProviderConfigEditor({
             aria-label={label}
             list={`models-${role}`}
             className="flex-1 rounded border border-line bg-surface px-3 py-1 text-sm text-fg"
-            placeholder={listing?.models?.[0] ? `e.g. ${listing.models[0]}` : 'e.g. llama3.2:1b'}
+            placeholder={listing?.models?.[0] ? `e.g. ${listing.models[0]}` : 'e.g. qwen2.5:7b'}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onFocus={() => {
@@ -549,9 +553,19 @@ export function ProviderConfigEditor({
           />
           Supports strict JSON
         </label>
+        <label className="flex items-center gap-2 text-xs text-fg-tertiary">
+          <input
+            type="checkbox"
+            aria-label="Knows part packages reliably"
+            checked={draft.part_facts}
+            onChange={(e) => setDraft((prev) => ({ ...prev, part_facts: e.target.checked }))}
+          />
+          Knows part packages reliably (allows part lookup)
+        </label>
         <p className="text-xs text-fg-muted">
-          Both capability boxes are a claim you're making about this model, not a measurement this app
-          runs.
+          These boxes are a claim you're making about this model, not a measurement this app runs.
+          Leave the last one off for a local model: they get packages wrong often enough to put the
+          wrong footprint on a board.
         </p>
         <div className="flex gap-2">
           <button

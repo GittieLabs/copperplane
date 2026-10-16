@@ -27,6 +27,7 @@ def _load_dotenv_local() -> None:
 _load_dotenv_local()
 
 import component_pipeline as cp
+import llm_providers
 
 _VALID_SOIC8_SCHEMA = {
     "part_number": "TEST123",
@@ -235,6 +236,28 @@ class TestGenerateComponentRetry(unittest.TestCase):
 
         self.assertIn("Extraction did not return valid JSON", str(ctx.exception))
         self.assertEqual(mock_build.call_count, cp._MAX_EXTRACTION_ATTEMPTS)
+
+
+class TestGenerateComponentSetupError(unittest.TestCase):
+    """SPEC-213 §2.3: a capability refusal used to reach the user as
+    "Extraction did not return valid JSON ... unusually long pin list.
+    Trying again often works" -- the workflow turned the node that could not
+    start into an empty answer. Found by driving the frozen sidecar against
+    a real Ollama (CTX-408.9 Phase 7). Uses the real resolver and the real
+    Ollama preset's declaration; nothing is called."""
+
+    def test_001_a_refused_agent_raises_the_setup_error_once_not_a_json_error(self):
+        refusing = {
+            "provider_roles": {"reasoning": "ollama", "fast": "ollama"},
+            "providers": [{"id": "ollama", "capabilities": {"tool_use": False, "strict_json": False}}],
+        }
+        llm_providers._preflight_checked.clear()
+        with patch('component_pipeline._build_agent_executor', wraps=cp._build_agent_executor) as build, \
+                self.assertRaises(llm_providers.ModelSetupError) as ctx:
+            cp.generate_component("TEST123", secrets={}, app_config=refusing)
+        self.assertNotIn("pin list", str(ctx.exception))
+        self.assertIn("structured (JSON) answers", str(ctx.exception))
+        self.assertEqual(build.call_count, 1, "a setup error is not retried")
 
 
 class TestBuildAgentExecutorProviderOverride(unittest.TestCase):

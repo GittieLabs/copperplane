@@ -54,13 +54,15 @@ export function missingRequirements(caps: DaemonCapabilities | null): Requiremen
     })
   }
 
-  if (caps.llm_providers.length === 0) {
+  // SPEC-213 §2.4: `llm_ready` counts a local model; `llm_providers` counts
+  // keys only, and is the fallback for a daemon that predates the field.
+  if (!(caps.llm_ready ?? caps.llm_providers.length > 0)) {
     missing.push({
       id: 'provider',
       title: 'No AI provider is configured',
       consequence:
         'Reviews, part lookups and the project chat cannot run. Everything that reads your files still works.',
-      action: 'Add an API key for one provider.',
+      action: 'Add an API key for one provider, or run a model on this computer with Ollama.',
       detail: null,
     })
   }

@@ -729,7 +729,15 @@ def _assemble_context(area: str, scope: str, scope_id: str, project_name: str | 
     return json.dumps(context, sort_keys=True, default=str)
 
 
-_CITATIONS_PATTERN = re.compile(r"<<<CITATIONS>>>(.*?)<<<END_CITATIONS>>>", re.DOTALL)
+_CITATIONS_PATTERN = re.compile(r"<<<CITATIONS>>>(.*?)<<<END_CITATIONS>>>", re.DOTALL | re.IGNORECASE)
+# SPEC-213: where a citation block *starts*, however it was wrapped. A local
+# 7B model (qwen2.5:7b, CTX-213.1) wrote the block inside a code fence, as
+# "CITATIONS:" before the sentinels, and closed it with `<<<END_Citations>>>`
+# -- and the user saw all of it, because only the exact sentinel pair was
+# stripped. The block is trailing by the prompt's own contract, so everything
+# from its first marker on is cut. "CITATIONS:" is matched in capitals only,
+# so a sentence that mentions citations is never truncated.
+_CITATIONS_START = re.compile(r"(?:```[^\n]*\n?\s*)?(?:<<<\s*CITATIONS\s*>>>|(?<![A-Za-z])CITATIONS:)")
 # CTX-319.1, SPEC-319 §2.1: the review-response counterpart to
 # _CITATIONS_PATTERN above -- a separate trailing block, never present
 # in a real chat response, so running both extractors against either
@@ -757,10 +765,13 @@ def _extract_self_reported(text: str) -> tuple:
     "the daemon is broken" -- it degrades to `general_practice=True`,
     the conservative, honest default when nothing can be confirmed as
     grounded."""
+    start = _CITATIONS_START.search(text)
     match = _CITATIONS_PATTERN.search(text)
     if not match:
-        return text.strip(), [], True
+        return (text[: start.start()] if start else text).strip(), [], True
     visible = (text[: match.start()] + text[match.end() :]).strip()
+    if start and start.start() < match.start():
+        visible = text[: start.start()].strip()
     try:
         payload = json.loads(match.group(1).strip())
     except (json.JSONDecodeError, TypeError):

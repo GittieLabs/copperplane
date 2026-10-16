@@ -356,6 +356,28 @@ class TestExtractSelfReported(unittest.TestCase):
         self.assertEqual(sources, [{"kind": "part_field", "part_id": "ATtiny85", "field": "manufacturer"}])
         self.assertFalse(general_practice)
 
+    def test_001b_a_local_models_mis_wrapped_blocks_never_reach_the_user(self):
+        """SPEC-213: the three shapes qwen2.5:7b actually produced through the
+        frozen sidecar (CTX-213.1 Phase 5), each of which the user saw raw."""
+        answer = "It appears that your parts library currently has no parts saved in it."
+        tails = [
+            '\n\n```CITATIONS:\n{"general_practice": true}\n```',
+            '\n\n```CITATIONS:\n{"general_practice": true}\n<<<END_CITATIONS>>>\n```',
+            '\n\n```CITATIONS:\n{"general_practice": true}\n<<<CITATIONS>>>\n'
+            '{"sources": [], "general_practice": true}\n<<<END_Citations>>>\n```',
+        ]
+        for tail in tails:
+            with self.subTest(tail=tail):
+                visible, sources, general_practice = chat_agents._extract_self_reported(answer + tail)
+                self.assertEqual(visible, answer)
+                self.assertEqual(sources, [])
+                self.assertTrue(general_practice)
+
+    def test_001c_prose_that_mentions_citations_is_never_cut(self):
+        text = "Good citations: the datasheet, page 4, says 5.5V maximum."
+        visible, _, _ = chat_agents._extract_self_reported(text)
+        self.assertEqual(visible, text)
+
     def test_002_no_block_at_all_defaults_to_general_practice_true(self):
         visible, sources, general_practice = chat_agents._extract_self_reported("Just an answer, no block.")
 
@@ -700,8 +722,8 @@ class TestSend(ChatAgentsTestCase):
             MockExecutor.return_value.run = AsyncMock(
                 return_value=NodeOutput(node_id="n", agent_id="a", text=self._NO_CITATIONS_TEXT)
             )
-            chat_agents.send("project", "weather-pcb:overview", "overview", "first message", secrets={})
-            chat_agents.send("project", "weather-pcb:overview", "overview", "second message", secrets={})
+            chat_agents.send("project", "weather-pcb:overview", "overview", "first message", secrets={"anthropic_api_key": "fake"})
+            chat_agents.send("project", "weather-pcb:overview", "overview", "second message", secrets={"anthropic_api_key": "fake"})
 
             second_call_kwargs = MockExecutor.return_value.run.call_args_list[1].kwargs
             history = second_call_kwargs["history"]
@@ -882,7 +904,7 @@ class TestReview(ChatAgentsTestCase):
             MockExecutor.return_value.run = AsyncMock(
                 return_value=NodeOutput(node_id="n", agent_id="a", text=self._NO_FINDINGS_TEXT)
             )
-            chat_agents.review("project", "weather-pcb:overview", "overview", secrets={})
+            chat_agents.review("project", "weather-pcb:overview", "overview", secrets={"anthropic_api_key": "fake"})
 
             passed_tools = MockExecutor.call_args.kwargs["tools"]
             tool_names = {t["name"] for t in passed_tools.list_tools()}

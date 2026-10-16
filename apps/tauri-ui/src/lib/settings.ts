@@ -30,7 +30,11 @@ export interface ProviderRecord {
   base_url: string | null
   api_key_ref: string | null
   models: { reasoning?: string; fast?: string }
-  capabilities: { tool_use: boolean; strict_json: boolean }
+  /** `part_facts` (SPEC-213 §2.2): the model knows part packages and pinouts
+   *  well enough to look a part up from memory. Optional because a record
+   *  saved before it existed has no such key, which the daemon reads as
+   *  not claimed. */
+  capabilities: { tool_use: boolean; strict_json: boolean; part_facts?: boolean }
 }
 
 export type ModelRole = 'reasoning' | 'fast'
@@ -94,6 +98,11 @@ export interface DaemonCapabilities {
   kicad_cli_path_source: 'override' | 'path' | 'install' | 'none' | null
   kicad_cli_error: string | null
   llm_providers: string[]
+  /** SPEC-213 §2.4: every model role is bound to a provider that needs no key
+   *  (a local server) or has its key saved. `llm_providers` above counts keys
+   *  only, so an install running on Ollama looked unconfigured. Absent from a
+   *  daemon older than SPEC-213. */
+  llm_ready?: boolean
   log_path: string | null
   python_version: string
   /** SPEC-110: the real, currently-active storage root, whether the
@@ -524,6 +533,12 @@ export async function getAppVersion(): Promise<string> {
  * that nothing has consumed until now. KiCad's version is looked up only
  * when `kicad_available` is true, and failure there degrades to
  * "unreachable" rather than failing the whole bundle. */
+/** Puts `text` on the clipboard -- for a command the user has to run
+ *  themselves, such as `ollama pull` (SPEC-213 §2.4). */
+export async function copyText(text: string): Promise<void> {
+  await writeText(text)
+}
+
 export async function copyDiagnostics(): Promise<void> {
   const [capabilities, appVersion] = await Promise.all([getCapabilities(), getAppVersion()])
 

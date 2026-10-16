@@ -1,11 +1,15 @@
 import { useState } from 'react'
 
-import { PROVIDER_KEY_DOCS, TOOL_DOWNLOADS, openExternal } from '../lib/externalLinks'
+import { OLLAMA_DOWNLOAD, PROVIDER_KEY_DOCS, TOOL_DOWNLOADS, openExternal } from '../lib/externalLinks'
 import { missingRequirements } from '../lib/requirements'
 import {
   KEY_BASED_PROVIDERS,
+  LOCAL_OLLAMA_BASE_URL,
   chooseToolExecutable,
+  copyText,
   getCapabilities,
+  getProviderRecords,
+  probeEndpoint,
   saveSecret,
   secretKeyFor,
   bindBothRolesTo,
@@ -31,11 +35,32 @@ import {
  *  unconfigured install already resolves them. */
 type Step = 'provider' | 'tools' | 'done'
 
-const PROVIDER_LABELS: Record<KeyBasedProvider, string> = {
+/** SPEC-213 §2.4: Ollama sits beside the key-based providers. It needs no
+ *  key, so choosing it swaps the key field for a check of the local server. */
+type SetupProvider = KeyBasedProvider | 'ollama'
+
+const PROVIDER_LABELS: Record<SetupProvider, string> = {
   anthropic: 'Anthropic (Claude)',
   openai: 'OpenAI',
   google: 'Google (Gemini)',
   perplexity: 'Perplexity',
+  ollama: 'Ollama — a model on this computer, no key',
+}
+
+/** What the local check found. `model` is the Ollama record's own reasoning
+ *  model, read from the daemon rather than repeated here, so a release that
+ *  moves the default cannot leave this screen asking for the old one. */
+type LocalCheck =
+  | { state: 'checking' }
+  | { state: 'not-running'; reason: string | null }
+  | { state: 'no-model'; model: string }
+  | { state: 'ready'; model: string }
+
+/** Ollama lists a model by the tag it was pulled with; an untagged name is
+ *  stored as `:latest`. */
+function hasModel(models: string[], wanted: string): boolean {
+  const full = wanted.includes(':') ? wanted : `${wanted}:latest`
+  return models.some((m) => m === wanted || m === full)
 }
 
 export function GuidedSetup({
@@ -54,7 +79,10 @@ export function GuidedSetup({
   onOpenManualSettings: () => void
 }) {
   const [step, setStep] = useState<Step>(startAt)
-  const [provider, setProvider] = useState<KeyBasedProvider>('anthropic')
+  const [provider, setProvider] = useState<SetupProvider>('anthropic')
+  const [local, setLocal] = useState<LocalCheck>({ state: 'checking' })
+  const [savedLocal, setSavedLocal] = useState(false)
+  const [copied, setCopied] = useState(false)
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -66,7 +94,42 @@ export function GuidedSetup({
     return caps
   }
 
+  async function checkLocal() {
+    setLocal({ state: 'checking' })
+    setCopied(false)
+    try {
+      const [probe, { records }] = await Promise.all([
+        probeEndpoint(LOCAL_OLLAMA_BASE_URL),
+        getProviderRecords(),
+      ])
+      const model = records.find((r) => r.id === 'ollama')?.models.reasoning ?? 'qwen2.5:7b'
+      if (!probe.reachable) {
+        setLocal({ state: 'not-running', reason: probe.reason })
+      } else {
+        setLocal({ state: hasModel(probe.models, model) ? 'ready' : 'no-model', model })
+      }
+    } catch (err) {
+      setLocal({ state: 'not-running', reason: err instanceof Error ? err.message : String(err) })
+    }
+  }
+
+  async function handleUseOllama() {
+    setBusy(true)
+    setError(null)
+    try {
+      await bindBothRolesTo('ollama')
+      setSavedLocal(true)
+      await refreshCapabilities()
+      setStep('tools')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleSaveKey() {
+    if (provider === 'ollama') return
     const trimmed = key.trim()
     if (!trimmed) return
     setBusy(true)
@@ -130,9 +193,10 @@ export function GuidedSetup({
             </p>
           )}
           <p className="text-fg-secondary">
-            Copperplane needs one API key to explain checks, look up parts and answer questions
-            about your project. You pay the provider directly; the key is stored in your
-            machine&rsquo;s keychain and never sent anywhere else.
+            Copperplane needs an AI model to explain checks, look up parts and answer questions
+            about your project. Either add an API key &mdash; you pay the provider directly, and the
+            key is stored in your machine&rsquo;s keychain and never sent anywhere else &mdash; or run
+            a model on this computer with Ollama, for free.
           </p>
 
           <label className="flex flex-col gap-1">
@@ -140,14 +204,82 @@ export function GuidedSetup({
             <select
               className="w-full rounded border border-line bg-surface px-2 py-1 text-fg"
               value={provider}
-              onChange={(e) => setProvider(e.target.value as KeyBasedProvider)}
+              onChange={(e) => {
+                const next = e.target.value as SetupProvider
+                setProvider(next)
+                if (next === 'ollama') void checkLocal()
+              }}
             >
-              {KEY_BASED_PROVIDERS.map((p) => (
+              {[...KEY_BASED_PROVIDERS, 'ollama' as const].map((p) => (
                 <option key={p} value={p}>{PROVIDER_LABELS[p]}</option>
               ))}
             </select>
           </label>
 
+          {provider === 'ollama' && (
+            <div className="flex flex-col gap-2 rounded border border-line p-3" data-testid="local-model">
+              <p className="text-fg-secondary">
+                A local model explains checks, reviews your board and answers chat. Looking up a new
+                part still needs an API key: local models get part packages wrong often enough to
+                put the wrong footprint on a board.
+              </p>
+              {local.state === 'checking' && <p className="text-fg-muted">Checking for Ollama…</p>}
+              {local.state === 'not-running' && (
+                <>
+                  <p className="text-warning">Ollama is not running on this computer.</p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      className="text-fg-secondary underline decoration-dotted underline-offset-2 hover:text-fg-bright"
+                      onClick={() => void openExternal(OLLAMA_DOWNLOAD.url)}
+                    >
+                      Download Ollama
+                    </button>
+                    <button
+                      type="button"
+                      className="text-fg-muted hover:text-fg-secondary"
+                      onClick={() => void checkLocal()}
+                    >
+                      Check again
+                    </button>
+                  </div>
+                </>
+              )}
+              {local.state === 'no-model' && (
+                <>
+                  <p className="text-fg-secondary">
+                    Ollama is running, but <code>{local.model}</code> is not on this computer yet.
+                    Run this in a terminal. It downloads about 5 GB, and the model needs about 5 GB
+                    of free memory while it answers.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <code className="rounded bg-surface-alt px-2 py-1 text-fg">ollama pull {local.model}</code>
+                    <button
+                      type="button"
+                      className="text-fg-secondary underline decoration-dotted underline-offset-2 hover:text-fg-bright"
+                      onClick={() => void copyText(`ollama pull ${local.model}`).then(() => setCopied(true))}
+                    >
+                      {copied ? 'Copied' : 'Copy'}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-fg-muted hover:text-fg-secondary"
+                      onClick={() => void checkLocal()}
+                    >
+                      Check again
+                    </button>
+                  </div>
+                </>
+              )}
+              {local.state === 'ready' && (
+                <p className="text-success">
+                  Ollama is running and <code>{local.model}</code> is ready.
+                </p>
+              )}
+            </div>
+          )}
+
+          {provider !== 'ollama' && (<>
           <label className="flex flex-col gap-1">
             <span className="text-fg-muted">API key</span>
             <input
@@ -166,16 +298,28 @@ export function GuidedSetup({
           >
             Where do I get a key? — {PROVIDER_KEY_DOCS[provider].label}
           </button>
+          </>)}
 
           <div className="mt-1 flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              className="rounded bg-accent px-3 py-1.5 font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
-              disabled={busy || !key.trim()}
-              onClick={() => void handleSaveKey()}
-            >
-              {busy ? 'Saving…' : 'Save key and continue'}
-            </button>
+            {provider === 'ollama' ? (
+              <button
+                type="button"
+                className="rounded bg-accent px-3 py-1.5 font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
+                disabled={busy || local.state !== 'ready'}
+                onClick={() => void handleUseOllama()}
+              >
+                {busy ? 'Saving…' : 'Use Ollama and continue'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="rounded bg-accent px-3 py-1.5 font-medium text-accent-fg hover:opacity-90 disabled:opacity-50"
+                disabled={busy || !key.trim()}
+                onClick={() => void handleSaveKey()}
+              >
+                {busy ? 'Saving…' : 'Save key and continue'}
+              </button>
+            )}
             {/* Skipping forward, not out. A user unsure about a key can still
                 see the tool check, which costs them nothing. */}
             <button
@@ -198,8 +342,10 @@ export function GuidedSetup({
 
       {step === 'tools' && (
         <div className="flex w-full max-w-xl flex-col gap-4 text-xs">
-          {saved && (
-            <p className="text-fg-secondary">Key saved. Now the two tools Copperplane drives.</p>
+          {(saved || savedLocal) && (
+            <p className="text-fg-secondary">
+              {savedLocal ? 'Ollama is set up.' : 'Key saved.'} Now the two tools Copperplane drives.
+            </p>
           )}
 
           {(['kicad', 'freecad'] as const).map((tool) => {

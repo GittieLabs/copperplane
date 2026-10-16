@@ -362,33 +362,24 @@ def kicad_generate_component(part_number: str) -> dict:
     ComponentValidationError -- replacing the old time.sleep(1.5) mock
     that fabricated filenames and never validated anything.
 
-    Passes CONFIG["llm_provider"]/["llm_model"] (SPEC-303's Settings UI)
-    through to override the extraction agent's own hardcoded
-    `component_extraction.prompt.md` default when set (CTX-303.1 Plan
-    Drift Deviation 2 -- this route used to always run that hardcoded
-    provider regardless of what was selected in Settings; only llm_chat
-    ever respected it)."""
+    The provider comes from CONFIG's `provider_roles` through
+    `app_config` (SPEC-213 §2.1). The legacy `llm_provider`/`llm_model`
+    used to be passed as an explicit override, which outranked the roles
+    Settings actually writes."""
     return component_pipeline.generate_component(
         part_number,
         secrets=CONFIG.get("secrets", {}),
-        provider=CONFIG.get("llm_provider"),
-        model=CONFIG.get("llm_model"),
         app_config=CONFIG,
     )
 
 
 def component_search(query: str) -> list:
     """The component.search route (SPEC-306): a free-text query in,
-    ranked candidates out. Threads CONFIG["llm_provider"]/["llm_model"]
-    through exactly like kicad_generate_component does, for the same
-    reason -- a fresh install with nothing configured in Settings yet
-    must still use whichever provider IS configured, not a hardcoded
-    default baked into the prompt file."""
+    ranked candidates out. Resolves its provider through CONFIG's
+    `provider_roles`, like kicad_generate_component (SPEC-213 §2.1)."""
     return component_pipeline.search_components(
         query,
         secrets=CONFIG.get("secrets", {}),
-        provider=CONFIG.get("llm_provider"),
-        model=CONFIG.get("llm_model"),
         app_config=CONFIG,
     )
 
@@ -708,10 +699,14 @@ def library_save_confirmed_part(candidate: dict, extraction: dict) -> dict:
     })
 
     search_provenance = {"source": "search", "confidence": candidate.get("confidence")}
+    # SPEC-213 §2.1: what component_extraction's role (reasoning) resolved to.
+    # This recorded the legacy `llm_provider` field, which a Settings save
+    # never writes -- so a part extracted by Ollama said Anthropic, or nothing.
+    extracted_by, extracted_with = llm_providers.bound_to_role(CONFIG, "reasoning")
     extraction_provenance = {
         "source": "llm_extraction",
-        "provider": CONFIG.get("llm_provider"),
-        "model": CONFIG.get("llm_model"),
+        "provider": extracted_by,
+        "model": extracted_with,
     }
 
     part = library_store.save_part({
@@ -1052,8 +1047,6 @@ def project_suggest_parts(name: str = None, brief: str = None) -> dict:
         brief,
         intent_fields=intent_fields,
         secrets=CONFIG.get("secrets", {}),
-        provider=CONFIG.get("llm_provider"),
-        model=CONFIG.get("llm_model"),
         app_config=CONFIG,
     )
 
@@ -1208,8 +1201,6 @@ def chat_send(scope: str, scope_id: str, area: str, message: str, project_name: 
     return chat_agents.send(
         scope, scope_id, area, message, project_name=project_name,
         secrets=CONFIG.get("secrets", {}),
-        provider=CONFIG.get("llm_provider"),
-        model=CONFIG.get("llm_model"),
         config=CONFIG,
     )
 
@@ -1227,8 +1218,6 @@ def chat_review(scope: str, scope_id: str, area: str, project_name: str = None) 
     findings = chat_agents.review(
         scope, scope_id, area, project_name=project_name,
         secrets=CONFIG.get("secrets", {}),
-        provider=CONFIG.get("llm_provider"),
-        model=CONFIG.get("llm_model"),
         config=CONFIG,
     )
     _remember_review(scope_id, area, findings, project_name)
@@ -1262,8 +1251,7 @@ def _remember_review(scope_id: str, area: str, findings: list, project_name: str
             {
                 "findings": findings,
                 "ran_at": datetime.now(timezone.utc).isoformat(),
-                "provider": CONFIG.get("llm_provider"),
-                "model": CONFIG.get("llm_model"),
+                **dict(zip(("provider", "model"), llm_providers.bound_to_role(CONFIG, "reasoning"))),
             },
             source_path=source_path,
         )
@@ -1727,7 +1715,13 @@ def _explain_or_report_plainly(findings: list, check_type: str, **kwargs) -> dic
             ],
             "summary": (
                 f"KiCad reported {len(findings)} issue(s). Plain-language explanations "
-                f"could not be generated: {exc}"
+                + (
+                    # SPEC-213 §2.3: a setup problem is said in our words. The
+                    # raw exception used to carry the vendor SDK's own text.
+                    f"need an AI model. {exc}"
+                    if isinstance(exc, llm_providers.ModelSetupError)
+                    else f"could not be generated: {exc}"
+                )
             ),
             "truncated_count": 0,
             "explanations_failed": True,
@@ -1927,24 +1921,27 @@ def llm_chat(
     `history` (SPEC-302) is a real, existing provider capability
     llm_providers.chat now exposes -- see its own docstring.
 
-    Falls back to llm_providers._DEFAULT_PROVIDER when neither an
-    explicit `provider` nor CONFIG["llm_provider"] is set (SPEC-303's
-    settings UI, which would let a human choose, doesn't exist yet --
-    found by actually running the real chat surface against a real,
-    never-configured install, CTX-302.1 Plan Drift).
+    An explicit `provider`/`model` wins; otherwise the reasoning role's
+    binding answers (SPEC-213 §2.1). A never-configured install still
+    lands on llm_providers._DEFAULT_PROVIDER, through
+    `migrate_legacy_config` (CTX-302.1 Plan Drift).
 
     CTX-207.1 (SPEC-207 §2.2): returns `llm_providers.chat`'s own real
     `{"text", "usage", "model"}` dict as the job result, not just a bare
     string -- the free build's first real per-call token accounting.
     `Overview.tsx`'s `llm.chat` call site is this route's only real
     frontend consumer and was updated alongside this change."""
-    provider_name = provider or CONFIG.get("llm_provider") or llm_providers._DEFAULT_PROVIDER
-
-    model_name = model or CONFIG.get("llm_model")
-    api_key = CONFIG.get("secrets", {}).get(f"{provider_name}_api_key", "")
-
-    return llm_providers.chat(
-        prompt, provider=provider_name, api_key=api_key, model=model_name, system=system, history=history
+    # SPEC-213 §2.1: resolved through `provider_roles`, like every agent.
+    # This read the legacy `llm_provider` and fell back to Anthropic -- and
+    # Settings → Model roles never writes that field, so a user who chose
+    # Ollama there had this route calling Anthropic and failing on auth.
+    provider_client, provider_name, model_name = llm_providers.resolve(
+        llm_providers._DEFAULT_PROVIDER, None, CONFIG.get("secrets", {}),
+        provider=provider, model=model, config=CONFIG, model_role="reasoning",
+    )
+    return llm_providers.chat_with_client(
+        provider_client, provider_name, model_name, prompt, system=system, history=history,
+        params=llm_providers.record_params(CONFIG, provider_name),
     )
 
 
@@ -2145,11 +2142,8 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
     kicad.generate_component/component.search -- unlike
     kicad.generate_footprint_from_part, this genuinely needs one.
 
-    Threads CONFIG["llm_provider"]/["llm_model"] through exactly like
-    kicad_generate_component/component_search already do, for the same
-    reason: a fresh install with nothing configured in Settings yet must
-    still use whichever provider IS configured, not a hardcoded default
-    baked into connection_guidance.prompt.md.
+    Resolves its provider through CONFIG's `provider_roles`, like
+    kicad_generate_component/component_search (SPEC-213 §2.1).
 
     CTX-206.1 (SPEC-206 §2.4): previously returned this result and
     nothing else -- the caller (`PartDetail.tsx`) held it in `useState`
@@ -2164,8 +2158,6 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
     result = component_pipeline.generate_connection_guidance(
         part["part_id"], part["package"], part["pins"],
         secrets=CONFIG.get("secrets", {}),
-        provider=CONFIG.get("llm_provider"),
-        model=CONFIG.get("llm_model"),
         app_config=CONFIG,
     )
     library_store.save_part_connection_guidance(
@@ -2180,7 +2172,7 @@ def kicad_generate_connection_guidance(part_id: str) -> dict:
 def kicad_suggest_footprint_query(part_id: str) -> dict:
     """The kicad.suggest_footprint_query route (CTX-308.10): thin
     wrapper, matching kicad_generate_connection_guidance's own shape and
-    the same CONFIG["llm_provider"]/["llm_model"] threading. Deliberately
+    the same `provider_roles` resolution. Deliberately
     NOT persisted onto the Part record (unlike connection guidance) --
     a search-term suggestion has no durable value once the user has run
     the search; nothing else ever reads it back."""
@@ -2188,8 +2180,6 @@ def kicad_suggest_footprint_query(part_id: str) -> dict:
     return component_pipeline.suggest_footprint_query(
         part["part_id"], part["manufacturer"], part["package"],
         secrets=CONFIG.get("secrets", {}),
-        provider=CONFIG.get("llm_provider"),
-        model=CONFIG.get("llm_model"),
         app_config=CONFIG,
     )
 
@@ -2235,8 +2225,6 @@ def datasheet_generate_guidance(part_id: str, cancel_event=None) -> dict:
     guidance = datasheet_guidance.generate_datasheet_guidance(
         pdf_path,
         secrets=CONFIG.get("secrets", {}),
-        provider=CONFIG.get("llm_provider"),
-        model=CONFIG.get("llm_model"),
         cancel_event=cancel_event,
         app_config=CONFIG,
     )
@@ -2539,8 +2527,6 @@ def kicad_check_board(pcb_path: str, profile: dict = None) -> dict:
     result = _explain_or_report_plainly(
         findings, "drc",
         secrets=CONFIG.get("secrets", {}),
-        provider=CONFIG.get("llm_provider"),
-        model=CONFIG.get("llm_model"),
         app_config=CONFIG,
     )
     result["source_path"] = pcb_path
@@ -2615,8 +2601,6 @@ def kicad_check_schematic(sch_path: str) -> dict:
     result = _explain_or_report_plainly(
         flattened, "erc",
         secrets=CONFIG.get("secrets", {}),
-        provider=CONFIG.get("llm_provider"),
-        model=CONFIG.get("llm_model"),
         app_config=CONFIG,
     )
     result["source_path"] = sch_path
@@ -3240,6 +3224,12 @@ def _detect_capabilities() -> dict:
         # right now, fixed from a hardcoded [] that predated any real
         # settings surface to populate it.
         "llm_providers": [p for p in _KEY_BASED_PROVIDERS if configured_secrets.get(f"{p}_api_key")],
+        # SPEC-213 §2.4: the list above only counts keys, so a user who bound
+        # both roles to Ollama was told no AI provider was configured. This
+        # asks the question the banner actually means.
+        "llm_ready": (
+            llm_providers.roles_ready(CONFIG, configured_secrets) if llm_providers is not None else False
+        ),
         # SPEC-321 §2.5: the editor's per-record "is a key saved for this
         # one" display needs to ask about an arbitrary custom
         # `api_key_ref`, not just the four fixed vendor names above --

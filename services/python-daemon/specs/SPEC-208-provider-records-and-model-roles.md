@@ -11,6 +11,7 @@ parent_spec: "SPEC-201-llm-provider-abstraction.md"
 child_specs:
   - "../../../apps/tauri-ui/specs/SPEC-321-provider-configuration-ui.md"
   - "SPEC-209-provider-parameter-contract-and-model-defaults.md"
+  - "SPEC-213-local-models-that-work.md"
 user_facing: false
 ---
 
