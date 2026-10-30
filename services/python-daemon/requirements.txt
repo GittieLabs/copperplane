@@ -1,8 +1,8 @@
 kicad-python==0.8.0
 pynng==0.9.0
-trimesh==5.1.1
+trimesh==5.2.0
 pyyaml==6.0.3
-certifi==2026.7.22
+certifi==2026.10.23
 gittielabs-agentflow[anthropic,openai,google]==0.12.0
 # CTX-209.1: the three vendor SDKs AgentFlow's extras pull in, pinned
 # explicitly rather than left to float. They were the only unpinned direct
@@ -27,8 +27,8 @@ gittielabs-agentflow[anthropic,openai,google]==0.12.0
 # Reaching a newly-added vendor parameter therefore needs a deliberate bump
 # here, verified by a real release, which is the intended trade.
 anthropic==1.13.0
-openai==3.29.0
-google-genai==2.30.0
+openai==3.39.0
+google-genai==2.33.0
 
 # CTX-205.1: real PDF text/page extraction for the datasheet structure
 # pass (SPEC-205) -- MIT-licensed (its own deps, pdfminer-six/pillow/
